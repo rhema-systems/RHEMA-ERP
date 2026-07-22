@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Pricing;
@@ -18,6 +19,7 @@ using ErpSystem.Data.Configuration.Maintenance;
 using ErpSystem.Data.Configuration.Pricing;
 using ErpSystem.Data.Configuration.Procurement;
 using ErpSystem.Data.Configuration.Projects;
+using ErpSystem.Data.Configuration.Sales;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -134,6 +136,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<SalesAgreementMilestone> SalesAgreementMilestones { get; set; }
     public DbSet<SalesAgreementRenewal> SalesAgreementRenewals { get; set; }
     public DbSet<SalesAgreementDocument> SalesAgreementDocuments { get; set; }
+    public DbSet<SalesSaleableSource> SalesSaleableSources { get; set; }
+    public DbSet<SalesAllocation> SalesAllocations { get; set; }
+    public DbSet<SalesAllocationHistory> SalesAllocationHistories { get; set; }
 
     // CRM entities
     public DbSet<Lead> Leads { get; set; }
@@ -211,6 +216,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     // Maintenance Management entities
     public DbSet<MaintenanceAsset> MaintenanceAssets { get; set; }
+    public DbSet<MaintenanceAssetMovement> MaintenanceAssetMovements { get; set; }
     public DbSet<MaintenanceAssetCategory> MaintenanceAssetCategories { get; set; }
     public DbSet<AssetType> AssetTypes { get; set; }
     public DbSet<AssetTypeField> AssetTypeFields { get; set; }
@@ -376,6 +382,63 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EmployeeBankDetail> EmployeeBankDetails { get; set; }
 
     #endregion Employee Management
+
+    #region HR Payroll
+
+    public DbSet<PayrollBudgetAnalysisRow> PayrollBudgetAnalysisRows { get; set; }
+    public DbSet<PayrollParameterSet> PayrollParameterSets { get; set; }
+    public DbSet<PayrollComponent> PayrollComponents { get; set; }
+    public DbSet<PayrollComponentRule> PayrollComponentRules { get; set; }
+    public DbSet<PayrollTaxBand> PayrollTaxBands { get; set; }
+    public DbSet<PayrollTaxRelief> PayrollTaxReliefs { get; set; }
+    public DbSet<PayrollPensionScheme> PayrollPensionSchemes { get; set; }
+    public DbSet<PayrollOvertimePolicy> PayrollOvertimePolicies { get; set; }
+    public DbSet<PayrollLoanPolicy> PayrollLoanPolicies { get; set; }
+    public DbSet<PayrollBonusPolicy> PayrollBonusPolicies { get; set; }
+    public DbSet<PayrollBonusRule> PayrollBonusRules { get; set; }
+    public DbSet<PayrollBonusException> PayrollBonusExceptions { get; set; }
+    public DbSet<PayrollBackpayPolicy> PayrollBackpayPolicies { get; set; }
+    public DbSet<PayrollBackpayRule> PayrollBackpayRules { get; set; }
+    public DbSet<PayrollBackpayException> PayrollBackpayExceptions { get; set; }
+    public DbSet<PayrollJournalMapping> PayrollJournalMappings { get; set; }
+    public DbSet<PayrollCodeType> PayrollCodeTypes { get; set; }
+    public DbSet<PayrollCodeValue> PayrollCodeValues { get; set; }
+    public DbSet<PayrollHoliday> PayrollHolidays { get; set; }
+    public DbSet<PayrollNonWorkingDay> PayrollNonWorkingDays { get; set; }
+    public DbSet<PayrollExchangeRate> PayrollExchangeRates { get; set; }
+    public DbSet<PayrollBankBranch> PayrollBankBranches { get; set; }
+    public DbSet<PayrollLeaveSetup> PayrollLeaveSetups { get; set; }
+    public DbSet<PayrollLeaveSetupDetail> PayrollLeaveSetupDetails { get; set; }
+    public DbSet<PayrollOvertimeRange> PayrollOvertimeRanges { get; set; }
+    public DbSet<PayrollLegacyMenuUser> PayrollLegacyMenuUsers { get; set; }
+    public DbSet<PayrollLegacyMenuSecurity> PayrollLegacyMenuSecurity { get; set; }
+    public DbSet<PayrollCompanyProfile> PayrollCompanyProfiles { get; set; }
+    public DbSet<PayrollBusinessUnit> PayrollBusinessUnits { get; set; }
+    public DbSet<PayrollCompanyBanker> PayrollCompanyBankers { get; set; }
+    public DbSet<PayrollGrade> PayrollGrades { get; set; }
+    public DbSet<PayrollGradeNotch> PayrollGradeNotches { get; set; }
+    public DbSet<PayrollEmployeeProfile> PayrollEmployeeProfiles { get; set; }
+    public DbSet<PayrollSalaryBasis> PayrollSalaryBases { get; set; }
+    public DbSet<PayrollPaymentMethod> PayrollPaymentMethods { get; set; }
+    public DbSet<PayrollEmployeeComponent> PayrollEmployeeComponents { get; set; }
+    public DbSet<PayrollLoan> PayrollLoans { get; set; }
+    public DbSet<PayrollLoanSchedule> PayrollLoanSchedules { get; set; }
+    public DbSet<PayrollSalaryAdvance> PayrollSalaryAdvances { get; set; }
+    public DbSet<PayrollEmployeeTaxRelief> PayrollEmployeeTaxReliefs { get; set; }
+    public DbSet<PayrollPromotionArrearsEntry> PayrollPromotionArrears { get; set; }
+    public DbSet<PayrollTimesheetSummary> PayrollTimesheetSummaries { get; set; }
+    public DbSet<PayrollContributionOpeningBalance> PayrollContributionOpeningBalances { get; set; }
+    public DbSet<PayrollContributionTransaction> PayrollContributionTransactions { get; set; }
+    public DbSet<PayrollImportBatch> PayrollImportBatches { get; set; }
+    public DbSet<PayrollImportRow> PayrollImportRows { get; set; }
+    public DbSet<PayrollRun> PayrollRuns { get; set; }
+    public DbSet<PayrollRunEmployee> PayrollRunEmployees { get; set; }
+    public DbSet<PayrollTransaction> PayrollTransactions { get; set; }
+    public DbSet<PayrollJournalLine> PayrollJournalLines { get; set; }
+    public DbSet<PayrollReportSnapshot> PayrollReportSnapshots { get; set; }
+    public DbSet<PayrollPayslipSnapshot> PayrollPayslipSnapshots { get; set; }
+
+    #endregion HR Payroll
 
     // Staff Attendance
 
@@ -646,6 +709,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<WorkflowStepInstance> WorkflowStepInstances { get; set; }
     public DbSet<WorkflowActivityLog> WorkflowActivityLogs { get; set; }
     public DbSet<WorkflowApproval> WorkflowApprovals { get; set; }
+    public DbSet<WorkflowApprovalPolicySet> WorkflowApprovalPolicySets { get; set; }
+    public DbSet<WorkflowDelegation> WorkflowDelegations { get; set; }
+    public DbSet<WorkflowWorkingCalendar> WorkflowWorkingCalendars { get; set; }
+    public DbSet<WorkflowCorrectionRequest> WorkflowCorrectionRequests { get; set; }
+    public DbSet<WorkflowEscalationExecution> WorkflowEscalationExecutions { get; set; }
+    public DbSet<WorkflowEvidencePolicy> WorkflowEvidencePolicies { get; set; }
+    public DbSet<WorkflowEvidenceDocument> WorkflowEvidenceDocuments { get; set; }
+    public DbSet<WorkflowSignatureEvidence> WorkflowSignatureEvidence { get; set; }
+    public DbSet<WorkflowIntegrationExecution> WorkflowIntegrationExecutions { get; set; }
+    public DbSet<WorkflowOfflineAction> WorkflowOfflineActions { get; set; }
     public DbSet<WorkflowEntityType> WorkflowEntityTypes { get; set; }
 
     // Finance - Common entities
@@ -733,6 +806,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ApplicationUserConfiguration());
         builder.ApplyConfiguration(new TenantConfiguration());
         builder.ApplyConfiguration(new UserTenantConfiguration());
+        builder.Entity<WorkflowEscalationExecution>()
+            .HasIndex(item => new { item.ApprovalId, item.RuleIndex })
+            .IsUnique();
+        builder.Entity<WorkflowEvidenceDocument>().HasIndex(item => new { item.TenantId, item.AttachmentId }).IsUnique();
+        builder.Entity<WorkflowSignatureEvidence>().HasIndex(item => item.ApprovalId).IsUnique();
+        builder.Entity<WorkflowIntegrationExecution>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+        builder.Entity<WorkflowOfflineAction>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
         builder.ApplyConfiguration(new AssetTypeConfiguration());
         builder.ApplyConfiguration(new AssetTypeFieldConfiguration());
 
@@ -1629,6 +1709,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ProjectCommentConfiguration());
         builder.ApplyConfiguration(new ProjectClosureConfiguration());
 
+        // Sales setup
+        builder.ApplyConfiguration(new SalesSaleableSourceConfiguration());
+        builder.ApplyConfiguration(new SalesAllocationConfiguration());
+        builder.ApplyConfiguration(new SalesAllocationHistoryConfiguration());
+
         // Price List configurations
         builder.ApplyConfiguration(new PriceListConfiguration());
         builder.ApplyConfiguration(new PriceListLineConfiguration());
@@ -2124,6 +2209,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         // Configure decimal precision globally
         ConfigureDecimalPrecision(builder);
+        ConfigureSalesAllocationPrecision(builder);
 
         // Configure all tenant relationships to avoid cascade conflicts
         ConfigureGlobalTenantRelationships(builder);
@@ -2133,6 +2219,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         ConfigureHrModule(builder);
         // RHEMA-specific HR deltas kept on top of the ported model (Division / Unit / WorkStation).
         ConfigureRhemaHrDeltas(builder);
+        // Oracle payroll entities developed on master alongside the HR port. The ported HR
+        // configuration in ApplicationDbContext.HR.cs does not cover the Payroll* entities,
+        // so this call must be kept — dropping it leaves all 39 payroll entities unconfigured.
+        ConfigurePayrollEntities(builder);
 
         // Configure Maintenance Management entities
         ConfigureMaintenanceEntities(builder);
@@ -2165,6 +2255,549 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         SeedData(builder);
     }
 
+    private static void ConfigurePayrollEntities(ModelBuilder builder)
+    {
+        builder.Entity<PayrollBudgetAnalysisRow>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.CompanyCode, e.PayPeriod, e.OrderField, e.TransactionType, e.ActualTransaction }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.CompanyCode, e.PayPeriod });
+            entity.Property(e => e.BaseAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Amount1).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.NewAmount1).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Amount2).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.NewAmount2).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Amount3).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.NewAmount3).HasColumnType("decimal(18,2)");
+        });
+
+        builder.Entity<PayrollParameterSet>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Code }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.IsActive });
+        });
+
+        builder.Entity<PayrollComponent>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.ComponentType, e.Code }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.ComponentType, e.IsActive });
+        });
+
+        builder.Entity<PayrollComponentRule>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.ComponentType, e.ComponentCode, e.Category }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.ComponentType, e.ComponentCode });
+        });
+
+        builder.Entity<PayrollTaxBand>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.TaxType, e.SerialNo, e.EffectiveFrom, e.IsAnnual, e.LegacyCompanyCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.TaxType, e.IsActive });
+            entity.HasIndex(e => new { e.TenantId, e.PayPeriod, e.LegacyCompanyCode });
+        });
+
+        builder.Entity<PayrollTaxRelief>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Code }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.AppliesByDefault, e.IsActive });
+        });
+
+        builder.Entity<PayrollEmployeeTaxRelief>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.ReliefCode, e.EmployeeProfileId }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.ReliefCode, e.IsActive });
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeProfileId, e.IsActive });
+
+            entity.HasOne(e => e.EmployeeProfile)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollPensionScheme>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Code }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.IsDefault, e.IsActive });
+        });
+
+        builder.Entity<PayrollOvertimePolicy>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Code, e.LegacyCompanyCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.IsDefault, e.IsActive });
+
+            entity.HasMany(e => e.Ranges)
+                .WithOne(e => e.PayrollOvertimePolicy)
+                .HasForeignKey(e => e.PayrollOvertimePolicyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollLoanPolicy>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Code, e.LegacyCompanyCode }).IsUnique();
+        });
+
+        builder.Entity<PayrollBonusPolicy>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Code }).IsUnique();
+        });
+
+        builder.Entity<PayrollBonusRule>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.BonusCode, e.GroupCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.BonusCode });
+        });
+
+        builder.Entity<PayrollBonusException>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.BonusCode, e.EmployeeNumber }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.BonusCode });
+
+            entity.HasOne(e => e.EmployeeProfile)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollBackpayPolicy>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.OperationType }).IsUnique();
+        });
+
+        builder.Entity<PayrollBackpayRule>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.OperationType, e.CategoryType, e.CategoryCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.OperationType, e.CategoryType });
+        });
+
+        builder.Entity<PayrollBackpayException>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.OperationType, e.EmployeeNumber }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.OperationType });
+        });
+
+        builder.Entity<PayrollJournalMapping>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.TransactionType, e.ComponentCode });
+            entity.HasIndex(e => new { e.TenantId, e.AccountCode });
+            entity.HasIndex(e => new { e.TenantId, e.LegacyCompanyCode, e.SequenceNo });
+        });
+
+        builder.Entity<PayrollCodeType>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.CodeType, e.LegacyCompanyCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.Blocked });
+
+            entity.HasMany(e => e.Values)
+                .WithOne(e => e.PayrollCodeType)
+                .HasForeignKey(e => e.PayrollCodeTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollCodeValue>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.CodeType, e.ActualCode, e.LegacyCompanyCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.CodeType, e.Blocked });
+        });
+
+        builder.Entity<PayrollHoliday>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.HolidayDate, e.LegacyCompanyCode }).IsUnique();
+        });
+
+        builder.Entity<PayrollNonWorkingDay>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.DayCode, e.LegacyCompanyCode }).IsUnique();
+        });
+
+        builder.Entity<PayrollExchangeRate>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.CurrencyCode, e.PayPeriod, e.LegacyCompanyCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.PayPeriodFrom, e.PayPeriodTo });
+        });
+
+        builder.Entity<PayrollBankBranch>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.BankCode, e.BranchCode, e.LegacyCompanyCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.BankCode });
+        });
+
+        builder.Entity<PayrollLeaveSetup>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Category, e.CategoryDetail, e.LegacyCompanyCode }).IsUnique();
+
+            entity.HasMany(e => e.Details)
+                .WithOne(e => e.PayrollLeaveSetup)
+                .HasForeignKey(e => e.PayrollLeaveSetupId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollLeaveSetupDetail>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.PayrollLeaveSetupId, e.SequenceNo });
+            entity.HasIndex(e => new { e.TenantId, e.Category, e.CategoryDetail, e.LegacyCompanyCode });
+        });
+
+        builder.Entity<PayrollOvertimeRange>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.PayrollOvertimePolicyId, e.MinRange, e.MaxRange }).IsUnique();
+        });
+
+        builder.Entity<PayrollLegacyMenuUser>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.UserName, e.LegacyCompanyCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.UserGroup });
+            entity.HasIndex(e => new { e.TenantId, e.LoginEnabled, e.Locked });
+        });
+
+        builder.Entity<PayrollLegacyMenuSecurity>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.FormCode, e.UserName, e.GroupName, e.LegacyCompanyCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.GroupName, e.Allowed });
+        });
+
+        builder.Entity<PayrollCompanyProfile>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.CompanyCode, e.LegacyCompanyCode });
+
+            entity.HasMany(e => e.BusinessUnits)
+                .WithOne(e => e.PayrollCompanyProfile)
+                .HasForeignKey(e => e.PayrollCompanyProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Bankers)
+                .WithOne(e => e.PayrollCompanyProfile)
+                .HasForeignKey(e => e.PayrollCompanyProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollBusinessUnit>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.BusinessUnitId, e.LegacyCompanyCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.CompanyCode });
+        });
+
+        builder.Entity<PayrollCompanyBanker>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.CompanyId, e.CompanyCode, e.BankCode, e.BankBranch });
+            entity.HasIndex(e => new { e.TenantId, e.LegacyCompanyCode });
+        });
+
+        builder.Entity<PayrollGrade>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.GradeName, e.CurrencyCode, e.LegacyCompanyCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.GradeId, e.LegacyCompanyCode });
+
+            entity.HasMany(e => e.Notches)
+                .WithOne(e => e.PayrollGrade)
+                .HasForeignKey(e => e.PayrollGradeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollGradeNotch>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.PayrollGradeId, e.Notch, e.CurrencyCode, e.LegacyCompanyCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.GradeName, e.Notch, e.LegacyCompanyCode });
+        });
+
+        builder.Entity<PayrollEmployeeProfile>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeId }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeNumber }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.LegacyEmployeeNumber });
+            entity.HasIndex(e => new { e.TenantId, e.PayrollActive });
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.DefaultPaymentMethod)
+                .WithMany()
+                .HasForeignKey(e => e.DefaultPaymentMethodId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.SalaryBasis)
+                .WithOne(e => e.EmployeeProfile)
+                .HasForeignKey<PayrollSalaryBasis>(e => e.EmployeeProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.PaymentMethods)
+                .WithOne(e => e.EmployeeProfile)
+                .HasForeignKey(e => e.EmployeeProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.EmployeeComponents)
+                .WithOne(e => e.EmployeeProfile)
+                .HasForeignKey(e => e.EmployeeProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Loans)
+                .WithOne(e => e.EmployeeProfile)
+                .HasForeignKey(e => e.EmployeeProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.SalaryAdvances)
+                .WithOne(e => e.EmployeeProfile)
+                .HasForeignKey(e => e.EmployeeProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollSalaryBasis>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeProfileId }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.EffectiveFrom, e.EffectiveTo });
+        });
+
+        builder.Entity<PayrollPaymentMethod>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeProfileId, e.SequenceNo });
+            entity.HasIndex(e => new { e.TenantId, e.PaymentType, e.IsActive });
+            entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,4)");
+        });
+
+        builder.Entity<PayrollEmployeeComponent>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeProfileId, e.PayrollComponentId }).IsUnique();
+            entity.Property(e => e.TaxFreeCeilingOverride).HasColumnType("decimal(18,2)");
+
+            entity.HasOne(e => e.PayrollComponent)
+                .WithMany(e => e.EmployeeComponents)
+                .HasForeignKey(e => e.PayrollComponentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollLoan>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeProfileId, e.FacilityNumber }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.IsActive, e.PaymentStartDate });
+            entity.HasIndex(e => new { e.TenantId, e.Status, e.PaymentStartDate });
+
+            entity.HasOne(e => e.LoanPolicy)
+                .WithMany()
+                .HasForeignKey(e => e.LoanPolicyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollLoanSchedule>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.PayrollLoanId, e.SequenceNo }).IsUnique();
+
+            entity.HasOne(e => e.PayrollLoan)
+                .WithMany(e => e.Schedules)
+                .HasForeignKey(e => e.PayrollLoanId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollSalaryAdvance>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeProfileId, e.AdvanceDate });
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeNumber, e.AdvanceDate });
+            entity.HasIndex(e => new { e.TenantId, e.IsActive, e.AdvanceDate });
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollPromotionArrearsEntry>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeProfileId }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeNumber }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.IsActive, e.EffectiveDate });
+            entity.HasIndex(e => new { e.TenantId, e.PayPeriod, e.LegacyCompanyCode });
+
+            entity.HasOne(e => e.EmployeeProfile)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollTimesheetSummary>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeProfileId, e.PayPeriod }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeNumber, e.PayPeriod });
+            entity.HasIndex(e => new { e.TenantId, e.IsActive, e.PayPeriod });
+            entity.Property(e => e.NormalHours).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.WeekdayHours).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.HolidayHours).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.SaturdayHours).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.SundayHours).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.AbsentHours).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.NightShiftCount).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.AttendanceCount).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.OvertimeAmount).HasColumnType("decimal(18,2)");
+
+            entity.HasOne(e => e.EmployeeProfile)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollContributionOpeningBalance>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.ContributionCodeType, e.ContributionCode, e.EmployeeProfileId }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.ContributionCodeType, e.ContributionCode, e.IsActive });
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeNumber });
+            entity.Property(e => e.OpeningBalance).HasColumnType("decimal(18,2)");
+
+            entity.HasOne(e => e.EmployeeProfile)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollContributionTransaction>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeProfileId, e.ContributionCode, e.EffectiveDate });
+            entity.HasIndex(e => new { e.TenantId, e.ContributionCodeType, e.ContributionCode, e.TransactionType, e.EffectiveDate });
+            entity.HasIndex(e => new { e.TenantId, e.IsActive, e.EffectiveDate });
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+
+            entity.HasOne(e => e.EmployeeProfile)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollImportBatch>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.ImportType, e.ImportedAt });
+
+            entity.HasMany(e => e.Rows)
+                .WithOne(e => e.PayrollImportBatch)
+                .HasForeignKey(e => e.PayrollImportBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollImportRow>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.PayrollImportBatchId, e.RowNumber }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.LegacyEmployeeNumber });
+
+            entity.HasOne(e => e.MatchedEmployee)
+                .WithMany()
+                .HasForeignKey(e => e.MatchedEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollRun>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.RunNumber }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.PayPeriod, e.Status });
+
+            entity.HasMany(e => e.Employees)
+                .WithOne(e => e.PayrollRun)
+                .HasForeignKey(e => e.PayrollRunId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Transactions)
+                .WithOne(e => e.PayrollRun)
+                .HasForeignKey(e => e.PayrollRunId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.JournalLines)
+                .WithOne(e => e.PayrollRun)
+                .HasForeignKey(e => e.PayrollRunId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.ReportSnapshots)
+                .WithOne(e => e.PayrollRun)
+                .HasForeignKey(e => e.PayrollRunId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.PayslipSnapshots)
+                .WithOne(e => e.PayrollRun)
+                .HasForeignKey(e => e.PayrollRunId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollRunEmployee>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.PayrollRunId, e.EmployeeId }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.EmployeeNumber });
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Transactions)
+                .WithOne(e => e.PayrollRunEmployee)
+                .HasForeignKey(e => e.PayrollRunEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollTransaction>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.PayrollRunId, e.TransactionType });
+            entity.HasIndex(e => new { e.TenantId, e.PayrollRunEmployeeId });
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.PayrollComponent)
+                .WithMany(e => e.Transactions)
+                .HasForeignKey(e => e.PayrollComponentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PayrollJournalLine>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.PayrollRunId, e.SequenceNo }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.AccountCode });
+        });
+
+        builder.Entity<PayrollReportSnapshot>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.PayrollRunId, e.ReportType, e.GeneratedAt });
+            entity.HasIndex(e => new { e.TenantId, e.SnapshotNumber }).IsUnique();
+        });
+
+        builder.Entity<PayrollPayslipSnapshot>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.PayrollRunId, e.EmployeeId }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.PayslipNumber }).IsUnique();
+
+            entity.HasOne(e => e.PayrollRunEmployee)
+                .WithMany()
+                .HasForeignKey(e => e.PayrollRunEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
     private static void ConfigureWorkflowEntities(ModelBuilder builder)
     {
         // Configure WorkflowEntityType relationships
@@ -2188,7 +2821,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(wd => wd.EntityTypeId);
             entity.HasIndex(wd => wd.Name);
             entity.HasIndex(wd => wd.IsActive);
-            entity.HasIndex(wd => new { wd.TenantId, wd.Name }).IsUnique();
+            entity.HasIndex(wd => wd.LifecycleStatus);
+            entity.HasIndex(wd => new { wd.TenantId, wd.DefinitionKey, wd.Version }).IsUnique();
 
             entity.HasMany(wd => wd.Steps)
                 .WithOne(ws => ws.WorkflowDefinition)
@@ -2342,6 +2976,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(a => a.Criticality);
             entity.HasIndex(a => a.ParentAssetId);
             entity.HasIndex(a => a.SerialNumber);
+            entity.HasIndex(a => a.CurrentProjectId);
+            entity.HasIndex(a => a.CurrentSiteLocationId);
 
             entity.HasOne(a => a.AssetCategory)
                 .WithMany(c => c.Assets)
@@ -2352,6 +2988,29 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany(pa => pa.ChildAssets)
                 .HasForeignKey(a => a.ParentAssetId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(a => a.CurrentProject)
+                .WithMany()
+                .HasForeignKey(a => a.CurrentProjectId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(a => a.CurrentSiteLocation)
+                .WithMany()
+                .HasForeignKey(a => a.CurrentSiteLocationId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<MaintenanceAssetMovement>(entity =>
+        {
+            entity.HasIndex(m => m.AssetId);
+            entity.HasIndex(m => m.EffectiveDate);
+            entity.HasIndex(m => m.ToProjectId);
+            entity.HasIndex(m => m.ToSiteLocationId);
+
+            entity.HasOne(m => m.Asset)
+                .WithMany(a => a.Movements)
+                .HasForeignKey(m => m.AssetId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Configure MaintenanceAssetCategory entity
@@ -2593,9 +3252,19 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure InspectionTemplate entity
         builder.Entity<InspectionTemplate>(entity =>
         {
+            entity.Property(it => it.TemplateScope).HasMaxLength(50).HasDefaultValue("General");
+            entity.Property(it => it.FleetInspectionKind).HasMaxLength(30).HasDefaultValue("Any");
+            entity.Property(it => it.QrPayloadVersion).HasDefaultValue(1);
+            entity.Property(it => it.AutoCreateWorkOrderOnFailure).HasDefaultValue(true);
+
             entity.HasIndex(it => it.Category);
             entity.HasIndex(it => it.InspectionType);
             entity.HasIndex(it => it.IsActive);
+            entity.HasIndex(it => it.TenantId);
+            entity.HasIndex(it => new { it.TenantId, it.TemplateScope, it.IsActive, it.IsDeleted });
+            entity.HasIndex(it => new { it.TenantId, it.TemplateScope, it.FleetInspectionKind, it.IsActive, it.IsDeleted });
+            entity.HasIndex(it => new { it.TenantId, it.AssignedAssetCategoryId, it.IsDeleted });
+            entity.HasIndex(it => new { it.TenantId, it.AssignedAssetId, it.IsDeleted });
         });
 
         // Configure AssetInspection entity
@@ -2624,6 +3293,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(ai => ai.InspectorId)
                 .OnDelete(DeleteBehavior.NoAction);
+
         });
 
         // Configure InspectionDocument entity
@@ -2682,7 +3352,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany(tt => tt.Members)
                 .HasForeignKey(ttm => ttm.TeamId)
                 .OnDelete(DeleteBehavior.Cascade);
-            // TechnicianId now references ApplicationUser (Users table) instead of Employee
+
+            entity.HasOne(ttm => ttm.Technician)
+                .WithMany()
+                .HasForeignKey(ttm => ttm.TechnicianId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         // Configure TechnicianSkill entity
@@ -2710,6 +3384,53 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany(ts => ts.UserSkills)
                 .HasForeignKey(uts => uts.SkillId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Tool checkouts are employee-driven because work order scheduling uses HR Employee IDs.
+        builder.Entity<ToolCheckout>(entity =>
+        {
+            entity.HasIndex(tc => tc.ToolId);
+            entity.HasIndex(tc => tc.CheckedOutById);
+            entity.HasIndex(tc => tc.CheckedInById);
+            entity.HasIndex(tc => tc.WorkOrderId);
+            entity.HasIndex(tc => tc.JobCardId);
+
+            entity.HasOne(tc => tc.CheckedOutBy)
+                .WithMany()
+                .HasForeignKey(tc => tc.CheckedOutById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(tc => tc.CheckedInBy)
+                .WithMany()
+                .HasForeignKey(tc => tc.CheckedInById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(tc => tc.WorkOrder)
+                .WithMany()
+                .HasForeignKey(tc => tc.WorkOrderId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(tc => tc.JobCard)
+                .WithMany()
+                .HasForeignKey(tc => tc.JobCardId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<WorkOrderTool>(entity =>
+        {
+            entity.HasIndex(wot => wot.WorkOrderId);
+            entity.HasIndex(wot => wot.ToolId);
+            entity.HasIndex(wot => wot.CheckoutId);
+
+            entity.HasOne(wot => wot.WorkOrder)
+                .WithMany(wo => wo.Tools)
+                .HasForeignKey(wot => wot.WorkOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(wot => wot.Checkout)
+                .WithMany()
+                .HasForeignKey(wot => wot.CheckoutId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         // Configure AssetDowntime entity
@@ -2889,6 +3610,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(jc => jc.MaintenanceTypeId);
             entity.HasIndex(jc => jc.PriorityLevelId);
             entity.HasIndex(jc => jc.RequestedById);
+            entity.HasIndex(jc => jc.CustomerBusinessPartnerId);
             entity.HasIndex(jc => jc.JobCardStatus);
             entity.HasIndex(jc => jc.ApprovalStatus);
             entity.HasIndex(jc => jc.RequestedDate);
@@ -2912,6 +3634,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(jc => jc.RequestedBy)
                 .WithMany()
                 .HasForeignKey(jc => jc.RequestedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(jc => jc.CustomerBusinessPartner)
+                .WithMany()
+                .HasForeignKey(jc => jc.CustomerBusinessPartnerId)
                 .OnDelete(DeleteBehavior.NoAction);
 
             entity.HasOne(jc => jc.PreferredTechnician)
@@ -4275,10 +5002,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         var employeeRoleId = Guid.Parse("00000000-0000-0000-0000-000000000004");
 
         builder.Entity<ApplicationRole>().HasData(
-            new ApplicationRole { Id = superAdminRoleId, Name = Shared.Constants.Roles.SuperAdmin, NormalizedName = Shared.Constants.Roles.SuperAdmin.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
-            new ApplicationRole { Id = tenantAdminRoleId, Name = Shared.Constants.Roles.TenantAdmin, NormalizedName = Shared.Constants.Roles.TenantAdmin.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
-            new ApplicationRole { Id = managerRoleId, Name = Shared.Constants.Roles.Manager, NormalizedName = Shared.Constants.Roles.Manager.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
-            new ApplicationRole { Id = employeeRoleId, Name = Shared.Constants.Roles.Employee, NormalizedName = Shared.Constants.Roles.Employee.ToUpper(), IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" }
+            new ApplicationRole { Id = superAdminRoleId, Name = Shared.Constants.Roles.SuperAdmin, NormalizedName = Shared.Constants.Roles.SuperAdmin.ToUpper(), ConcurrencyStamp = null, IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
+            new ApplicationRole { Id = tenantAdminRoleId, Name = Shared.Constants.Roles.TenantAdmin, NormalizedName = Shared.Constants.Roles.TenantAdmin.ToUpper(), ConcurrencyStamp = null, IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
+            new ApplicationRole { Id = managerRoleId, Name = Shared.Constants.Roles.Manager, NormalizedName = Shared.Constants.Roles.Manager.ToUpper(), ConcurrencyStamp = null, IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" },
+            new ApplicationRole { Id = employeeRoleId, Name = Shared.Constants.Roles.Employee, NormalizedName = Shared.Constants.Roles.Employee.ToUpper(), ConcurrencyStamp = null, IsSystemRole = true, CreatedAt = seedDateUtc, CreatedBy = "System" }
         );
 
         // Seed default modules for default tenant (use stable IDs to avoid migration churn)
@@ -4577,6 +5304,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         foreach (var entry in entries)
         {
+            if (entry.Entity is WorkflowActivityLog && entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("Workflow audit events are immutable and cannot be changed or deleted.");
             switch (entry.State)
             {
                 case EntityState.Added:
@@ -4630,6 +5359,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         }
     }
 
+    private static void ConfigureSalesAllocationPrecision(ModelBuilder builder)
+    {
+        builder.Entity<SalesAllocation>(entity =>
+        {
+            entity.Property(e => e.EstimatedValue).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.AgreedValue).HasColumnType("decimal(18,2)");
+        });
+    }
+
     private static void ConfigureGlobalTenantRelationships(ModelBuilder builder)
     {
         // Configure all TenantEntity relationships to use Restrict instead of Cascade
@@ -4674,7 +5412,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(p => p.PlanNumber).IsUnique();
             entity.HasIndex(p => p.DepartmentId);
             entity.HasIndex(p => p.FiscalYear);
+            entity.HasIndex(p => p.PlanningCycle);
+            entity.HasIndex(p => p.PlanningQuarter);
             entity.HasIndex(p => p.Status);
+            entity.HasIndex(p => p.PublishedDate);
 
             entity.HasOne(p => p.Department)
                 .WithMany()
@@ -4691,6 +5432,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<ProcurementPlanItem>(entity =>
         {
             entity.HasIndex(i => i.ProcurementPlanId);
+            entity.HasIndex(i => i.ProcurementBudgetId);
+            entity.HasIndex(i => i.ProcurementBudgetAllocationId);
+            entity.HasIndex(i => i.MarketAnalysisId);
+            entity.HasIndex(i => i.BudgetLineCode);
             entity.HasIndex(i => i.ItemCategory);
             entity.HasIndex(i => i.IsCritical);
 
@@ -4698,6 +5443,21 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithOne(s => s.ProcurementPlanItem)
                 .HasForeignKey(s => s.ProcurementPlanItemId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(i => i.ProcurementBudget)
+                .WithMany()
+                .HasForeignKey(i => i.ProcurementBudgetId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(i => i.ProcurementBudgetAllocation)
+                .WithMany()
+                .HasForeignKey(i => i.ProcurementBudgetAllocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(i => i.MarketAnalysis)
+                .WithMany()
+                .HasForeignKey(i => i.MarketAnalysisId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // ProcurementPlanItemSupplier entity
@@ -4777,6 +5537,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(m => m.ItemCategory);
             entity.HasIndex(m => m.ItemDescription);
             entity.HasIndex(m => m.AnalysisPeriodStart);
+            entity.Property(m => m.HistoricalAveragePrice).HasColumnType("decimal(18,4)");
+            entity.Property(m => m.PreviousPrice).HasColumnType("decimal(18,4)");
+            entity.Property(m => m.CurrentMarketPrice).HasColumnType("decimal(18,4)");
+            entity.Property(m => m.ForecastedPrice).HasColumnType("decimal(18,4)");
+            entity.Property(m => m.PriceChangePercent).HasColumnType("decimal(8,2)");
+            entity.Property(m => m.PriceVariancePercent).HasColumnType("decimal(8,2)");
+            entity.Property(m => m.InflationImpactPercent).HasColumnType("decimal(8,2)");
+            entity.Property(m => m.RecommendedBudgetAdjustmentPercent).HasColumnType("decimal(8,2)");
 
             entity.HasMany(m => m.PriceHistories)
                 .WithOne(p => p.MarketAnalysis)
@@ -5838,7 +6606,6 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     private static void SeedMaintenanceData(ModelBuilder builder, Guid tenantId)
     {
-        var now = DateTime.UtcNow;
         var baseDate = new DateTime(2025, 10, 1, 0, 0, 0, DateTimeKind.Utc);
 
         // Seed Employees (Maintenance Team)

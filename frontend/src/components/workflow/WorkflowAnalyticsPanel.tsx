@@ -1,0 +1,11 @@
+'use client';
+import * as React from 'react';
+import { RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { workflowApiService } from '@/services/workflow-api.service';
+export function WorkflowAnalyticsPanel(){const [data,setData]=React.useState<any>();const [exceptions,setExceptions]=React.useState<any[]>([]);const load=React.useCallback(async()=>{try{const [a,e]=await Promise.all([workflowApiService.getWorkflowAnalytics(),workflowApiService.getWorkflowIntegrationExceptions()]);setData(a);setExceptions(e);}catch(error:any){toast.error(error?.message||'Analytics failed');}},[]);React.useEffect(()=>{void load();},[load]);
+return <div className="space-y-5"><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">{[['Average duration',`${Number(data?.averageHours||0).toFixed(1)}h`],['SLA compliance',`${Number(data?.slaCompliance||0).toFixed(1)}%`],['Rejection rate',`${Number(data?.rejectionRate||0).toFixed(1)}%`],['Overdue',String(data?.overdue||0)]].map(([label,value])=><Card key={label}><CardHeader className="pb-2"><CardTitle className="text-sm">{label}</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{value}</CardContent></Card>)}</div>
+<div><h3 className="mb-2 font-semibold">Bottlenecks</h3><div className="divide-y rounded-md border">{(data?.bottlenecks||[]).map((item:any)=><div key={item.step} className="flex justify-between px-3 py-2 text-sm"><span>{item.step}</span><span>{Number(item.averageHours).toFixed(1)}h / {item.count}</span></div>)}</div></div>
+<div><h3 className="mb-2 font-semibold">Integration exceptions</h3><div className="divide-y rounded-md border">{exceptions.map(item=><div key={item.id} className="flex items-center justify-between px-3 py-2 text-sm"><div><div className="font-medium">{item.operation}</div><div className="text-muted-foreground">{item.lastError}</div></div><Button size="icon" variant="ghost" title="Retry" onClick={async()=>{await workflowApiService.retryWorkflowIntegration(item.id);await load();}}><RefreshCw className="h-4 w-4"/></Button></div>)}</div></div></div>}

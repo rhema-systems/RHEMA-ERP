@@ -243,11 +243,11 @@ export function DataTable<T extends Record<string, any>>({
           <div className="rounded-md overflow-hidden border border-border">
             <Table>
               <TableHeader>
-                <TableRow className="h-10 bg-muted/40 border-b border-border/60">
+                <TableRow className="h-8 bg-slate-100/80 border-b border-border/60">
                   {columns.map((column) => (
                     <TableHead
                       key={String(column.key)}
-                      className={`py-2 font-semibold border-r border-border/40 last:border-r-0 ${column.sortable ? 'cursor-pointer hover:bg-muted/70' : ''}`}
+                      className={`py-1.5 font-semibold border-r border-border/40 last:border-r-0 ${column.sortable ? 'cursor-pointer hover:bg-muted/70' : ''}`}
                       onClick={column.sortable ? () => handleSort(String(column.key)) : undefined}
                     >
                       <div className="flex items-center gap-1">
@@ -260,7 +260,7 @@ export function DataTable<T extends Record<string, any>>({
                       </div>
                     </TableHead>
                   ))}
-                  {actions && <TableHead className="w-[100px] py-2 text-xs font-semibold border-r-0">Actions</TableHead>}
+                  {actions && <TableHead className="w-[84px] py-1.5 text-xs font-semibold border-r-0">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -268,7 +268,7 @@ export function DataTable<T extends Record<string, any>>({
                   <TableRow className="border-b border-border/40">
                     <TableCell
                       colSpan={columns.length + (actions ? 1 : 0)}
-                      className="h-16 text-center text-muted-foreground text-sm py-4"
+                      className="h-14 text-center text-muted-foreground text-sm py-3"
                     >
                       No data found.
                     </TableCell>
@@ -277,22 +277,22 @@ export function DataTable<T extends Record<string, any>>({
                   sortedData.map((row, index) => (
                     <TableRow 
                       key={index} 
-                      className={`h-12 transition-colors hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer ${
+                      className={`h-9 transition-colors hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer ${
                         selectedRows.has(index) 
                           ? 'bg-blue-100 dark:bg-blue-900/30' 
-                          : index % 2 === 0 
-                          ? 'bg-background' 
-                          : 'bg-muted/25'
+                          : index % 2 === 0
+                            ? 'bg-white dark:bg-slate-950'
+                            : 'bg-slate-50/80 dark:bg-slate-900/35'
                       } border-b border-border/40`}
                       onClick={() => selectable && handleRowSelect(index, !selectedRows.has(index))}
                     >
                       {columns.map((column) => (
-                        <TableCell key={String(column.key)} className="py-2 text-sm border-r border-border/30 last:border-r-0">
+                        <TableCell key={String(column.key)} className="py-1.5 text-[13px] border-r border-border/30 last:border-r-0">
                           {renderCellValue(column, row)}
                         </TableCell>
                       ))}
                       {actions && (
-                        <TableCell className="py-2 border-r-0" onClick={(e) => e.stopPropagation()}>
+                        <TableCell className="py-1.5 border-r-0" onClick={(e) => e.stopPropagation()}>
                           {customActions ? (
                             customActions(row)
                           ) : (

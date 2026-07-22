@@ -1,5 +1,11 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 "use client"
+
+type InstallPromptOutcome = 'accepted' | 'dismissed' | 'unavailable'
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
+}
 
 // PWA utilities for service worker registration and management
 export class PWAManager {
@@ -10,6 +16,8 @@ export class PWAManager {
   private onlineHandlers: (() => void)[] = []
   private offlineHandlers: (() => void)[] = []
   private updateHandlers: (() => void)[] = []
+  private deferredInstallPrompt: BeforeInstallPromptEvent | null = null
+  private installPromptListenerReady = false
 
   static getInstance(): PWAManager {
     if (!PWAManager.instance) {
@@ -20,10 +28,23 @@ export class PWAManager {
 
   async init() {
     if (typeof window !== 'undefined') {
+      // Capture this one-time browser event before service-worker registration awaits.
+      this.setupInstallPrompt()
+
+      if (this.shouldDisableServiceWorker()) {
+        await this.unregisterServiceWorkers()
+        this.setupNetworkListeners()
+        return
+      }
+
       // Check if service workers are supported
       if ('serviceWorker' in navigator) {
         try {
           await this.registerServiceWorker()
+          if (this.isMobileSurface()) {
+            await this.warmMobileShell()
+            void this.requestPersistentStorage()
+          }
         } catch (error) {
           console.error('Failed to register service worker:', error)
         }
@@ -32,8 +53,41 @@ export class PWAManager {
       // Set up online/offline listeners
       this.setupNetworkListeners()
       
-      // Set up beforeinstallprompt listener for PWA installation
-      this.setupInstallPrompt()
+    }
+  }
+
+  private shouldDisableServiceWorker() {
+    if (process.env.NODE_ENV !== 'production') {
+      return true
+    }
+
+    const localHosts = new Set(['localhost', '127.0.0.1', '::1'])
+    return localHosts.has(window.location.hostname)
+  }
+
+  private isMobileSurface() {
+    return window.location.pathname === '/mobile' || window.location.pathname.startsWith('/mobile/')
+  }
+
+  private async unregisterServiceWorkers() {
+    if (!('serviceWorker' in navigator)) {
+      return
+    }
+
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(registrations.map((registration) => registration.unregister()))
+
+      if ('caches' in window) {
+        const cacheNames = await caches.keys()
+        await Promise.all(
+          cacheNames
+            .filter((cacheName) => cacheName.startsWith('erp-'))
+            .map((cacheName) => caches.delete(cacheName))
+        )
+      }
+    } catch (error) {
+      console.error('Failed to clear development service worker state:', error)
     }
   }
 
@@ -77,6 +131,9 @@ export class PWAManager {
       this.isOnline = true
       this.notifyOnlineHandlers()
       this.syncOfflineData()
+      if (this.isMobileSurface()) {
+        void this.warmMobileShell()
+      }
     })
 
     window.addEventListener('offline', () => {
@@ -86,26 +143,17 @@ export class PWAManager {
   }
 
   private setupInstallPrompt() {
-    let deferredPrompt: any = null
+    if (this.installPromptListenerReady) return
+    this.installPromptListenerReady = true
 
-    window.addEventListener('beforeinstallprompt', (e) => {
-      // Prevent Chrome 67 and earlier from automatically showing the prompt
-      e.preventDefault()
-      // Stash the event so it can be triggered later
-      deferredPrompt = e
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault()
+      this.deferredInstallPrompt = event as BeforeInstallPromptEvent
     })
 
-    // Store the prompt for later use
-    ;(window as any).showInstallPrompt = async () => {
-      if (deferredPrompt) {
-        deferredPrompt.prompt()
-        const { outcome } = await deferredPrompt.userChoice
-        console.log(`User response to install prompt: ${outcome}`)
-        deferredPrompt = null
-        return outcome === 'accepted'
-      }
-      return false
-    }
+    window.addEventListener('appinstalled', () => {
+      this.deferredInstallPrompt = null
+    })
   }
 
   // Public API methods
@@ -139,11 +187,18 @@ export class PWAManager {
     return null
   }
 
+  async requestInstall(): Promise<InstallPromptOutcome> {
+    const prompt = this.deferredInstallPrompt
+    if (!prompt) return 'unavailable'
+
+    this.deferredInstallPrompt = null
+    await prompt.prompt()
+    const { outcome } = await prompt.userChoice
+    return outcome
+  }
+
   async showInstallPrompt(): Promise<boolean> {
-    if ((window as any).showInstallPrompt) {
-      return await (window as any).showInstallPrompt()
-    }
-    return false
+    return await this.requestInstall() === 'accepted'
   }
 
   async requestNotificationPermission(): Promise<NotificationPermission> {
@@ -193,6 +248,14 @@ export class PWAManager {
         sync: { register: (tag: string) => Promise<void> }
       }).sync.register('background-sync')
     }
+  }
+
+  private async warmMobileShell() {
+    if (!this.isMobileSurface() || !this.serviceWorkerRegistration || !navigator.onLine) return
+
+    const registration = await navigator.serviceWorker.ready
+    const worker = registration.active || navigator.serviceWorker.controller
+    worker?.postMessage({ type: 'WARM_MOBILE_SHELL' })
   }
 
   private urlBase64ToUint8Array(base64String: string): ArrayBuffer {

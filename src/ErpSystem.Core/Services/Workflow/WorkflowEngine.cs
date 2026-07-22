@@ -25,6 +25,9 @@ public class WorkflowEngine : IWorkflowEngine
     private readonly IWorkflowActivityService _activityService;
     private readonly IWorkflowConditionEvaluator _conditionEvaluator;
     private readonly IWorkflowNotificationService _notificationService;
+    private readonly IWorkflowApprovalPolicyResolver _approvalPolicyResolver;
+    private readonly IWorkflowRuntimeGovernanceService _runtimeGovernance;
+    private readonly IWorkflowSignatureSubmissionStore _signatureStore;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<WorkflowEngine> _logger;
 
@@ -38,6 +41,9 @@ public class WorkflowEngine : IWorkflowEngine
         IWorkflowActivityService activityService,
         IWorkflowConditionEvaluator conditionEvaluator,
         IWorkflowNotificationService notificationService,
+        IWorkflowApprovalPolicyResolver approvalPolicyResolver,
+        IWorkflowRuntimeGovernanceService runtimeGovernance,
+        IWorkflowSignatureSubmissionStore signatureStore,
         ICurrentUserService currentUserService,
         ILogger<WorkflowEngine> logger)
     {
@@ -50,6 +56,9 @@ public class WorkflowEngine : IWorkflowEngine
         _activityService = activityService;
         _conditionEvaluator = conditionEvaluator;
         _notificationService = notificationService;
+        _approvalPolicyResolver = approvalPolicyResolver;
+        _runtimeGovernance = runtimeGovernance;
+        _signatureStore = signatureStore;
         _currentUserService = currentUserService;
         _logger = logger;
     }
@@ -62,9 +71,9 @@ public class WorkflowEngine : IWorkflowEngine
         var definition = await _workflowDefinitionRepository.GetByNameAsync(workflowName, tenantId)
             ?? throw new InvalidOperationException($"Workflow definition '{workflowName}' not found");
 
-        if (!definition.IsActive)
+        if (!WorkflowDefinitionLifecyclePolicy.IsRuntimeEligible(definition))
         {
-            throw new InvalidOperationException($"Workflow definition '{workflowName}' is not active");
+            throw new InvalidOperationException($"Workflow definition '{workflowName}' is not published and active");
         }
 
         var startStep = await _workflowStepRepository.GetStartStepAsync(definition.Id)
@@ -74,8 +83,10 @@ public class WorkflowEngine : IWorkflowEngine
         {
             Id = Guid.NewGuid(),
             WorkflowDefinitionId = definition.Id,
+            WorkflowDefinition = definition,
             EntityId = entityId,
             EntityTypeId = definition.EntityTypeId,
+            EntityType = definition.EntityType,
             Status = WorkflowInstanceStatus.InProgress,
             InitiatedById = initiatedById,
             StartedById = initiatedById,
@@ -291,6 +302,13 @@ public class WorkflowEngine : IWorkflowEngine
             return await ProcessApprovalStepAsync(instance, stepInstance, stepDefinition, userId, action, resultData, comments);
         }
 
+        var config = DeserializeStepConfig(stepDefinition.Configuration);
+        if (stepDefinition.StepType == WorkflowStepType.Manual &&
+            !CanCurrentUserActOnManualStep(stepInstance, stepDefinition, config, userId))
+        {
+            throw new UnauthorizedAccessException("User does not have permission to complete this workflow task.");
+        }
+
         if (action == WorkflowStepAction.RequestInformation)
         {
             stepInstance.Status = WorkflowStepInstanceStatus.InProgress;
@@ -354,10 +372,32 @@ public class WorkflowEngine : IWorkflowEngine
             };
         }
 
+        if (action == WorkflowStepAction.Complete)
+        {
+            var taskRequirementErrors = ValidateTaskCompletionRequirements(config, stepInstance.ResultData);
+            if (taskRequirementErrors.Count > 0)
+            {
+                return new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Status = instance.Status,
+                    WorkflowInstanceId = instance.Id,
+                    CurrentStepId = stepDefinition.Id,
+                    Errors = taskRequirementErrors.Select(message => new WorkflowExecutionError
+                    {
+                        Code = "TaskRequirementNotSatisfied",
+                        Message = message,
+                        StepId = stepDefinition.Id
+                    }).ToList(),
+                    Message = string.Join(" ", taskRequirementErrors)
+                };
+            }
+        }
+
         stepInstance.Status = WorkflowStepInstanceStatus.Completed;
         stepInstance.CompletedDate = DateTime.UtcNow;
         stepInstance.Comments = comments;
-        stepInstance.ResultData = resultData != null ? JsonSerializer.Serialize(resultData) : stepInstance.ResultData;
+        stepInstance.ResultData = MergeStepResultData(stepInstance.ResultData, resultData);
         await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
         await _workflowStepInstanceRepository.SaveChangesAsync();
 
@@ -457,21 +497,70 @@ public class WorkflowEngine : IWorkflowEngine
             ?? throw new InvalidOperationException($"Workflow instance {workflowInstanceId} not found");
 
         var steps = instance.StepInstances?.OrderBy(si => si.CreatedDate).ToList() ?? new List<WorkflowStepInstance>();
+        var currentStep = ResolveCurrentStep(instance, steps);
+        var currentStepDefinition = ResolveCurrentStepDefinition(instance, currentStep, steps);
         var totalSteps = instance.WorkflowDefinition?.Steps?.Count ?? steps.Count;
         var completedSteps = steps.Count(si => si.Status == WorkflowStepInstanceStatus.Completed);
+        var isTerminalInstance =
+            instance.Status == WorkflowInstanceStatus.Completed ||
+            instance.Status == WorkflowInstanceStatus.Cancelled ||
+            instance.Status == WorkflowInstanceStatus.Failed;
 
-        var approvals = await _workflowApprovalRepository.GetByStatusAsync(WorkflowApprovalStatus.Pending, instance.TenantId);
+        var approvals = isTerminalInstance
+            ? new List<WorkflowApproval>()
+            : (await _workflowApprovalRepository.GetByStatusAsync(WorkflowApprovalStatus.Pending, instance.TenantId)).ToList();
         var pendingApprovals = approvals.Where(a => a.StepInstance.WorkflowInstanceId == instance.Id).ToList();
+        var currentStepPendingApprovals = currentStep == null
+            ? pendingApprovals
+            : pendingApprovals.Where(a => a.StepInstanceId == currentStep.Id).ToList();
+
+        if (!isTerminalInstance && !currentStepPendingApprovals.Any() && currentStep?.WorkflowStep?.StepType == WorkflowStepType.Approval)
+        {
+            await EnsureApprovalsForStepAsync(currentStep.Id);
+            approvals = (await _workflowApprovalRepository.GetByStatusAsync(WorkflowApprovalStatus.Pending, instance.TenantId)).ToList();
+            pendingApprovals = approvals.Where(a => a.StepInstance.WorkflowInstanceId == instance.Id).ToList();
+        }
+
+        var pendingApprovalStatuses = pendingApprovals.Select(a => new WorkflowApprovalStatusDto
+        {
+            ApprovalId = a.Id,
+            ApprovalGroup = Math.Max(a.ApprovalGroup, 1),
+            StepName = a.StepInstance.WorkflowStep?.Name ?? "Approval",
+            ApproverId = a.ApproverId ?? Guid.Empty,
+            ApproverName = a.Approver?.UserName ?? a.ApproverRole ?? "Unassigned",
+            ApproverRole = a.ApproverRole,
+            Status = a.Status,
+            RequestedDate = a.RequestedDate,
+            DueDate = a.DueDate,
+            IsOverdue = a.DueDate.HasValue && a.DueDate.Value < DateTime.UtcNow && a.Status == WorkflowApprovalStatus.Pending,
+            IsAdHoc = a.IsAdHoc
+        }).ToList();
+
+        if (!isTerminalInstance && pendingApprovalStatuses.Count == 0 && currentStepDefinition?.StepType == WorkflowStepType.Approval)
+        {
+            pendingApprovalStatuses = BuildConfiguredPendingApprovalStatuses(currentStepDefinition, currentStep);
+        }
+
+        var pendingApproverNamesByStepInstanceId = pendingApprovals
+            .GroupBy(a => a.StepInstanceId)
+            .ToDictionary(
+                g => g.Key,
+                g => FormatApproverList(g
+                    .Select(a => a.Approver?.UserName ?? a.ApproverRole ?? "Unassigned")
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)));
 
         return new WorkflowStatusDto
         {
             WorkflowInstanceId = instance.Id,
             WorkflowName = instance.WorkflowDefinition?.Name ?? "Workflow",
             EntityId = instance.EntityId,
-            EntityType = instance.EntityType?.Name ?? "Unknown",
+            EntityType = instance.EntityType?.Name ?? instance.EntityType?.Code ?? "Unknown",
             Status = instance.Status,
             StartedDate = instance.StartedDate ?? instance.CreatedDate,
             CompletedDate = instance.CompletedDate,
+            CurrentStepName = currentStepDefinition?.Name,
+            CurrentStepInstanceId = currentStep?.Id,
             Progress = new WorkflowProgressDto
             {
                 TotalSteps = totalSteps,
@@ -484,22 +573,181 @@ public class WorkflowEngine : IWorkflowEngine
                 StepName = si.WorkflowStep?.Name ?? "Step",
                 Status = si.Status,
                 AssignedToId = si.AssignedToId,
+                AssignedToName = si.AssignedTo?.UserName
+                    ?? (pendingApproverNamesByStepInstanceId.TryGetValue(si.Id, out var pendingApprovers)
+                        ? pendingApprovers
+                        : si.WorkflowStep == null
+                            ? null
+                            : FormatApproverList(GetConfiguredApproverLabels(si.WorkflowStep))),
                 StartedDate = si.StartedDate,
                 CompletedDate = si.CompletedDate,
                 DueDate = si.DueDate,
                 IsOverdue = si.DueDate.HasValue && si.DueDate.Value < DateTime.UtcNow && si.Status == WorkflowStepInstanceStatus.Pending
             }).ToList(),
-            PendingApprovals = pendingApprovals.Select(a => new WorkflowApprovalStatusDto
+            PendingApprovals = pendingApprovalStatuses
+        };
+    }
+
+    private static WorkflowStepInstance? ResolveCurrentStep(WorkflowInstance instance, List<WorkflowStepInstance> steps)
+    {
+        if (!steps.Any())
+        {
+            return null;
+        }
+
+        if (instance.CurrentStepId.HasValue)
+        {
+            var currentStepByDefinition = steps
+                .Where(si =>
+                    si.WorkflowStepId == instance.CurrentStepId.Value &&
+                    (si.Status == WorkflowStepInstanceStatus.Pending || si.Status == WorkflowStepInstanceStatus.InProgress))
+                .OrderByDescending(si => si.CreatedDate)
+                .FirstOrDefault();
+
+            if (currentStepByDefinition != null)
             {
-                ApprovalId = a.Id,
-                StepName = a.StepInstance.WorkflowStep?.Name ?? "Approval",
-                ApproverId = a.ApproverId ?? Guid.Empty,
-                ApproverName = a.Approver?.UserName ?? a.ApproverRole ?? "Unassigned",
-                Status = a.Status,
-                RequestedDate = a.RequestedDate,
-                DueDate = a.DueDate,
-                IsOverdue = a.DueDate.HasValue && a.DueDate.Value < DateTime.UtcNow && a.Status == WorkflowApprovalStatus.Pending
-            }).ToList()
+                return currentStepByDefinition;
+            }
+        }
+
+        return steps
+            .Where(si => si.Status == WorkflowStepInstanceStatus.InProgress)
+            .OrderByDescending(si => si.CreatedDate)
+            .FirstOrDefault()
+            ?? steps
+                .Where(si => si.Status == WorkflowStepInstanceStatus.Pending)
+                .OrderByDescending(si => si.CreatedDate)
+                .FirstOrDefault();
+    }
+
+    private static WorkflowStep? ResolveCurrentStepDefinition(
+        WorkflowInstance instance,
+        WorkflowStepInstance? currentStep,
+        List<WorkflowStepInstance> steps)
+    {
+        if (currentStep?.WorkflowStep != null)
+        {
+            return currentStep.WorkflowStep;
+        }
+
+        if (instance.CurrentStep != null)
+        {
+            return instance.CurrentStep;
+        }
+
+        if (instance.CurrentStepId.HasValue)
+        {
+            var byCurrentStepId = instance.WorkflowDefinition?.Steps
+                .FirstOrDefault(step => step.Id == instance.CurrentStepId.Value);
+
+            if (byCurrentStepId != null)
+            {
+                return byCurrentStepId;
+            }
+        }
+
+        return steps
+            .Select(stepInstance => stepInstance.WorkflowStep)
+            .Where(step => step != null)
+            .OrderBy(step => step!.Order)
+            .FirstOrDefault()
+            ?? instance.WorkflowDefinition?.Steps
+                .Where(step => !step.IsEndStep)
+                .OrderBy(step => step.Order)
+                .FirstOrDefault();
+    }
+
+    private static List<WorkflowApprovalStatusDto> BuildConfiguredPendingApprovalStatuses(
+        WorkflowStep stepDefinition,
+        WorkflowStepInstance? stepInstance)
+    {
+        var labels = GetConfiguredApproverLabels(stepDefinition);
+        if (labels.Count == 0)
+        {
+            return new List<WorkflowApprovalStatusDto>();
+        }
+
+        var requestedDate = stepInstance?.StartedDate ?? stepInstance?.CreatedDate ?? DateTime.UtcNow;
+
+        return labels
+            .Select(label =>
+            {
+                var dueDate = stepInstance?.DueDate;
+                return new WorkflowApprovalStatusDto
+                {
+                    ApprovalId = Guid.Empty,
+                    ApprovalGroup = 1,
+                    StepName = stepDefinition.Name,
+                    ApproverId = Guid.Empty,
+                    ApproverName = label,
+                    ApproverRole = label,
+                    Status = WorkflowApprovalStatus.Pending,
+                    RequestedDate = requestedDate,
+                    DueDate = dueDate,
+                    IsOverdue = dueDate.HasValue && dueDate.Value < DateTime.UtcNow
+                };
+            })
+            .ToList();
+    }
+
+    private static List<string> GetConfiguredApproverLabels(WorkflowStep stepDefinition)
+    {
+        var labels = new List<string>();
+
+        var config = DeserializeStepConfig(stepDefinition.Configuration);
+        var rules = config?.ApprovalConfig?.ApproverRules;
+        if (rules != null)
+        {
+            foreach (var rule in rules.OrderByDescending(rule => rule.Priority))
+            {
+                switch (rule.AssignmentType)
+                {
+                    case WorkflowAssignmentType.Role:
+                        if (!string.IsNullOrWhiteSpace(rule.Role))
+                        {
+                            labels.Add(rule.Role);
+                        }
+                        break;
+                    case WorkflowAssignmentType.User:
+                        if (rule.UserId.HasValue)
+                        {
+                            labels.Add(rule.UserId.Value.ToString());
+                        }
+                        break;
+                    case WorkflowAssignmentType.Dynamic:
+                        if (!string.IsNullOrWhiteSpace(rule.DynamicExpression))
+                        {
+                            labels.Add(rule.DynamicExpression);
+                        }
+                        break;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(stepDefinition.RequiredRole))
+        {
+            labels.Add(stepDefinition.RequiredRole);
+        }
+
+        return labels
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? FormatApproverList(IEnumerable<string> approverNames)
+    {
+        var names = approverNames
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return names.Count switch
+        {
+            0 => null,
+            1 => names[0],
+            2 => string.Join(", ", names),
+            _ => $"{string.Join(", ", names.Take(2))} +{names.Count - 2}"
         };
     }
 
@@ -523,16 +771,12 @@ public class WorkflowEngine : IWorkflowEngine
         var existingApprovals = (await _workflowApprovalRepository.GetByStepInstanceAsync(stepInstance.Id)).ToList();
         if (existingApprovals.Count > 0)
         {
-            return;
-        }
-
-        var config = DeserializeStepConfig(stepDefinition.Configuration);
-        if (config?.ApprovalConfig == null)
-        {
+            await EnsureStepAssignedToDirectApproverAsync(stepInstance, existingApprovals);
             return;
         }
 
         var context = MergeDataContext(instance, dataContext);
+        var config = DeserializeStepConfig(stepDefinition.Configuration);
         await CreateApprovalsAsync(instance, stepInstance, stepDefinition, config, context);
     }
 
@@ -585,6 +829,42 @@ public class WorkflowEngine : IWorkflowEngine
             };
         }
 
+        if (action == WorkflowStepAction.Delegate)
+        {
+            if (!TryResolveGuidFromData(resultData, "delegateToId", out var delegateToId))
+            {
+                throw new InvalidOperationException("A delegate user is required.");
+            }
+
+            await _runtimeGovernance.ValidateOneOffDelegationAsync(
+                instance.TenantId, userId, delegateToId, allowRedelegation: false);
+            approval.OriginalApproverId ??= approval.ApproverId ?? userId;
+            approval.ApproverId = delegateToId;
+            approval.ApproverRole = null;
+            approval.DelegatedById = userId;
+            approval.DelegatedAt = DateTime.UtcNow;
+            approval.DelegationReason = comments;
+            await _workflowApprovalRepository.UpdateAsync(approval);
+            await _workflowApprovalRepository.SaveChangesAsync();
+
+            stepInstance.AssignedToId = delegateToId;
+            await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
+            await _workflowStepInstanceRepository.SaveChangesAsync();
+            await _activityService.LogActivityAsync(instance.Id, WorkflowActivityType.ApprovalDelegated,
+                "Approval delegated", comments, userId, stepInstance.Id,
+                new { approvalId = approval.Id, delegatedToId = delegateToId });
+            await _notificationService.SendApprovalRequestNotificationAsync(approval.Id);
+
+            return new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = instance.Status,
+                WorkflowInstanceId = instance.Id,
+                CurrentStepId = stepDefinition.Id,
+                Message = "Approval delegated"
+            };
+        }
+
         if (action == WorkflowStepAction.RequestInformation)
         {
             approval.Status = WorkflowApprovalStatus.MoreInfoRequested;
@@ -617,6 +897,100 @@ public class WorkflowEngine : IWorkflowEngine
             };
         }
 
+        var config = DeserializeStepConfig(stepDefinition.Configuration);
+        var policyContext = MergeDataContext(instance, resultData);
+        var policyResolution = await ResolveApprovalPolicyAsync(instance, policyContext);
+        if (policyResolution != null)
+        {
+            config ??= new WorkflowStepConfigurationDto();
+            config.ApprovalConfig = policyResolution.ApprovalConfig;
+        }
+        if (action != WorkflowStepAction.Reject)
+        {
+            object? signatureResultData = resultData;
+            if (config?.ApprovalConfig?.SignaturePolicy?.IsRequired == true &&
+                WorkflowSignatureValidator.ReadSubmission(signatureResultData) == null)
+            {
+                var stagedSignature = await _signatureStore.GetPendingAsync(approval.Id, userId);
+                if (stagedSignature != null) signatureResultData = new { signature = stagedSignature };
+            }
+            var signatureErrors = WorkflowSignatureValidator.Validate(
+                config?.ApprovalConfig?.SignaturePolicy,
+                _currentUserService.Roles ?? [],
+                signatureResultData,
+                DateTime.UtcNow);
+            if (signatureErrors.Count > 0)
+            {
+                return new WorkflowExecutionResult
+                {
+                    Success = false, Status = instance.Status, WorkflowInstanceId = instance.Id,
+                    CurrentStepId = stepDefinition.Id, Message = string.Join(" ", signatureErrors),
+                    Errors = signatureErrors.Select(message => new WorkflowExecutionError
+                    { Code = "ElectronicSignatureRequired", Message = message, StepId = stepDefinition.Id }).ToList()
+                };
+            }
+
+            var approvalGuardErrors = WorkflowApprovalGuardValidator.Validate(
+                config?.ApprovalConfig,
+                instance.InitiatedById,
+                approvals,
+                userId);
+            if (approvalGuardErrors.Count > 0)
+            {
+                return new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Status = instance.Status,
+                    WorkflowInstanceId = instance.Id,
+                    CurrentStepId = stepDefinition.Id,
+                    Message = string.Join(" ", approvalGuardErrors),
+                    Errors = approvalGuardErrors.Select(message => new WorkflowExecutionError
+                    {
+                        Code = "ApprovalPolicyViolation",
+                        Message = message,
+                        StepId = stepDefinition.Id
+                    }).ToList()
+                };
+            }
+
+            var crossStepSodErrors = await ValidateCrossStepSodAsync(
+                config?.ApprovalConfig,
+                instance,
+                stepInstance,
+                resultData,
+                userId);
+            if (crossStepSodErrors.Count > 0)
+            {
+                return new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Status = instance.Status,
+                    WorkflowInstanceId = instance.Id,
+                    CurrentStepId = stepDefinition.Id,
+                    Message = string.Join(" ", crossStepSodErrors),
+                    Errors = crossStepSodErrors.Select(message => new WorkflowExecutionError
+                    {
+                        Code = "SegregationOfDutiesViolation",
+                        Message = message,
+                        StepId = stepDefinition.Id
+                    }).ToList()
+                };
+            }
+
+            var checklistErrors = ValidateApprovalChecklist(config, stepInstance.ResultData, resultData);
+            if (checklistErrors.Count > 0)
+            {
+                return new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Status = instance.Status,
+                    WorkflowInstanceId = instance.Id,
+                    CurrentStepId = stepDefinition.Id,
+                    Message = string.Join(" ", checklistErrors)
+                };
+            }
+        }
+
         approval.Status = action == WorkflowStepAction.Reject
             ? WorkflowApprovalStatus.Rejected
             : WorkflowApprovalStatus.Approved;
@@ -626,6 +1000,10 @@ public class WorkflowEngine : IWorkflowEngine
 
         await _workflowApprovalRepository.UpdateAsync(approval);
         await _workflowApprovalRepository.SaveChangesAsync();
+        if (action != WorkflowStepAction.Reject && config?.ApprovalConfig?.SignaturePolicy?.IsRequired == true)
+        {
+            await _signatureStore.CommitAsync(approval.Id, userId);
+        }
 
         var activityType = action == WorkflowStepAction.Reject
             ? WorkflowActivityType.ApprovalRejected
@@ -640,14 +1018,47 @@ public class WorkflowEngine : IWorkflowEngine
             stepInstance.Id,
             resultData);
 
-        var config = DeserializeStepConfig(stepDefinition.Configuration);
         if (action == WorkflowStepAction.Reject)
         {
             return await HandleRejectionAsync(instance, stepInstance, stepDefinition, config, userId, comments);
         }
 
         var approvalConfig = config?.ApprovalConfig;
-        var shouldComplete = approvalConfig == null || IsApprovalSatisfied(approvalConfig, approvals);
+        if (approvalConfig?.ActivationMode == WorkflowApprovalActivationMode.Sequential)
+        {
+            var currentGroup = Math.Max(approval.ApprovalGroup, 1);
+            var currentGroupApprovals = approvals
+                .Where(candidate => Math.Max(candidate.ApprovalGroup, 1) == currentGroup)
+                .ToList();
+
+            if (WorkflowApprovalSequenceCoordinator.IsGroupSatisfied(
+                    approvalConfig.ApprovalType,
+                    approvalConfig.MinApprovalsRequired,
+                    currentGroupApprovals))
+            {
+                var nextGroup = WorkflowApprovalSequenceCoordinator.GetNextQueuedGroup(approvals);
+                if (nextGroup.HasValue)
+                {
+                    await ActivateApprovalGroupAsync(instance, stepInstance, stepDefinition, approvals, nextGroup.Value);
+                    return new WorkflowExecutionResult
+                    {
+                        Success = true,
+                        Status = instance.Status,
+                        WorkflowInstanceId = instance.Id,
+                        CurrentStepId = stepDefinition.Id,
+                        Message = $"Approval recorded; approval group {nextGroup.Value} activated"
+                    };
+                }
+            }
+        }
+
+        var shouldComplete = approvalConfig == null ||
+            (approvalConfig.ActivationMode == WorkflowApprovalActivationMode.Sequential
+                ? WorkflowApprovalSequenceCoordinator.AreAllSequentialGroupsSatisfied(
+                    approvalConfig.ApprovalType,
+                    approvalConfig.MinApprovalsRequired,
+                    approvals)
+                : IsApprovalSatisfied(approvalConfig, approvals));
         if (!shouldComplete)
         {
             return new WorkflowExecutionResult
@@ -663,7 +1074,7 @@ public class WorkflowEngine : IWorkflowEngine
         stepInstance.Status = WorkflowStepInstanceStatus.Completed;
         stepInstance.CompletedDate = DateTime.UtcNow;
         stepInstance.Comments = comments;
-        stepInstance.ResultData = resultData != null ? JsonSerializer.Serialize(resultData) : stepInstance.ResultData;
+        stepInstance.ResultData = MergeStepResultData(stepInstance.ResultData, resultData);
         await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
         await _workflowStepInstanceRepository.SaveChangesAsync();
 
@@ -906,25 +1317,80 @@ public class WorkflowEngine : IWorkflowEngine
         WorkflowStepConfigurationDto? config,
         Dictionary<string, object> context)
     {
-        var approvalConfig = config?.ApprovalConfig;
-        if (approvalConfig == null)
+        var policyResolution = await ResolveApprovalPolicyAsync(instance, context);
+        if (policyResolution != null)
         {
-            return;
+            config ??= new WorkflowStepConfigurationDto();
+            config.ApprovalConfig = policyResolution.ApprovalConfig;
+            stepInstance.ResultData = MergeStepResultData(stepInstance.ResultData, new
+            {
+                appliedApprovalPolicySetId = policyResolution.PolicySetId,
+                appliedApprovalPolicyCode = policyResolution.PolicyCode
+            });
+            await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
+            await _workflowStepInstanceRepository.SaveChangesAsync();
+            await _activityService.LogActivityAsync(
+                instance.Id,
+                WorkflowActivityType.DataUpdated,
+                "Approval policy applied",
+                $"Policy '{policyResolution.PolicyCode}' applied to step '{stepDefinition.Name}'",
+                null,
+                stepInstance.Id,
+                new { policyResolution.PolicySetId, policyResolution.PolicyCode });
         }
 
-        var approvers = await ResolveApproversAsync(approvalConfig, context, stepInstance);
+        var approvers = config?.ApprovalConfig == null
+            ? new List<(Guid? UserId, string? Role, int ApprovalGroup)>()
+            : await ResolveApproversAsync(config.ApprovalConfig, context, stepInstance);
+
+        if (approvers.Count == 0 && !string.IsNullOrWhiteSpace(stepDefinition.RequiredRole))
+        {
+            approvers.Add((null, stepDefinition.RequiredRole, 1));
+        }
+
+        var firstGroup = approvers.Count == 0
+            ? 1
+            : approvers.Min(approver => approver.ApprovalGroup);
+        var activationMode = config?.ApprovalConfig?.ActivationMode ?? WorkflowApprovalActivationMode.Parallel;
+        Guid? directAssigneeId = null;
+        var module = ContextString(context, "module") ?? InferModule(instance.EntityType?.Name ?? instance.EntityType?.Code);
+        var entityType = instance.EntityType?.Name ?? instance.EntityType?.Code;
+        var amount = ContextDecimal(context, "amount", "totalAmount", "value");
+        var currencyCode = ContextString(context, "currencyCode") ?? ContextString(context, "currency");
+
         foreach (var approver in approvers)
         {
+            var approvalStatus = WorkflowApprovalSequenceCoordinator.GetInitialStatus(
+                activationMode,
+                approver.ApprovalGroup,
+                firstGroup);
+            var effectiveApproverId = approver.UserId;
+            WorkflowDelegationResolution? delegation = null;
+            if (effectiveApproverId.HasValue)
+            {
+                delegation = await _runtimeGovernance.ResolveDelegateAsync(instance.TenantId,
+                    effectiveApproverId.Value, module, entityType, instance.WorkflowDefinitionId,
+                    stepDefinition.Id, amount, currencyCode, DateTime.UtcNow);
+                if (delegation != null) effectiveApproverId = delegation.DelegateUserId;
+            }
+
+            var requestedAt = DateTime.UtcNow;
             var approval = new WorkflowApproval
             {
                 Id = Guid.NewGuid(),
                 StepInstanceId = stepInstance.Id,
-                ApproverId = approver.UserId,
+                ApproverId = effectiveApproverId,
                 ApproverRole = approver.Role,
-                Status = WorkflowApprovalStatus.Pending,
-                RequestedDate = DateTime.UtcNow,
-                DueDate = stepDefinition.EstimatedHours.HasValue
-                    ? DateTime.UtcNow.AddHours(stepDefinition.EstimatedHours.Value)
+                OriginalApproverId = delegation?.PrincipalUserId,
+                DelegationId = delegation?.DelegationId,
+                DelegatedById = delegation?.PrincipalUserId,
+                DelegatedAt = delegation == null ? null : requestedAt,
+                DelegationReason = delegation?.Reason,
+                ApprovalGroup = approver.ApprovalGroup,
+                Status = approvalStatus,
+                RequestedDate = requestedAt,
+                DueDate = approvalStatus == WorkflowApprovalStatus.Pending
+                    ? await _runtimeGovernance.CalculateDueDateAsync(instance.TenantId, requestedAt, stepDefinition.EstimatedHours)
                     : null,
                 TenantId = instance.TenantId
             };
@@ -932,28 +1398,63 @@ public class WorkflowEngine : IWorkflowEngine
             await _workflowApprovalRepository.AddAsync(approval);
             await _workflowApprovalRepository.SaveChangesAsync();
 
-            await _activityService.LogActivityAsync(
-                instance.Id,
-                WorkflowActivityType.ApprovalRequested,
-                "Approval requested",
-                $"Approval requested for step '{stepDefinition.Name}'",
-                null,
-                stepInstance.Id);
-
-            // Notify either direct user approvers OR role-based approvers.
-            if (approver.UserId.HasValue || !string.IsNullOrWhiteSpace(approver.Role))
+            if (approvalStatus == WorkflowApprovalStatus.Pending)
             {
-                await _notificationService.SendApprovalRequestNotificationAsync(approval.Id);
+                directAssigneeId ??= effectiveApproverId;
+                await _activityService.LogActivityAsync(
+                    instance.Id,
+                    WorkflowActivityType.ApprovalRequested,
+                    "Approval requested",
+                    $"Approval requested for step '{stepDefinition.Name}'",
+                    null,
+                    stepInstance.Id);
+
+                if (effectiveApproverId.HasValue || !string.IsNullOrWhiteSpace(approver.Role))
+                {
+                    await _notificationService.SendApprovalRequestNotificationAsync(approval.Id);
+                }
             }
+        }
+
+        if (!stepInstance.AssignedToId.HasValue && directAssigneeId.HasValue)
+        {
+            stepInstance.AssignedToId = directAssigneeId.Value;
+            await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
+            await _workflowStepInstanceRepository.SaveChangesAsync();
         }
     }
 
-    private async Task<List<(Guid? UserId, string? Role)>> ResolveApproversAsync(
+    private async Task EnsureStepAssignedToDirectApproverAsync(
+        WorkflowStepInstance stepInstance,
+        IReadOnlyCollection<WorkflowApproval> approvals)
+    {
+        if (stepInstance.AssignedToId.HasValue)
+        {
+            return;
+        }
+
+        var directAssigneeId = approvals
+            .Where(approval => approval.Status == WorkflowApprovalStatus.Pending && approval.ApproverId.HasValue)
+            .OrderBy(approval => approval.RequestedDate)
+            .Select(approval => approval.ApproverId!.Value)
+            .FirstOrDefault();
+
+        if (directAssigneeId == Guid.Empty)
+        {
+            return;
+        }
+
+        stepInstance.AssignedToId = directAssigneeId;
+        await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
+        await _workflowStepInstanceRepository.SaveChangesAsync();
+    }
+
+    private async Task<List<(Guid? UserId, string? Role, int ApprovalGroup)>> ResolveApproversAsync(
         WorkflowApprovalConfigDto approvalConfig,
         Dictionary<string, object> context,
         WorkflowStepInstance stepInstance)
     {
-        var approvers = new List<(Guid? UserId, string? Role)>();
+        var approvers = new List<(Guid? UserId, string? Role, int ApprovalGroup)>();
         var rules = approvalConfig.ApproverRules
             .OrderByDescending(r => r.Priority)
             .ToList();
@@ -965,37 +1466,38 @@ public class WorkflowEngine : IWorkflowEngine
                 continue;
             }
 
+            var approvalGroup = Math.Max(rule.ApprovalGroup, 1);
             switch (rule.AssignmentType)
             {
                 case WorkflowAssignmentType.User:
                     if (rule.UserId.HasValue)
                     {
-                        approvers.Add((rule.UserId.Value, null));
+                        approvers.Add((rule.UserId.Value, null, approvalGroup));
                     }
                     break;
                 case WorkflowAssignmentType.Role:
                     if (!string.IsNullOrWhiteSpace(rule.Role))
                     {
-                        approvers.Add((null, rule.Role));
+                        approvers.Add((null, rule.Role, approvalGroup));
                     }
                     break;
                 case WorkflowAssignmentType.Dynamic:
                     if (!string.IsNullOrWhiteSpace(rule.DynamicExpression) &&
                         TryResolveGuidFromContext(context, rule.DynamicExpression!, out var dynamicUserId))
                     {
-                        approvers.Add((dynamicUserId, null));
+                        approvers.Add((dynamicUserId, null, approvalGroup));
                     }
                     break;
                 case WorkflowAssignmentType.RequestorManager:
                     if (TryResolveGuidFromContext(context, "requestorManagerId", out var managerId))
                     {
-                        approvers.Add((managerId, null));
+                        approvers.Add((managerId, null, approvalGroup));
                     }
                     break;
                 case WorkflowAssignmentType.PreviousStepUser:
                     if (stepInstance.AssignedToId.HasValue)
                     {
-                        approvers.Add((stepInstance.AssignedToId.Value, null));
+                        approvers.Add((stepInstance.AssignedToId.Value, null, approvalGroup));
                     }
                     break;
                 default:
@@ -1004,6 +1506,53 @@ public class WorkflowEngine : IWorkflowEngine
         }
 
         return approvers.Distinct().ToList();
+    }
+
+    private async Task ActivateApprovalGroupAsync(
+        WorkflowInstance instance,
+        WorkflowStepInstance stepInstance,
+        WorkflowStep stepDefinition,
+        IReadOnlyCollection<WorkflowApproval> approvals,
+        int approvalGroup)
+    {
+        var activatedAt = DateTime.UtcNow;
+        var activatedApprovals = approvals
+            .Where(approval => approval.Status == WorkflowApprovalStatus.Queued &&
+                Math.Max(approval.ApprovalGroup, 1) == approvalGroup)
+            .ToList();
+
+        foreach (var queuedApproval in activatedApprovals)
+        {
+            queuedApproval.Status = WorkflowApprovalStatus.Pending;
+            queuedApproval.RequestedDate = activatedAt;
+            queuedApproval.DueDate = await _runtimeGovernance.CalculateDueDateAsync(
+                instance.TenantId, activatedAt, stepDefinition.EstimatedHours);
+            await _workflowApprovalRepository.UpdateAsync(queuedApproval);
+        }
+        await _workflowApprovalRepository.SaveChangesAsync();
+
+        stepInstance.AssignedToId = activatedApprovals
+            .Where(approval => approval.ApproverId.HasValue)
+            .Select(approval => approval.ApproverId)
+            .FirstOrDefault();
+        await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
+        await _workflowStepInstanceRepository.SaveChangesAsync();
+
+        foreach (var activatedApproval in activatedApprovals)
+        {
+            await _activityService.LogActivityAsync(
+                instance.Id,
+                WorkflowActivityType.ApprovalRequested,
+                "Sequential approval group activated",
+                $"Approval group {approvalGroup} activated for step '{stepDefinition.Name}'",
+                null,
+                stepInstance.Id);
+
+            if (activatedApproval.ApproverId.HasValue || !string.IsNullOrWhiteSpace(activatedApproval.ApproverRole))
+            {
+                await _notificationService.SendApprovalRequestNotificationAsync(activatedApproval.Id);
+            }
+        }
     }
 
     private static bool IsApprovalSatisfied(WorkflowApprovalConfigDto approvalConfig, List<WorkflowApproval> approvals)
@@ -1047,17 +1596,17 @@ public class WorkflowEngine : IWorkflowEngine
             assignedToId = null;
         }
 
+        var startedAt = DateTime.UtcNow;
         var stepInstance = new WorkflowStepInstance
         {
             Id = Guid.NewGuid(),
             WorkflowInstanceId = instance.Id,
             WorkflowStepId = stepDefinition.Id,
             Status = WorkflowStepInstanceStatus.Pending,
-            StartedDate = DateTime.UtcNow,
+            StartedDate = startedAt,
             AssignedToId = assignedToId,
-            DueDate = stepDefinition.EstimatedHours.HasValue
-                ? DateTime.UtcNow.AddHours(stepDefinition.EstimatedHours.Value)
-                : null,
+            DueDate = await _runtimeGovernance.CalculateDueDateAsync(
+                instance.TenantId, startedAt, stepDefinition.EstimatedHours),
             TenantId = instance.TenantId
         };
 
@@ -1070,6 +1619,150 @@ public class WorkflowEngine : IWorkflowEngine
         }
 
         return stepInstance;
+    }
+
+    private async Task<WorkflowApprovalPolicyResolution?> ResolveApprovalPolicyAsync(
+        WorkflowInstance instance,
+        IReadOnlyDictionary<string, object> context)
+    {
+        var entityType = instance.EntityType?.Name ??
+            instance.WorkflowDefinition?.EntityType?.Name ??
+            ReadString(context, "entityType");
+        if (string.IsNullOrWhiteSpace(entityType))
+        {
+            return null;
+        }
+
+        return await _approvalPolicyResolver.ResolveAsync(new WorkflowApprovalPolicyContext(
+            instance.TenantId,
+            entityType,
+            instance.StartedDate ?? instance.CreatedDate,
+            Module: ReadString(context, "module"),
+            Category: ReadString(context, "category"),
+            LocationId: ReadGuid(context, "locationId"),
+            LegalEntityId: ReadGuid(context, "legalEntityId"),
+            Amount: ReadDecimal(context, "amount") ?? ReadDecimal(context, "totalAmount"),
+            CurrencyCode: ReadString(context, "currencyCode") ?? ReadString(context, "currency")));
+    }
+
+    private static string? ReadString(IReadOnlyDictionary<string, object> context, string key)
+    {
+        if (!context.TryGetValue(key, out var value) || value == null)
+        {
+            return null;
+        }
+
+        return value is JsonElement element
+            ? element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString()
+            : value.ToString();
+    }
+
+    private static Guid? ReadGuid(IReadOnlyDictionary<string, object> context, string key)
+        => Guid.TryParse(ReadString(context, key), out var value) ? value : null;
+
+    private static decimal? ReadDecimal(IReadOnlyDictionary<string, object> context, string key)
+        => decimal.TryParse(ReadString(context, key), out var value) ? value : null;
+
+    private bool CanCurrentUserActOnManualStep(
+        WorkflowStepInstance stepInstance,
+        WorkflowStep stepDefinition,
+        WorkflowStepConfigurationDto? config,
+        Guid userId)
+    {
+        if (stepDefinition.StepType != WorkflowStepType.Manual)
+        {
+            return true;
+        }
+
+        if (stepInstance.Status != WorkflowStepInstanceStatus.Pending &&
+            stepInstance.Status != WorkflowStepInstanceStatus.InProgress)
+        {
+            return false;
+        }
+
+        if (stepInstance.AssignedToId.HasValue && stepInstance.AssignedToId.Value == userId)
+        {
+            return true;
+        }
+
+        var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(stepDefinition.RequiredRole) && roleSet.Contains(stepDefinition.RequiredRole))
+        {
+            return true;
+        }
+
+        var assignedRoles = config?.AssignmentRules?
+            .Where(rule => rule.AssignmentType == WorkflowAssignmentType.Role && !string.IsNullOrWhiteSpace(rule.Role))
+            .Select(rule => rule.Role!)
+            .ToList() ?? new List<string>();
+
+        return assignedRoles.Any(roleSet.Contains);
+    }
+
+    private static List<string> ValidateTaskCompletionRequirements(
+        WorkflowStepConfigurationDto? config,
+        string? existingResultData)
+    {
+        var errors = new List<string>();
+        var taskConfig = config?.TaskConfig;
+        var requiresDocument = taskConfig?.RequiresDocument == true ||
+            string.Equals(taskConfig?.TaskActionType, "document", StringComparison.OrdinalIgnoreCase);
+        var attachments = GetWorkflowTaskAttachments(existingResultData);
+
+        if (requiresDocument)
+        {
+            var requirementKey = taskConfig?.DocumentRequirementKey?.Trim();
+            var hasRequiredDocument = attachments.Any(attachment =>
+                string.IsNullOrWhiteSpace(requirementKey) ||
+                string.Equals(attachment.RequirementKey, requirementKey, StringComparison.OrdinalIgnoreCase));
+
+            if (!hasRequiredDocument)
+            {
+                var configuredDocumentName = taskConfig?.DocumentName?.Trim();
+                var documentName = string.IsNullOrWhiteSpace(configuredDocumentName)
+                    ? "the required document"
+                    : configuredDocumentName;
+                errors.Add($"Attach {documentName} before completing this workflow task.");
+            }
+        }
+
+        var checklist = config?.QualityConfig?.QualityChecks?
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+            .ToList() ?? new List<WorkflowQualityCheckDto>();
+        if (checklist.Count > 0)
+        {
+            var responses = ExtractApprovalChecklistResponses(existingResultData);
+            errors.AddRange(WorkflowChecklistEvidenceValidator.Validate(checklist, responses, attachments));
+        }
+
+        return errors;
+    }
+
+    private static List<WorkflowTaskAttachmentDto> GetWorkflowTaskAttachments(string? resultData)
+    {
+        if (string.IsNullOrWhiteSpace(resultData))
+        {
+            return new List<WorkflowTaskAttachmentDto>();
+        }
+
+        try
+        {
+            var payload = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(resultData, GetJsonSerializerOptions());
+            if (payload == null ||
+                !payload.TryGetValue("workflowTaskAttachments", out var attachmentsElement) ||
+                attachmentsElement.ValueKind != JsonValueKind.Array)
+            {
+                return new List<WorkflowTaskAttachmentDto>();
+            }
+
+            return JsonSerializer.Deserialize<List<WorkflowTaskAttachmentDto>>(
+                attachmentsElement.GetRawText(),
+                GetJsonSerializerOptions()) ?? new List<WorkflowTaskAttachmentDto>();
+        }
+        catch
+        {
+            return new List<WorkflowTaskAttachmentDto>();
+        }
     }
 
     private async Task<Guid?> ResolveStepAssignmentAsync(
@@ -1093,6 +1786,12 @@ public class WorkflowEngine : IWorkflowEngine
                         if (rule.UserId.HasValue)
                         {
                             return rule.UserId;
+                        }
+                        break;
+                    case WorkflowAssignmentType.Role:
+                        if (!string.IsNullOrWhiteSpace(rule.Role))
+                        {
+                            return null;
                         }
                         break;
                     case WorkflowAssignmentType.Dynamic:
@@ -1248,6 +1947,180 @@ public class WorkflowEngine : IWorkflowEngine
         }
     }
 
+    private static List<string> ValidateApprovalChecklist(
+        WorkflowStepConfigurationDto? config,
+        string? storedResultData,
+        object? resultData)
+    {
+        var checklist = config?.QualityConfig?.QualityChecks?
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+            .ToList() ?? new List<WorkflowQualityCheckDto>();
+
+        if (checklist.Count == 0)
+        {
+            return new List<string>();
+        }
+
+        var responses = ExtractApprovalChecklistResponses(resultData)
+            .Concat(ExtractApprovalChecklistResponses(storedResultData))
+            .GroupBy(response => WorkflowChecklistEvidenceValidator.NormalizeKey(response.Id, response.Name), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var attachments = GetWorkflowTaskAttachments(storedResultData);
+
+        return WorkflowChecklistEvidenceValidator.Validate(checklist, responses.Values.ToList(), attachments);
+    }
+
+    private async Task<List<string>> ValidateCrossStepSodAsync(
+        WorkflowApprovalConfigDto? config,
+        WorkflowInstance instance,
+        WorkflowStepInstance currentStep,
+        object? resultData,
+        Guid userId)
+    {
+        if (config?.ConflictRules?.Any(rule => rule.IsEnabled) != true)
+        {
+            return new List<string>();
+        }
+
+        var previousSteps = (await _workflowStepInstanceRepository.GetByWorkflowInstanceAsync(instance.Id))
+            .Where(step => step.Id != currentStep.Id &&
+                (step.CompletedDate ?? step.CreatedDate) <= (currentStep.StartedDate ?? currentStep.CreatedDate))
+            .ToList();
+        var approvalsByStep = new Dictionary<Guid, IReadOnlyCollection<WorkflowApproval>>();
+        foreach (var step in previousSteps)
+        {
+            approvalsByStep[step.Id] = (await _workflowApprovalRepository.GetByStepInstanceAsync(step.Id)).ToList();
+        }
+
+        return WorkflowCrossStepSodEvaluator.Validate(
+            config,
+            previousSteps,
+            approvalsByStep,
+            MergeDataContext(instance, resultData),
+            userId);
+    }
+
+    private static List<WorkflowApprovalChecklistResponseDto> ExtractApprovalChecklistResponses(object? data)
+    {
+        if (data == null)
+        {
+            return new List<WorkflowApprovalChecklistResponseDto>();
+        }
+
+        if (data is string json)
+        {
+            return ExtractApprovalChecklistResponses(json);
+        }
+
+        try
+        {
+            return ExtractApprovalChecklistResponses(JsonSerializer.Serialize(data));
+        }
+        catch
+        {
+            return new List<WorkflowApprovalChecklistResponseDto>();
+        }
+    }
+
+    private static List<WorkflowApprovalChecklistResponseDto> ExtractApprovalChecklistResponses(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new List<WorkflowApprovalChecklistResponseDto>();
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                return JsonSerializer.Deserialize<List<WorkflowApprovalChecklistResponseDto>>(document.RootElement.GetRawText(), GetJsonSerializerOptions()) ??
+                    new List<WorkflowApprovalChecklistResponseDto>();
+            }
+
+            if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                TryGetPropertyIgnoreCase(document.RootElement, "approvalChecklistResponses", out var responsesElement) &&
+                responsesElement.ValueKind == JsonValueKind.Array)
+            {
+                return JsonSerializer.Deserialize<List<WorkflowApprovalChecklistResponseDto>>(responsesElement.GetRawText(), GetJsonSerializerOptions()) ??
+                    new List<WorkflowApprovalChecklistResponseDto>();
+            }
+        }
+        catch
+        {
+            return new List<WorkflowApprovalChecklistResponseDto>();
+        }
+
+        return new List<WorkflowApprovalChecklistResponseDto>();
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string propertyName, out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string MergeStepResultData(string? existingResultData, object? resultData)
+    {
+        if (resultData == null)
+        {
+            return existingResultData ?? string.Empty;
+        }
+
+        var incomingJson = JsonSerializer.Serialize(resultData, GetJsonSerializerOptions());
+        if (string.IsNullOrWhiteSpace(existingResultData))
+        {
+            return incomingJson;
+        }
+
+        try
+        {
+            using var existingDocument = JsonDocument.Parse(existingResultData);
+            using var incomingDocument = JsonDocument.Parse(incomingJson);
+            if (existingDocument.RootElement.ValueKind != JsonValueKind.Object ||
+                incomingDocument.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return incomingJson;
+            }
+
+            var payload = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in existingDocument.RootElement.EnumerateObject())
+            {
+                payload[property.Name] = property.Value.Clone();
+            }
+
+            foreach (var property in incomingDocument.RootElement.EnumerateObject())
+            {
+                payload[property.Name] = property.Value.Clone();
+            }
+
+            return JsonSerializer.Serialize(payload, GetJsonSerializerOptions());
+        }
+        catch (JsonException)
+        {
+            return incomingJson;
+        }
+    }
+
+    private static JsonSerializerOptions GetJsonSerializerOptions()
+    {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
+
     private static Dictionary<string, object> MergeDataContext(WorkflowInstance instance, object? dataContext)
     {
         var merged = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
@@ -1319,5 +2192,63 @@ public class WorkflowEngine : IWorkflowEngine
 
         value = Guid.Empty;
         return false;
+    }
+
+    private static bool TryResolveGuidFromData(object? data, string key, out Guid value)
+    {
+        return TryResolveGuidFromContext(
+            data == null
+                ? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                : MergeObject(data),
+            key,
+            out value);
+    }
+
+    private static Dictionary<string, object> MergeObject(object data)
+    {
+        if (data is Dictionary<string, object> dictionary)
+            return new Dictionary<string, object>(dictionary, StringComparer.OrdinalIgnoreCase);
+
+        var json = JsonSerializer.Serialize(data);
+        var parsed = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+        return parsed?.ToDictionary(pair => pair.Key, pair => ConvertJsonElement(pair.Value) ?? string.Empty,
+            StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string? ContextString(IReadOnlyDictionary<string, object> context, string key) =>
+        context.TryGetValue(key, out var value) ? Convert.ToString(value)?.Trim() : null;
+
+    private static string? InferModule(string? entityType)
+    {
+        var normalized = (entityType ?? string.Empty)
+            .Replace(" ", string.Empty)
+            .Replace("_", string.Empty)
+            .Replace("-", string.Empty)
+            .ToLowerInvariant();
+
+        return normalized switch
+        {
+            "purchaseorder" or "purchaserequisition" or "procurementplan" or "tender" or "rfq" or
+                "supplierquote" or "bid" or "evaluation" or "vendor" or "businesspartner" => "Procurement",
+            "workorder" or "jobcard" or "fleettrip" or "fleettripinspection" or "asset" or "quality" => "Maintenance",
+            "inventory" or "inventorytransfer" or "inventoryrequisition" => "Inventory",
+            "employee" or "payrollrun" or "payrollpayslipemail" or "payrollsalaryadvance" or
+                "payrollbonussetup" or "payrollbackpaysetup" => "Human Resources",
+            "project" or "projectdeliverable" or "projectclosure" => "Projects",
+            "customer" or "salesorder" or "salesagreement" or "salesallocation" or "refund" or "creditnote" => "Sales",
+            "servicerequest" => "Service Management",
+            _ => null
+        };
+    }
+
+    private static decimal? ContextDecimal(IReadOnlyDictionary<string, object> context, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!context.TryGetValue(key, out var value) || value == null) continue;
+            if (value is decimal number) return number;
+            if (decimal.TryParse(Convert.ToString(value), out number)) return number;
+        }
+        return null;
     }
 }

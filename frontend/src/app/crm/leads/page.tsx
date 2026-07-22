@@ -19,6 +19,7 @@ import {
   type CrmLeadListItemDto,
   type PagedResult,
 } from '@/services/crmService';
+import { SalesHandoffActions } from '../components/SalesHandoffActions';
 import {
   CalendarClock,
   Pencil,
@@ -803,6 +804,20 @@ export default function CrmLeadsPage() {
                       View Activities
                     </Link>
                   </Button>
+                  {selectedLead.convertedBusinessPartnerId ? (
+                    <SalesHandoffActions
+                      context={{
+                        businessPartnerId: selectedLead.convertedBusinessPartnerId,
+                        businessPartnerName: selectedLead.companyName || selectedLead.fullName,
+                        leadId: selectedLead.leadId,
+                        leadName: selectedLead.fullName,
+                        currency: 'GHS',
+                        estimatedValue: selectedLead.estimatedValue,
+                        contextLabel: 'Converted Lead',
+                      }}
+                      showUnavailableHint={false}
+                    />
+                  ) : null}
                 </div>
 
                 {selectedLead.convertedBusinessPartnerId ? (

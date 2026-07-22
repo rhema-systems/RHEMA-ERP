@@ -26,6 +26,22 @@ public interface IProcurementPlanService
     Task<ProcurementPlanDetailDto> UpdateAsync(Guid id, UpdateProcurementPlanDto dto);
     Task<ProcurementPlanDetailDto> SubmitForApprovalAsync(Guid id, SubmitProcurementPlanDto dto);
     Task<ProcurementPlanDetailDto> ApproveAsync(Guid id, ApproveProcurementPlanDto dto);
+    Task<ProcurementPlanDetailDto> PublishAsync(Guid id, PublishProcurementPlanDto dto);
+    Task<ProcurementPlanDetailDto> CreateAmendmentAsync(Guid id, CreateProcurementPlanAmendmentDto dto);
+    Task<IEnumerable<ProcurementPlanDto>> GetVersionHistoryAsync(Guid id);
+    Task<IEnumerable<ProcurementPlanConsolidationOpportunityDto>> GetConsolidationOpportunitiesAsync(
+        int? fiscalYear = null,
+        string? planningQuarter = null,
+        Guid? departmentId = null);
+    Task<ProcurementPlanningDashboardDto> GetDashboardAsync(
+        int? fiscalYear = null,
+        string? planningQuarter = null,
+        Guid? departmentId = null);
+    Task<ProcurementPlanningReportDto> GetReportAsync(
+        string reportType,
+        int? fiscalYear = null,
+        string? planningQuarter = null,
+        Guid? departmentId = null);
     Task DeleteAsync(Guid id);
 
     // Plan Items
@@ -133,7 +149,9 @@ public interface IProcurementScheduleService
         string? search = null,
         string? status = null,
         Guid? departmentId = null,
-        Guid? planId = null);
+        Guid? planId = null,
+        DateTime? startDate = null,
+        DateTime? endDate = null);
     Task<IEnumerable<ProcurementScheduleDto>> GetByPlanIdAsync(Guid planId);
     Task<IEnumerable<ProcurementScheduleDto>> GetByDepartmentAsync(Guid departmentId);
     Task<IEnumerable<ProcurementScheduleDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
@@ -163,7 +181,8 @@ public interface IMarketAnalysisService
         int page,
         int pageSize,
         string? search = null,
-        string? itemCategory = null);
+        string? itemCategory = null,
+        string? status = null);
     Task<IEnumerable<MarketAnalysisDto>> GetByCategoryAsync(string category);
     Task<IEnumerable<MarketAnalysisDto>> GetByItemAsync(string itemName);
     Task<IEnumerable<MarketAnalysisDto>> GetRecentAnalysesAsync(int count = 10);
@@ -177,6 +196,7 @@ public interface IMarketAnalysisService
     Task DeletePriceHistoryAsync(Guid priceHistoryId);
     Task<IEnumerable<PriceHistoryDto>> GetPriceHistoryAsync(Guid analysisId);
     Task<PriceTrendDto> GetPriceTrendAsync(Guid analysisId, int months = 12);
+    Task<MarketSurveySummaryDto> GetMarketSurveySummaryAsync(Guid analysisId);
     Task<decimal> GetAveragePriceAsync(string category);
 }
 
@@ -252,4 +272,3 @@ public interface IEmergencyProcurementPlanService
 }
 
 #endregion
-

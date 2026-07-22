@@ -11,6 +11,7 @@ import { Button } from '../ui/button';
 import { useToast } from '../../hooks/use-toast';
 import { tenantService } from '../../services/tenant';
 import { apiService, type UserTenantInfo } from '../../services/api.service';
+import { getAuthenticatedHomePath } from '../../lib/auth-routing';
 import type { Tenant } from '../../types';
 
 interface TenantSelectionDialogProps {
@@ -41,7 +42,7 @@ export function TenantSelectionDialog({ isOpen, onClose }: TenantSelectionDialog
   const selectTenantMutation = useMutation({
     mutationFn: (tenant: UserTenantInfo) => tenantService.selectTenant(tenant.tenantCode, false),
     onSuccess: () => {
-      router.push('/dashboard');
+      router.push(getAuthenticatedHomePath(userInfo));
     },
     onError: (error: any) => {
       toast({

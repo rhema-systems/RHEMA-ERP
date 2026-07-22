@@ -107,6 +107,9 @@ public enum StaffStatus
     OnLeave = 7
 }
 
+/// <summary>
+/// Work arrangement / schedule types
+/// </summary>
 public enum WorkArrangementType
 {
     FullTime = 1,
@@ -5402,7 +5405,6 @@ public enum CompanyAssetStatus
     Reserved = 7
 }
 
-
 public enum DisposalMethod
 {
     [Description("Sold")]
@@ -5561,7 +5563,6 @@ public enum AssetRequisitionStatus
     [Description("Cancelled")]
     Cancelled = 6
 }
-
 
 
 public enum AssetAttributeDataType
@@ -6761,7 +6762,6 @@ public enum FiscalYearStatus
     [Description("Archived")]
     Archived = 3
 }
-
 
 #endregion Company Schedule
 

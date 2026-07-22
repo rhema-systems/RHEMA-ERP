@@ -33,6 +33,18 @@ public class ProcurementPlan : TenantEntity
     public int FiscalYear { get; set; }
 
     /// <summary>
+    /// Planning cycle: Annual, Quarterly, MultiYear
+    /// </summary>
+    [MaxLength(20)]
+    public string PlanningCycle { get; set; } = "Annual";
+
+    /// <summary>
+    /// Applicable quarter for quarterly plans (Q1, Q2, Q3, Q4)
+    /// </summary>
+    [MaxLength(10)]
+    public string? PlanningQuarter { get; set; }
+
+    /// <summary>
     /// Start date of the planning period
     /// </summary>
     public DateTime PlanStartDate { get; set; }
@@ -70,6 +82,12 @@ public class ProcurementPlan : TenantEntity
     public DateTime? ApprovedDate { get; set; }
     public string? ApprovalComments { get; set; }
 
+    public Guid? PublishedById { get; set; }
+    public DateTime? PublishedDate { get; set; }
+
+    [MaxLength(2000)]
+    public string? PublishComments { get; set; }
+
     public int RevisionNumber { get; set; } = 1;
     public Guid? PreviousVersionId { get; set; }
 
@@ -81,6 +99,7 @@ public class ProcurementPlan : TenantEntity
     public virtual ApplicationUser? PreparedBy { get; set; }
     public virtual ApplicationUser? ReviewedBy { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
+    public virtual ApplicationUser? PublishedBy { get; set; }
     public virtual ProcurementPlan? PreviousVersion { get; set; }
     public virtual ICollection<ProcurementPlanItem> Items { get; set; } = new List<ProcurementPlanItem>();
     public virtual ICollection<ProcurementBudget> Budgets { get; set; } = new List<ProcurementBudget>();
@@ -99,6 +118,24 @@ public class ProcurementPlanItem : TenantEntity
     /// Optional reference to inventory item (null for non-inventory items)
     /// </summary>
     public Guid? InventoryItemId { get; set; }
+
+    public Guid? ProcurementBudgetId { get; set; }
+
+    public Guid? ProcurementBudgetAllocationId { get; set; }
+
+    public Guid? MarketAnalysisId { get; set; }
+
+    [MaxLength(50)]
+    public string? BudgetLineCode { get; set; }
+
+    [MaxLength(100)]
+    public string? BudgetCategoryName { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ApprovedBudgetAmount { get; set; }
+
+    [MaxLength(500)]
+    public string? BudgetNotes { get; set; }
 
     [Required]
     [MaxLength(200)]
@@ -186,6 +223,9 @@ public class ProcurementPlanItem : TenantEntity
 
     // Navigation Properties
     public virtual ProcurementPlan ProcurementPlan { get; set; } = null!;
+    public virtual ProcurementBudget? ProcurementBudget { get; set; }
+    public virtual ProcurementBudgetAllocation? ProcurementBudgetAllocation { get; set; }
+    public virtual MarketAnalysis? MarketAnalysis { get; set; }
     public virtual Supplier? PreferredSupplier { get; set; }
     public virtual InventoryItem? InventoryItem { get; set; }
     public virtual ICollection<ProcurementPlanItemSupplier> ItemSuppliers { get; set; } = new List<ProcurementPlanItemSupplier>();
@@ -507,6 +547,12 @@ public class MarketAnalysis : TenantEntity
     public decimal HistoricalAveragePrice { get; set; }
 
     /// <summary>
+    /// Previous procurement or market price used for variance analysis
+    /// </summary>
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? PreviousPrice { get; set; }
+
+    /// <summary>
     /// Current market price
     /// </summary>
     [Column(TypeName = "decimal(18,4)")]
@@ -530,8 +576,43 @@ public class MarketAnalysis : TenantEntity
     [Column(TypeName = "decimal(8,2)")]
     public decimal PriceChangePercent { get; set; }
 
+    /// <summary>
+    /// Variance between current market price and previous price
+    /// </summary>
+    [Column(TypeName = "decimal(8,2)")]
+    public decimal? PriceVariancePercent { get; set; }
+
     [MaxLength(10)]
     public string Currency { get; set; } = "USD";
+
+    /// <summary>
+    /// Estimated delivery lead time in days
+    /// </summary>
+    public int? LeadTimeDays { get; set; }
+
+    /// <summary>
+    /// Market availability: High, Medium, Low
+    /// </summary>
+    [MaxLength(20)]
+    public string MarketAvailability { get; set; } = "Medium";
+
+    /// <summary>
+    /// Supply risk level: Low, Medium, High
+    /// </summary>
+    [MaxLength(20)]
+    public string SupplyRiskLevel { get; set; } = "Medium";
+
+    /// <summary>
+    /// Estimated inflation impact on the planning price
+    /// </summary>
+    [Column(TypeName = "decimal(8,2)")]
+    public decimal InflationImpactPercent { get; set; }
+
+    /// <summary>
+    /// Recommended budget adjustment from market analysis
+    /// </summary>
+    [Column(TypeName = "decimal(8,2)")]
+    public decimal RecommendedBudgetAdjustmentPercent { get; set; }
 
     /// <summary>
     /// Market risk level: Low, Medium, High
@@ -944,4 +1025,3 @@ public class EmergencySupplier : TenantEntity
 }
 
 #endregion
-

@@ -566,6 +566,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var existing = await _service.GetContactByIdAsync(contactId, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.UpdateContactAsync(dto, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -584,6 +587,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var contact = await _service.GetContactByIdAsync(contactId, cancellationToken);
+            if (contact == null || contact.EmployeeId != employeeId) return NotFound();
+
             var ok = await _service.RemoveContactAsync(contactId, cancellationToken);
             return ok ? NoContent() : NotFound();
         }
@@ -603,6 +609,9 @@ public class EmployeesController : ControllerBase
 
         try
         {
+            var contact = await _service.GetContactByIdAsync(contactId, cancellationToken);
+            if (contact == null || contact.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.SetPrimaryContactAsync(contactId, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -611,7 +620,15 @@ public class EmployeesController : ControllerBase
         }
     }
 
-    // NEW ENDPOINTS: Dependents
+    /// <summary>
+    /// Retrieves all dependents for a specific employee.
+    /// </summary>
+    /// <param name="employeeId">The unique identifier of the employee.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A list of dependents for the employee.</returns>
+    /// <response code="200">Dependents retrieved successfully.</response>
+    /// <response code="400">Invalid employee identifier provided.</response>
+    /// <response code="404">Employee not found.</response>
     [HttpGet("{employeeId:guid}/dependents")]
     [ProducesResponseType(typeof(IEnumerable<EmployeeDependentReadDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1940,8 +1957,6 @@ public class EmployeesController : ControllerBase
         }
     }
 
-    // NEW ENDPOINTS: Bank Details
-
     [HttpGet("{employeeId:guid}/bank-details")]
     public async Task<ActionResult<IEnumerable<EmployeeBankDetailDto>>> GetBankDetails(Guid employeeId, CancellationToken cancellationToken)
     {
@@ -1955,7 +1970,8 @@ public class EmployeesController : ControllerBase
         if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
         if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
         var result = await _service.GetBankDetailByIdAsync(id, cancellationToken);
-        return result == null ? NotFound() : Ok(result);
+        if (result == null || result.EmployeeId != employeeId) return NotFound();
+        return Ok(result);
     }
 
     [HttpPost("{employeeId:guid}/bank-details")]
@@ -1981,6 +1997,9 @@ public class EmployeesController : ControllerBase
         dto.Id = id;
         try
         {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.UpdateBankDetailAsync(dto, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -1996,6 +2015,9 @@ public class EmployeesController : ControllerBase
         if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
         try
         {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
             var removed = await _service.RemoveBankDetailAsync(id, cancellationToken);
             return removed ? NoContent() : NotFound();
         }
@@ -2012,6 +2034,9 @@ public class EmployeesController : ControllerBase
         if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
         try
         {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.SetPrimaryBankDetailAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -2028,6 +2053,9 @@ public class EmployeesController : ControllerBase
         if (verifiedById == Guid.Empty) return BadRequest("verifiedById is required.");
         try
         {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.VerifyBankDetailAsync(id, verifiedById, verifiedDate, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -2043,6 +2071,9 @@ public class EmployeesController : ControllerBase
         if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
         try
         {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.UnverifyBankDetailAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -2058,6 +2089,9 @@ public class EmployeesController : ControllerBase
         if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
         try
         {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.ActivateBankDetailAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -2073,6 +2107,9 @@ public class EmployeesController : ControllerBase
         if (id == Guid.Empty) return BadRequest("Invalid bank detail id.");
         try
         {
+            var existing = await _service.GetBankDetailByIdAsync(id, cancellationToken);
+            if (existing == null || existing.EmployeeId != employeeId) return NotFound();
+
             return Ok(await _service.DeactivateBankDetailAsync(id, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)

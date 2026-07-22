@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { Plus, Trash2, Search, Package, AlertCircle, Pencil, Check, X } from 'lucide-react';
 import {
   inventoryRequisitionService,
@@ -574,7 +574,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
               <TabsList className={`grid w-full ${showApprovalsTab ? 'grid-cols-3' : 'grid-cols-2'}`}>
                 <TabsTrigger value="details">Details</TabsTrigger>
                 <TabsTrigger value="items">Items ({displayItems.length})</TabsTrigger>
-                {showApprovalsTab && <TabsTrigger value="approvals">Approvals</TabsTrigger>}
+                {showApprovalsTab && <WorkflowTabTrigger value="approvals" />}
               </TabsList>
 
               <TabsContent value="details" className="space-y-4">
@@ -808,9 +808,29 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
               </TabsContent>
 
               {showApprovalsTab && requisitionDetail && (
-                <TabsContent value="approvals" className="space-y-4 mt-4">
-                  <WorkflowApprovalHistoryPanel entityType="InventoryRequisition" entityId={requisitionDetail.id} />
-                </TabsContent>
+                <WorkflowTabContent
+                  value="approvals"
+                  entityType="InventoryRequisition"
+                  entityId={requisitionDetail.id}
+                  entityLabel="Inventory Requisition"
+                  entityNumber={requisitionDetail.requisitionNumber}
+                  status={RequisitionStatusMap[requisitionStatus] || 'Draft'}
+                  currentStepName={requisitionDetail.currentWorkflowStepName}
+                  canSubmit={requisitionStatus === 1}
+                  canApproveReject={requisitionStatus === 2}
+                  onSubmit={async () => {
+                    await inventoryRequisitionService.submit(requisitionDetail.id);
+                  }}
+                  onApprove={async (comments) => {
+                    await inventoryRequisitionService.approve(requisitionDetail.id, comments || undefined);
+                  }}
+                  onReject={async (comments) => {
+                    await inventoryRequisitionService.reject(requisitionDetail.id, comments);
+                  }}
+                  onAfterAction={async () => {
+                    await loadRequisitionDetail();
+                  }}
+                />
               )}
             </Tabs>
           )}

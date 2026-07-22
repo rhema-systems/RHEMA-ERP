@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Events;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Maintenance.Fleet;
@@ -65,6 +66,14 @@ public class FleetTripService : IFleetTripService
             .Include(t => t.DriverEmployee)
             .Include(t => t.FleetTripDestination);
 
+        var scope = await GetMaintenanceLocationScopeAsync();
+        if (scope.IsScoped)
+        {
+            q = scope.LocationId.HasValue
+                ? q.Where(t => t.VehicleAsset.CurrentSiteLocationId == scope.LocationId.Value)
+                : q.Where(t => false);
+        }
+
         if (vehicleAssetId.HasValue && vehicleAssetId.Value != Guid.Empty)
         {
             q = q.Where(t => t.VehicleAssetId == vehicleAssetId.Value);
@@ -113,6 +122,12 @@ public class FleetTripService : IFleetTripService
         var trip = await _unitOfWork.Repository<FleetTrip>()
             .FirstOrDefaultAsync(t => t.Id == tripId && t.TenantId == tenantId, t => t.VehicleAsset, t => t.DriverEmployee, t => t.FleetTripDestination);
 
+        var scope = await GetMaintenanceLocationScopeAsync();
+        if (trip != null && scope.IsScoped && (!scope.LocationId.HasValue || trip.VehicleAsset?.CurrentSiteLocationId != scope.LocationId.Value))
+        {
+            return null;
+        }
+
         return trip == null ? null : Map(trip);
     }
 
@@ -128,9 +143,25 @@ public class FleetTripService : IFleetTripService
         if (vehicle.Status != AssetStatus.Active)
             throw new InvalidOperationException($"Vehicle '{vehicle.Name}' ({vehicle.AssetNumber}) is currently {vehicle.Status} and cannot be assigned to a trip.");
 
-        var driver = dto.DriverEmployeeId.HasValue && dto.DriverEmployeeId.Value != Guid.Empty
-            ? await RequireEmployeeAsync(dto.DriverEmployeeId.Value)
+        await EnsureNoDispatchedConflictAsync(vehicle.Id, null, null);
+
+        var driverEmployeeId = dto.DriverEmployeeId.HasValue && dto.DriverEmployeeId.Value != Guid.Empty
+            ? dto.DriverEmployeeId
+            : await _unitOfWork.Repository<FleetVehicleAssignment>()
+                .GetQueryable(a => a.TenantId == tenantId && a.VehicleAssetId == vehicle.Id && a.IsActive && !a.IsDeleted)
+                .OrderByDescending(a => a.AssignedFromUtc)
+                .Select(a => (Guid?)a.EmployeeId)
+                .FirstOrDefaultAsync();
+
+        var driver = driverEmployeeId.HasValue && driverEmployeeId.Value != Guid.Empty
+            ? await RequireEmployeeAsync(driverEmployeeId.Value)
             : null;
+
+        if (driver != null)
+        {
+            await EnsureDriverLicenseValidAsync(driver);
+            await EnsureNoDispatchedConflictAsync(vehicle.Id, driver.Id, null);
+        }
 
         var trip = new FleetTrip
         {
@@ -240,6 +271,12 @@ public class FleetTripService : IFleetTripService
                 ? await RequireEmployeeAsync(dto.DriverEmployeeId.Value)
                 : null;
 
+            if (approvedDriver != null)
+            {
+                await EnsureDriverLicenseValidAsync(approvedDriver);
+                await EnsureNoDispatchedConflictAsync(trip.VehicleAssetId, approvedDriver.Id, trip.Id);
+            }
+
             trip.DriverEmployeeId = approvedDriver?.Id;
 
             if (!string.IsNullOrWhiteSpace(dto.Notes))
@@ -266,6 +303,12 @@ public class FleetTripService : IFleetTripService
         var driver = dto.DriverEmployeeId.HasValue && dto.DriverEmployeeId.Value != Guid.Empty
             ? await RequireEmployeeAsync(dto.DriverEmployeeId.Value)
             : null;
+
+        await EnsureNoDispatchedConflictAsync(vehicle.Id, driver?.Id, trip.Id);
+        if (driver != null)
+        {
+            await EnsureDriverLicenseValidAsync(driver);
+        }
 
         trip.VehicleAssetId = vehicle.Id;
         trip.DriverEmployeeId = driver?.Id;
@@ -463,41 +506,17 @@ public class FleetTripService : IFleetTripService
             }
         }
 
-        // Driver license expiry blocking (Driver's License in HR identification cards).
+        // Driver licence and concurrent-trip blocking.
         if (trip.DriverEmployeeId.HasValue && trip.DriverEmployeeId.Value != Guid.Empty)
         {
             var driverId = trip.DriverEmployeeId.Value;
             var driver = await _unitOfWork.Repository<Employee>()
                 .FirstOrDefaultAsync(e => e.TenantId == tenantId && e.Id == driverId && !e.IsDeleted);
-
-            var license = await _unitOfWork.Repository<EmployeeIdentificationCard>()
-                .GetQueryable(c =>
-                    c.TenantId == tenantId &&
-                    c.EmployeeId == driverId &&
-                    !c.IsDeleted &&
-                    // [HR-MODULE-PORT] `EmployeeIdentificationCard` no longer has a free-text `DocumentType` string.
-                    // The HR module port replaced it with `IdentificationTypeId` + the `IdentificationType` lookup entity,
-                    // so driver-licence detection now matches on `IdentificationType.Name`. Behaviour is preserved as long
-                    // as the licence identification type is named with "driver" (e.g. "Driver's License"). If you referenced
-                    // a `DocumentType` string elsewhere, use the `IdentificationType` relationship instead.
-                    c.IdentificationType.Name.ToLower().Contains("driver"))
-                .OrderByDescending(c => c.ExpiryDate)
-                .FirstOrDefaultAsync();
-
-            if (license?.ExpiryDate == null)
-            {
-                var name = driver != null ? $"{driver.FirstName} {driver.LastName}" : driverId.ToString();
-                throw new InvalidOperationException(
-                    $"Dispatch blocked: '{name}' must have a valid driver's license on file before a trip can be dispatched (no driver's license record found).");
-            }
-
-            var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
-            if (license.ExpiryDate.Value < today)
-            {
-                var name = driver != null ? $"{driver.FirstName} {driver.LastName}" : driverId.ToString();
-                throw new InvalidOperationException($"Dispatch blocked: driver's license for '{name}' expired on {license.ExpiryDate.Value:yyyy-MM-dd}.");
-            }
+            if (driver == null) throw new InvalidOperationException("Dispatch blocked: the selected driver employee record no longer exists.");
+            await EnsureDriverLicenseValidAsync(driver, "Dispatch blocked");
         }
+
+        await EnsureNoDispatchedConflictAsync(trip.VehicleAssetId, trip.DriverEmployeeId, trip.Id);
 
         var vehicle = await RequireVehicleAsync(trip.VehicleAssetId);
         if (vehicle.Status != AssetStatus.Active)
@@ -771,7 +790,55 @@ public class FleetTripService : IFleetTripService
         if (!string.Equals(vehicle.AssetCategory?.AssetType, "Vehicle", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Selected asset is not a vehicle.");
 
+        var scope = await GetMaintenanceLocationScopeAsync();
+        if (scope.IsScoped && (!scope.LocationId.HasValue || vehicle.CurrentSiteLocationId != scope.LocationId.Value))
+        {
+            throw new UnauthorizedAccessException("You can only use fleet vehicles assigned to your HR location/site.");
+        }
+
         return vehicle;
+    }
+
+    private async Task<(bool IsScoped, Guid? LocationId)> GetMaintenanceLocationScopeAsync()
+    {
+        if (!_currentUserProvider.IsAuthenticated)
+        {
+            return (false, null);
+        }
+
+        var unrestrictedRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Constants.Roles.SuperAdmin,
+            Constants.Roles.TenantAdmin,
+            Constants.Roles.Manager,
+            "MaintenanceManager",
+            "MaintenanceSupervisor",
+            "MaintenanceDirector",
+            "FleetManager",
+            "FleetSupervisor"
+        };
+
+        if ((_currentUserProvider.Roles ?? Enumerable.Empty<string>()).Any(unrestrictedRoles.Contains))
+        {
+            return (false, null);
+        }
+
+        if (!_currentUserProvider.Claims.TryGetValue("employee_id", out var employeeClaim) ||
+            !Guid.TryParse(employeeClaim, out var employeeId))
+        {
+            return (false, null);
+        }
+
+        var employee = await _unitOfWork.Repository<Employee>()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == _currentUserProvider.TenantId && e.IsActive, e => e.Department);
+
+        if (employee?.Department == null ||
+            !employee.Department.Name.Contains("Maintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, null);
+        }
+
+        return (true, employee.LocationId);
     }
 
     private async Task<Employee> RequireEmployeeAsync(Guid employeeId)
@@ -782,6 +849,55 @@ public class FleetTripService : IFleetTripService
 
         if (employee == null) throw new ArgumentException("Driver employee not found.");
         return employee;
+    }
+
+    private async Task EnsureDriverLicenseValidAsync(Employee driver, string prefix = "Driver selection blocked")
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        var license = await _unitOfWork.Repository<EmployeeIdentificationCard>()
+            .GetQueryable(c =>
+                c.TenantId == tenantId &&
+                c.EmployeeId == driver.Id &&
+                !c.IsDeleted &&
+                // [HR-MODULE-PORT] `EmployeeIdentificationCard` no longer has a free-text `DocumentType` string.
+                // The HR module port replaced it with `IdentificationTypeId` + the `IdentificationType` lookup entity,
+                // so driver-licence detection now matches on `IdentificationType.Name`. Behaviour is preserved as long
+                // as the licence identification type is named with "driver" (e.g. "Driver's License"). If you referenced
+                // a `DocumentType` string elsewhere, use the `IdentificationType` relationship instead.
+                c.IdentificationType.Name.ToLower().Contains("driver"))
+            .OrderByDescending(c => c.ExpiryDate)
+            .FirstOrDefaultAsync();
+
+        var name = $"{driver.FirstName} {driver.LastName}".Trim();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+        if (license == null)
+            throw new InvalidOperationException($"{prefix}: '{name}' does not have a driver's license on file.");
+        if (!license.IsVerified)
+            throw new InvalidOperationException($"{prefix}: driver's license for '{name}' has not been verified by HR.");
+        if (!license.ExpiryDate.HasValue)
+            throw new InvalidOperationException($"{prefix}: driver's license for '{name}' has no expiry date.");
+        if (license.IssueDate.HasValue && license.IssueDate.Value > today)
+            throw new InvalidOperationException($"{prefix}: driver's license for '{name}' is not valid until {license.IssueDate.Value:yyyy-MM-dd}.");
+        if (license.ExpiryDate.Value < today)
+            throw new InvalidOperationException($"{prefix}: driver's license for '{name}' expired on {license.ExpiryDate.Value:yyyy-MM-dd}.");
+    }
+
+    private async Task EnsureNoDispatchedConflictAsync(Guid vehicleAssetId, Guid? driverEmployeeId, Guid? excludeTripId)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        var activeTrips = _unitOfWork.Repository<FleetTrip>()
+            .GetQueryable(t =>
+                t.TenantId == tenantId &&
+                !t.IsDeleted &&
+                t.Status == FleetTripStatuses.Dispatched &&
+                (!excludeTripId.HasValue || t.Id != excludeTripId.Value));
+
+        if (await activeTrips.AnyAsync(t => t.VehicleAssetId == vehicleAssetId))
+            throw new InvalidOperationException("The selected vehicle is already engaged on a dispatched trip.");
+
+        if (driverEmployeeId.HasValue && driverEmployeeId.Value != Guid.Empty &&
+            await activeTrips.AnyAsync(t => t.DriverEmployeeId == driverEmployeeId.Value))
+            throw new InvalidOperationException("The selected driver is already engaged on a dispatched trip.");
     }
 
     private async Task<bool> IsVehicleUsedByActiveWorkOrderAsync(Guid vehicleAssetId)

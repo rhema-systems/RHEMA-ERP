@@ -3,7 +3,9 @@ using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
@@ -15,7 +17,9 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Services.Workflow;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Api.Services;
@@ -38,6 +42,7 @@ public class SimpleWorkflowService : IWorkflowService
     private readonly ITenderRepository _tenderRepository;
     private readonly IProjectRepository _projectRepository;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
+    private readonly IProcurementPlanRepository _procurementPlanRepository;
     private readonly ICurrentUserService _currentUserService;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IUnitOfWork _unitOfWork;
@@ -60,6 +65,7 @@ public class SimpleWorkflowService : IWorkflowService
         ITenderRepository tenderRepository,
         IProjectRepository projectRepository,
         IBusinessPartnerRepository businessPartnerRepository,
+        IProcurementPlanRepository procurementPlanRepository,
         ICurrentUserService currentUserService,
         UserManager<ApplicationUser> userManager,
         IUnitOfWork unitOfWork,
@@ -81,6 +87,7 @@ public class SimpleWorkflowService : IWorkflowService
         _tenderRepository = tenderRepository;
         _projectRepository = projectRepository;
         _businessPartnerRepository = businessPartnerRepository;
+        _procurementPlanRepository = procurementPlanRepository;
         _currentUserService = currentUserService;
         _userManager = userManager;
         _unitOfWork = unitOfWork;
@@ -108,7 +115,7 @@ public class SimpleWorkflowService : IWorkflowService
         WorkflowStepInstance? currentStepInstance = null;
         foreach (var candidate in activeCandidates)
         {
-            currentStepInstance = await _stepInstanceRepository.GetCurrentStepAsync(candidate.Id);
+            currentStepInstance = await EnsureCurrentStepInstanceAsync(candidate, entityTypeRecord, entityId);
             if (currentStepInstance != null)
             {
                 existingActiveInstance = candidate;
@@ -121,7 +128,7 @@ public class SimpleWorkflowService : IWorkflowService
         if (existingActiveInstance != null)
         {
             // Self-heal: if the active step is an approval step and approvals are missing, materialize them.
-            currentStepInstance ??= await _stepInstanceRepository.GetCurrentStepAsync(existingActiveInstance.Id);
+            currentStepInstance ??= await EnsureCurrentStepInstanceAsync(existingActiveInstance, entityTypeRecord, entityId);
             if (currentStepInstance?.WorkflowStep?.StepType == WorkflowStepType.Approval)
             {
                 try
@@ -191,7 +198,7 @@ public class SimpleWorkflowService : IWorkflowService
             return false;
         }
 
-        var user = await _userManager.FindByIdAsync(userId.ToString());
+        var (workflowUserId, user) = await ResolveWorkflowUserAsync(userId, "approval check");
         if (user == null)
         {
             _logger.LogWarning("Workflow approval check failed: user {UserId} not found", userId);
@@ -223,7 +230,7 @@ public class SimpleWorkflowService : IWorkflowService
 
         var canApprove = approvals.Any(a =>
             a.Status == WorkflowApprovalStatus.Pending &&
-            (a.ApproverId == userId || (!string.IsNullOrWhiteSpace(a.ApproverRole) && roleSet.Contains(a.ApproverRole))));
+            (a.ApproverId == workflowUserId || (!string.IsNullOrWhiteSpace(a.ApproverRole) && roleSet.Contains(a.ApproverRole))));
 
         var currentStepType = stepInstance.WorkflowStep?.StepType;
         var isApprovalStep = currentStepType == WorkflowStepType.Approval;
@@ -233,7 +240,7 @@ public class SimpleWorkflowService : IWorkflowService
         if (!canApprove &&
             !isApprovalStep &&
             stepInstance.AssignedToId.HasValue &&
-            stepInstance.AssignedToId.Value == userId &&
+            stepInstance.AssignedToId.Value == workflowUserId &&
             (stepInstance.Status == WorkflowStepInstanceStatus.Pending || stepInstance.Status == WorkflowStepInstanceStatus.InProgress))
         {
             canApprove = true;
@@ -241,16 +248,64 @@ public class SimpleWorkflowService : IWorkflowService
 
         // Fallback for instances created before approval rows were generated correctly:
         // allow if the current step configuration explicitly includes this user/role.
-        if (!canApprove && IsUserConfiguredAsApprover(stepInstance, userId, roleSet))
+        var hasPendingApprovalRows = approvals.Any(a => a.Status == WorkflowApprovalStatus.Pending);
+        if (!canApprove &&
+            !hasPendingApprovalRows &&
+            !string.IsNullOrWhiteSpace(stepInstance.WorkflowStep?.RequiredRole) &&
+            roleSet.Contains(stepInstance.WorkflowStep.RequiredRole))
         {
             canApprove = true;
+        }
+
+        if (!canApprove && IsUserConfiguredAsApprover(stepInstance, workflowUserId, roleSet))
+        {
+            canApprove = true;
+        }
+
+        if (canApprove && isApprovalStep)
+        {
+            var approvalConfig = GetApprovalConfig(stepInstance);
+            var guardErrors = WorkflowApprovalGuardValidator.Validate(
+                approvalConfig,
+                instance.InitiatedById,
+                approvals.ToList(),
+                workflowUserId);
+            if (guardErrors.Count > 0)
+            {
+                canApprove = false;
+                _logger.LogDebug(
+                    "Workflow approval check denied by policy for user {UserId}, step {StepInstanceId}: {Reason}",
+                    workflowUserId,
+                    stepInstance.Id,
+                    string.Join(" ", guardErrors));
+            }
+
+            if (canApprove)
+            {
+                var crossStepErrors = await ValidateCrossStepSodAsync(
+                    approvalConfig,
+                    instance,
+                    stepInstance,
+                    entityType,
+                    entityId,
+                    workflowUserId);
+                if (crossStepErrors.Count > 0)
+                {
+                    canApprove = false;
+                    _logger.LogDebug(
+                        "Workflow approval check denied by cross-step SOD for user {UserId}, step {StepInstanceId}: {Reason}",
+                        workflowUserId,
+                        stepInstance.Id,
+                        string.Join(" ", crossStepErrors));
+                }
+            }
         }
 
         if (!canApprove)
         {
             _logger.LogDebug(
                 "Workflow approval check denied: user {UserId} has no matching pending approval for step {StepInstanceId}",
-                userId,
+                workflowUserId,
                 stepInstance.Id);
         }
 
@@ -312,6 +367,17 @@ public class SimpleWorkflowService : IWorkflowService
 
     public async Task<WorkflowExecutionResult> ProcessApprovalStepAsync(string entityType, Guid entityId, Guid userId, string action, string? comments = null)
     {
+        var (workflowUserId, user) = await ResolveWorkflowUserAsync(userId, "approval processing");
+        if (user == null)
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = WorkflowInstanceStatus.Failed,
+                Message = "Approval user not found"
+            };
+        }
+
         var instance = await ResolveActiveWorkflowInstanceAsync(entityType, entityId);
         if (instance == null)
         {
@@ -335,7 +401,35 @@ public class SimpleWorkflowService : IWorkflowService
         }
 
         var stepAction = MapToStepAction(action);
-        return await _workflowEngine.ProcessStepAsync(stepInstance.Id, userId, stepAction, comments: comments);
+        return await _workflowEngine.ProcessStepAsync(stepInstance.Id, workflowUserId, stepAction, comments: comments);
+    }
+
+    private async Task<(Guid UserId, ApplicationUser? User)> ResolveWorkflowUserAsync(Guid suppliedId, string operation)
+    {
+        if (suppliedId == Guid.Empty)
+        {
+            return (Guid.Empty, null);
+        }
+
+        var user = await _userManager.FindByIdAsync(suppliedId.ToString());
+        if (user != null)
+        {
+            return (user.Id, user);
+        }
+
+        var linkedUser = await _userManager.Users
+            .FirstOrDefaultAsync(u => u.EmployeeId == suppliedId);
+        if (linkedUser != null)
+        {
+            _logger.LogWarning(
+                "Workflow {Operation} received EmployeeId {EmployeeId}; resolved to ApplicationUser {UserId}. Module callers should pass ApplicationUser.Id to workflow APIs.",
+                operation,
+                suppliedId,
+                linkedUser.Id);
+            return (linkedUser.Id, linkedUser);
+        }
+
+        return (suppliedId, null);
     }
 
     public async Task<WorkflowStepInfo?> GetCurrentWorkflowStepAsync(string entityType, Guid entityId)
@@ -473,6 +567,56 @@ public class SimpleWorkflowService : IWorkflowService
         };
     }
 
+    public async Task<WorkflowExecutionResult> RecallWorkflowAsync(string entityType, Guid entityId, Guid userId, string? reason = null)
+    {
+        var (workflowUserId, user) = await ResolveWorkflowUserAsync(userId, "workflow recall");
+        if (user == null)
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = WorkflowInstanceStatus.Failed,
+                Message = "Requester user not found"
+            };
+        }
+
+        var instance = await ResolveActiveWorkflowInstanceAsync(entityType, entityId);
+        if (instance == null)
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = WorkflowInstanceStatus.Failed,
+                Message = "No active workflow found"
+            };
+        }
+
+        if (instance.InitiatedById != workflowUserId && instance.StartedById != workflowUserId)
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = instance.Status,
+                WorkflowInstanceId = instance.Id,
+                Message = "Only the requester can recall this workflow"
+            };
+        }
+
+        var recallReason = string.IsNullOrWhiteSpace(reason)
+            ? "Recalled by requester"
+            : reason.Trim();
+
+        await _workflowEngine.CancelWorkflowAsync(instance.Id, workflowUserId, recallReason);
+
+        return new WorkflowExecutionResult
+        {
+            Success = true,
+            Status = WorkflowInstanceStatus.Cancelled,
+            WorkflowInstanceId = instance.Id,
+            Message = "Workflow recalled"
+        };
+    }
+
     private Guid GetCurrentUserId()
     {
         var userIdString = _currentUserService.UserId;
@@ -493,9 +637,7 @@ public class SimpleWorkflowService : IWorkflowService
         }
 
         var activeTypes = await _entityTypeRepository.GetActiveEntityTypesAsync(tenantId);
-        entityTypeRecord = activeTypes.FirstOrDefault(et =>
-            string.Equals(et.Code, entityType, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(et.Name, entityType, StringComparison.OrdinalIgnoreCase));
+        entityTypeRecord = activeTypes.FirstOrDefault(et => IsEntityType(et, entityType));
 
         if (entityTypeRecord == null)
         {
@@ -536,7 +678,7 @@ public class SimpleWorkflowService : IWorkflowService
         // Prefer an instance that actually has a current pending/in-progress step.
         foreach (var candidate in active)
         {
-            var stepInstance = await _stepInstanceRepository.GetCurrentStepAsync(candidate.Id);
+            var stepInstance = await EnsureCurrentStepInstanceAsync(candidate, entityTypeRecord, entityId);
             if (stepInstance != null)
             {
                 return candidate;
@@ -544,6 +686,105 @@ public class SimpleWorkflowService : IWorkflowService
         }
 
         return active.FirstOrDefault();
+    }
+
+    private async Task<WorkflowStepInstance?> EnsureCurrentStepInstanceAsync(
+        WorkflowInstance instance,
+        WorkflowEntityType entityTypeRecord,
+        Guid entityId)
+    {
+        var currentStepInstance = await _stepInstanceRepository.GetCurrentStepAsync(instance.Id);
+        if (currentStepInstance != null)
+        {
+            return currentStepInstance;
+        }
+
+        var definition = await _definitionRepository.GetWithDetailsAsync(instance.WorkflowDefinitionId);
+        if (definition == null)
+        {
+            return null;
+        }
+
+        var stepDefinition = ResolveRecoverableCurrentStep(instance, definition);
+        if (stepDefinition == null)
+        {
+            return null;
+        }
+
+        var repairedStepInstance = new WorkflowStepInstance
+        {
+            Id = Guid.NewGuid(),
+            WorkflowInstanceId = instance.Id,
+            WorkflowStepId = stepDefinition.Id,
+            Status = WorkflowStepInstanceStatus.Pending,
+            StartedDate = DateTime.UtcNow,
+            AssignedToId = stepDefinition.StepType == WorkflowStepType.Approval
+                ? null
+                : instance.StartedById ?? instance.InitiatedById,
+            DueDate = stepDefinition.EstimatedHours.HasValue
+                ? DateTime.UtcNow.AddHours(stepDefinition.EstimatedHours.Value)
+                : null,
+            TenantId = instance.TenantId
+        };
+
+        await _stepInstanceRepository.AddAsync(repairedStepInstance);
+        await _stepInstanceRepository.SaveChangesAsync();
+
+        instance.CurrentStepId = stepDefinition.Id;
+        if (instance.Status == WorkflowInstanceStatus.Created)
+        {
+            instance.Status = WorkflowInstanceStatus.InProgress;
+            instance.StartedDate ??= DateTime.UtcNow;
+        }
+
+        await _instanceRepository.UpdateAsync(instance);
+        await _instanceRepository.SaveChangesAsync();
+
+        if (stepDefinition.StepType == WorkflowStepType.Approval)
+        {
+            try
+            {
+                var dataContext = await BuildEntityContextAsync(entityTypeRecord, entityId);
+                await _workflowEngine.EnsureApprovalsForStepAsync(repairedStepInstance.Id, dataContext);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Failed to create approvals while repairing workflow instance {WorkflowInstanceId}",
+                    instance.Id);
+            }
+        }
+
+        return await _stepInstanceRepository.GetCurrentStepAsync(instance.Id) ?? repairedStepInstance;
+    }
+
+    private static WorkflowStep? ResolveRecoverableCurrentStep(
+        WorkflowInstance instance,
+        WorkflowDefinition definition)
+    {
+        var steps = definition.Steps
+            .Where(step => !step.IsDeleted)
+            .OrderBy(step => step.Order)
+            .ToList();
+
+        if (steps.Count == 0)
+        {
+            return null;
+        }
+
+        if (instance.CurrentStepId.HasValue)
+        {
+            var currentStep = steps.FirstOrDefault(step => step.Id == instance.CurrentStepId.Value);
+            if (currentStep != null)
+            {
+                return currentStep;
+            }
+        }
+
+        return steps.FirstOrDefault(step => step.IsStartStep)
+            ?? steps.FirstOrDefault(step => !step.IsEndStep)
+            ?? steps.FirstOrDefault();
     }
 
     private async Task<WorkflowInstance?> ResolveWorkflowInstanceAsync(string entityType, Guid entityId)
@@ -620,6 +861,27 @@ public class SimpleWorkflowService : IWorkflowService
             context["endMileage"] = trip.EndMileage;
             context["startOperatingHours"] = trip.StartOperatingHours;
             context["endOperatingHours"] = trip.EndOperatingHours;
+        }
+
+        if (IsEntityType(entityTypeRecord, "FLEET_TRIP_INSPECTION", "FleetTripInspection", "Fleet Trip Inspection"))
+        {
+            var inspection = await _unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.FleetTripInspection>()
+                .FirstOrDefaultAsync(x => x.Id == entityId, x => x.VehicleAsset!, x => x.InspectionTemplate!)
+                ?? throw new InvalidOperationException("Fleet inspection not found");
+
+            context["status"] = inspection.Status;
+            context["inspectionKind"] = inspection.InspectionKind;
+            context["overallResult"] = inspection.OverallResult ?? string.Empty;
+            context["vehicleAssetId"] = inspection.VehicleAssetId;
+            context["vehicleName"] = inspection.VehicleAsset?.Name ?? string.Empty;
+            context["vehicleAssetNumber"] = inspection.VehicleAsset?.AssetNumber ?? string.Empty;
+            context["inspectionTemplateId"] = inspection.InspectionTemplateId;
+            context["inspectionTemplateName"] = inspection.InspectionTemplate?.Name ?? string.Empty;
+            context["sheetType"] = inspection.InspectionTemplate?.SheetType ?? "InspectionSheet";
+            context["fleetTripId"] = inspection.FleetTripId;
+            context["inspectorEmployeeId"] = inspection.InspectorEmployeeId;
+            context["startedAtUtc"] = inspection.StartedAtUtc;
+            context["completedAtUtc"] = inspection.CompletedAtUtc;
         }
 
         if (IsEntityType(entityTypeRecord, "INVENTORY_TRANSFER", "InventoryTransfer", "Inventory Transfer", "Transfer"))
@@ -717,6 +979,34 @@ public class SimpleWorkflowService : IWorkflowService
             context["totalRemainingQuantity"] = items.Sum(i => i.RemainingQuantity);
         }
 
+        if (IsEntityType(entityTypeRecord, "PAYROLL_RUN", "PayrollRun", "Payroll Run"))
+        {
+            var payrollRun = await _unitOfWork.Repository<PayrollRun>()
+                .FirstOrDefaultAsync(r => r.Id == entityId)
+                ?? throw new InvalidOperationException("Payroll run not found");
+
+            context["runNumber"] = payrollRun.RunNumber;
+            context["payPeriod"] = payrollRun.PayPeriod;
+            context["payPeriodFrom"] = payrollRun.PayPeriodFrom;
+            context["payPeriodTo"] = payrollRun.PayPeriodTo;
+            context["runDate"] = payrollRun.RunDate;
+            context["status"] = payrollRun.Status.ToString();
+            context["currencyCode"] = payrollRun.CurrencyCode;
+            context["employeeCount"] = payrollRun.EmployeeCount;
+            context["grossAmount"] = payrollRun.GrossAmount;
+            context["netAmount"] = payrollRun.NetAmount;
+            context["taxAmount"] = payrollRun.TaxAmount;
+            context["employeeContributionAmount"] = payrollRun.EmployeeContributionAmount;
+            context["employerContributionAmount"] = payrollRun.EmployerContributionAmount;
+            context["isSeparateBonusRun"] = payrollRun.IsSeparateBonusRun;
+            context["separateBonusCode"] = payrollRun.SeparateBonusCode ?? string.Empty;
+            context["calculatedByUserId"] = payrollRun.CalculatedByUserId;
+            context["calculatedAt"] = payrollRun.CalculatedAt;
+            context["reviewedByUserId"] = payrollRun.ReviewedByUserId;
+            context["approvedByUserId"] = payrollRun.ApprovedByUserId;
+            context["notes"] = payrollRun.Notes ?? string.Empty;
+        }
+
         if (IsEntityType(entityTypeRecord, "PURCHASE_REQUISITION", "PurchaseRequisition", "Purchase Requisition", "PR"))
         {
             var requisition = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(entityId)
@@ -770,6 +1060,44 @@ public class SimpleWorkflowService : IWorkflowService
             context["orderedItems"] = items.Count(i => string.Equals(i.Status, "Ordered", StringComparison.OrdinalIgnoreCase));
             context["receivedItems"] = items.Count(i => string.Equals(i.Status, "Received", StringComparison.OrdinalIgnoreCase));
             context["cancelledItems"] = items.Count(i => string.Equals(i.Status, "Cancelled", StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (IsEntityType(entityTypeRecord, "PROCUREMENT_PLAN", "ProcurementPlan", "Procurement Plan"))
+        {
+            var plan = await _procurementPlanRepository.GetWithFullDetailsAsync(entityId)
+                       ?? throw new InvalidOperationException("Procurement plan not found");
+
+            var items = plan.Items?.Where(i => !i.IsDeleted).ToList() ?? new List<ProcurementPlanItem>();
+            context["planNumber"] = plan.PlanNumber;
+            context["title"] = plan.Title;
+            context["description"] = plan.Description ?? string.Empty;
+            context["departmentId"] = plan.DepartmentId;
+            context["departmentName"] = plan.Department?.Name ?? string.Empty;
+            context["fiscalYear"] = plan.FiscalYear;
+            context["planningCycle"] = plan.PlanningCycle;
+            context["planningQuarter"] = plan.PlanningQuarter ?? string.Empty;
+            context["planStartDate"] = plan.PlanStartDate;
+            context["planEndDate"] = plan.PlanEndDate;
+            context["planDurationYears"] = plan.PlanDurationYears;
+            context["status"] = plan.Status;
+            context["totalEstimatedBudget"] = plan.TotalEstimatedBudget;
+            context["approvedBudget"] = plan.ApprovedBudget;
+            context["currency"] = plan.Currency;
+            context["preparedById"] = plan.PreparedById;
+            context["preparedDate"] = plan.PreparedDate;
+            context["reviewedById"] = plan.ReviewedById;
+            context["approvedById"] = plan.ApprovedById;
+            context["publishedById"] = plan.PublishedById;
+            context["publishedDate"] = plan.PublishedDate;
+            context["revisionNumber"] = plan.RevisionNumber;
+            context["previousVersionId"] = plan.PreviousVersionId;
+            context["itemCount"] = items.Count;
+            context["criticalItemCount"] = items.Count(i => i.IsCritical);
+            context["highPriorityItemCount"] = items.Count(i => string.Equals(i.Priority, "High", StringComparison.OrdinalIgnoreCase) || string.Equals(i.Priority, "Critical", StringComparison.OrdinalIgnoreCase));
+            context["totalItemQuantity"] = items.Sum(i => i.EstimatedQuantity);
+            context["totalItemEstimatedCost"] = items.Sum(i => i.EstimatedTotalCost);
+            context["budgetLineCount"] = items.Select(i => i.BudgetLineCode).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().Count();
+            context["categoryCount"] = items.Select(i => i.ItemCategory).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().Count();
         }
 
         if (IsEntityType(entityTypeRecord, "TENDER", "Tender", "ProcurementTender"))
@@ -898,14 +1226,18 @@ public class SimpleWorkflowService : IWorkflowService
     {
         foreach (var match in matches)
         {
-            if (!string.IsNullOrWhiteSpace(entityTypeRecord.Code) &&
-                string.Equals(entityTypeRecord.Code, match, StringComparison.OrdinalIgnoreCase))
+            var normalizedMatch = NormalizeEntityTypeKey(match);
+            if (string.IsNullOrWhiteSpace(normalizedMatch))
+            {
+                continue;
+            }
+
+            if (NormalizeEntityTypeKey(entityTypeRecord.Code) == normalizedMatch)
             {
                 return true;
             }
 
-            if (!string.IsNullOrWhiteSpace(entityTypeRecord.Name) &&
-                string.Equals(entityTypeRecord.Name, match, StringComparison.OrdinalIgnoreCase))
+            if (NormalizeEntityTypeKey(entityTypeRecord.Name) == normalizedMatch)
             {
                 return true;
             }
@@ -913,6 +1245,62 @@ public class SimpleWorkflowService : IWorkflowService
 
         return false;
     }
+
+    private static WorkflowApprovalConfigDto? GetApprovalConfig(WorkflowStepInstance stepInstance)
+    {
+        var configurationJson = stepInstance.WorkflowStep?.Configuration;
+        if (string.IsNullOrWhiteSpace(configurationJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var serializerOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            serializerOptions.Converters.Add(new JsonStringEnumConverter());
+            return JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(configurationJson, serializerOptions)?.ApprovalConfig;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<List<string>> ValidateCrossStepSodAsync(
+        WorkflowApprovalConfigDto? config,
+        WorkflowInstance instance,
+        WorkflowStepInstance currentStep,
+        string entityType,
+        Guid entityId,
+        Guid userId)
+    {
+        if (config?.ConflictRules?.Any(rule => rule.IsEnabled) != true)
+        {
+            return new List<string>();
+        }
+
+        var previousSteps = (await _stepInstanceRepository.GetByWorkflowInstanceAsync(instance.Id))
+            .Where(step => step.Id != currentStep.Id &&
+                (step.CompletedDate ?? step.CreatedDate) <= (currentStep.StartedDate ?? currentStep.CreatedDate))
+            .ToList();
+        var approvalsByStep = new Dictionary<Guid, IReadOnlyCollection<WorkflowApproval>>();
+        foreach (var step in previousSteps)
+        {
+            approvalsByStep[step.Id] = (await _approvalRepository.GetByStepInstanceAsync(step.Id)).ToList();
+        }
+
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var entityTypeRecord = await ResolveEntityTypeAsync(entityType, tenantId);
+        var context = await BuildEntityContextAsync(entityTypeRecord, entityId);
+
+        return WorkflowCrossStepSodEvaluator.Validate(config, previousSteps, approvalsByStep, context, userId);
+    }
+
+    private static string NormalizeEntityTypeKey(string? value)
+        => new((value ?? string.Empty)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
 
     private async Task AttachWorkflowInstanceAsync(WorkflowEntityType entityTypeRecord, Guid entityId, Guid workflowInstanceId)
     {
@@ -961,6 +1349,26 @@ public class SimpleWorkflowService : IWorkflowService
                 item.EntityTitle = jobCard.Title;
                 item.EntityDescription = jobCard.ProblemDescription ?? jobCard.Description ?? string.Empty;
                 return;
+            }
+        }
+
+        if (IsEntityType(entityTypeRecord, "PROCUREMENT_PLAN", "ProcurementPlan", "Procurement Plan"))
+        {
+            try
+            {
+                var plan = await _procurementPlanRepository.GetWithFullDetailsAsync(entityId);
+                if (plan != null)
+                {
+                    item.EntityTitle = $"{plan.PlanNumber} - {plan.Title}";
+                    item.EntityDescription = string.IsNullOrWhiteSpace(plan.Department?.Name)
+                        ? $"{plan.FiscalYear} {plan.PlanningCycle} plan"
+                        : $"{plan.Department.Name} / {plan.FiscalYear} {plan.PlanningCycle} plan";
+                    return;
+                }
+            }
+            catch
+            {
+                // ignore and fall through
             }
         }
 

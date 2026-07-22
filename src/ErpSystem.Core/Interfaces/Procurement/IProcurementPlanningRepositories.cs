@@ -126,7 +126,9 @@ public interface IProcurementScheduleRepository : IGenericRepository<Procurement
         string? search = null,
         string? status = null,
         Guid? departmentId = null,
-        Guid? planId = null);
+        Guid? planId = null,
+        DateTime? startDate = null,
+        DateTime? endDate = null);
     Task<string> GenerateScheduleCodeAsync();
 }
 
@@ -237,4 +239,3 @@ public interface IEmergencySupplierRepository : IGenericRepository<EmergencySupp
 }
 
 #endregion
-

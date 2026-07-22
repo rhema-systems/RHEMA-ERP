@@ -164,6 +164,10 @@ export interface TenantDto {
   welcomeMessage?: string;
   defaultPriority?: number;
   enableAutoSelection?: boolean;
+  baseCurrency?: string;
+  baseCurrencyName?: string;
+  currencySymbol?: string;
+  currencyDecimalPlaces?: number;
 }
 
 export interface RefreshTokenRequest {
@@ -172,9 +176,13 @@ export interface RefreshTokenRequest {
 }
 
 class ApiService {
-  private baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:53484/api';
+  private baseUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
   private token: string | null = null;
   private readonly enableApiDebugLogging = process.env.NEXT_PUBLIC_DEBUG_API === 'true';
+  private readonly requestTimeoutMs = Number.parseInt(
+    process.env.NEXT_PUBLIC_API_TIMEOUT_MS || '',
+    10
+  ) || 20000;
 
   constructor() {
     // Load token from localStorage if available
@@ -444,6 +452,43 @@ class ApiService {
     return this.privateRequest<T>(endpoint, options, true, true);
   }
 
+  private createRequestTimeout(signal?: AbortSignal | null): {
+    signal?: AbortSignal;
+    clear: () => void;
+  } {
+    if (signal || this.requestTimeoutMs <= 0 || typeof AbortController === 'undefined') {
+      return { signal: signal ?? undefined, clear: () => undefined };
+    }
+
+    const controller = new AbortController();
+    const timeoutId: ReturnType<typeof setTimeout> = setTimeout(() => {
+      controller.abort();
+    }, this.requestTimeoutMs);
+
+    return {
+      signal: controller.signal,
+      clear: () => clearTimeout(timeoutId),
+    };
+  }
+
+  private normalizeFetchError(error: any, method: string, endpoint: string): any {
+    if (error?.name !== 'AbortError') {
+      return error;
+    }
+
+    const timeoutError = new Error(
+      `API request timed out after ${this.requestTimeoutMs}ms: ${method} ${endpoint}`
+    );
+    (timeoutError as any).status = 0;
+    (timeoutError as any).statusText = 'Request Timeout';
+    (timeoutError as any).originalError = error;
+    return timeoutError;
+  }
+
+  public async downloadBlob(endpoint: string, query?: Record<string, unknown>): Promise<Blob> {
+    return this.privateBlobRequest(this.appendQueryParams(endpoint, query), { method: 'GET' });
+  }
+
   // Rename private request method
   private async privateRequest<T>(endpoint: string, options: RequestInit = {}, includeAuth: boolean = true, silent: boolean = false, retryCount: number = 0): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
@@ -451,9 +496,11 @@ class ApiService {
     // Check if the body is FormData
     const isFormData = options.body instanceof FormData;
 
+    const timeout = this.createRequestTimeout(options.signal);
     const config: RequestInit = {
       headers: this.getHeaders(isFormData, includeAuth),
       ...options,
+      signal: timeout.signal,
     };
 
     const method = options.method || 'GET';
@@ -499,7 +546,9 @@ class ApiService {
       }
 
       return result;
-    } catch (error: any) {
+    } catch (caught: any) {
+      const error = this.normalizeFetchError(caught, method, endpoint);
+
       // Handle 401 errors with token refresh attempt (only once)
       if (error.status === 401 && includeAuth && retryCount === 0 && this.token) {
         // Don't retry for auth endpoints to avoid infinite loops
@@ -550,6 +599,60 @@ class ApiService {
         console.error(`💥 API ${method} ${endpoint} failed:`, error);
       }
       throw error;
+    } finally {
+      timeout.clear();
+    }
+  }
+
+  private async privateBlobRequest(endpoint: string, options: RequestInit = {}, retryCount: number = 0): Promise<Blob> {
+    const url = `${this.baseUrl}${endpoint}`;
+    const isFormData = options.body instanceof FormData;
+    const timeout = this.createRequestTimeout(options.signal);
+    const config: RequestInit = {
+      headers: this.getHeaders(isFormData, true),
+      ...options,
+      signal: timeout.signal,
+    };
+    const method = options.method || 'GET';
+
+    try {
+      const response = await fetch(url, config);
+
+      if (response.ok) {
+        return await response.blob();
+      }
+
+      let error: any;
+      try {
+        await this.handleResponse<never>(response);
+      } catch (e) {
+        error = e;
+      }
+
+      if (error?.status === 401 && retryCount === 0 && this.token) {
+        try {
+          await this.refreshToken();
+          return this.privateBlobRequest(endpoint, options, retryCount + 1);
+        } catch {
+          this.clearToken();
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('session-blacklisted', {
+              detail: {
+                status: 401,
+                message: 'Session terminated - token refresh failed'
+              }
+            }));
+          }
+        }
+      }
+
+      throw error || new Error(`HTTP ${response.status}: ${response.statusText}`);
+    } catch (caught) {
+      const error = this.normalizeFetchError(caught, method, endpoint);
+      console.error(`Blob download ${endpoint} failed:`, error);
+      throw error;
+    } finally {
+      timeout.clear();
     }
   }
 

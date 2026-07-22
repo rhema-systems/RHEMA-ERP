@@ -82,7 +82,7 @@ public interface IJobCardService
     /// </summary>
     /// <param name="jobCardId">The job card ID</param>
     /// <param name="billingType">Optional billing type: "Maintenance" (fixed price) or "Repairs" (itemized costs). Defaults to "Repairs".</param>
-    Task<Guid> GenerateWorkOrderAsync(Guid jobCardId, string billingType = "Repairs");
+    Task<Guid> GenerateWorkOrderAsync(Guid jobCardId, string? billingType = null);
 
     /// <summary>
     /// Gets job cards by asset ID
@@ -118,6 +118,11 @@ public interface IJobCardService
     /// Gets all documents for a job card
     /// </summary>
     Task<List<JobCardDocumentDto>> GetDocumentsAsync(Guid id);
+
+    /// <summary>
+    /// Downloads a document from a job card
+    /// </summary>
+    Task<JobCardDocumentDownloadDto> DownloadDocumentAsync(Guid jobCardId, Guid documentId);
 
     /// <summary>
     /// Completes a job card with completion details

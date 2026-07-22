@@ -3,7 +3,7 @@
 import React from 'react';
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Plus, Search, Eye, Truck, CheckCircle2, Trash2, Droplet, ReceiptText, Hotel, Paperclip } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Truck, CheckCircle2, Trash2, Droplet, ReceiptText, Hotel, Paperclip } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 
 import MaintenanceAttachmentsPanel from '@/components/maintenance/MaintenanceAttachmentsPanel';
 import fleetService, {
@@ -25,6 +26,7 @@ import fleetService, {
   CreateFleetTripDto,
   DispatchFleetTripDto,
   FleetCostEntryDto,
+  FleetDriverDto,
   FleetTripDestinationDto,
   FleetTripDto,
   FleetTripInspectionDto,
@@ -33,12 +35,12 @@ import fleetService, {
   StartFleetTripInspectionDto,
 } from '@/services/fleetService';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { formatFleetDateTime } from '@/lib/date-format';
 import maintenanceSettingsService from '@/services/maintenanceSettingsService';
 import { MaintenanceAttachmentEntityType } from '@/services/maintenanceAttachmentsService';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem('token') || localStorage.getItem('authToken');
@@ -60,6 +62,13 @@ type InspectionTemplateLite = {
   id: string;
   name: string;
   category?: string | null;
+  sheetType?: string | null;
+  templateScope?: string | null;
+  fleetInspectionKind?: string | null;
+  assignedAssetCategoryId?: string | null;
+  assignedAssetId?: string | null;
+  isQrEnabled?: boolean;
+  mobileOfflineEnabled?: boolean;
   isActive?: boolean;
 };
 
@@ -77,6 +86,14 @@ type InspectionTemplateDetail = {
   code: string;
   description?: string | null;
   category?: string | null;
+  sheetType?: string | null;
+  templateScope?: string | null;
+  fleetInspectionKind?: string | null;
+  assignedAssetCategoryId?: string | null;
+  assignedAssetId?: string | null;
+  isQrEnabled?: boolean;
+  mobileOfflineEnabled?: boolean;
+  qrPayloadVersion?: number | null;
   frequency?: string | null;
   estimatedDuration?: number | null;
   isActive?: boolean;
@@ -113,13 +130,17 @@ export default function FleetTripsPage() {
 }
 
 function FleetTripsPageContent() {
+  const { currencyCode, formatMoney } = useMaintenanceCurrency();
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const initialOpenId = searchParams?.get('id');
+  const initialOpenInspectionId = searchParams?.get('inspectionId');
+  const inspectionDeepLinkHandledRef = React.useRef(false);
 
   const [loading, setLoading] = React.useState(true);
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
   const [employees, setEmployees] = React.useState<EmployeeDto[]>([]);
+  const [drivers, setDrivers] = React.useState<FleetDriverDto[]>([]);
   const [tripDestinations, setTripDestinations] = React.useState<FleetTripDestinationDto[]>([]);
   const [tripDestinationById, setTripDestinationById] = React.useState<Record<string, FleetTripDestinationDto>>({});
   const [requirePredefinedDestinationOnDispatch, setRequirePredefinedDestinationOnDispatch] = React.useState(false);
@@ -137,6 +158,7 @@ function FleetTripsPageContent() {
   });
 
   const [createOpen, setCreateOpen] = React.useState(false);
+  const [editingTripId, setEditingTripId] = React.useState<string | null>(null);
   const [viewOpen, setViewOpen] = React.useState(false);
   const [tripDetailsTab, setTripDetailsTab] = React.useState<'details' | 'expenses' | 'approvals'>('details');
   const [selected, setSelected] = React.useState<FleetTripDto | null>(null);
@@ -152,6 +174,7 @@ function FleetTripsPageContent() {
   const [selectedInspection, setSelectedInspection] = React.useState<FleetTripInspectionDto | null>(null);
   const [selectedInspectionTemplate, setSelectedInspectionTemplate] = React.useState<InspectionTemplateDetail | null>(null);
   const [inspectionAnswers, setInspectionAnswers] = React.useState<Record<string, string>>({});
+  const [inspectionPhotos, setInspectionPhotos] = React.useState<Record<string, string>>({});
   const [startInspectionForm, setStartInspectionForm] = React.useState<StartFleetTripInspectionDto>({
     fleetTripId: '',
     inspectionTemplateId: '',
@@ -193,7 +216,7 @@ function FleetTripsPageContent() {
     costDateUtc: new Date().toISOString(),
     costType: 'Other',
     amount: 0,
-    currencyCode: null,
+    currencyCode,
     notes: null,
   });
 
@@ -215,7 +238,11 @@ function FleetTripsPageContent() {
     []
   );
 
-  function buildInspectionDataJson(template: InspectionTemplateDetail | null, answers: Record<string, string>) {
+  function buildInspectionDataJson(
+    template: InspectionTemplateDetail | null,
+    answers: Record<string, string>,
+    photos: Record<string, string> = {},
+  ) {
     const payload = {
       schema: 'FleetTripInspectionChecklist.v1',
       templateId: template?.id || null,
@@ -227,6 +254,7 @@ function FleetTripsPageContent() {
         required: !!i.required,
         order: i.order,
         value: answers[i.id] ?? '',
+        photo: photos[i.id] || null,
       })),
     };
     return JSON.stringify(payload);
@@ -234,8 +262,23 @@ function FleetTripsPageContent() {
 
   function deriveOverallResult(template: InspectionTemplateDetail | null, answers: Record<string, string>) {
     const items = template?.checklistItems || [];
-    const anyFail = items.some((i) => (answers[i.id] || '').toLowerCase() === 'fail');
-    return anyFail ? 'Fail' : 'Pass';
+    const anyFail = items.some((i) => ['fail', 'failed', 'no'].includes((answers[i.id] || '').toLowerCase()));
+    const anyFlagged = items.some((i) => ['flag', 'flagged', 'attention', 'conditionalpass'].includes((answers[i.id] || '').toLowerCase()));
+    return anyFail ? 'Fail' : anyFlagged ? 'ConditionalPass' : 'Pass';
+  }
+
+  function openInspectionReview(current: FleetTripInspectionDto) {
+    setSelectedInspection(current);
+    setCompleteInspectionForm({
+      completedAtUtc:
+        current.status === 'InProgress'
+          ? toDatetimeLocal(new Date())
+          : (current.completedAtUtc ?? null),
+      overallResult: current.overallResult || 'Pass',
+      inspectionData: current.inspectionData || '{}',
+      notes: current.notes || '',
+    });
+    setCompleteInspectionOpen(true);
   }
 
   React.useEffect(() => {
@@ -247,6 +290,7 @@ function FleetTripsPageContent() {
 
         // Attempt to hydrate answers from stored inspectionData if it matches our schema.
         const nextAnswers: Record<string, string> = {};
+        const nextPhotos: Record<string, string> = {};
         try {
           const raw = selectedInspection.inspectionData || '{}';
           const parsed = JSON.parse(raw);
@@ -254,6 +298,7 @@ function FleetTripsPageContent() {
             for (const row of parsed.checklist) {
               if (!row?.id) continue;
               nextAnswers[String(row.id)] = row.value != null ? String(row.value) : '';
+              if (row.photo) nextPhotos[String(row.id)] = String(row.photo);
             }
           }
         } catch {
@@ -261,14 +306,16 @@ function FleetTripsPageContent() {
         }
 
         setInspectionAnswers(nextAnswers);
+        setInspectionPhotos(nextPhotos);
         setCompleteInspectionForm((p) => ({
           ...p,
-          inspectionData: buildInspectionDataJson(template, nextAnswers),
+          inspectionData: buildInspectionDataJson(template, nextAnswers, nextPhotos),
           overallResult: deriveOverallResult(template, nextAnswers),
         }));
       } catch (e: any) {
         setSelectedInspectionTemplate(null);
         setInspectionAnswers({});
+        setInspectionPhotos({});
         toast({ title: 'Failed to load inspection template', description: e?.message || String(e), variant: 'destructive' });
       }
     })();
@@ -303,12 +350,23 @@ function FleetTripsPageContent() {
     plannedEndAt: null,
   });
 
+  const eligibleDrivers = React.useMemo(
+    () => drivers.filter((driver) =>
+      driver.isActive &&
+      driver.isLicenseVerified &&
+      ['valid', 'expiring'].includes(driver.licenseStatus.toLowerCase()) &&
+      driver.availabilityStatus !== 'Engaged'
+    ),
+    [drivers]
+  );
+
   const loadLookups = React.useCallback(async () => {
     try {
-      const [vRes, eRes, dests] = await Promise.all([
+      const [vRes, eRes, dests, driverDirectory] = await Promise.all([
         fleetService.getVehicles({ page: 1, pageSize: 100, assetType: 'Vehicle' }),
         fetch(`${API_BASE_URL}/employees?page=1&pageSize=100`, { headers: getAuthHeaders() }),
         fleetService.getTripDestinations({ activeOnly: true }),
+        fleetService.getDrivers({ page: 1, pageSize: 100 }),
       ]);
 
       const activeVehicles = (vRes.items || []).filter((v) => (v.status || '').toLowerCase() === 'active');
@@ -318,6 +376,7 @@ function FleetTripsPageContent() {
       const rawEmployees: EmployeeDto[] = await eRes.json();
       const activeEmployees = (rawEmployees || []).filter((e) => (e.status || '').toLowerCase() !== 'inactive');
       setEmployees(activeEmployees);
+      setDrivers(driverDirectory.items || []);
 
       setTripDestinations((dests || []).filter((d) => d.isActive !== false));
 
@@ -331,10 +390,10 @@ function FleetTripsPageContent() {
 
       // Inspection templates (for fleet pre/post inspections)
       try {
-        const tRes = await fetch(`${API_BASE_URL}/inspection-templates?activeOnly=true`, { headers: getAuthHeaders() });
+        const tRes = await fetch(`${API_BASE_URL}/inspection-templates?activeOnly=true&templateScope=Fleet`, { headers: getAuthHeaders() });
         if (tRes.ok) {
           const templates: InspectionTemplateLite[] = await tRes.json();
-          setInspectionTemplates((templates || []).filter((t) => t.isActive !== false));
+          setInspectionTemplates((templates || []).filter((t) => t.isActive !== false && (t.templateScope || 'Fleet') === 'Fleet'));
         }
       } catch {
         setInspectionTemplates([]);
@@ -398,6 +457,14 @@ function FleetTripsPageContent() {
     })();
   }, [viewOpen, selected?.id]);
 
+  React.useEffect(() => {
+    if (inspectionDeepLinkHandledRef.current || inspectionsLoading || !initialOpenInspectionId) return;
+    const inspection = inspections.find((item) => item.id === initialOpenInspectionId);
+    if (!inspection) return;
+    inspectionDeepLinkHandledRef.current = true;
+    openInspectionReview(inspection);
+  }, [initialOpenInspectionId, inspections, inspectionsLoading]);
+
   const loadTripCosts = React.useCallback(async () => {
     if (!viewOpen || !selected?.id) return;
     setTripCostsLoading(true);
@@ -444,6 +511,24 @@ function FleetTripsPageContent() {
     }
   };
 
+  const openEditTrip = async (trip: FleetTripDto) => {
+    if (!['Draft', 'Rejected'].includes(trip.status)) return;
+    const current = await fleetService.getTrip(trip.id);
+    setEditingTripId(current.id);
+    setCreateForm({
+      vehicleAssetId: current.vehicleAssetId,
+      driverEmployeeId: current.driverEmployeeId || null,
+      purpose: current.purpose || '',
+      origin: current.origin || '',
+      destination: current.destination || '',
+      fleetTripDestinationId: current.fleetTripDestinationId || null,
+      notes: current.notes || '',
+      plannedStartAt: current.plannedStartAt ? toDatetimeLocal(new Date(current.plannedStartAt)) : null,
+      plannedEndAt: current.plannedEndAt ? toDatetimeLocal(new Date(current.plannedEndAt)) : null,
+    });
+    setCreateOpen(true);
+  };
+
   const refreshSelected = async () => {
     if (!selected) return;
     const trip = await fleetService.getTrip(selected.id);
@@ -476,7 +561,7 @@ function FleetTripsPageContent() {
       costDateUtc: new Date().toISOString(),
       costType: presetType,
       amount: 0,
-      currencyCode: null,
+      currencyCode,
       notes: null,
     });
     setAddExpenseOpen(true);
@@ -525,7 +610,7 @@ function FleetTripsPageContent() {
         costType: expenseForm.costType.trim(),
         source: 'TripExpense',
         amount: Number(expenseForm.amount),
-        currencyCode: expenseForm.currencyCode?.trim() || null,
+        currencyCode: expenseForm.currencyCode?.trim() || currencyCode,
         notes: expenseForm.notes?.trim() || null,
       };
 
@@ -588,16 +673,22 @@ function FleetTripsPageContent() {
       if (requirePredefinedDestinationOnDispatch && !createForm.fleetTripDestinationId) {
         throw new Error('Trip destination is required (per Maintenance settings)');
       }
-      const created = await fleetService.createTrip({
+      const payload: CreateFleetTripDto = {
         ...createForm,
         purpose: createForm.purpose?.trim() || null,
         origin: createForm.origin?.trim() || null,
         destination: createForm.destination?.trim() || null,
         notes: createForm.notes?.trim() || null,
-      });
+        plannedStartAt: createForm.plannedStartAt ? new Date(createForm.plannedStartAt).toISOString() : null,
+        plannedEndAt: createForm.plannedEndAt ? new Date(createForm.plannedEndAt).toISOString() : null,
+      };
+      const saved = editingTripId
+        ? await fleetService.updateTrip(editingTripId, payload)
+        : await fleetService.createTrip(payload);
 
-      toast({ title: 'Trip created' });
+      toast({ title: editingTripId ? 'Trip updated' : 'Trip created' });
       setCreateOpen(false);
+      setEditingTripId(null);
       setCreateForm({
         vehicleAssetId: '',
         driverEmployeeId: null,
@@ -610,7 +701,7 @@ function FleetTripsPageContent() {
         plannedEndAt: null,
       });
       await loadTrips();
-      setSelected(created);
+      setSelected(saved);
       setViewOpen(true);
     } catch (e: any) {
       toast({ title: 'Failed to create trip', description: e?.message || String(e), variant: 'destructive' });
@@ -638,7 +729,7 @@ function FleetTripsPageContent() {
       toast({ title: 'Trip dispatched' });
       setSelected(updated);
       setDispatchOpen(false);
-      await loadTrips();
+      await Promise.all([loadTrips(), loadLookups()]);
     } catch (e: any) {
       toast({ title: 'Dispatch failed', description: e?.message || String(e), variant: 'destructive' });
     }
@@ -656,7 +747,7 @@ function FleetTripsPageContent() {
       toast({ title: 'Trip completed' });
       setSelected(updated);
       setCompleteOpen(false);
-      await loadTrips();
+      await Promise.all([loadTrips(), loadLookups()]);
     } catch (e: any) {
       toast({ title: 'Complete failed', description: e?.message || String(e), variant: 'destructive' });
     }
@@ -689,6 +780,32 @@ function FleetTripsPageContent() {
     vehicles.find((vehicle) => vehicle.id === selected?.vehicleAssetId)?.fuelType ??
     null;
 
+  const getTemplatesForTripInspection = React.useCallback(
+    (kind: string, trip: FleetTripDto | null) => {
+      const vehicle = trip ? vehicles.find((item) => item.id === trip.vehicleAssetId) : null;
+      const vehicleId = trip?.vehicleAssetId || null;
+      const categoryId = vehicle?.assetCategoryId || null;
+
+      return [...inspectionTemplates]
+        .filter((template) => {
+          const scope = template.templateScope || 'Fleet';
+          const templateKind = template.fleetInspectionKind || 'Any';
+          const sheetType = template.sheetType || 'InspectionSheet';
+          const assetMatches = !template.assignedAssetId || template.assignedAssetId === vehicleId;
+          const categoryMatches = !template.assignedAssetCategoryId || template.assignedAssetCategoryId === categoryId;
+          const kindMatches = templateKind === 'Any' || templateKind === kind;
+
+          return scope === 'Fleet' && sheetType === 'InspectionSheet' && kindMatches && assetMatches && categoryMatches;
+        })
+        .sort((a, b) => {
+          const aScore = (a.assignedAssetId ? 4 : 0) + (a.assignedAssetCategoryId ? 2 : 0) + (a.fleetInspectionKind && a.fleetInspectionKind !== 'Any' ? 1 : 0);
+          const bScore = (b.assignedAssetId ? 4 : 0) + (b.assignedAssetCategoryId ? 2 : 0) + (b.fleetInspectionKind && b.fleetInspectionKind !== 'Any' ? 1 : 0);
+          return bScore - aScore || a.name.localeCompare(b.name);
+        });
+    },
+    [inspectionTemplates, vehicles]
+  );
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
@@ -699,22 +816,36 @@ function FleetTripsPageContent() {
 
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
-            <Button>
+            <Button onClick={() => {
+              setEditingTripId(null);
+              setCreateForm({
+                vehicleAssetId: '', driverEmployeeId: null, purpose: '', origin: '', destination: '',
+                fleetTripDestinationId: null, notes: '', plannedStartAt: null, plannedEndAt: null,
+              });
+            }}>
               <Plus className="mr-2 h-4 w-4" />
               New Trip
             </Button>
           </DialogTrigger>
           <DialogContent className="flex max-h-[90vh] w-[95vw] max-w-5xl flex-col overflow-hidden">
             <DialogHeader>
-              <DialogTitle>Create Trip</DialogTitle>
-              <DialogDescription>Create a draft trip request, then submit for workflow approval.</DialogDescription>
+              <DialogTitle>{editingTripId ? 'Edit Draft Trip' : 'Create Trip'}</DialogTitle>
+              <DialogDescription>{editingTripId ? 'Update this draft or rejected trip before submitting it again.' : 'Create a draft trip request, then submit for workflow approval.'}</DialogDescription>
             </DialogHeader>
 
             <div className="flex-1 overflow-y-auto pr-1">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
                 <div className="space-y-2 md:col-span-3">
                   <Label>Vehicle</Label>
-                  <Select value={createForm.vehicleAssetId || undefined} onValueChange={(v) => setCreateForm((p) => ({ ...p, vehicleAssetId: v }))}>
+                  <Select value={createForm.vehicleAssetId || undefined} onValueChange={(v) => {
+                    const vehicle = vehicles.find((item) => item.id === v);
+                    const assignedDriver = eligibleDrivers.find((driver) => driver.employeeId === vehicle?.currentDriverEmployeeId);
+                    setCreateForm((p) => ({
+                      ...p,
+                      vehicleAssetId: v,
+                      driverEmployeeId: assignedDriver?.employeeId || null,
+                    }));
+                  }}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select vehicle" />
                     </SelectTrigger>
@@ -739,13 +870,14 @@ function FleetTripsPageContent() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Unassigned</SelectItem>
-                      {employees.map((e) => (
-                        <SelectItem key={e.id} value={e.id}>
-                          {(e.firstName || '').trim()} {(e.lastName || '').trim()} {e.employeeNumber ? `(${e.employeeNumber})` : ''}
+                      {eligibleDrivers.filter((driver) => !driver.isAssigned || driver.currentVehicleAssetId === createForm.vehicleAssetId).map((driver) => (
+                        <SelectItem key={driver.employeeId} value={driver.employeeId}>
+                          {driver.fullName} ({driver.employeeNumber}){driver.isAssigned ? ` · ${driver.currentVehicleAssetNumber || 'Assigned'}` : ''}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">The vehicle's assigned driver is selected automatically when available. Engaged or licence-ineligible drivers are hidden.</p>
                 </div>
 
                 <div className="space-y-2 md:col-span-6">
@@ -838,10 +970,10 @@ function FleetTripsPageContent() {
             </div>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setCreateOpen(false)}>
+              <Button variant="outline" onClick={() => { setCreateOpen(false); setEditingTripId(null); }}>
                 Cancel
               </Button>
-              <Button onClick={onCreate}>Create</Button>
+              <Button onClick={onCreate}>{editingTripId ? 'Save Changes' : 'Create'}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -955,9 +1087,16 @@ function FleetTripsPageContent() {
                       </TableCell>
                       <TableCell className="text-sm">{formatFleetDateTime(t.createdAt)}</TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => openView(t.id)} title="View trip">
-                          <Eye className="h-4 w-4" />
-                        </Button>
+                        <div className="flex justify-end gap-1">
+                          {['Draft', 'Rejected'].includes(t.status) && (
+                            <Button variant="ghost" size="sm" onClick={() => void openEditTrip(t)} title="Edit trip">
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Button variant="ghost" size="sm" onClick={() => openView(t.id)} title="View trip">
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
@@ -969,7 +1108,7 @@ function FleetTripsPageContent() {
       </Card>
 
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        <DialogContent className="flex max-h-[90vh] w-[95vw] max-w-6xl flex-col overflow-hidden">
+        <DialogContent className="flex h-[88vh] w-[1100px] max-w-[95vw] flex-col overflow-hidden sm:max-w-[1100px]">
           <DialogHeader>
             <DialogTitle>Trip Details</DialogTitle>
             <DialogDescription>View trip information, approvals, and dispatch/completion.</DialogDescription>
@@ -983,7 +1122,7 @@ function FleetTripsPageContent() {
             <TabsList className="w-fit">
               <TabsTrigger value="details">Details</TabsTrigger>
               <TabsTrigger value="expenses">Expenses</TabsTrigger>
-              <TabsTrigger value="approvals">Approval History</TabsTrigger>
+              <WorkflowTabTrigger value="approvals" />
             </TabsList>
 
             <TabsContent value="details" className="mt-4 min-h-0 flex-1 overflow-hidden">
@@ -1031,7 +1170,7 @@ function FleetTripsPageContent() {
                             <Button
                               size="sm"
                               variant="outline"
-                              disabled={selected.status !== 'Approved' || !employees.length}
+                              disabled={selected.status !== 'Approved' || !eligibleDrivers.some((driver) => !driver.isAssigned || driver.currentVehicleAssetId === selected.vehicleAssetId)}
                               onClick={() => {
                                 setAssignDriverId(selected.driverEmployeeId || 'none');
                                 setAssignDriverOpen(true);
@@ -1106,15 +1245,26 @@ function FleetTripsPageContent() {
                                 const current = inspections
                                   .filter((i) => i.inspectionKind === kind && i.status !== 'Cancelled')
                                   .sort((a, b) => (a.startedAtUtc < b.startedAtUtc ? 1 : -1))[0];
+                                const availableTemplates = getTemplatesForTripInspection(kind, selected);
+                                const inspectionDate = current?.completedAtUtc || current?.startedAtUtc;
 
                                 return (
-                                  <div key={kind} className="rounded-md border p-3">
+                                  <div
+                                    key={kind}
+                                    className={`rounded-md border p-3 ${current ? 'cursor-pointer transition-colors hover:bg-muted/50' : ''}`}
+                                    onClick={() => {
+                                      if (current) openInspectionReview(current);
+                                    }}
+                                  >
                                     <div className="flex items-start justify-between gap-3">
                                       <div>
                                         <div className="font-medium">{kind === 'PreTrip' ? 'Pre-trip' : 'Post-trip'}</div>
                                         <div className="text-muted-foreground">
                                           {current ? `${current.status}${current.overallResult ? ` (${current.overallResult})` : ''}` : 'Not started'}
                                         </div>
+                                        {inspectionDate ? (
+                                          <div className="text-muted-foreground">Date/time: {formatFleetDateTime(inspectionDate)}</div>
+                                        ) : null}
                                         {current?.inspectionTemplateName ? (
                                           <div className="text-muted-foreground">Template: {current.inspectionTemplateName}</div>
                                         ) : null}
@@ -1123,35 +1273,27 @@ function FleetTripsPageContent() {
                                         <Button
                                           variant="outline"
                                           size="sm"
-                                          onClick={() => {
+                                          onClick={(event) => {
+                                            event.stopPropagation();
                                             setStartInspectionForm({
                                               fleetTripId: selected.id,
-                                              inspectionTemplateId: inspectionTemplates[0]?.id || '',
+                                              inspectionTemplateId: availableTemplates[0]?.id || '',
                                               inspectorEmployeeId: selected.driverEmployeeId || null,
                                               inspectionKind: kind,
                                             });
                                             setStartInspectionOpen(true);
                                           }}
-                                          disabled={!inspectionTemplates.length || !!current}
+                                          disabled={!availableTemplates.length || !!current}
                                         >
                                           Start
                                         </Button>
                                         <Button
                                           variant="outline"
                                           size="sm"
-                                          onClick={() => {
+                                          onClick={(event) => {
+                                            event.stopPropagation();
                                             if (!current) return;
-                                            setSelectedInspection(current);
-                                            setCompleteInspectionForm({
-                                              completedAtUtc:
-                                                current.status === 'InProgress'
-                                                  ? toDatetimeLocal(new Date())
-                                                  : (current.completedAtUtc ?? null),
-                                              overallResult: current.overallResult || 'Pass',
-                                              inspectionData: current.inspectionData || '{}',
-                                              notes: current.notes || '',
-                                            });
-                                            setCompleteInspectionOpen(true);
+                                            openInspectionReview(current);
                                           }}
                                           disabled={!current}
                                         >
@@ -1164,7 +1306,7 @@ function FleetTripsPageContent() {
                               })}
                               {!inspectionTemplates.length ? (
                                 <div className="text-xs text-muted-foreground">
-                                  No inspection templates found. Create templates via `api/inspection-templates` (or seed them).
+                                  No Fleet inspection templates found. Tag an active Inspection Template as Fleet in Administration.
                                 </div>
                               ) : null}
                             </>
@@ -1245,7 +1387,7 @@ function FleetTripsPageContent() {
                                     <Badge variant="outline">{c.source}</Badge>
                                   </TableCell>
                                   <TableCell className="text-right">
-                                    {typeof c.amount === 'number' ? c.amount.toFixed(2) : String(c.amount)} {c.currencyCode || ''}
+                                    {formatMoney(typeof c.amount === 'number' ? c.amount : Number(c.amount) || 0)}
                                   </TableCell>
                                   <TableCell className="max-w-[420px] truncate text-muted-foreground" title={c.notes || ''}>
                                     {c.notes || '-'}
@@ -1272,7 +1414,7 @@ function FleetTripsPageContent() {
                           <div>Total entries: {tripCosts.length}</div>
                           <div>
                             Total:{' '}
-                            {tripCosts.reduce((sum, x) => sum + (typeof x.amount === 'number' ? x.amount : Number(x.amount) || 0), 0).toFixed(2)}
+                            {formatMoney(tripCosts.reduce((sum, x) => sum + (typeof x.amount === 'number' ? x.amount : Number(x.amount) || 0), 0))}
                           </div>
                         </div>
                       ) : null}
@@ -1282,15 +1424,38 @@ function FleetTripsPageContent() {
               </div>
             </TabsContent>
 
-            <TabsContent value="approvals" className="mt-4 flex-1 overflow-hidden">
-              <div className="h-full overflow-y-auto pr-1">
-                {!selected ? (
+            {selected ? (
+              <WorkflowTabContent
+                value="approvals"
+                className="mt-4 flex-1 overflow-y-auto pr-1"
+                entityType="FleetTrip"
+                entityId={selected.id}
+                entityLabel="Fleet Trip"
+                entityNumber={selected.vehicleAssetNumber || selected.vehicleLicensePlate || undefined}
+                status={selected.status}
+                canSubmit={selected.status === 'Draft'}
+                canApproveReject={selected.status === 'Submitted'}
+                onSubmit={async () => {
+                  await fleetService.submitTrip(selected.id);
+                }}
+                onApprove={async (comments) => {
+                  await fleetService.approveTrip(selected.id, comments);
+                }}
+                onReject={async (comments) => {
+                  await fleetService.rejectTrip(selected.id, 'Rejected', comments);
+                }}
+                onAfterAction={async () => {
+                  await refreshSelected();
+                  await loadTrips();
+                }}
+              />
+            ) : (
+              <TabsContent value="approvals" className="mt-4 flex-1 overflow-hidden">
+                <div className="h-full overflow-y-auto pr-1">
                   <div className="py-10 text-center text-muted-foreground">No trip selected</div>
-                ) : (
-                  <WorkflowApprovalHistoryPanel entityType="FleetTrip" entityId={selected.id} />
-                )}
-              </div>
-            </TabsContent>
+                </div>
+              </TabsContent>
+            )}
           </Tabs>
 
           <DialogFooter className="border-t pt-3 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:space-x-0">
@@ -1392,13 +1557,18 @@ function FleetTripsPageContent() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Select template</SelectItem>
-                  {inspectionTemplates.map((t) => (
+                  {getTemplatesForTripInspection(startInspectionForm.inspectionKind, selected).map((t) => (
                     <SelectItem key={t.id} value={t.id}>
-                      {t.name}
+                      {t.name}{t.mobileOfflineEnabled ? ' - Offline' : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {!getTemplatesForTripInspection(startInspectionForm.inspectionKind, selected).length ? (
+                <p className="text-xs text-muted-foreground">
+                  No matching Fleet template for this vehicle and inspection type.
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-2">
@@ -1446,8 +1616,11 @@ function FleetTripsPageContent() {
       <Dialog open={completeInspectionOpen} onOpenChange={setCompleteInspectionOpen}>
         <DialogContent className="flex max-h-[90vh] w-[95vw] max-w-4xl flex-col overflow-hidden">
           <DialogHeader>
-            <DialogTitle>Complete Inspection</DialogTitle>
-            <DialogDescription>{selectedInspection?.inspectionTemplateName}</DialogDescription>
+            <DialogTitle>{inspectionReadOnly ? 'Inspection Review' : 'Complete Inspection'}</DialogTitle>
+            <DialogDescription>
+              {selectedInspection?.vehicleAssetNumber ? `${selectedInspection.vehicleAssetNumber} · ` : ''}
+              {selectedInspection?.inspectionTemplateName}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto pr-1">
@@ -1458,6 +1631,7 @@ function FleetTripsPageContent() {
                   Status: {selectedInspection.status}
                   {selectedInspection.startedAtUtc ? ` • Started: ${formatFleetDateTime(selectedInspection.startedAtUtc)}` : ''}
                   {selectedInspection.completedAtUtc ? ` • Completed: ${formatFleetDateTime(selectedInspection.completedAtUtc)}` : ''}
+                  {selectedInspection.syncedAtUtc ? ` • Synced: ${formatFleetDateTime(selectedInspection.syncedAtUtc)}` : ''}
                 </div>
               ) : null}
               <Label>Overall Result</Label>
@@ -1471,6 +1645,7 @@ function FleetTripsPageContent() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Pass">Pass</SelectItem>
+                  <SelectItem value="ConditionalPass">Conditional Pass</SelectItem>
                   <SelectItem value="Fail">Fail</SelectItem>
                 </SelectContent>
               </Select>
@@ -1505,7 +1680,7 @@ function FleetTripsPageContent() {
                               setCompleteInspectionForm((p) => ({
                                 ...p,
                                 overallResult: derived,
-                                inspectionData: buildInspectionDataJson(selectedInspectionTemplate, next),
+                                inspectionData: buildInspectionDataJson(selectedInspectionTemplate, next, inspectionPhotos),
                               }));
                             }}
                             disabled={inspectionReadOnly}
@@ -1516,7 +1691,33 @@ function FleetTripsPageContent() {
                             <SelectContent>
                               <SelectItem value="none">Select…</SelectItem>
                               <SelectItem value="Pass">Pass</SelectItem>
+                              <SelectItem value="Flagged">Flagged</SelectItem>
                               <SelectItem value="Fail">Fail</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : type === 'yesno' ? (
+                          <Select
+                            value={value || 'none'}
+                            onValueChange={(v) => {
+                              if (inspectionReadOnly) return;
+                              const next = { ...inspectionAnswers, [i.id]: v === 'none' ? '' : v };
+                              setInspectionAnswers(next);
+                              const derived = deriveOverallResult(selectedInspectionTemplate, next);
+                              setCompleteInspectionForm((p) => ({
+                                ...p,
+                                overallResult: derived,
+                                inspectionData: buildInspectionDataJson(selectedInspectionTemplate, next, inspectionPhotos),
+                              }));
+                            }}
+                            disabled={inspectionReadOnly}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select response" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Select…</SelectItem>
+                              <SelectItem value="Yes">Yes</SelectItem>
+                              <SelectItem value="No">No</SelectItem>
                             </SelectContent>
                           </Select>
                         ) : type === 'number' || type === 'measurement' ? (
@@ -1529,7 +1730,7 @@ function FleetTripsPageContent() {
                               setInspectionAnswers(next);
                               setCompleteInspectionForm((p) => ({
                                 ...p,
-                                inspectionData: buildInspectionDataJson(selectedInspectionTemplate, next),
+                                inspectionData: buildInspectionDataJson(selectedInspectionTemplate, next, inspectionPhotos),
                               }));
                             }}
                             placeholder="Enter value"
@@ -1544,7 +1745,7 @@ function FleetTripsPageContent() {
                               setInspectionAnswers(next);
                               setCompleteInspectionForm((p) => ({
                                 ...p,
-                                inspectionData: buildInspectionDataJson(selectedInspectionTemplate, next),
+                                inspectionData: buildInspectionDataJson(selectedInspectionTemplate, next, inspectionPhotos),
                               }));
                             }}
                             placeholder="Enter response"
@@ -1552,13 +1753,18 @@ function FleetTripsPageContent() {
                             disabled={inspectionReadOnly}
                           />
                         )}
+                        {inspectionPhotos[i.id] ? (
+                          <div className="mt-2 overflow-hidden rounded-md border bg-muted/30">
+                            <img src={inspectionPhotos[i.id]} alt={`${i.item} evidence`} className="max-h-64 w-full object-contain" />
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}
                 </div>
               )}
               {selectedInspectionTemplate?.checklistItems?.length ? (
-                <div className="text-xs text-muted-foreground">Overall result auto-derives from item results (any Fail → Fail).</div>
+                <div className="text-xs text-muted-foreground">Overall result auto-derives from item results: failed/no responses fail the inspection, flagged responses mark it conditional.</div>
               ) : null}
             </div>
 
@@ -1574,10 +1780,41 @@ function FleetTripsPageContent() {
           </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCompleteInspectionOpen(false)}>
-              {inspectionReadOnly ? 'Close' : 'Cancel'}
-            </Button>
+          <DialogFooter className="flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:space-x-0">
+            {inspectionReadOnly && selectedInspection && !['InProgress', 'Cancelled'].includes(selectedInspection.status) ? (
+              <WorkflowApprovalActions
+                entityType="FleetTripInspection"
+                entityId={selectedInspection.id}
+                entityLabel={selectedInspection.inspectionKind === 'PostTrip' ? 'Post-trip Inspection' : 'Pre-trip Inspection'}
+                entityNumber={`${selectedInspection.vehicleAssetNumber || 'Inspection'} / ${selectedInspection.inspectionKind}`}
+                status={selectedInspection.status}
+                loadWorkflowSummary
+                canSubmit={selectedInspection.status === 'Completed' || selectedInspection.status === 'Rejected'}
+                canApproveReject={selectedInspection.status === 'Submitted'}
+                onSubmit={async () => {
+                  const updated = await fleetService.submitInspectionApproval(selectedInspection.id);
+                  setSelectedInspection(updated);
+                  if (selected?.id) setInspections(await fleetService.getTripInspections(selected.id));
+                }}
+                onApprove={async (comments) => {
+                  const updated = await fleetService.approveInspection(selectedInspection.id, comments);
+                  setSelectedInspection(updated);
+                  if (selected?.id) setInspections(await fleetService.getTripInspections(selected.id));
+                }}
+                onReject={async (comments) => {
+                  const updated = await fleetService.rejectInspection(selectedInspection.id, comments);
+                  setSelectedInspection(updated);
+                  if (selected?.id) setInspections(await fleetService.getTripInspections(selected.id));
+                }}
+                onAfterAction={async () => {
+                  if (selected?.id) setInspections(await fleetService.getTripInspections(selected.id));
+                }}
+              />
+            ) : <div />}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCompleteInspectionOpen(false)}>
+                {inspectionReadOnly ? 'Close' : 'Cancel'}
+              </Button>
             {!inspectionReadOnly ? (
               <Button
                 onClick={async () => {
@@ -1617,6 +1854,7 @@ function FleetTripsPageContent() {
                 Complete
               </Button>
             ) : null}
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1763,11 +2001,10 @@ function FleetTripsPageContent() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Currency (optional)</Label>
+              <Label>Currency</Label>
               <Input
-                value={expenseForm.currencyCode || ''}
-                onChange={(e) => setExpenseForm((p) => ({ ...p, currencyCode: e.target.value }))}
-                placeholder="e.g. USD"
+                value={expenseForm.currencyCode || currencyCode}
+                disabled
               />
             </div>
             <div className="space-y-2 md:col-span-2">
@@ -1895,9 +2132,9 @@ function FleetTripsPageContent() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Unassigned</SelectItem>
-                {employees.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>
-                    {(e.firstName || '').trim()} {(e.lastName || '').trim()} {e.employeeNumber ? `(${e.employeeNumber})` : ''}
+                {eligibleDrivers.filter((driver) => !driver.isAssigned || driver.currentVehicleAssetId === selected?.vehicleAssetId).map((driver) => (
+                  <SelectItem key={driver.employeeId} value={driver.employeeId}>
+                    {driver.fullName} ({driver.employeeNumber})
                   </SelectItem>
                 ))}
               </SelectContent>

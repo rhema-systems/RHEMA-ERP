@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DashboardLayout } from '../../components/layout/dashboard-layout';
 import { TenantGuard } from '../../components/auth/tenant-guard';
@@ -109,6 +110,7 @@ interface ReportParameter {
 }
 
 export default function UserReportsPage() {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedModule, setSelectedModule] = useState<string>('all');
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -164,6 +166,14 @@ export default function UserReportsPage() {
       icon: 'Activity', 
       reportCount: 10,
       color: 'bg-indigo-100 text-indigo-700 border-indigo-200'
+    },
+    {
+      id: 'maintenance',
+      name: 'Maintenance Reports',
+      description: 'Asset movements, inspections, work orders, parts issues, and maintenance costs',
+      icon: 'Activity',
+      reportCount: 5,
+      color: 'bg-cyan-100 text-cyan-700 border-cyan-200'
     },
   ];
 
@@ -475,7 +485,23 @@ export default function UserReportsPage() {
             <h2 className="text-xl font-semibold mb-4">Browse by Module</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {modules.map((module) => (
-                <Card key={module.id} className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setSelectedModule(module.id)}>
+                <Card
+                  key={module.id}
+                  className="cursor-pointer hover:shadow-lg transition-shadow"
+                  onClick={() => {
+                    if (module.id === 'hr') {
+                      router.push('/reports/hr');
+                      return;
+                    }
+
+                    if (module.id === 'maintenance') {
+                      router.push('/maintenance/reports');
+                      return;
+                    }
+
+                    setSelectedModule(module.id);
+                  }}
+                >
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">

@@ -18,18 +18,26 @@ namespace ErpSystem.Api.Services.Sales;
 /// </summary>
 public class SalesAgreementService : ISalesAgreementService
 {
+    private const string WorkflowEntityType = "SalesAgreement";
+
     private readonly ApplicationDbContext _context;
     private readonly ILogger<SalesAgreementService> _logger;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
 
     public SalesAgreementService(
         ApplicationDbContext context,
         ILogger<SalesAgreementService> logger,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry)
     {
         _context = context;
         _logger = logger;
         _currentUserService = currentUserService;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
     }
 
     // ── CRUD ─────────────────────────────────────────────────────────────
@@ -332,7 +340,14 @@ public class SalesAgreementService : ISalesAgreementService
         if (agreement.AgreementStatus != SalesAgreementStatus.Draft)
             throw new InvalidOperationException("Only Draft agreements can be submitted for approval");
 
-        agreement.AgreementStatus = SalesAgreementStatus.PendingApproval;
+        var userId = GetCurrentUserId();
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(WorkflowEntityType, id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start workflow");
+
+        var adapter = _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType);
+        adapter.ApplySubmitOutcome(agreement, workflowResult.Outcome, userId);
+
         await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
         _logger.LogInformation("Sales Agreement {Number} submitted for approval", agreement.DocumentNumber);
@@ -348,23 +363,46 @@ public class SalesAgreementService : ISalesAgreementService
         if (agreement.AgreementStatus != SalesAgreementStatus.PendingApproval)
             throw new InvalidOperationException("Only PendingApproval agreements can be approved/rejected");
 
-        if (dto.IsApproved)
+        var userId = GetCurrentUserId();
+        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(WorkflowEntityType, id, userId);
+        if (!canApprove)
+            throw new UnauthorizedAccessException("You are not assigned to approve the current workflow step");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            WorkflowEntityType,
+            id,
+            userId,
+            dto.IsApproved ? "Approve" : "Reject",
+            dto.Comments);
+
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process approval");
+
+        var adapter = _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType);
+        adapter.ApplyApprovalOutcome(agreement, workflowResult.Outcome, userId, dto.Comments);
+
+        if (workflowResult.Outcome == WorkflowOutcome.Approved)
         {
-            agreement.AgreementStatus = SalesAgreementStatus.Active;
-            agreement.ApprovedDate = DateTime.UtcNow;
-            agreement.ApprovalComments = dto.Comments;
             _logger.LogInformation("Sales Agreement {Number} approved", agreement.DocumentNumber);
         }
-        else
+        else if (workflowResult.Outcome == WorkflowOutcome.Rejected)
         {
-            agreement.AgreementStatus = SalesAgreementStatus.Draft; // Rejected → back to Draft for revision
-            agreement.ApprovalComments = dto.Comments;
             _logger.LogInformation("Sales Agreement {Number} rejected", agreement.DocumentNumber);
         }
 
         await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
         return await GetByIdAsync(id);
+    }
+
+    private Guid GetCurrentUserId()
+    {
+        if (Guid.TryParse(_currentUserService.UserId, out var userId) && userId != Guid.Empty)
+        {
+            return userId;
+        }
+
+        throw new UnauthorizedAccessException("User is not authenticated");
     }
 
     public async Task<SalesAgreementDetailDto> ActivateAsync(Guid id)

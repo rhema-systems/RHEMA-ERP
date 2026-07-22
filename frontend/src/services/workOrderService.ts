@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export interface WorkOrder {
   id: string;
@@ -185,6 +185,18 @@ export interface WorkOrderMetrics {
   averageCompletionPercentage: number;
 }
 
+export interface ArInvoiceSummary {
+  id: string;
+  invoiceNumber: string;
+  customerId: string;
+  customerName: string;
+  invoiceDate: string;
+  dueDate?: string;
+  status: string;
+  totalAmount: number;
+  currencyCode: string;
+}
+
 class WorkOrderService {
   private getAuthHeaders() {
     const token = localStorage.getItem('authToken');
@@ -258,6 +270,13 @@ class WorkOrderService {
     await axios.delete(`${API_URL}/maintenance/work-orders/${id}`, {
       headers: this.getAuthHeaders()
     });
+  }
+
+  async postArInvoice(id: string): Promise<ArInvoiceSummary> {
+    const response = await axios.post(`${API_URL}/maintenance/work-orders/${id}/post-ar-invoice`, {}, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
   }
 
   // Get work order metrics

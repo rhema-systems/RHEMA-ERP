@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
+ 
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { format, subDays, subMonths } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 
 interface MaintenanceHistoryItem {
   id: string; // Changed from number to string (Guid)
@@ -60,6 +61,7 @@ interface MaintenanceHistoryItem {
 }
 
 export default function MaintenanceHistoryPage() {
+  const { formatMoney } = useMaintenanceCurrency();
   const [maintenanceHistoryData, setMaintenanceHistoryData] = useState<MaintenanceHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -77,7 +79,7 @@ export default function MaintenanceHistoryPage() {
     const loadMaintenanceHistory = async () => {
       setLoading(true);
       try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
         const token = localStorage.getItem('authToken');
         const response = await fetch(`${API_URL}/maintenance/history`, {
           headers: {
@@ -251,7 +253,7 @@ export default function MaintenanceHistoryPage() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-bold">${getTotalCost().toFixed(0)}</p>
+                <p className="text-2xl font-bold">{formatMoney(getTotalCost(), 0)}</p>
                 <p className="text-sm text-muted-foreground">Total Cost</p>
               </div>
               <DollarSign className="h-8 w-8 text-green-500" />
@@ -454,7 +456,7 @@ export default function MaintenanceHistoryPage() {
                             <span className="font-medium">Duration:</span> {record.laborHours}h
                           </div>
                           <div>
-                            <span className="font-medium">Cost:</span> ${record.cost.toFixed(2)}
+                            <span className="font-medium">Cost:</span> {formatMoney(record.cost)}
                           </div>
                           <div>
                             <span className="font-medium">Rating:</span> {getRatingStars(record.rating)}
@@ -549,7 +551,7 @@ export default function MaintenanceHistoryPage() {
                   
                   <div>
                     <h4 className="font-semibold mb-2">Cost & Performance</h4>
-                    <p><span className="font-medium">Total Cost:</span> ${selectedRecord.cost.toFixed(2)}</p>
+                    <p><span className="font-medium">Total Cost:</span> {formatMoney(selectedRecord.cost)}</p>
                     <p><span className="font-medium">Labor Hours:</span> {selectedRecord.laborHours}h</p>
                     <p><span className="font-medium">Rating:</span> {getRatingStars(selectedRecord.rating)}</p>
                   </div>

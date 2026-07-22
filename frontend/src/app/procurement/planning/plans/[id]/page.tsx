@@ -12,13 +12,80 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, Edit, FileText, Package, Calendar, Clock, CheckCircle, XCircle, AlertCircle, Send, Loader2, Plus, Trash2, Search, Users, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { ArrowLeft, Edit, FileText, Package, Calendar, Clock, CheckCircle, XCircle, AlertCircle, Send, Loader2, Plus, Trash2, Search, Users, History, GitBranch } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementPlanService, procurementBudgetService, commonService, type ProcurementPlanDetailDto, type CreateProcurementPlanItemDto, type InventoryItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type ApproveProcurementPlanDto, type ProcurementBudgetDto } from '@/services/procurementPlanningService';
+import { procurementPlanService, commonService, marketAnalysisService, type ProcurementPlanDetailDto, type ProcurementPlanDto, type CreateProcurementPlanItemDto, type InventoryItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import { inventoryManagementService, type UnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { format } from 'date-fns';
 import { FileCheck, ShoppingCart } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { WorkflowApprovalActions, useWorkflowRecord } from '@/components/workflow';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
+import { ProcurementPlanItemDialogBody } from '@/app/procurement/planning/components/ProcurementPlanItemDialogBody';
+
+const createEmptyItemForm = (): CreateProcurementPlanItemDto => ({
+  itemDescription: '',
+  specifications: '',
+  itemCategory: '',
+  estimatedQuantity: 1,
+  unitOfMeasure: 'EA',
+  estimatedUnitPrice: 0,
+  priority: 'Medium',
+  isCritical: false,
+  requiredDate: '',
+  plannedQuarter: '',
+  justification: '',
+  procurementMethod: 'DirectPurchase',
+  notes: '',
+  itemSuppliers: [],
+});
+
+const getItemEstimatedTotal = (item: Pick<CreateProcurementPlanItemDto, 'estimatedQuantity' | 'estimatedUnitPrice'>) =>
+  (Number(item.estimatedQuantity) || 0) * (Number(item.estimatedUnitPrice) || 0);
+
+const normalizeLookup = (value?: string | null) => value?.trim().toLowerCase() || '';
+
+const isSupplierBusinessPartner = (partner: BusinessPartnerDto) => {
+  const partnerType = normalizeLookup(partner.partnerType);
+  const approvalStatus = normalizeLookup(partner.approvalStatus);
+  const status = normalizeLookup(partner.status);
+
+  return (
+    ['supplier', 'both', 'vendor'].includes(partnerType) &&
+    (!approvalStatus || approvalStatus === 'approved') &&
+    (!status || status === 'active' || status === 'approved')
+  );
+};
+
+const getUnitOfMeasureValue = (unit: UnitOfMeasureDto) => unit.code?.trim() || unit.name?.trim() || unit.id;
+
+const getUnitOfMeasureLabel = (unit: UnitOfMeasureDto) => {
+  const value = getUnitOfMeasureValue(unit);
+  const name = unit.name?.trim();
+  const symbol = unit.symbol?.trim();
+
+  if (name && name !== value) return symbol ? `${value} - ${name} (${symbol})` : `${value} - ${name}`;
+  return symbol && symbol !== value ? `${value} (${symbol})` : value;
+};
+
+const buildUnitOfMeasureOptions = (units: UnitOfMeasureDto[], currentValue?: string) => {
+  const seen = new Set<string>();
+  const options = units
+    .map((unit) => ({ value: getUnitOfMeasureValue(unit), label: getUnitOfMeasureLabel(unit) }))
+    .filter((option) => {
+      if (!option.value || seen.has(option.value)) return false;
+      seen.add(option.value);
+      return true;
+    });
+
+  const savedValue = currentValue?.trim();
+  if (savedValue && !seen.has(savedValue)) {
+    options.unshift({ value: savedValue, label: `${savedValue} (saved value)` });
+  }
+
+  return options;
+};
 
 export default function ProcurementPlanDetailPage() {
   const params = useParams();
@@ -27,7 +94,6 @@ export default function ProcurementPlanDetailPage() {
 
   const [plan, setPlan] = useState<ProcurementPlanDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(false);
 
   // Add Item Dialog State
   const [addItemDialogOpen, setAddItemDialogOpen] = useState(false);
@@ -37,40 +103,29 @@ export default function ProcurementPlanDetailPage() {
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryItemDto | null>(null);
   const [addingItem, setAddingItem] = useState(false);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
-  const [newItemForm, setNewItemForm] = useState<CreateProcurementPlanItemDto>({
-    itemDescription: '',
-    specifications: '',
-    itemCategory: '',
-    estimatedQuantity: 1,
-    unitOfMeasure: 'EA',
-    estimatedUnitPrice: 0,
-    priority: 'Medium',
-    isCritical: false,
-    requiredDate: '',
-    plannedQuarter: '',
-    justification: '',
-    procurementMethod: 'DirectPurchase',
-    notes: '',
-    itemSuppliers: [],
-  });
+  const [newItemForm, setNewItemForm] = useState<CreateProcurementPlanItemDto>(createEmptyItemForm);
+  const [pendingPlanItems, setPendingPlanItems] = useState<CreateProcurementPlanItemDto[]>([]);
 
   // Supplier selection state
   const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [supplierSearchTerm, setSupplierSearchTerm] = useState('');
   const [selectedItemSuppliers, setSelectedItemSuppliers] = useState<CreateProcurementPlanItemSupplierDto[]>([]);
+  const [marketAnalyses, setMarketAnalyses] = useState<MarketAnalysisDto[]>([]);
+  const [loadingMarketAnalyses, setLoadingMarketAnalyses] = useState(false);
+  const [unitsOfMeasure, setUnitsOfMeasure] = useState<UnitOfMeasureDto[]>([]);
+  const [loadingUnitsOfMeasure, setLoadingUnitsOfMeasure] = useState(false);
 
-  // Approval dialog state
-  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
-  const [approvalAction, setApprovalAction] = useState<'approve' | 'reject'>('approve');
-  const [approvalComments, setApprovalComments] = useState('');
-  const [approvedBudget, setApprovedBudget] = useState<number | undefined>(undefined);
-  const [approvalLoading, setApprovalLoading] = useState(false);
-  const [autoGenerateSchedules, setAutoGenerateSchedules] = useState(true);
-  const [autoLinkBudget, setAutoLinkBudget] = useState(true);
-  const [selectedBudgetId, setSelectedBudgetId] = useState<string | undefined>(undefined);
-  const [availableBudgets, setAvailableBudgets] = useState<{ id: string; budgetCode: string; allocatedAmount: number; remainingAmount: number }[]>([]);
-  const [loadingBudgets, setLoadingBudgets] = useState(false);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [publishComments, setPublishComments] = useState('');
+  const [publishLoading, setPublishLoading] = useState(false);
+  const [versionHistory, setVersionHistory] = useState<ProcurementPlanDto[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [amendmentDialogOpen, setAmendmentDialogOpen] = useState(false);
+  const [amendmentReason, setAmendmentReason] = useState('');
+  const [amendmentTitle, setAmendmentTitle] = useState('');
+  const [amendmentDescription, setAmendmentDescription] = useState('');
+  const [amendmentLoading, setAmendmentLoading] = useState(false);
 
   // Conversion dialog state
   const [conversionDialogOpen, setConversionDialogOpen] = useState(false);
@@ -110,6 +165,7 @@ export default function ProcurementPlanDetailPage() {
   useEffect(() => {
     if (planId) {
       loadPlanDetails();
+      loadVersionHistory();
     }
   }, [planId]);
 
@@ -123,6 +179,20 @@ export default function ProcurementPlanDetailPage() {
       toast.error('Failed to load procurement plan details');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadVersionHistory = async () => {
+    if (!planId) return;
+    try {
+      setLoadingVersions(true);
+      const versions = await procurementPlanService.getVersionHistory(planId);
+      setVersionHistory(versions);
+    } catch (error) {
+      console.error('Error loading plan version history:', error);
+      setVersionHistory([]);
+    } finally {
+      setLoadingVersions(false);
     }
   };
 
@@ -142,12 +212,8 @@ export default function ProcurementPlanDetailPage() {
   const loadSuppliers = async () => {
     try {
       setLoadingSuppliers(true);
-      const response = await businessPartnerService.getPartners({
-        partnerType: 'Supplier',
-        approvalStatus: 'Approved',
-        pageSize: 1000
-      });
-      setSuppliers(response.items || []);
+      const partners = await businessPartnerService.getAllPartnersForDropdown();
+      setSuppliers(partners.filter(isSupplierBusinessPartner));
     } catch (error) {
       console.error('Error loading suppliers:', error);
       toast.error('Failed to load suppliers');
@@ -156,29 +222,52 @@ export default function ProcurementPlanDetailPage() {
     }
   };
 
+  const loadUnitsOfMeasure = async () => {
+    try {
+      setLoadingUnitsOfMeasure(true);
+      const data = await inventoryManagementService.getUnitsOfMeasure(true);
+      setUnitsOfMeasure(data);
+    } catch (error) {
+      console.error('Error loading units of measure:', error);
+      toast.error('Failed to load units of measure');
+    } finally {
+      setLoadingUnitsOfMeasure(false);
+    }
+  };
+
+  const loadMarketAnalyses = async () => {
+    try {
+      setLoadingMarketAnalyses(true);
+      const response = await marketAnalysisService.getAnalyses({ page: 1, pageSize: 100, status: 'Published' });
+      setMarketAnalyses(response.items || []);
+    } catch (error) {
+      console.error('Error loading market analyses:', error);
+      setMarketAnalyses([]);
+    } finally {
+      setLoadingMarketAnalyses(false);
+    }
+  };
+
   const handleOpenAddItemDialog = () => {
     setAddItemDialogOpen(true);
     loadInventoryItems();
     loadSuppliers();
+    loadMarketAnalyses();
+    loadUnitsOfMeasure();
+    setPendingPlanItems([]);
     setSelectedInventoryItem(null);
     setSelectedItemSuppliers([]);
+    setInventorySearchTerm('');
     setSupplierSearchTerm('');
-    setNewItemForm({
-      itemDescription: '',
-      specifications: '',
-      itemCategory: '',
-      estimatedQuantity: 1,
-      unitOfMeasure: 'EA',
-      estimatedUnitPrice: 0,
-      priority: 'Medium',
-      isCritical: false,
-      requiredDate: '',
-      plannedQuarter: '',
-      justification: '',
-      procurementMethod: 'DirectPurchase',
-      notes: '',
-      itemSuppliers: [],
-    });
+    setNewItemForm(createEmptyItemForm());
+  };
+
+  const resetCurrentPlanItem = () => {
+    setSelectedInventoryItem(null);
+    setSelectedItemSuppliers([]);
+    setInventorySearchTerm('');
+    setSupplierSearchTerm('');
+    setNewItemForm(createEmptyItemForm());
   };
 
   const handleAddSupplierToItem = (supplier: BusinessPartnerDto) => {
@@ -221,9 +310,27 @@ export default function ProcurementPlanDetailPage() {
     setNewItemForm({ ...newItemForm, itemSuppliers: updatedSuppliers });
   };
 
+  const handleMarketAnalysisSelect = (value: string) => {
+    if (value === 'none') {
+      setNewItemForm({ ...newItemForm, marketAnalysisId: undefined });
+      return;
+    }
+
+    const analysis = marketAnalyses.find((item) => item.id === value);
+    setNewItemForm({
+      ...newItemForm,
+      marketAnalysisId: value,
+      itemCategory: newItemForm.itemCategory || analysis?.itemCategory || '',
+      itemDescription: newItemForm.itemDescription || analysis?.itemDescription || analysis?.title || '',
+      estimatedUnitPrice: newItemForm.estimatedUnitPrice && newItemForm.estimatedUnitPrice > 0
+        ? newItemForm.estimatedUnitPrice
+        : analysis?.currentMarketPrice || 0,
+    });
+  };
+
   const filteredSuppliers = suppliers.filter(s =>
-    s.partnerName.toLowerCase().includes(supplierSearchTerm.toLowerCase()) ||
-    s.partnerCode.toLowerCase().includes(supplierSearchTerm.toLowerCase())
+    (s.partnerName || '').toLowerCase().includes(supplierSearchTerm.toLowerCase()) ||
+    (s.partnerCode || '').toLowerCase().includes(supplierSearchTerm.toLowerCase())
   );
 
   const handleSelectInventoryItem = (item: InventoryItemDto) => {
@@ -239,25 +346,80 @@ export default function ProcurementPlanDetailPage() {
     });
   };
 
-  const handleAddItem = async () => {
-    if (!newItemForm.itemDescription.trim()) {
-      toast.error('Item description is required');
+  const validateItemForm = (item: CreateProcurementPlanItemDto) => {
+    if (!item.itemDescription.trim()) return 'Item description is required';
+    if (!item.unitOfMeasure?.trim()) return 'Unit of measure is required';
+    if (Number(item.estimatedQuantity) <= 0) return 'Quantity must be greater than 0';
+    if (Number(item.estimatedUnitPrice) < 0) return 'Unit cost cannot be negative';
+    return null;
+  };
+
+  const hasCurrentItemDraft = () =>
+    Boolean(
+      selectedInventoryItem ||
+      newItemForm.inventoryItemId ||
+      newItemForm.itemDescription.trim() ||
+      newItemForm.specifications?.trim() ||
+      newItemForm.justification?.trim() ||
+      selectedItemSuppliers.length > 0
+    );
+
+  const buildCurrentPlanItem = (): CreateProcurementPlanItemDto => ({
+    ...newItemForm,
+    estimatedQuantity: Number(newItemForm.estimatedQuantity) || 0,
+    estimatedUnitPrice: Number(newItemForm.estimatedUnitPrice) || 0,
+    approvedBudgetAmount: newItemForm.approvedBudgetAmount !== undefined ? Number(newItemForm.approvedBudgetAmount) || 0 : undefined,
+    itemSuppliers: selectedItemSuppliers,
+  });
+
+  const handleAddItem = () => {
+    const itemToQueue = buildCurrentPlanItem();
+    const validationError = validateItemForm(itemToQueue);
+    if (validationError) {
+      toast.error(validationError);
       return;
     }
-    if (newItemForm.estimatedQuantity <= 0) {
-      toast.error('Quantity must be greater than 0');
+
+    setPendingPlanItems((items) => [...items, itemToQueue]);
+    resetCurrentPlanItem();
+    toast.success('Item added to list');
+  };
+
+  const handleRemovePendingPlanItem = (index: number) => {
+    setPendingPlanItems((items) => items.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const handleSavePendingItems = async () => {
+    const itemsToSave = [...pendingPlanItems];
+
+    if (hasCurrentItemDraft()) {
+      const currentItem = buildCurrentPlanItem();
+      const validationError = validateItemForm(currentItem);
+      if (validationError) {
+        toast.error(validationError);
+        return;
+      }
+      itemsToSave.push(currentItem);
+    }
+
+    if (itemsToSave.length === 0) {
+      toast.error('Add at least one item before saving');
       return;
     }
 
     try {
       setAddingItem(true);
-      await procurementPlanService.addItem(planId, newItemForm);
-      toast.success('Item added successfully');
+      for (const item of itemsToSave) {
+        await procurementPlanService.addItem(planId, item);
+      }
+      toast.success(`${itemsToSave.length} item${itemsToSave.length === 1 ? '' : 's'} added successfully`);
+      setPendingPlanItems([]);
+      resetCurrentPlanItem();
       setAddItemDialogOpen(false);
       loadPlanDetails(); // Refresh plan data
     } catch (error) {
-      console.error('Error adding item:', error);
-      toast.error('Failed to add item');
+      console.error('Error adding items:', error);
+      toast.error('Failed to save plan items');
     } finally {
       setAddingItem(false);
     }
@@ -279,11 +441,14 @@ export default function ProcurementPlanDetailPage() {
     }
   };
 
-  const filteredInventoryItems = inventoryItems.filter(item =>
-    item.name?.toLowerCase().includes(inventorySearchTerm.toLowerCase()) ||
-    item.itemCode?.toLowerCase().includes(inventorySearchTerm.toLowerCase()) ||
-    item.categoryName?.toLowerCase().includes(inventorySearchTerm.toLowerCase())
-  );
+  const inventorySearchQuery = inventorySearchTerm.trim().toLowerCase();
+  const filteredInventoryItems = inventorySearchQuery.length >= 2
+    ? inventoryItems.filter(item =>
+        (item.name || '').toLowerCase().includes(inventorySearchQuery) ||
+        (item.itemCode || '').toLowerCase().includes(inventorySearchQuery) ||
+        (item.categoryName || '').toLowerCase().includes(inventorySearchQuery)
+      )
+    : [];
 
   const getStatusBadge = (status: string) => {
     const statusConfig: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ReactNode }> = {
@@ -328,70 +493,96 @@ export default function ProcurementPlanDetailPage() {
     }
   };
 
-  const handleSubmitForApproval = async () => {
+  const itemBatchSaveCount = pendingPlanItems.length + (hasCurrentItemDraft() ? 1 : 0);
+  const pendingPlanItemsTotal = pendingPlanItems.reduce((total, item) => total + getItemEstimatedTotal(item), 0);
+  const unitOfMeasureOptions = buildUnitOfMeasureOptions(unitsOfMeasure, newItemForm.unitOfMeasure);
+
+  const workflow = useWorkflowRecord({
+    entityType: 'ProcurementPlan',
+    entityId: planId,
+    entityLabel: 'Procurement Plan',
+    entityNumber: plan?.planNumber,
+    status: plan?.status ?? '',
+    canSubmit: plan?.status === 'Draft',
+    canApproveReject: plan?.status === 'Submitted' || plan?.status === 'UnderReview',
+    enabled: Boolean(plan),
+    commands: {
+      submit: async () => { await procurementPlanService.submitForApproval(planId, { comments: '' }); },
+      approve: async ({ comments }) => {
+        if (!plan) return;
+        await procurementPlanService.approvePlan(planId, {
+          isApproved: true,
+          approvedBudget: plan.approvedBudget || plan.totalEstimatedBudget,
+          comments: comments || undefined,
+          autoGenerateSchedules: true,
+          autoLinkBudget: true,
+        });
+      },
+      reject: async ({ comments }) => {
+        await procurementPlanService.approvePlan(planId, {
+          isApproved: false,
+          comments: comments || undefined,
+          autoGenerateSchedules: false,
+          autoLinkBudget: false,
+        });
+      },
+      afterAction: loadPlanDetails,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
+
+  const handleOpenPublishDialog = () => {
+    setPublishComments('');
+    setPublishDialogOpen(true);
+  };
+
+  const handlePublishPlan = async () => {
     if (!plan) return;
+
     try {
-      setActionLoading(true);
-      await procurementPlanService.submitForApproval(planId, { comments: '' });
-      toast.success('Plan submitted for approval');
+      setPublishLoading(true);
+      await procurementPlanService.publishPlan(planId, {
+        comments: publishComments || undefined,
+      });
+      toast.success('Procurement plan published to execution');
+      setPublishDialogOpen(false);
       loadPlanDetails();
     } catch (error) {
-      console.error('Error submitting plan:', error);
-      toast.error('Failed to submit plan for approval');
+      console.error('Error publishing plan:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to publish procurement plan');
     } finally {
-      setActionLoading(false);
+      setPublishLoading(false);
     }
   };
 
-  const handleOpenApprovalDialog = async (action: 'approve' | 'reject') => {
-    setApprovalAction(action);
-    setApprovalComments('');
-    setApprovedBudget(plan?.totalEstimatedBudget);
-    setAutoLinkBudget(true);
-    setSelectedBudgetId(undefined);
-    setApprovalDialogOpen(true);
+  const canAmendPlan = plan && ['Approved', 'Active', 'Completed'].includes(plan.status);
 
-    // Load available budgets for linking when approving
-    if (action === 'approve' && plan) {
-      try {
-        setLoadingBudgets(true);
-        const budgets = await procurementBudgetService.getAvailableBudgetsForLinking(plan.departmentId, plan.fiscalYear);
-        setAvailableBudgets(budgets.map(b => ({
-          id: b.id,
-          budgetCode: b.budgetCode,
-          allocatedAmount: b.allocatedAmount,
-          remainingAmount: b.remainingAmount
-        })));
-      } catch (error) {
-        console.error('Error loading available budgets:', error);
-        setAvailableBudgets([]);
-      } finally {
-        setLoadingBudgets(false);
-      }
-    }
+  const handleOpenAmendmentDialog = () => {
+    if (!plan) return;
+    setAmendmentReason('');
+    setAmendmentTitle(`${plan.title} - Amendment ${plan.revisionNumber + 1}`);
+    setAmendmentDescription(plan.description || '');
+    setAmendmentDialogOpen(true);
   };
 
-  const handleApprovalSubmit = async () => {
-    if (!plan) return;
+  const handleCreateAmendment = async () => {
+    if (!plan || !amendmentReason.trim()) return;
+
     try {
-      setApprovalLoading(true);
-      const dto: ApproveProcurementPlanDto = {
-        isApproved: approvalAction === 'approve',
-        approvedBudget: approvalAction === 'approve' ? approvedBudget : undefined,
-        comments: approvalComments || undefined,
-        autoGenerateSchedules: approvalAction === 'approve' ? autoGenerateSchedules : undefined,
-        autoLinkBudget: approvalAction === 'approve' ? autoLinkBudget : undefined,
-        budgetId: approvalAction === 'approve' && !autoLinkBudget ? selectedBudgetId : undefined,
-      };
-      await procurementPlanService.approvePlan(planId, dto);
-      toast.success(approvalAction === 'approve' ? 'Plan approved successfully' : 'Plan rejected');
-      setApprovalDialogOpen(false);
-      loadPlanDetails();
+      setAmendmentLoading(true);
+      const amendment = await procurementPlanService.createAmendment(plan.id, {
+        reason: amendmentReason.trim(),
+        title: amendmentTitle.trim() || undefined,
+        description: amendmentDescription.trim() || undefined,
+      });
+      toast.success('Draft amendment created');
+      setAmendmentDialogOpen(false);
+      router.push(`/procurement/planning/plans/${amendment.id}`);
     } catch (error) {
-      console.error('Error processing approval:', error);
-      toast.error(`Failed to ${approvalAction} plan`);
+      console.error('Error creating amendment:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to create amendment');
     } finally {
-      setApprovalLoading(false);
+      setAmendmentLoading(false);
     }
   };
 
@@ -551,7 +742,7 @@ export default function ProcurementPlanDetailPage() {
   };
 
   const canConvertItem = (item: ProcurementPlanItemDto) => {
-    return plan?.status === 'Approved' &&
+    return plan?.status === 'Active' &&
            (item.status === 'Approved' || item.status === 'Planned') &&
            !item.tenderId &&
            !item.purchaseOrderId;
@@ -632,36 +823,26 @@ export default function ProcurementPlanDetailPage() {
         <div className="flex items-center gap-2">
           {getStatusBadge(plan.status)}
           {plan.status === 'Draft' && (
-            <>
-              <Button variant="outline" onClick={() => router.push(`/procurement/planning/plans/${planId}/edit`)}>
-                <Edit className="h-4 w-4 mr-2" />
-                Edit
-              </Button>
-              <Button onClick={handleSubmitForApproval} disabled={actionLoading}>
-                {actionLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
-                Submit for Approval
-              </Button>
-            </>
+            <Button variant="outline" onClick={() => router.push(`/procurement/planning/plans/${planId}/edit`)}>
+              <Edit className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
           )}
-          {(plan.status === 'Submitted' || plan.status === 'UnderReview') && (
-            <>
-              <Button
-                onClick={() => handleOpenApprovalDialog('approve')}
-                disabled={approvalLoading}
-                className="bg-green-600 hover:bg-green-700"
-              >
-                <ThumbsUp className="h-4 w-4 mr-2" />
-                Approve
-              </Button>
-              <Button
-                onClick={() => handleOpenApprovalDialog('reject')}
-                disabled={approvalLoading}
-                variant="destructive"
-              >
-                <ThumbsDown className="h-4 w-4 mr-2" />
-                Reject
-              </Button>
-            </>
+          <WorkflowApprovalActions
+            {...workflow.actionProps}
+            showStepBadge
+          />
+          {plan.status === 'Approved' && (
+            <Button onClick={handleOpenPublishDialog} disabled={publishLoading || !plan.items?.length}>
+              {publishLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileCheck className="h-4 w-4 mr-2" />}
+              Publish to Execution
+            </Button>
+          )}
+          {canAmendPlan && (
+            <Button variant="outline" onClick={handleOpenAmendmentDialog}>
+              <GitBranch className="h-4 w-4 mr-2" />
+              Amend
+            </Button>
           )}
         </div>
       </div>
@@ -717,6 +898,11 @@ export default function ProcurementPlanDetailPage() {
             <Calendar className="h-4 w-4 mr-2" />
             Schedule
           </TabsTrigger>
+          <TabsTrigger value="versions">
+            <History className="h-4 w-4 mr-2" />
+            Versions
+          </TabsTrigger>
+          <WorkflowTabTrigger />
         </TabsList>
 
         <TabsContent value="details" className="space-y-4">
@@ -738,6 +924,12 @@ export default function ProcurementPlanDetailPage() {
                 <p className="mt-1">{plan.fiscalYear}</p>
               </div>
               <div>
+                <label className="text-sm font-medium text-gray-500">Planning Cycle</label>
+                <p className="mt-1">
+                  {plan.planningCycle || 'Annual'}{plan.planningQuarter ? ` - ${plan.planningQuarter}` : ''}
+                </p>
+              </div>
+              <div>
                 <label className="text-sm font-medium text-gray-500">Status</label>
                 <div className="mt-1">{getStatusBadge(plan.status)}</div>
               </div>
@@ -757,10 +949,28 @@ export default function ProcurementPlanDetailPage() {
                 <label className="text-sm font-medium text-gray-500">Currency</label>
                 <p className="mt-1">{plan.currency}</p>
               </div>
+              {plan.publishedDate && (
+                <>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Published By</label>
+                    <p className="mt-1">{plan.publishedByName || '-'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Published Date</label>
+                    <p className="mt-1">{formatDate(plan.publishedDate)}</p>
+                  </div>
+                </>
+              )}
               <div className="col-span-2">
                 <label className="text-sm font-medium text-gray-500">Description</label>
                 <p className="mt-1">{plan.description || '-'}</p>
               </div>
+              {plan.publishComments && (
+                <div className="col-span-2">
+                  <label className="text-sm font-medium text-gray-500">Publish Comments</label>
+                  <p className="mt-1">{plan.publishComments}</p>
+                </div>
+              )}
               {plan.notes && (
                 <div className="col-span-2">
                   <label className="text-sm font-medium text-gray-500">Notes</label>
@@ -813,6 +1023,7 @@ export default function ProcurementPlanDetailPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item Description</TableHead>
+                      <TableHead>Budget Line</TableHead>
                       <TableHead>Quantity</TableHead>
                       <TableHead>Unit Cost</TableHead>
                       <TableHead>Total</TableHead>
@@ -837,6 +1048,14 @@ export default function ProcurementPlanDetailPage() {
                               <div className="text-xs text-green-600 mt-1">
                                 → PO created
                               </div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm">
+                            <div>{item.budgetLineCode || '-'}</div>
+                            {item.budgetCategoryName && (
+                              <div className="text-xs text-gray-500">{item.budgetCategoryName}</div>
                             )}
                           </div>
                         </TableCell>
@@ -941,32 +1160,147 @@ export default function ProcurementPlanDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="versions">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Version History</CardTitle>
+                <CardDescription>Original plan, amendments, and draft revisions linked to this plan.</CardDescription>
+              </div>
+              {canAmendPlan && (
+                <Button variant="outline" onClick={handleOpenAmendmentDialog}>
+                  <GitBranch className="h-4 w-4 mr-2" />
+                  Create Amendment
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent>
+              {loadingVersions ? (
+                <div className="flex items-center justify-center py-8 text-gray-500">
+                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                  Loading versions...
+                </div>
+              ) : versionHistory.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No linked versions found.</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Revision</TableHead>
+                      <TableHead>Plan</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Budget</TableHead>
+                      <TableHead>Prepared</TableHead>
+                      <TableHead className="w-[90px]">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {versionHistory.map((version) => (
+                      <TableRow key={version.id}>
+                        <TableCell>Rev {version.revisionNumber}</TableCell>
+                        <TableCell>
+                          <div className="font-medium">{version.planNumber}</div>
+                          <div className="text-xs text-gray-500">{version.title}</div>
+                        </TableCell>
+                        <TableCell>{getStatusBadge(version.status)}</TableCell>
+                        <TableCell>{formatCurrency(version.totalEstimatedBudget, version.currency)}</TableCell>
+                        <TableCell>{formatDate(version.preparedDate || version.createdAt)}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => router.push(`/procurement/planning/plans/${version.id}`)}
+                          >
+                            Open
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <WorkflowTabContent
+          {...workflow.actionProps}
+          entityType="ProcurementPlan"
+          showActions
+        />
       </Tabs>
 
       {/* Add Item Dialog */}
       <Dialog open={addItemDialogOpen} onOpenChange={setAddItemDialogOpen}>
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Add Item to Procurement Plan</DialogTitle>
-            <DialogDescription>
-              Select an item from inventory or enter details manually
-            </DialogDescription>
+        <DialogContent className="max-w-[96vw] xl:max-w-7xl max-h-[92vh] overflow-hidden flex flex-col">
+          <DialogHeader className="pb-3 border-b">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <DialogTitle>Add Items to Procurement Plan</DialogTitle>
+                <DialogDescription>
+                  Select a product, enter the required details, add it to the list, then save the batch.
+                </DialogDescription>
+              </div>
+              <Badge variant="outline" className="w-fit">
+                Costs in {plan?.currency || 'USD'}
+              </Badge>
+            </div>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-6">
-            {/* Left: Inventory Selection */}
-            <div className="space-y-4 border-r pr-6">
-              <h4 className="font-medium">Select from Inventory</h4>
+          <ProcurementPlanItemDialogBody
+            currency={plan?.currency || 'USD'}
+            form={newItemForm}
+            setForm={setNewItemForm}
+            inventorySearchTerm={inventorySearchTerm}
+            onInventorySearchTermChange={setInventorySearchTerm}
+            inventoryResults={filteredInventoryItems}
+            loadingInventory={loadingInventory}
+            selectedInventoryItem={selectedInventoryItem}
+            onSelectInventoryItem={handleSelectInventoryItem}
+            unitOfMeasureOptions={unitOfMeasureOptions}
+            loadingUnitsOfMeasure={loadingUnitsOfMeasure}
+            marketAnalyses={marketAnalyses}
+            loadingMarketAnalyses={loadingMarketAnalyses}
+            onMarketAnalysisSelect={handleMarketAnalysisSelect}
+            suppliers={suppliers}
+            supplierSearchTerm={supplierSearchTerm}
+            onSupplierSearchTermChange={setSupplierSearchTerm}
+            filteredSuppliers={filteredSuppliers}
+            loadingSuppliers={loadingSuppliers}
+            selectedItemSuppliers={selectedItemSuppliers}
+            onAddSupplier={handleAddSupplierToItem}
+            onUpdateSupplier={handleUpdateItemSupplier}
+            onRemoveSupplier={handleRemoveSupplierFromItem}
+            pendingPlanItems={pendingPlanItems}
+            pendingPlanItemsTotal={pendingPlanItemsTotal}
+            onAddCurrentItem={handleAddItem}
+            onClearCurrentItem={resetCurrentPlanItem}
+            onRemovePendingPlanItem={handleRemovePendingPlanItem}
+          />
+
+          <Tabs defaultValue="details" className="hidden">
+            <TabsList className="grid w-full max-w-md grid-cols-2">
+              <TabsTrigger value="details">Item Details</TabsTrigger>
+              <TabsTrigger value="suppliers">Suppliers ({selectedItemSuppliers.length})</TabsTrigger>
+            </TabsList>
+            <TabsContent value="details" className="mt-3 min-h-0">
+              <div className="grid grid-cols-1 lg:grid-cols-[minmax(260px,0.85fr)_minmax(460px,1.2fr)_minmax(280px,0.85fr)] gap-4 overflow-y-auto pr-1">
+                <div className="space-y-3 lg:border-r lg:pr-4">
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium">Products</h4>
+                <Badge variant="secondary">{filteredInventoryItems.length}</Badge>
+              </div>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
                   placeholder="Search inventory items..."
                   value={inventorySearchTerm}
                   onChange={(e) => setInventorySearchTerm(e.target.value)}
-                  className="pl-10"
+                  className="h-9 pl-9"
                 />
               </div>
-              <div className="h-[300px] overflow-y-auto border rounded-lg">
+              <div className="h-[360px] lg:h-[56vh] overflow-y-auto border rounded-md">
                 {loadingInventory ? (
                   <div className="flex items-center justify-center h-full">
                     <Loader2 className="h-6 w-6 animate-spin" />
@@ -980,33 +1314,38 @@ export default function ProcurementPlanDetailPage() {
                     {filteredInventoryItems.map((item) => (
                       <div
                         key={item.id}
-                        className={`p-3 cursor-pointer hover:bg-gray-50 ${
+                        className={`p-2.5 cursor-pointer hover:bg-gray-50 ${
                           selectedInventoryItem?.id === item.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''
                         }`}
                         onClick={() => handleSelectInventoryItem(item)}
                       >
-                        <div className="font-medium">{item.name}</div>
-                        <div className="text-sm text-gray-500">
+                        <div className="font-medium text-sm leading-tight">{item.name}</div>
+                        <div className="text-xs text-gray-500 mt-1">
                           {item.itemCode} | {item.categoryName || 'No Category'} | {item.unitOfMeasure}
                         </div>
-                        <div className="text-sm text-gray-500">
-                          Cost: {formatCurrency(item.standardCost || item.averageCost, plan?.currency || 'USD')} | Stock: {item.availableStock}
+                        <div className="text-xs text-gray-500">
+                          Cost: {formatCurrency(item.standardCost || item.averageCost || 0, plan?.currency || 'USD')} | Stock: {item.availableStock}
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-            </div>
+                </div>
 
-            {/* Right: Item Details Form */}
-            <div className="space-y-4">
-              <h4 className="font-medium">Item Details</h4>
-              <div className="space-y-3">
+                <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium">Item Details</h4>
+                <Badge variant="outline">
+                  Line total: {formatCurrency(getItemEstimatedTotal(newItemForm), plan?.currency || 'USD')}
+                </Badge>
+              </div>
+              <div className="space-y-2">
                 <div className="space-y-1">
                   <Label htmlFor="itemDescription">Item Description *</Label>
                   <Input
                     id="itemDescription"
+                    className="h-9"
                     value={newItemForm.itemDescription}
                     onChange={(e) => setNewItemForm({ ...newItemForm, itemDescription: e.target.value })}
                     placeholder="Enter item description"
@@ -1015,12 +1354,22 @@ export default function ProcurementPlanDetailPage() {
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <Label htmlFor="unitOfMeasure">Unit of Measure</Label>
-                    <Input
-                      id="unitOfMeasure"
-                      value={newItemForm.unitOfMeasure || 'EA'}
-                      onChange={(e) => setNewItemForm({ ...newItemForm, unitOfMeasure: e.target.value })}
-                      placeholder="EA"
-                    />
+                    <Select
+                      value={newItemForm.unitOfMeasure || undefined}
+                      onValueChange={(value) => setNewItemForm({ ...newItemForm, unitOfMeasure: value })}
+                      disabled={loadingUnitsOfMeasure && unitOfMeasureOptions.length === 0}
+                    >
+                      <SelectTrigger id="unitOfMeasure" className="h-9">
+                        <SelectValue placeholder={loadingUnitsOfMeasure ? 'Loading UOMs...' : 'Select UOM'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {unitOfMeasureOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="estimatedQuantity">Quantity *</Label>
@@ -1028,17 +1377,19 @@ export default function ProcurementPlanDetailPage() {
                       id="estimatedQuantity"
                       type="number"
                       min={1}
+                      className="h-9"
                       value={newItemForm.estimatedQuantity}
                       onChange={(e) => setNewItemForm({ ...newItemForm, estimatedQuantity: parseFloat(e.target.value) || 0 })}
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="estimatedUnitPrice">Unit Cost</Label>
+                    <Label htmlFor="estimatedUnitPrice">Unit Cost ({plan?.currency || 'USD'})</Label>
                     <Input
                       id="estimatedUnitPrice"
                       type="number"
                       min={0}
                       step={0.01}
+                      className="h-9"
                       value={newItemForm.estimatedUnitPrice || 0}
                       onChange={(e) => setNewItemForm({ ...newItemForm, estimatedUnitPrice: parseFloat(e.target.value) || 0 })}
                     />
@@ -1051,7 +1402,7 @@ export default function ProcurementPlanDetailPage() {
                       value={newItemForm.priority || 'Medium'}
                       onValueChange={(value) => setNewItemForm({ ...newItemForm, priority: value })}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="h-9">
                         <SelectValue placeholder="Select priority" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1067,10 +1418,104 @@ export default function ProcurementPlanDetailPage() {
                     <Input
                       id="requiredDate"
                       type="date"
+                      className="h-9"
                       value={newItemForm.requiredDate || ''}
                       onChange={(e) => setNewItemForm({ ...newItemForm, requiredDate: e.target.value })}
                     />
                   </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="plannedQuarter">Quarter</Label>
+                    <Select
+                      value={newItemForm.plannedQuarter || ''}
+                      onValueChange={(value) => setNewItemForm({ ...newItemForm, plannedQuarter: value })}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select quarter" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Q1">Q1</SelectItem>
+                        <SelectItem value="Q2">Q2</SelectItem>
+                        <SelectItem value="Q3">Q3</SelectItem>
+                        <SelectItem value="Q4">Q4</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="procurementMethod">Method</Label>
+                    <Select
+                      value={newItemForm.procurementMethod || 'DirectPurchase'}
+                      onValueChange={(value) => setNewItemForm({ ...newItemForm, procurementMethod: value })}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select method" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="DirectPurchase">Direct Purchase</SelectItem>
+                        <SelectItem value="RFQ">RFQ</SelectItem>
+                        <SelectItem value="Tender">Tender</SelectItem>
+                        <SelectItem value="Framework">Framework</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="budgetLineCode">Budget Line</Label>
+                    <Input
+                      id="budgetLineCode"
+                      className="h-9"
+                      value={newItemForm.budgetLineCode || ''}
+                      onChange={(e) => setNewItemForm({ ...newItemForm, budgetLineCode: e.target.value })}
+                      placeholder="Line code"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="budgetCategoryName">Budget Category</Label>
+                    <Input
+                      id="budgetCategoryName"
+                      className="h-9"
+                      value={newItemForm.budgetCategoryName || ''}
+                      onChange={(e) => setNewItemForm({ ...newItemForm, budgetCategoryName: e.target.value })}
+                      placeholder="Category"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="approvedBudgetAmount">Approved Budget</Label>
+                    <Input
+                      id="approvedBudgetAmount"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      className="h-9"
+                      value={newItemForm.approvedBudgetAmount ?? ''}
+                      onChange={(e) => setNewItemForm({
+                        ...newItemForm,
+                        approvedBudgetAmount: e.target.value ? parseFloat(e.target.value) || 0 : undefined,
+                      })}
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label>Market Analysis</Label>
+                  <Select
+                    value={newItemForm.marketAnalysisId || 'none'}
+                    onValueChange={handleMarketAnalysisSelect}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder={loadingMarketAnalyses ? 'Loading analyses...' : 'Select market analysis'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No linked analysis</SelectItem>
+                      {marketAnalyses.map((analysis) => (
+                        <SelectItem key={analysis.id} value={analysis.id}>
+                          {analysis.title} - {formatCurrency(analysis.currentMarketPrice, analysis.currency)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
@@ -1081,6 +1526,7 @@ export default function ProcurementPlanDetailPage() {
                       onChange={(e) => setNewItemForm({ ...newItemForm, specifications: e.target.value })}
                       placeholder="Enter specifications"
                       rows={2}
+                      className="min-h-[68px]"
                     />
                   </div>
                   <div className="space-y-1">
@@ -1091,36 +1537,94 @@ export default function ProcurementPlanDetailPage() {
                       onChange={(e) => setNewItemForm({ ...newItemForm, justification: e.target.value })}
                       placeholder="Enter justification"
                       rows={2}
+                      className="min-h-[68px]"
                     />
                   </div>
                 </div>
+                <div className="flex items-center justify-between rounded-md border bg-gray-50 px-3 py-2">
+                  <div>
+                    <p className="text-xs text-gray-500">Current item cost</p>
+                    <p className="font-semibold">{formatCurrency(getItemEstimatedTotal(newItemForm), plan?.currency || 'USD')}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={resetCurrentPlanItem}>
+                      Clear
+                    </Button>
+                    <Button type="button" size="sm" onClick={handleAddItem}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add to List
+                    </Button>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+                </div>
 
-          {/* Preferred Suppliers Section */}
-          <div className="border-t pt-4 mt-4">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="font-medium flex items-center gap-2">
-                <Users className="h-4 w-4" />
-                Preferred Suppliers
-              </h4>
-            </div>
+                <div className="space-y-3 lg:border-l lg:pl-4">
+                  <div className="space-y-2 rounded-md border p-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-medium">Items to Save</h4>
+                  <Badge variant="secondary">{pendingPlanItems.length}</Badge>
+                </div>
+                <div className="h-[160px] overflow-y-auto rounded-md border">
+                  {pendingPlanItems.length === 0 ? (
+                    <div className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-500">
+                      Added items will appear here before saving to the plan.
+                    </div>
+                  ) : (
+                    <div className="divide-y">
+                      {pendingPlanItems.map((item, index) => (
+                        <div key={`${item.itemDescription}-${index}`} className="flex items-start gap-2 p-2.5">
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium">{item.itemDescription}</div>
+                            <div className="text-xs text-gray-500">
+                              {item.estimatedQuantity} {item.unitOfMeasure || 'EA'} | {formatCurrency(getItemEstimatedTotal(item), plan?.currency || 'USD')}
+                            </div>
+                            {item.itemSuppliers?.length ? (
+                              <div className="text-xs text-gray-500">{item.itemSuppliers.length} supplier(s)</div>
+                            ) : null}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0"
+                            onClick={() => handleRemovePendingPlanItem(index)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Batch total</span>
+                  <span className="font-semibold">
+                    {formatCurrency(pendingPlanItemsTotal, plan?.currency || 'USD')}
+                  </span>
+                </div>
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
 
-            {/* Supplier Search and Add */}
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div className="space-y-2">
-                <Label>Search & Add Supplier</Label>
+            <TabsContent value="suppliers" className="mt-3 min-h-0 overflow-y-auto pr-1">
+              <div className="grid grid-cols-1 lg:grid-cols-[minmax(280px,0.85fr)_minmax(460px,1.15fr)] gap-4">
+                <div className="space-y-2 rounded-md border p-3">
+                <h4 className="font-medium flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Preferred Suppliers
+                </h4>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <Input
                     placeholder="Search suppliers..."
                     value={supplierSearchTerm}
                     onChange={(e) => setSupplierSearchTerm(e.target.value)}
-                    className="pl-10"
+                    className="h-9 pl-9"
                   />
                 </div>
-                <div className="h-[150px] overflow-y-auto border rounded-lg">
+                <div className="h-[110px] overflow-y-auto border rounded-md">
                   {loadingSuppliers ? (
                     <div className="flex items-center justify-center h-full">
                       <Loader2 className="h-5 w-5 animate-spin" />
@@ -1147,12 +1651,12 @@ export default function ProcurementPlanDetailPage() {
                     </div>
                   )}
                 </div>
-              </div>
 
-              {/* Selected Suppliers Grid */}
-              <div className="space-y-2">
+                </div>
+
+                <div className="space-y-2 rounded-md border p-3">
                 <Label>Selected Suppliers ({selectedItemSuppliers.length})</Label>
-                <div className="h-[180px] overflow-y-auto border rounded-lg">
+                <div className="h-[360px] overflow-y-auto border rounded-md">
                   {selectedItemSuppliers.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-gray-500 text-sm">
                       No suppliers selected
@@ -1212,24 +1716,93 @@ export default function ProcurementPlanDetailPage() {
                     </Table>
                   )}
                 </div>
+                </div>
               </div>
+            </TabsContent>
+          </Tabs>
+
+          <DialogFooter className="pt-3 border-t gap-2 sm:justify-between">
+            <div className="text-xs text-gray-500 text-left">
+              Item unit costs are saved using the plan currency: {plan?.currency || 'USD'}.
+            </div>
+            <div className="flex flex-col-reverse sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setAddItemDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSavePendingItems} disabled={addingItem || itemBatchSaveCount === 0}>
+                {addingItem ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Save {itemBatchSaveCount} Item{itemBatchSaveCount === 1 ? '' : 's'}
+                  </>
+                )}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Publish Dialog */}
+      <Dialog open={publishDialogOpen} onOpenChange={setPublishDialogOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileCheck className="h-5 w-5 text-green-600" />
+              Publish to Procurement Execution
+            </DialogTitle>
+            <DialogDescription>
+              Publishing makes this approved plan active for tender, RFQ, and purchase order execution.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="rounded-md border bg-gray-50 p-3 text-sm">
+              <div className="flex justify-between gap-4">
+                <span className="text-gray-500">Plan</span>
+                <span className="font-medium text-right">{plan?.planNumber}</span>
+              </div>
+              <div className="flex justify-between gap-4 mt-2">
+                <span className="text-gray-500">Items</span>
+                <span className="font-medium">{plan?.items?.length || 0}</span>
+              </div>
+              <div className="flex justify-between gap-4 mt-2">
+                <span className="text-gray-500">Budget</span>
+                <span className="font-medium">
+                  {plan ? formatCurrency(plan.approvedBudget || plan.totalEstimatedBudget, plan.currency) : '-'}
+                </span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="publishComments">Publish Comments</Label>
+              <Textarea
+                id="publishComments"
+                value={publishComments}
+                onChange={(e) => setPublishComments(e.target.value)}
+                placeholder="Optional notes for the execution handoff"
+                rows={3}
+              />
             </div>
           </div>
 
-          <DialogFooter className="mt-4">
-            <Button variant="outline" onClick={() => setAddItemDialogOpen(false)}>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPublishDialogOpen(false)} disabled={publishLoading}>
               Cancel
             </Button>
-            <Button onClick={handleAddItem} disabled={addingItem}>
-              {addingItem ? (
+            <Button onClick={handlePublishPlan} disabled={publishLoading}>
+              {publishLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Adding...
+                  Publishing...
                 </>
               ) : (
                 <>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Item
+                  <FileCheck className="h-4 w-4 mr-2" />
+                  Publish Plan
                 </>
               )}
             </Button>
@@ -1237,180 +1810,63 @@ export default function ProcurementPlanDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Approval/Rejection Dialog */}
-      <Dialog open={approvalDialogOpen} onOpenChange={setApprovalDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+      {/* Amendment Dialog */}
+      <Dialog open={amendmentDialogOpen} onOpenChange={setAmendmentDialogOpen}>
+        <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {approvalAction === 'approve' ? (
-                <>
-                  <ThumbsUp className="h-5 w-5 text-green-600" />
-                  Approve Procurement Plan
-                </>
-              ) : (
-                <>
-                  <ThumbsDown className="h-5 w-5 text-red-600" />
-                  Reject Procurement Plan
-                </>
-              )}
+              <GitBranch className="h-5 w-5 text-blue-600" />
+              Create Plan Amendment
             </DialogTitle>
             <DialogDescription>
-              {approvalAction === 'approve'
-                ? 'Review and approve this procurement plan. You can optionally adjust the approved budget.'
-                : 'Provide a reason for rejecting this procurement plan.'}
+              This creates a new draft revision copied from the current plan for controlled changes and approval.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            {/* Plan Summary */}
-            <div className="bg-gray-50 p-4 rounded-lg space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-500">Plan Number:</span>
-                <span className="font-medium">{plan?.planNumber}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-500">Title:</span>
-                <span className="font-medium">{plan?.title}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-500">Estimated Budget:</span>
-                <span className="font-medium">
-                  {plan && formatCurrency(plan.totalEstimatedBudget, plan.currency)}
-                </span>
-              </div>
-            </div>
-
-            {/* Approved Budget (only for approval) */}
-            {approvalAction === 'approve' && (
-              <div className="space-y-2">
-                <Label htmlFor="approvedBudget">Approved Budget</Label>
-                <Input
-                  id="approvedBudget"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={approvedBudget || ''}
-                  onChange={(e) => setApprovedBudget(e.target.value ? parseFloat(e.target.value) : undefined)}
-                  placeholder="Enter approved budget amount"
-                />
-                <p className="text-xs text-gray-500">
-                  Leave as is to approve the estimated budget, or adjust as needed.
-                </p>
-              </div>
-            )}
-
-            {/* Auto-generate schedules (only for approval) */}
-            {approvalAction === 'approve' && (
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="autoGenerateSchedules"
-                  checked={autoGenerateSchedules}
-                  onCheckedChange={(checked) => setAutoGenerateSchedules(checked === true)}
-                />
-                <Label htmlFor="autoGenerateSchedules" className="text-sm font-normal cursor-pointer">
-                  Auto-generate procurement schedules for each plan item
-                </Label>
-              </div>
-            )}
-
-            {/* Budget Linking (only for approval) */}
-            {approvalAction === 'approve' && (
-              <div className="space-y-3 border-t pt-4">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="autoLinkBudget"
-                    checked={autoLinkBudget}
-                    onCheckedChange={(checked) => {
-                      setAutoLinkBudget(checked === true);
-                      if (checked) setSelectedBudgetId(undefined);
-                    }}
-                  />
-                  <Label htmlFor="autoLinkBudget" className="text-sm font-normal cursor-pointer">
-                    Auto-link to matching budget (by department & fiscal year)
-                  </Label>
-                </div>
-
-                {!autoLinkBudget && (
-                  <div className="space-y-2">
-                    <Label htmlFor="budgetSelect">Select Budget to Link</Label>
-                    {loadingBudgets ? (
-                      <div className="flex items-center gap-2 text-sm text-gray-500">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Loading available budgets...
-                      </div>
-                    ) : availableBudgets.length === 0 ? (
-                      <p className="text-sm text-amber-600">
-                        No available budgets found for this department and fiscal year.
-                      </p>
-                    ) : (
-                      <Select value={selectedBudgetId} onValueChange={setSelectedBudgetId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a budget..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableBudgets.map((budget) => (
-                            <SelectItem key={budget.id} value={budget.id}>
-                              {budget.budgetCode} - Remaining: {formatCurrency(budget.remainingAmount)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Comments */}
             <div className="space-y-2">
-              <Label htmlFor="approvalComments">
-                {approvalAction === 'approve' ? 'Comments (Optional)' : 'Reason for Rejection'}
-              </Label>
+              <Label htmlFor="amendmentTitle">Amendment Title</Label>
+              <Input
+                id="amendmentTitle"
+                value={amendmentTitle}
+                onChange={(e) => setAmendmentTitle(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="amendmentDescription">Description</Label>
               <Textarea
-                id="approvalComments"
-                value={approvalComments}
-                onChange={(e) => setApprovalComments(e.target.value)}
-                placeholder={approvalAction === 'approve'
-                  ? 'Add any comments about this approval...'
-                  : 'Please provide a reason for rejecting this plan...'}
+                id="amendmentDescription"
+                value={amendmentDescription}
+                onChange={(e) => setAmendmentDescription(e.target.value)}
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="amendmentReason">Reason *</Label>
+              <Textarea
+                id="amendmentReason"
+                value={amendmentReason}
+                onChange={(e) => setAmendmentReason(e.target.value)}
+                placeholder="Explain why this amendment is required"
                 rows={4}
               />
-              {approvalAction === 'reject' && !approvalComments && (
-                <p className="text-xs text-amber-600">
-                  Please provide a reason for rejection.
-                </p>
-              )}
             </div>
           </div>
 
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setApprovalDialogOpen(false)}
-              disabled={approvalLoading}
-            >
+            <Button variant="outline" onClick={() => setAmendmentDialogOpen(false)} disabled={amendmentLoading}>
               Cancel
             </Button>
-            <Button
-              onClick={handleApprovalSubmit}
-              disabled={approvalLoading || (approvalAction === 'reject' && !approvalComments)}
-              className={approvalAction === 'approve' ? 'bg-green-600 hover:bg-green-700' : ''}
-              variant={approvalAction === 'reject' ? 'destructive' : 'default'}
-            >
-              {approvalLoading ? (
+            <Button onClick={handleCreateAmendment} disabled={amendmentLoading || !amendmentReason.trim()}>
+              {amendmentLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Processing...
-                </>
-              ) : approvalAction === 'approve' ? (
-                <>
-                  <CheckCircle className="h-4 w-4 mr-2" />
-                  Confirm Approval
+                  Creating...
                 </>
               ) : (
                 <>
-                  <XCircle className="h-4 w-4 mr-2" />
-                  Confirm Rejection
+                  <GitBranch className="h-4 w-4 mr-2" />
+                  Create Draft Amendment
                 </>
               )}
             </Button>

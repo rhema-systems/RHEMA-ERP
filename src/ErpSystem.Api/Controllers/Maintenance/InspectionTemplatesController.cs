@@ -12,21 +12,48 @@ public class InspectionTemplatesController : ControllerBase
 {
     private readonly IInspectionTemplateService _service;
     private readonly ILogger<InspectionTemplatesController> _logger;
+    private readonly IConfiguration _configuration;
 
-    public InspectionTemplatesController(IInspectionTemplateService service, ILogger<InspectionTemplatesController> logger)
+    public InspectionTemplatesController(
+        IInspectionTemplateService service,
+        ILogger<InspectionTemplatesController> logger,
+        IConfiguration configuration)
     {
         _service = service;
         _logger = logger;
+        _configuration = configuration;
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<InspectionTemplateDto>>> GetAll([FromQuery] bool activeOnly = false, [FromQuery] string? category = null)
+    public async Task<ActionResult<IEnumerable<InspectionTemplateDto>>> GetAll(
+        [FromQuery] bool activeOnly = false,
+        [FromQuery] string? category = null,
+        [FromQuery] string? sheetType = null,
+        [FromQuery] string? frequency = null,
+        [FromQuery] string? searchTerm = null,
+        [FromQuery] string? templateScope = null,
+        [FromQuery] string? fleetInspectionKind = null,
+        [FromQuery] Guid? assignedAssetCategoryId = null,
+        [FromQuery] Guid? assignedAssetId = null,
+        [FromQuery] bool? isQrEnabled = null,
+        [FromQuery] bool? mobileOfflineEnabled = null)
     {
         try
         {
-            if (activeOnly) return Ok(await _service.GetActiveTemplatesAsync());
-            if (!string.IsNullOrWhiteSpace(category)) return Ok(await _service.GetTemplatesByCategoryAsync(category));
-            return Ok(await _service.GetAllTemplatesAsync());
+            return Ok(await _service.GetTemplatesAsync(new InspectionTemplateFilterDto
+            {
+                SearchTerm = searchTerm,
+                Category = category,
+                SheetType = sheetType,
+                Frequency = frequency,
+                TemplateScope = templateScope,
+                FleetInspectionKind = fleetInspectionKind,
+                AssignedAssetCategoryId = assignedAssetCategoryId,
+                AssignedAssetId = assignedAssetId,
+                IsQrEnabled = isQrEnabled,
+                MobileOfflineEnabled = mobileOfflineEnabled,
+                IsActive = activeOnly ? true : null
+            }));
         }
         catch (Exception ex)
         {
@@ -47,6 +74,56 @@ public class InspectionTemplatesController : ControllerBase
         {
             _logger.LogError(ex, "Error retrieving inspection template {Id}", id);
             return StatusCode(500, "An error occurred while retrieving the template");
+        }
+    }
+
+    [HttpGet("{id:guid}/qr-package")]
+    public async Task<ActionResult<InspectionTemplateQrPackageDto>> GetQrPackage(
+        Guid id,
+        [FromQuery] Guid? assetId = null,
+        [FromQuery] Guid? assetCategoryId = null,
+        [FromQuery] Guid? fleetTripId = null,
+        [FromQuery] string? inspectionKind = null,
+        [FromQuery] bool includeEmbeddedPayload = true,
+        [FromQuery] int maxQrPayloadBytes = 2500)
+    {
+        try
+        {
+            var frontendUrl = _configuration["FrontendUrl"];
+            if (string.IsNullOrWhiteSpace(frontendUrl))
+            {
+                frontendUrl = Request.Headers.Origin.FirstOrDefault();
+            }
+            if (string.IsNullOrWhiteSpace(frontendUrl))
+            {
+                frontendUrl = $"{Request.Scheme}://{Request.Host}";
+            }
+
+            var package = await _service.GetQrPackageAsync(id, new InspectionTemplateQrPackageRequestDto
+            {
+                AssetId = assetId,
+                AssetCategoryId = assetCategoryId,
+                FleetTripId = fleetTripId,
+                InspectionKind = inspectionKind,
+                FrontendBaseUrl = frontendUrl,
+                IncludeEmbeddedPayload = includeEmbeddedPayload,
+                MaxQrPayloadBytes = maxQrPayloadBytes
+            });
+
+            return Ok(package);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating inspection template QR package {Id}", id);
+            return StatusCode(500, "An error occurred while generating the QR package");
         }
     }
 

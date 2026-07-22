@@ -24,6 +24,7 @@ import {
   Engineering as EngineeringIcon
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 
 interface DashboardStats {
   totalAssets: number;
@@ -50,6 +51,7 @@ interface MaintenanceType {
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
 
 const MaintenanceDashboard: React.FC = () => {
+  const { formatMoney } = useMaintenanceCurrency();
   const [activeTab, setActiveTab] = useState(0);
   const [stats, setStats] = useState<DashboardStats>({
     totalAssets: 0,
@@ -224,10 +226,10 @@ const MaintenanceDashboard: React.FC = () => {
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Cost This Month"
-            value={`$${(stats.costThisMonth / 1000).toFixed(0)}k`}
+            value={formatMoney(stats.costThisMonth, 0)}
             icon={<TrendingUpIcon sx={{ fontSize: 40 }} />}
             color="warning.main"
-            subtext="Budget: $180k"
+            subtext={`Budget: ${formatMoney(180000, 0)}`}
           />
         </Grid>
       </Grid>

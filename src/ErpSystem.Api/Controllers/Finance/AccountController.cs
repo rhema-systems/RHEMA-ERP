@@ -143,9 +143,23 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="401">Not authenticated.</response>
         /// <response code="500">Internal server error.</response>
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<AccountDto>>> GetAllAccounts()
+        public async Task<ActionResult<IEnumerable<AccountDto>>> GetAllAccounts(
+            [FromQuery] string? accountType,
+            [FromQuery] string? status,
+            [FromQuery] bool? isMultiCurrency,
+            [FromQuery] string? coaType,
+            [FromQuery] string? search,
+            [FromQuery] int? take,
+            CancellationToken cancellationToken)
         {
-            var accounts = await _accountService.GetAllAsync();
+            var accounts = await _accountService.GetAllAsync(
+                accountType,
+                status,
+                isMultiCurrency,
+                coaType,
+                search,
+                take,
+                cancellationToken);
             return Ok(accounts);
         }
 

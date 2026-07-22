@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Search, Eye, Edit, Plus, Download, RefreshCw, Filter, Trash2, AlertTriangle, Shield } from 'lucide-react';
+import { Search, Eye, Edit, Plus, Download, RefreshCw, Filter, Trash2, AlertTriangle, Shield, PlayCircle, Power, Siren } from 'lucide-react';
 import { toast } from 'sonner';
 import { emergencyProcurementPlanService, type EmergencyProcurementPlanDto } from '@/services/procurementPlanningService';
 import { format } from 'date-fns';
@@ -23,6 +23,7 @@ export default function EmergencyPlansPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [actionPlanId, setActionPlanId] = useState<string | null>(null);
 
   useEffect(() => { loadPlans(); }, [page, statusFilter]);
 
@@ -48,6 +49,30 @@ export default function EmergencyPlansPage() {
   const handleCreateNew = () => router.push('/procurement/planning/emergency-plans/new');
   const getPlanValidFrom = (plan: EmergencyProcurementPlanDto) => plan.validFrom || plan.effectiveDate;
   const getPlanValidTo = (plan: EmergencyProcurementPlanDto) => plan.validTo || plan.expiryDate;
+
+  const handleEmergencyAction = async (plan: EmergencyProcurementPlanDto, action: 'activate' | 'trigger' | 'deactivate') => {
+    if (action === 'trigger' && !confirm(`Trigger emergency procurement for ${plan.planNumber || plan.planCode}?`)) return;
+
+    try {
+      setActionPlanId(plan.id);
+      if (action === 'activate') {
+        await emergencyProcurementPlanService.activatePlan(plan.id);
+        toast.success('Emergency plan activated');
+      } else if (action === 'trigger') {
+        await emergencyProcurementPlanService.triggerPlan(plan.id);
+        toast.success('Emergency procurement triggered');
+      } else {
+        await emergencyProcurementPlanService.deactivatePlan(plan.id);
+        toast.success('Emergency plan deactivated');
+      }
+      await loadPlans();
+    } catch (error) {
+      console.error('Error processing emergency plan action:', error);
+      toast.error('Failed to update emergency plan');
+    } finally {
+      setActionPlanId(null);
+    }
+  };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this emergency plan?')) return;
@@ -86,6 +111,8 @@ export default function EmergencyPlansPage() {
       'Draft': { variant: 'secondary', className: 'bg-gray-100 text-gray-800' },
       'Active': { variant: 'default', className: 'bg-green-100 text-green-800' },
       'Activated': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
+      'Triggered': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
+      'Inactive': { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
       'Expired': { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
       'Archived': { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
     };
@@ -163,7 +190,22 @@ export default function EmergencyPlansPage() {
                       <TableCell>
                         <div className="flex gap-2">
                           <Button variant="ghost" size="sm" onClick={() => handleViewDetails(p.id)} title="View"><Eye className="h-4 w-4" /></Button>
-                          {p.status === 'Draft' && (<><Button variant="ghost" size="sm" onClick={() => handleEdit(p.id)} title="Edit"><Edit className="h-4 w-4" /></Button><Button variant="ghost" size="sm" onClick={() => handleDelete(p.id)} title="Delete"><Trash2 className="h-4 w-4" /></Button></>)}
+                          {p.status === 'Draft' && (
+                            <>
+                              <Button variant="ghost" size="sm" onClick={() => handleEdit(p.id)} title="Edit"><Edit className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" onClick={() => handleEmergencyAction(p, 'activate')} disabled={actionPlanId === p.id} title="Activate"><PlayCircle className="h-4 w-4 text-green-600" /></Button>
+                              <Button variant="ghost" size="sm" onClick={() => handleDelete(p.id)} title="Delete"><Trash2 className="h-4 w-4" /></Button>
+                            </>
+                          )}
+                          {p.status === 'Active' && (
+                            <>
+                              <Button variant="ghost" size="sm" onClick={() => handleEmergencyAction(p, 'trigger')} disabled={actionPlanId === p.id} title="Trigger emergency request"><Siren className="h-4 w-4 text-red-600" /></Button>
+                              <Button variant="ghost" size="sm" onClick={() => handleEmergencyAction(p, 'deactivate')} disabled={actionPlanId === p.id} title="Deactivate"><Power className="h-4 w-4 text-gray-600" /></Button>
+                            </>
+                          )}
+                          {p.status === 'Triggered' && (
+                            <Button variant="ghost" size="sm" onClick={() => handleEmergencyAction(p, 'deactivate')} disabled={actionPlanId === p.id} title="Close emergency trigger"><Power className="h-4 w-4 text-gray-600" /></Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

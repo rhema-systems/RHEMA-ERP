@@ -26,11 +26,12 @@ public class ProcurementSchedulesController : ControllerBase
     public async Task<ActionResult<PagedResult<ProcurementScheduleDto>>> GetSchedules(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 10,
         [FromQuery] string? search = null, [FromQuery] string? status = null,
-        [FromQuery] Guid? departmentId = null, [FromQuery] Guid? planId = null)
+        [FromQuery] Guid? departmentId = null, [FromQuery] Guid? planId = null,
+        [FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null)
     {
         try
         {
-            var result = await _scheduleService.GetSchedulesAsync(page, pageSize, search, status, departmentId, planId);
+            var result = await _scheduleService.GetSchedulesAsync(page, pageSize, search, status, departmentId, planId, startDate, endDate);
             return Ok(result);
         }
         catch (Exception ex)

@@ -6,6 +6,7 @@ export interface Asset {
   assetNumber: string;
   description?: string;
   location?: string;
+  currentSiteLocationId?: string;
   status: 'Active' | 'Inactive' | 'Maintenance' | 'OutOfService' | 'Retired' | 'Disposed';
   criticality: 'Low' | 'Medium' | 'High' | 'Critical';
   assetCategoryId: string;
@@ -174,6 +175,8 @@ export interface WorkOrder {
   actualCompletionDate?: string;
   estimatedHours: number;
   actualHours?: number;
+  billingType?: 'Maintenance' | 'Repairs' | string;
+  fixedAmount?: number;
   estimatedCost: number;
   actualCost?: number;
   completionNotes?: string;
@@ -709,7 +712,7 @@ class MaintenanceApiService {
     formData.append('file', file);
 
     const token = localStorage.getItem('authToken');
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
     const response = await fetch(`${baseUrl}/maintenance/expenses/upload-receipt`, {
       method: 'POST',
       headers: {
@@ -731,7 +734,7 @@ class MaintenanceApiService {
     formData.append('file', file);
 
     const token = localStorage.getItem('authToken');
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
     const response = await fetch(`${baseUrl}/maintenance/work-orders/tasks/${taskId}/photo`, {
       method: 'POST',
       headers: {

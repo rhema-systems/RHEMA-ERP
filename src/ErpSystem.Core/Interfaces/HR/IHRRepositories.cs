@@ -198,6 +198,28 @@ public interface IBankBranchRepository : IGenericRepository<EmployeeBankBranch>
     Task<bool> CodeExistsAsync(Guid tenantId, Guid bankId, string code, Guid? excludeId = null);
 }
 
+/// <summary>
+/// Repository interface for bank (financial institution) operations
+/// </summary>
+public interface IEmployeeBankRepository : IGenericRepository<EmployeeBank>
+{
+    Task<IEnumerable<EmployeeBank>> GetActiveAsync(Guid tenantId);
+    Task<EmployeeBank?> GetByCodeAsync(Guid tenantId, string code);
+    Task<EmployeeBank?> GetWithBranchesAsync(Guid tenantId, Guid id);
+    Task<bool> CodeExistsAsync(Guid tenantId, string code, Guid? excludeId = null);
+}
+
+/// <summary>
+/// Repository interface for bank branch operations
+/// </summary>
+public interface IEmployeeBankBranchRepository : IGenericRepository<EmployeeBankBranch>
+{
+    Task<IEnumerable<EmployeeBankBranch>> GetByBankAsync(Guid tenantId, Guid bankId);
+    Task<IEnumerable<EmployeeBankBranch>> GetActiveByBankAsync(Guid tenantId, Guid bankId);
+    Task<EmployeeBankBranch?> GetByCodeAsync(Guid tenantId, Guid bankId, string code);
+    Task<bool> CodeExistsAsync(Guid tenantId, Guid bankId, string code, Guid? excludeId = null);
+}
+
 #endregion Employee Management Repositories
 
 #region Organizational Structure Repositories

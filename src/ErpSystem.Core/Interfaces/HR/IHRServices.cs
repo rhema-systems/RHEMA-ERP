@@ -66,6 +66,7 @@ public interface IEmployeeService
     Task<EmployeeContactDto> UpdateContactAsync(UpdateEmployeeContactDto dto, CancellationToken cancellationToken = default);
     Task<bool> RemoveContactAsync(Guid contactId, CancellationToken cancellationToken = default);
     Task<EmployeeContactDto> SetPrimaryContactAsync(Guid contactId, CancellationToken cancellationToken = default);
+    Task<EmployeeContactDto?> GetContactByIdAsync(Guid contactId, CancellationToken cancellationToken = default);
 
     // Dependents
     Task<IEnumerable<EmployeeDependentReadDto>> GetDependentsAsync(Guid employeeId, CancellationToken cancellationToken = default);

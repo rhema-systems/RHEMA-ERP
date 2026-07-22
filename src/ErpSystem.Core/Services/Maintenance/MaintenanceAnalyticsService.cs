@@ -89,7 +89,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
 
                 UpcomingMaintenance = new List<MaintenanceScheduleDto>(), // TODO: Convert UpcomingMaintenanceDto to MaintenanceScheduleDto
 
-                RecentAlerts = await GetRecentAlertsAsync(10),
+                RecentAlerts = await BuildRecentAlertsAsync(10),
 
                 TopIssues = new List<string>() // TODO: Convert TopIssueDto to string list
             };
@@ -119,7 +119,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
                 PageSize = int.MaxValue
             });
 
-            var completedWorkOrders = workOrders.Data.Where(wo => wo.Status == "Completed").ToList();
+            var completedWorkOrders = workOrders.Data.Where(wo => IsCompletedWorkOrderStatus(wo.Status)).ToList();
             var totalWorkOrders = workOrders.Data.Count();
 
             // Calculate MTTR (Mean Time To Repair)
@@ -220,32 +220,43 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
                 PageSize = int.MaxValue
             });
 
-            var completedWorkOrders = workOrders.Data.Where(wo => wo.Status == "Completed").ToList();
+            var periodWorkOrders = workOrders.Data.ToList();
+            var completedWorkOrders = periodWorkOrders.Where(wo => IsCompletedWorkOrderStatus(wo.Status)).ToList();
+            var costedWorkOrders = periodWorkOrders
+                .Where(wo => (wo.ActualCost > 0 ? wo.ActualCost : wo.EstimatedCost) > 0)
+                .ToList();
+            var totalCost = costedWorkOrders.Sum(wo => wo.ActualCost > 0 ? wo.ActualCost : wo.EstimatedCost);
+            var plannedCost = costedWorkOrders
+                .Where(wo =>
+                    string.Equals(wo.WorkOrderSource, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+                    ContainsAny(wo.MaintenanceTypeName, "preventive", "planned", "scheduled") ||
+                    ContainsAny(wo.WorkOrderTypeName, "preventive", "planned", "scheduled"))
+                .Sum(wo => wo.ActualCost > 0 ? wo.ActualCost : wo.EstimatedCost);
+            var unplannedCost = totalCost - plannedCost;
 
             return new MaintenanceCostAnalysisDto
             {
                 ReportPeriod = $"{startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}",
 
-                TotalMaintenanceCost = completedWorkOrders.Sum(wo => wo.ActualCost),
-                LaborCost = completedWorkOrders.Sum(wo => CalculateLaborCost(wo)),
-                PartsCost = completedWorkOrders.Sum(wo => CalculatePartsCost(wo)),
-                ContractorCost = completedWorkOrders.Sum(wo => CalculateContractorCost(wo)),
+                TotalCost = totalCost,
+                TotalMaintenanceCost = totalCost,
+                PreventiveCost = plannedCost,
+                CorrectiveCost = unplannedCost,
+                PlannedMaintenanceCost = plannedCost,
+                UnplannedMaintenanceCost = unplannedCost,
+                LaborCost = 0,
+                PartsCost = 0,
+                MaterialsCost = 0,
+                ContractorCost = 0,
 
-                PlannedMaintenanceCost = completedWorkOrders
-                    .Where(wo => wo.WorkOrderSource == "Scheduled")
-                    .Sum(wo => wo.ActualCost),
+                CostByCategory = BuildCostByCategory(costedWorkOrders, totalCost),
+                CostByAsset = BuildCostByAsset(costedWorkOrders, totalCost),
+                CostByMonth = BuildCostByMonth(costedWorkOrders),
+                CostTrend = BuildCostTrend(costedWorkOrders, startDate, endDate),
 
-                UnplannedMaintenanceCost = completedWorkOrders
-                    .Where(wo => wo.WorkOrderSource != "Scheduled")
-                    .Sum(wo => wo.ActualCost),
-
-                CostByCategory = new List<CostByCategoryDto>(), // TODO: Convert Dictionary to List
-                CostByAsset = new List<CostByAssetDto>(), // TODO: Convert Dictionary to List
-                CostTrend = new List<TrendDataPointDto>(), // TODO: Convert MonthlyCostDto to TrendDataPointDto
-
-                BudgetVariance = (double)await CalculateBudgetVarianceAsync(startDate, endDate),
+                BudgetVariance = 0,
                 CostPerWorkOrder = completedWorkOrders.Any() ?
-                    (double)(completedWorkOrders.Sum(wo => wo.ActualCost) / completedWorkOrders.Count) : 0
+                    (double)(totalCost / completedWorkOrders.Count) : 0
             };
         }
         catch (Exception ex)
@@ -276,27 +287,28 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
 
     private async Task<WorkOrderMetricsDto> GetWorkOrderMetricsAsync()
     {
-        var endDate = DateTime.Now;
-        var startDate = endDate.AddMonths(-1);
-
         var workOrders = await _workOrderService.GetWorkOrdersPagedAsync(new WorkOrderFilterDto
         {
-            StartDate = startDate,
-            EndDate = endDate,
             Page = 1,
             PageSize = int.MaxValue
         });
 
-        var completedWorkOrders = workOrders.Data.Where(wo => wo.Status == "Completed").ToList();
+        var workOrderItems = workOrders.Data.ToList();
+        var completedWorkOrders = workOrderItems.Where(wo => IsCompletedWorkOrderStatus(wo.Status)).ToList();
 
         return new WorkOrderMetricsDto
         {
-            TotalWorkOrders = workOrders.Data.Count(),
-            ActiveWorkOrders = workOrders.Data.Count(wo => wo.Status == "In Progress" || wo.Status == "Pending"),
-            OverdueWorkOrders = workOrders.Data.Count(wo => wo.ScheduledEndDate < DateTime.Now && wo.Status != "Completed"),
+            TotalWorkOrders = workOrderItems.Count,
+            ActiveWorkOrders = workOrderItems.Count(wo => IsActiveWorkOrderStatus(wo.Status)),
+            OverdueWorkOrders = workOrderItems.Count(wo => wo.IsOverdue),
             CompletedWorkOrders = completedWorkOrders.Count,
-            WorkOrdersByStatus = workOrders.Data.GroupBy(wo => wo.Status).ToDictionary(g => g.Key, g => g.Count()),
-            WorkOrdersByPriority = workOrders.Data.GroupBy(wo => wo.Priority).ToDictionary(g => g.Key, g => g.Count()),
+            WorkOrdersByStatus = workOrderItems
+                .GroupBy(wo => NormalizeWorkOrderStatus(wo.Status))
+                .ToDictionary(g => g.Key, g => g.Count()),
+            WorkOrdersByPriority = workOrderItems
+                .GroupBy(wo => string.IsNullOrWhiteSpace(wo.PriorityName) ? wo.Priority : wo.PriorityName)
+                .Where(g => !string.IsNullOrWhiteSpace(g.Key))
+                .ToDictionary(g => g.Key, g => g.Count()),
             MTTR = CalculateMTTR(completedWorkOrders),
             FirstTimeFixRate = CalculateFirstTimeFixRate(completedWorkOrders)
         };
@@ -334,22 +346,54 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         return new SafetyMetricsDto
         {
             ActiveProtocols = activeProtocols,
-            OverallComplianceRate = 95.5 // Mock data - would be calculated from actual adherence records
+            OverallComplianceRate = 0
         };
+    }
+
+    private static string NormalizeWorkOrderStatus(string? status)
+    {
+        return status switch
+        {
+            "InProgress" => "In Progress",
+            "OnHold" => "On Hold",
+            "PendingQualityApproval" => "Pending QA",
+            null or "" => "Unspecified",
+            _ => status
+        };
+    }
+
+    private static bool IsActiveWorkOrderStatus(string? status)
+    {
+        return !IsCompletedWorkOrderStatus(status) && !IsCancelledWorkOrderStatus(status);
+    }
+
+    private static bool IsCompletedWorkOrderStatus(string? status)
+    {
+        return string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "Closed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsCancelledWorkOrderStatus(string? status)
+    {
+        return string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "Canceled", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ContainsAny(string? value, params string[] terms)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+            terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
     }
 
     private static double CalculateMTTR(List<WorkOrderListDto> completedWorkOrders)
     {
-        if (!completedWorkOrders.Any())
-        {
-            return 0;
-        }
-
-        var totalRepairTime = completedWorkOrders
+        var repairTimes = completedWorkOrders
             .Where(wo => wo.ActualStartDate.HasValue && wo.ActualEndDate.HasValue)
-            .Sum(wo => (wo.ActualEndDate.Value - wo.ActualStartDate.Value).TotalHours);
+            .Select(wo => (wo.ActualEndDate!.Value - wo.ActualStartDate!.Value).TotalHours)
+            .Where(hours => hours >= 0)
+            .ToList();
 
-        return totalRepairTime / completedWorkOrders.Count;
+        return repairTimes.Any() ? repairTimes.Average() : 0;
     }
 
     private static double CalculateFirstTimeFixRate(List<WorkOrderListDto> completedWorkOrders)
@@ -364,10 +408,24 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         return (double)firstTimeFixes / completedWorkOrders.Count * 100;
     }
 
-    private static async Task<double> CalculateScheduleComplianceAsync(DateTime startDate, DateTime endDate)
+    private async Task<double> CalculateScheduleComplianceAsync(DateTime startDate, DateTime endDate)
     {
-        // Mock calculation - in reality would compare scheduled vs actual completion dates
-        return 87.3;
+        var schedules = await _scheduleService.GetSchedulesPagedAsync(new MaintenanceScheduleFilterDto
+        {
+            DueDateFrom = startDate,
+            DueDateTo = endDate,
+            Page = 1,
+            PageSize = int.MaxValue
+        });
+
+        var scheduleItems = schedules.Items.ToList();
+        if (!scheduleItems.Any())
+        {
+            return 0;
+        }
+
+        var overdueSchedules = scheduleItems.Count(schedule => schedule.IsOverdue);
+        return (double)(scheduleItems.Count - overdueSchedules) / scheduleItems.Count * 100;
     }
 
     private static double CalculatePlannedMaintenancePercentage(IEnumerable<WorkOrderListDto> workOrders)
@@ -377,46 +435,81 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
             return 0;
         }
 
-        var plannedWorkOrders = workOrders.Count(wo => wo.WorkOrderSource == "Scheduled");
+        var plannedWorkOrders = workOrders.Count(wo =>
+            string.Equals(wo.WorkOrderSource, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+            ContainsAny(wo.MaintenanceTypeName, "preventive", "planned", "scheduled") ||
+            ContainsAny(wo.WorkOrderTypeName, "preventive", "planned", "scheduled"));
         return (double)plannedWorkOrders / workOrders.Count() * 100;
     }
 
-    private static async Task<double> CalculateMTBFAsync(DateTime startDate, DateTime endDate)
+    private async Task<double> CalculateMTBFAsync(DateTime startDate, DateTime endDate)
     {
-        // Mock calculation - Mean Time Between Failures
-        return 720.5; // hours
-    }
+        var workOrders = await GetWorkOrdersInPeriodAsync(startDate, endDate);
+        var unplannedWorkOrders = workOrders
+            .Where(wo => !string.Equals(wo.WorkOrderSource, "Scheduled", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
-    private static async Task<double> CalculateOEEAsync(DateTime startDate, DateTime endDate)
-    {
-        // Mock calculation - Overall Equipment Effectiveness
-        return 78.2; // percentage
-    }
-
-    private static async Task<decimal> CalculateMaintenanceCostPerAssetAsync(DateTime startDate, DateTime endDate)
-    {
-        // Mock calculation
-        return 2350.75m;
-    }
-
-    private static double CalculateAverageWorkOrderDuration(List<WorkOrderListDto> completedWorkOrders)
-    {
-        if (!completedWorkOrders.Any())
+        if (!unplannedWorkOrders.Any())
         {
             return 0;
         }
 
-        var totalDuration = completedWorkOrders
-            .Where(wo => wo.ActualStartDate.HasValue && wo.ActualEndDate.HasValue)
-            .Sum(wo => (wo.ActualEndDate.Value - wo.ActualStartDate.Value).TotalHours);
+        var assetMetrics = await _assetService.GetAssetMetricsAsync();
+        var trackedAssetCount = Math.Max(assetMetrics.TotalAssets, 1);
+        var periodHours = Math.Max((endDate - startDate).TotalHours, 0);
 
-        return totalDuration / completedWorkOrders.Count;
+        return periodHours * trackedAssetCount / unplannedWorkOrders.Count;
     }
 
-    private static async Task<double> CalculatePreventiveMaintenanceRatioAsync(DateTime startDate, DateTime endDate)
+    private async Task<double> CalculateOEEAsync(DateTime startDate, DateTime endDate)
     {
-        // Mock calculation
-        return 65.8; // percentage
+        var assetMetrics = await _assetService.GetAssetMetricsAsync();
+        if (assetMetrics.TotalAssets <= 0)
+        {
+            return 0;
+        }
+
+        return (double)assetMetrics.ActiveAssets / assetMetrics.TotalAssets * 100;
+    }
+
+    private async Task<decimal> CalculateMaintenanceCostPerAssetAsync(DateTime startDate, DateTime endDate)
+    {
+        var workOrders = await GetWorkOrdersInPeriodAsync(startDate, endDate);
+        var assetMetrics = await _assetService.GetAssetMetricsAsync();
+        if (assetMetrics.TotalAssets <= 0)
+        {
+            return 0;
+        }
+
+        var totalCost = workOrders.Sum(wo => wo.ActualCost > 0 ? wo.ActualCost : wo.EstimatedCost);
+        return totalCost / assetMetrics.TotalAssets;
+    }
+
+    private static double CalculateAverageWorkOrderDuration(List<WorkOrderListDto> completedWorkOrders)
+    {
+        var durations = completedWorkOrders
+            .Where(wo => wo.ActualStartDate.HasValue && wo.ActualEndDate.HasValue)
+            .Select(wo => (wo.ActualEndDate!.Value - wo.ActualStartDate!.Value).TotalHours)
+            .Where(hours => hours >= 0)
+            .ToList();
+
+        return durations.Any() ? durations.Average() : 0;
+    }
+
+    private async Task<double> CalculatePreventiveMaintenanceRatioAsync(DateTime startDate, DateTime endDate)
+    {
+        var workOrders = await GetWorkOrdersInPeriodAsync(startDate, endDate);
+        if (!workOrders.Any())
+        {
+            return 0;
+        }
+
+        var plannedWorkOrders = workOrders.Count(wo =>
+            string.Equals(wo.WorkOrderSource, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+            ContainsAny(wo.MaintenanceTypeName, "preventive", "planned", "scheduled") ||
+            ContainsAny(wo.WorkOrderTypeName, "preventive", "planned", "scheduled"));
+
+        return (double)plannedWorkOrders / workOrders.Count * 100;
     }
 
     private static async Task<List<UpcomingMaintenanceDto>> GetUpcomingMaintenanceAsync(int days)
@@ -432,6 +525,53 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
                 Priority = "Medium"
             }
         };
+    }
+
+    private async Task<List<MaintenanceAlertDto>> BuildRecentAlertsAsync(int count)
+    {
+        var alerts = new List<MaintenanceAlertDto>();
+        var overdueWorkOrders = await _workOrderService.GetOverdueWorkOrdersAsync();
+        foreach (var workOrder in overdueWorkOrders.Take(count))
+        {
+            alerts.Add(new MaintenanceAlertDto
+            {
+                Id = workOrder.Id,
+                AlertType = "OverdueWorkOrder",
+                Title = $"Overdue work order {workOrder.WorkOrderNumber}",
+                Message = $"{workOrder.Title} is past its requested completion date.",
+                Priority = workOrder.PriorityName,
+                Severity = "Warning",
+                CreatedDate = workOrder.RequestedCompletionDate ?? workOrder.CreatedAt,
+                CreatedAt = workOrder.RequestedCompletionDate ?? workOrder.CreatedAt,
+                AssetId = workOrder.AssetId,
+                AssetName = workOrder.AssetName
+            });
+        }
+
+        if (alerts.Count < count)
+        {
+            var dueAssets = await _assetService.GetAssetsRequiringMaintenanceAsync();
+            alerts.AddRange(dueAssets
+                .Take(count - alerts.Count)
+                .Select(asset => new MaintenanceAlertDto
+                {
+                    Id = asset.Id,
+                    AlertType = "AssetMaintenanceDue",
+                    Title = $"Maintenance due for {asset.Name}",
+                    Message = $"{asset.AssetNumber} is due for scheduled maintenance.",
+                    Priority = "Normal",
+                    Severity = "Info",
+                    CreatedDate = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    AssetId = asset.Id,
+                    AssetName = asset.Name
+                }));
+        }
+
+        return alerts
+            .OrderByDescending(alert => alert.CreatedAt == default ? alert.CreatedDate : alert.CreatedAt)
+            .Take(count)
+            .ToList();
     }
 
     private static async Task<List<MaintenanceAlertDto>> GetRecentAlertsAsync(int count)
@@ -507,7 +647,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
     private static decimal CalculateLaborCost(WorkOrderListDto workOrder)
     {
         // Mock calculation - would calculate from labor records
-        return (decimal)workOrder.ActualHours * 75m; // $75/hour average
+        return (decimal)workOrder.ActualHours * 75m; // base-currency hourly average
     }
 
     private static decimal CalculatePartsCost(WorkOrderListDto workOrder)
@@ -522,41 +662,90 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
         return workOrder.ActualCost * 0.15m; // Assume 15% is contractor cost
     }
 
-    private static Dictionary<string, decimal> GroupCostByCategory(List<WorkOrderListDto> workOrders)
-    {
-        // Mock grouping
-        return new Dictionary<string, decimal>
-        {
-            ["Preventive"] = workOrders.Where(wo => wo.WorkOrderSource == "Scheduled").Sum(wo => wo.ActualCost),
-            ["Corrective"] = workOrders.Where(wo => wo.WorkOrderSource != "Scheduled").Sum(wo => wo.ActualCost)
-        };
-    }
-
-    private static Dictionary<string, decimal> GroupCostByAsset(List<WorkOrderListDto> workOrders)
+    private static List<CostByCategoryDto> BuildCostByCategory(List<WorkOrderListDto> workOrders, decimal totalCost)
     {
         return workOrders
-            .GroupBy(wo => wo.AssetName ?? "Unknown")
-            .ToDictionary(g => g.Key, g => g.Sum(wo => wo.ActualCost));
-    }
-
-    private static List<MonthlyCostDto> CalculateCostTrend(List<WorkOrderListDto> workOrders, DateTime startDate, DateTime endDate)
-    {
-        // Mock trend calculation
-        return workOrders
-            .GroupBy(wo => new { wo.CreatedAt.Year, wo.CreatedAt.Month })
-            .Select(g => new MonthlyCostDto
+            .GroupBy(wo => string.IsNullOrWhiteSpace(wo.MaintenanceTypeName) ? "Unspecified" : wo.MaintenanceTypeName)
+            .Select(g =>
             {
-                Month = new DateTime(g.Key.Year, g.Key.Month, 1),
-                TotalCost = g.Sum(wo => wo.ActualCost)
+                var cost = g.Sum(wo => GetWorkOrderCost(wo));
+                return new CostByCategoryDto
+                {
+                    Category = g.Key,
+                    Cost = cost,
+                    Percentage = totalCost > 0 ? cost / totalCost * 100 : 0
+                };
             })
-            .OrderBy(x => x.Month)
+            .OrderByDescending(x => x.Cost)
             .ToList();
     }
 
-    private static async Task<decimal> CalculateBudgetVarianceAsync(DateTime startDate, DateTime endDate)
+    private static List<CostByAssetDto> BuildCostByAsset(List<WorkOrderListDto> workOrders, decimal totalCost)
     {
-        // Mock calculation - would compare against budget
-        return -15000m; // $15k under budget
+        return workOrders
+            .GroupBy(wo => new { wo.AssetId, AssetName = string.IsNullOrWhiteSpace(wo.AssetName) ? "Unknown Asset" : wo.AssetName })
+            .Select(g =>
+            {
+                var cost = g.Sum(GetWorkOrderCost);
+                return new CostByAssetDto
+                {
+                    AssetId = g.Key.AssetId,
+                    AssetName = g.Key.AssetName,
+                    Cost = cost,
+                    Percentage = totalCost > 0 ? cost / totalCost * 100 : 0
+                };
+            })
+            .OrderByDescending(x => x.Cost)
+            .Take(10)
+            .ToList();
+    }
+
+    private static List<CostByMonthDto> BuildCostByMonth(List<WorkOrderListDto> workOrders)
+    {
+        return workOrders
+            .GroupBy(wo => new { wo.CreatedAt.Year, wo.CreatedAt.Month })
+            .Select(g => new CostByMonthDto
+            {
+                Year = g.Key.Year,
+                Month = g.Key.Month,
+                MonthName = new DateTime(g.Key.Year, g.Key.Month, 1).ToString("MMM yyyy"),
+                Cost = g.Sum(GetWorkOrderCost)
+            })
+            .OrderBy(x => x.Year)
+            .ThenBy(x => x.Month)
+            .ToList();
+    }
+
+    private static List<TrendDataPointDto> BuildCostTrend(List<WorkOrderListDto> workOrders, DateTime startDate, DateTime endDate)
+    {
+        var trend = new List<TrendDataPointDto>();
+        var monthStart = new DateTime(startDate.Year, startDate.Month, 1);
+        var finalMonth = new DateTime(endDate.Year, endDate.Month, 1);
+
+        while (monthStart <= finalMonth)
+        {
+            var monthEnd = monthStart.AddMonths(1).AddTicks(-1);
+            var cost = workOrders
+                .Where(wo => wo.CreatedAt >= monthStart && wo.CreatedAt <= monthEnd)
+                .Sum(wo => (double)GetWorkOrderCost(wo));
+
+            trend.Add(new TrendDataPointDto
+            {
+                Date = monthStart,
+                Value = cost,
+                MetricType = "Cost",
+                Label = monthStart.ToString("MMM yyyy")
+            });
+
+            monthStart = monthStart.AddMonths(1);
+        }
+
+        return trend;
+    }
+
+    private static decimal GetWorkOrderCost(WorkOrderListDto workOrder)
+    {
+        return workOrder.ActualCost > 0 ? workOrder.ActualCost : workOrder.EstimatedCost;
     }
 
     #endregion
@@ -567,17 +756,61 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
     {
         _logger.LogInformation("Generating preventive maintenance report from {StartDate} to {EndDate}", startDate, endDate);
 
-        // Mock implementation - would get actual PM data
+        var workOrders = await GetWorkOrdersInPeriodAsync(startDate, endDate);
+        var preventiveWorkOrders = workOrders
+            .Where(wo =>
+                string.Equals(wo.WorkOrderSource, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+                ContainsAny(wo.MaintenanceTypeName, "preventive", "planned", "scheduled") ||
+                ContainsAny(wo.WorkOrderTypeName, "preventive", "planned", "scheduled"))
+            .ToList();
+        var completedPreventive = preventiveWorkOrders.Count(wo => IsCompletedWorkOrderStatus(wo.Status));
+        var overduePreventive = preventiveWorkOrders.Count(wo => wo.IsOverdue);
+        var totalPreventive = preventiveWorkOrders.Count;
+
         return new PreventiveMaintenanceReportDto
         {
             ReportDate = DateTime.UtcNow,
-            TotalPreventiveTasks = 150,
-            CompletedTasks = 142,
-            OverdueTasks = 8,
-            ComplianceRate = 94.7,
-            TotalCost = 45000m,
-            AssetBreakdown = new List<AssetPreventiveMaintenanceDto>(),
-            TypeBreakdown = new List<MaintenanceTypeBreakdownDto>()
+            TotalPreventiveTasks = totalPreventive,
+            CompletedTasks = completedPreventive,
+            OverdueTasks = overduePreventive,
+            ComplianceRate = totalPreventive > 0 ? (double)completedPreventive / totalPreventive * 100 : 0,
+            TotalCost = preventiveWorkOrders.Sum(GetWorkOrderCost),
+            AssetBreakdown = preventiveWorkOrders
+                .GroupBy(wo => new { wo.AssetId, wo.AssetName })
+                .Select(g =>
+                {
+                    var assetTotal = g.Count();
+                    var assetCompleted = g.Count(wo => IsCompletedWorkOrderStatus(wo.Status));
+                    return new AssetPreventiveMaintenanceDto
+                    {
+                        AssetId = g.Key.AssetId,
+                        AssetName = string.IsNullOrWhiteSpace(g.Key.AssetName) ? "Unknown Asset" : g.Key.AssetName,
+                        ScheduledTasks = assetTotal,
+                        CompletedTasks = assetCompleted,
+                        OverdueTasks = g.Count(wo => wo.IsOverdue),
+                        ComplianceRate = assetTotal > 0 ? (double)assetCompleted / assetTotal * 100 : 0,
+                        TotalCost = g.Sum(GetWorkOrderCost)
+                    };
+                })
+                .OrderByDescending(x => x.ScheduledTasks)
+                .Take(10)
+                .ToList(),
+            TypeBreakdown = preventiveWorkOrders
+                .GroupBy(wo => string.IsNullOrWhiteSpace(wo.MaintenanceTypeName) ? "Preventive" : wo.MaintenanceTypeName)
+                .Select(g =>
+                {
+                    var count = g.Count();
+                    return new MaintenanceTypeBreakdownDto
+                    {
+                        MaintenanceType = g.Key,
+                        Count = count,
+                        Percentage = totalPreventive > 0 ? (double)count / totalPreventive * 100 : 0,
+                        AverageCost = count > 0 ? g.Average(GetWorkOrderCost) : 0,
+                        AverageCompletionTime = CalculateAverageWorkOrderDuration(g.Where(wo => IsCompletedWorkOrderStatus(wo.Status)).ToList())
+                    };
+                })
+                .OrderByDescending(x => x.Count)
+                .ToList()
         };
     }
 
@@ -603,12 +836,12 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
 
             var createdInMonth = workOrders.Where(wo => wo.CreatedAt >= monthStart && wo.CreatedAt <= monthEnd).ToList();
             var completedInMonth = workOrders.Where(wo =>
-                wo.Status == "Completed" &&
+                IsCompletedWorkOrderStatus(wo.Status) &&
                 wo.ActualCompletionDate.HasValue &&
                 wo.ActualCompletionDate.Value >= monthStart &&
                 wo.ActualCompletionDate.Value <= monthEnd).ToList();
 
-            var costInMonth = completedInMonth.Sum(wo => (double)wo.ActualCost);
+            var costInMonth = completedInMonth.Sum(wo => (double)GetWorkOrderCost(wo));
 
             creationTrend.Add(new TrendDataPointDto
             {
@@ -648,7 +881,7 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
                 WorkOrderType = g.Key,
                 Count = g.Count(),
                 Percentage = totalWorkOrders > 0 ? (double)g.Count() / totalWorkOrders * 100 : 0,
-                AverageCost = g.Any() ? g.Average(wo => wo.ActualCost) : 0,
+                AverageCost = g.Any() ? g.Average(GetWorkOrderCost) : 0,
                 AverageCompletionTime = g
                     .Where(wo => wo.ActualStartDate.HasValue && wo.ActualEndDate.HasValue)
                     .Select(wo => (wo.ActualEndDate!.Value - wo.ActualStartDate!.Value).TotalHours)
@@ -673,14 +906,48 @@ public class MaintenanceAnalyticsService : IMaintenanceAnalyticsService
     {
         _logger.LogInformation("Generating technician utilization report from {StartDate} to {EndDate}", startDate, endDate);
 
-        // Mock implementation - would calculate actual utilization
+        var workOrders = await GetWorkOrdersInPeriodAsync(startDate, endDate);
+        var assignedWorkOrders = workOrders
+            .Where(wo => wo.AssignedTechnicianId.HasValue)
+            .ToList();
+        var completedWorkOrders = assignedWorkOrders
+            .Where(wo => IsCompletedWorkOrderStatus(wo.Status))
+            .ToList();
+        var technicianStats = assignedWorkOrders
+            .GroupBy(wo => new
+            {
+                TechnicianId = wo.AssignedTechnicianId!.Value,
+                TechnicianName = string.IsNullOrWhiteSpace(wo.AssignedTechnicianName) ? "Unassigned" : wo.AssignedTechnicianName
+            })
+            .Select(g =>
+            {
+                var assignedCount = g.Count();
+                var completedCount = g.Count(wo => IsCompletedWorkOrderStatus(wo.Status));
+                var completedForTech = g.Where(wo => IsCompletedWorkOrderStatus(wo.Status)).ToList();
+                return new TechnicianUtilizationDto
+                {
+                    TechnicianId = g.Key.TechnicianId,
+                    TechnicianName = g.Key.TechnicianName,
+                    AssignedWorkOrders = assignedCount,
+                    CompletedWorkOrders = completedCount,
+                    UtilizationRate = assignedCount > 0 ? (double)completedCount / assignedCount * 100 : 0,
+                    AverageCompletionTime = CalculateAverageWorkOrderDuration(completedForTech),
+                    TotalLaborCost = 0,
+                    ProductivityScore = assignedCount > 0 ? (double)completedCount / assignedCount * 100 : 0
+                };
+            })
+            .OrderByDescending(x => x.CompletedWorkOrders)
+            .ToList();
+
         return new TechnicianUtilizationReportDto
         {
             ReportDate = DateTime.UtcNow,
-            TechnicianStats = GenerateMockTechnicianStats(),
-            OverallUtilizationRate = 78.5,
-            TotalLaborCost = 125000m,
-            AverageProductivity = 85.2
+            TechnicianStats = technicianStats,
+            OverallUtilizationRate = assignedWorkOrders.Any()
+                ? (double)completedWorkOrders.Count / assignedWorkOrders.Count * 100
+                : 0,
+            TotalLaborCost = 0,
+            AverageProductivity = technicianStats.Any() ? technicianStats.Average(x => x.ProductivityScore) : 0
         };
     }
 

@@ -22,12 +22,17 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { workflowApiService } from '@/services/workflow-api.service';
+import { toast } from 'sonner';
 import Link from 'next/link';
 import type {
   WorkflowStatusDto,
   WorkflowStepStatusDto,
-  WorkflowApprovalStatusDto
+  WorkflowApprovalStatusDto,
+  WorkflowDirectoryUser
 } from '@/types/workflow';
 import {
   WorkflowInstanceStatus,
@@ -36,7 +41,7 @@ import {
 
 import {
   Play, Pause, Clock, CheckCircle, AlertCircle,
-  XCircle, Timer, RefreshCw, Eye, Filter, Search
+  XCircle, Timer, RefreshCw, Eye, Filter, Search, UserRoundPlus, UserMinus
 } from 'lucide-react';
 
 // Import custom node types
@@ -49,6 +54,7 @@ import { NotificationNode } from './nodes/NotificationNode';
 import { DocumentNode } from './nodes/DocumentNode';
 import { EscalationNode } from './nodes/EscalationNode';
 import { IntegrationNode } from './nodes/IntegrationNode';
+import { WorkflowReasonDialog } from './WorkflowReasonDialog';
 
 const nodeTypes: NodeTypes = {
   start: StartNode,
@@ -98,33 +104,75 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
   const [activeTab, setActiveTab] = useState('list');
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [approverDialogOpen, setApproverDialogOpen] = useState(false);
+  const [directoryUsers, setDirectoryUsers] = useState<WorkflowDirectoryUser[]>([]);
+  const [adHocUserId, setAdHocUserId] = useState('');
+  const [adHocRole, setAdHocRole] = useState('');
+  const [adHocReason, setAdHocReason] = useState('');
+  const [adHocGroup, setAdHocGroup] = useState(1);
+  const [approverSaving, setApproverSaving] = useState(false);
+  const [removeApproverTarget, setRemoveApproverTarget] = useState<WorkflowApprovalStatusDto | null>(null);
 
-  const toUiStatus = (status: WorkflowInstanceStatus): UiWorkflowStatus => {
-    switch (status) {
-      case WorkflowInstanceStatus.Completed:
-        return 'completed';
-      case WorkflowInstanceStatus.Cancelled:
-        return 'cancelled';
-      case WorkflowInstanceStatus.Failed:
-        return 'failed';
-      case WorkflowInstanceStatus.Suspended:
-      case WorkflowInstanceStatus.Waiting:
-        return 'paused';
-      case WorkflowInstanceStatus.InProgress:
-      case WorkflowInstanceStatus.Created:
-      default:
-        return 'running';
+  const instanceStatusName = (status: WorkflowInstanceStatus | string | number | undefined) => {
+    if (typeof status === 'number') {
+      return WorkflowInstanceStatus[status] || String(status);
     }
+    return String(status || '');
+  };
+
+  const stepStatusName = (status: WorkflowStepInstanceStatus | string | number | undefined) => {
+    if (typeof status === 'number') {
+      return WorkflowStepInstanceStatus[status] || String(status);
+    }
+    return String(status || '');
+  };
+
+  const isInstanceStatus = (status: WorkflowInstanceStatus | string | number | undefined, expected: keyof typeof WorkflowInstanceStatus) =>
+    instanceStatusName(status).toLowerCase() === expected.toLowerCase();
+
+  const isStepStatus = (status: WorkflowStepInstanceStatus | string | number | undefined, expected: keyof typeof WorkflowStepInstanceStatus) =>
+    stepStatusName(status).toLowerCase() === expected.toLowerCase();
+
+  const formatApprovers = (approvals: WorkflowApprovalStatusDto[], maxNames = 2) => {
+    const names = (approvals || [])
+      .map(approval => approval.approverName?.trim())
+      .filter(Boolean);
+    const full = names.join(', ');
+    if (names.length <= maxNames) {
+      return { short: full, full };
+    }
+
+    return {
+      short: `${names.slice(0, maxNames).join(', ')} +${names.length - maxNames}`,
+      full,
+    };
+  };
+
+  const toUiStatus = (status: WorkflowInstanceStatus | string | number): UiWorkflowStatus => {
+    if (isInstanceStatus(status, 'Completed')) {
+      return 'completed';
+    }
+    if (isInstanceStatus(status, 'Cancelled')) {
+      return 'cancelled';
+    }
+    if (isInstanceStatus(status, 'Failed')) {
+      return 'failed';
+    }
+    if (isInstanceStatus(status, 'Suspended') || isInstanceStatus(status, 'Waiting')) {
+      return 'paused';
+    }
+
+    return 'running';
   };
 
   const getCurrentStep = (steps: WorkflowStepStatusDto[]): WorkflowStepStatusDto | null => {
     if (!steps || steps.length === 0) return null;
-    const inProgress = steps.find(step => step.status === WorkflowStepInstanceStatus.InProgress);
+    const inProgress = steps.find(step => isStepStatus(step.status, 'InProgress'));
     if (inProgress) return inProgress;
-    const pending = steps.find(step => step.status === WorkflowStepInstanceStatus.Pending);
+    const pending = steps.find(step => isStepStatus(step.status, 'Pending'));
     if (pending) return pending;
     const completedSteps = steps
-      .filter(step => step.status === WorkflowStepInstanceStatus.Completed)
+      .filter(step => isStepStatus(step.status, 'Completed'))
       .sort((a, b) => {
         const aDate = a.completedDate ? new Date(a.completedDate).getTime() : 0;
         const bDate = b.completedDate ? new Date(b.completedDate).getTime() : 0;
@@ -138,7 +186,7 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
       return Math.max(0, Math.min(100, status.progress.percentComplete));
     }
     if (!status.steps || status.steps.length === 0) return 0;
-    const completed = status.steps.filter(step => step.status === WorkflowStepInstanceStatus.Completed).length;
+    const completed = status.steps.filter(step => isStepStatus(step.status, 'Completed')).length;
     return Math.round((completed / status.steps.length) * 100);
   };
 
@@ -150,11 +198,11 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
     const hasOverdueStep = steps.some(step => step.isOverdue);
     const hasOverdueApproval = approvals.some(approval => approval.isOverdue);
 
-    if (hasOverdueStep || hasOverdueApproval || status.status === WorkflowInstanceStatus.Failed) {
+    if (hasOverdueStep || hasOverdueApproval || isInstanceStatus(status.status, 'Failed')) {
       return 'high';
     }
 
-    if (status.status === WorkflowInstanceStatus.Completed || status.status === WorkflowInstanceStatus.Cancelled) {
+    if (isInstanceStatus(status.status, 'Completed') || isInstanceStatus(status.status, 'Cancelled')) {
       return 'low';
     }
 
@@ -207,7 +255,11 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
   const instanceViews = useMemo<WorkflowInstanceView[]>(() => {
     return instances.map(instance => {
       const steps = instance.steps || [];
-      const approvals = instance.pendingApprovals || [];
+      const status = toUiStatus(instance.status);
+      const rawApprovals = instance.pendingApprovals || [];
+      const approvals = status === 'completed' || status === 'cancelled' || status === 'failed'
+        ? []
+        : rawApprovals;
       const currentStep = getCurrentStep(steps);
       const startedAt = instance.startedDate ? new Date(instance.startedDate).toISOString() : '';
       const completedAt = instance.completedDate ? new Date(instance.completedDate).toISOString() : undefined;
@@ -218,12 +270,12 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
         workflowName: instance.workflowName,
         entityType: instance.entityType || 'Workflow',
         entityId: instance.entityId || instance.workflowInstanceId,
-        status: toUiStatus(instance.status),
-        currentStepId: currentStep?.stepInstanceId ?? '',
-        currentStepName: currentStep?.stepName ?? 'Pending',
+        status,
+        currentStepId: instance.currentStepInstanceId || currentStep?.stepInstanceId || '',
+        currentStepName: instance.currentStepName || currentStep?.stepName || 'No current step',
         startedAt,
         completedAt,
-        assignedTo: currentStep?.assignedToName ?? 'Unassigned',
+        assignedTo: currentStep?.assignedToName || formatApprovers(approvals).short || 'Unassigned',
         priority: determinePriority(instance, steps, approvals),
         progress: calculateProgress(instance),
         steps,
@@ -259,6 +311,43 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const openApproverDialog = async () => {
+    setApproverDialogOpen(true);
+    if (directoryUsers.length === 0) {
+      try { setDirectoryUsers(await workflowApiService.getWorkflowDirectoryUsers()); }
+      catch (error: any) { toast.error(error?.message || 'Unable to load users'); }
+    }
+  };
+
+  const addAdHocApprover = async () => {
+    if (!selectedInstance?.currentStepId || (!adHocUserId && !adHocRole.trim()) || !adHocReason.trim()) {
+      toast.error('Select a user or enter a role, and provide a reason.'); return;
+    }
+    try {
+      setApproverSaving(true);
+      await workflowApiService.addAdHocApprover(selectedInstance.currentStepId, {
+        userId: adHocUserId || undefined, role: adHocUserId ? undefined : adHocRole.trim(),
+        approvalGroup: adHocGroup, reason: adHocReason.trim(),
+      });
+      setAdHocUserId(''); setAdHocRole(''); setAdHocReason(''); await loadInstances();
+      toast.success('Ad hoc approver added');
+    } catch (error: any) { toast.error(error?.message || 'Failed to add approver'); }
+    finally { setApproverSaving(false); }
+  };
+
+  const removeAdHocApprover = async (reason: string) => {
+    if (!removeApproverTarget) return;
+    try {
+      setApproverSaving(true);
+      await workflowApiService.removeAdHocApprover(removeApproverTarget.approvalId, reason);
+      setRemoveApproverTarget(null);
+      await loadInstances();
+      toast.success('Ad hoc approver removed');
+    }
+    catch (error: any) { toast.error(error?.message || 'Failed to remove approver'); }
+    finally { setApproverSaving(false); }
   };
 
   useEffect(() => {
@@ -298,15 +387,14 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
       return a.stepName.localeCompare(b.stepName);
     });
 
-    const getNodeClassName = (status: WorkflowStepInstanceStatus) => {
-      switch (status) {
-        case WorkflowStepInstanceStatus.Completed:
-          return 'completed-node';
-        case WorkflowStepInstanceStatus.InProgress:
-          return 'active-node';
-        default:
-          return 'pending-node';
+    const getNodeClassName = (status: WorkflowStepInstanceStatus | string | number) => {
+      if (isStepStatus(status, 'Completed')) {
+        return 'completed-node';
       }
+      if (isStepStatus(status, 'InProgress')) {
+        return 'active-node';
+      }
+      return 'pending-node';
     };
 
     const nodes: Node[] = [
@@ -486,7 +574,10 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                 {!isLoading && !loadError && filteredInstances.length === 0 && (
                   <div className="text-sm text-muted-foreground">No workflow instances found.</div>
                 )}
-                {filteredInstances.map((instance) => (
+                {filteredInstances.map((instance) => {
+                  const pending = formatApprovers(instance.pendingApprovals);
+
+                  return (
                   <Card 
                     key={instance.id}
                     className={`cursor-pointer transition-colors ${
@@ -530,6 +621,13 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                           <span className="text-gray-600">Assigned To:</span>
                           <span>{instance.assignedTo}</span>
                         </div>
+
+                        {pending.short && (
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-gray-600">Pending With:</span>
+                            <span className="font-medium" title={pending.full}>{pending.short}</span>
+                          </div>
+                        )}
                         
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-gray-600">Priority:</span>
@@ -553,7 +651,8 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                  );
+                })}
               </div>
             </ScrollArea>
           </div>
@@ -567,6 +666,9 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-lg font-semibold">{selectedInstance.workflowName}</h3>
                     <div className="flex items-center space-x-2">
+                      {selectedInstance.currentStepId && selectedInstance.pendingApprovals.length > 0 && (
+                        <Button size="sm" variant="outline" onClick={() => void openApproverDialog()}><UserRoundPlus className="mr-2 h-4 w-4" />Approvers</Button>
+                      )}
                       {getStatusIcon(selectedInstance.status)}
                       <Badge className={`${getStatusColor(selectedInstance.status)}`}>
                         {selectedInstance.status.toUpperCase()}
@@ -574,11 +676,11 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                     </div>
                   </div>
                   
-                  <div className="grid grid-cols-4 gap-4 text-sm">
-                    <div>
+                  <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2 xl:grid-cols-5">
+                    <div className="min-w-0">
                       <span className="text-gray-600">Entity ID:</span>
                       <div className="flex items-center gap-2">
-                        <p className="font-medium">{selectedInstance.entityId}</p>
+                        <p className="break-all font-medium">{selectedInstance.entityId}</p>
                         {selectedInstance.entityLink && (
                           <Button variant="link" size="sm" className="h-auto p-0 text-xs" asChild>
                             <Link href={selectedInstance.entityLink} target="_blank" rel="noreferrer">
@@ -588,13 +690,19 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                         )}
                       </div>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-gray-600">Current Step:</span>
-                      <p className="font-medium">{selectedInstance.currentStepName}</p>
+                      <p className="break-words font-medium">{selectedInstance.currentStepName}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-gray-600">Assigned To:</span>
-                      <p className="font-medium">{selectedInstance.assignedTo}</p>
+                      <p className="break-words font-medium">{selectedInstance.assignedTo}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-gray-600">Pending With:</span>
+                      <p className="break-words font-medium" title={formatApprovers(selectedInstance.pendingApprovals).full}>
+                        {formatApprovers(selectedInstance.pendingApprovals).short || 'None'}
+                      </p>
                     </div>
                     <div>
                       <span className="text-gray-600">Started:</span>
@@ -637,8 +745,8 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                         <div className="text-sm text-muted-foreground">No step history available.</div>
                       )}
                       {selectedInstance.steps.map((step) => {
-                        const isCompleted = step.status === WorkflowStepInstanceStatus.Completed;
-                        const isInProgress = step.status === WorkflowStepInstanceStatus.InProgress;
+                        const isCompleted = isStepStatus(step.status, 'Completed');
+                        const isInProgress = isStepStatus(step.status, 'InProgress');
                         const statusIcon = isCompleted ? (
                           <CheckCircle className="h-5 w-5 text-green-600 mr-3" />
                         ) : isInProgress ? (
@@ -761,6 +869,43 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                     </div>
                   </TabsContent>
                 </Tabs>
+
+                <Dialog open={approverDialogOpen} onOpenChange={setApproverDialogOpen}>
+                  <DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Manage step approvers</DialogTitle></DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-2">{selectedInstance.pendingApprovals.map(approval => <div key={approval.approvalId} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                        <div><span className="font-medium">{approval.approverName || approval.approverRole}</span>{approval.isAdHoc && <Badge variant="outline" className="ml-2">Ad hoc</Badge>}</div>
+                        {approval.isAdHoc && <Button size="icon" variant="ghost" title="Remove approver" onClick={() => setRemoveApproverTarget(approval)}><UserMinus className="h-4 w-4" /></Button>}
+                      </div>)}</div>
+                      <div className="grid gap-3 sm:grid-cols-2"><div><Label>User</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={adHocUserId} onChange={event => setAdHocUserId(event.target.value)}><option value="">Use role instead</option>{directoryUsers.map(user => <option key={user.id} value={user.id}>{user.firstName} {user.lastName}</option>)}</select></div>
+                        <div><Label>Role</Label><Input value={adHocRole} onChange={event => setAdHocRole(event.target.value)} disabled={!!adHocUserId} /></div>
+                        <div><Label>Approval group</Label><Input type="number" min="1" value={adHocGroup} onChange={event => setAdHocGroup(Math.max(1, Number(event.target.value)))} /></div>
+                        <div className="sm:col-span-2"><Label>Reason</Label><Textarea value={adHocReason} onChange={event => setAdHocReason(event.target.value)} /></div></div>
+                    </div><DialogFooter><Button variant="outline" onClick={() => setApproverDialogOpen(false)}>Close</Button><Button onClick={() => void addAdHocApprover()} disabled={approverSaving}>Add approver</Button></DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                <WorkflowReasonDialog
+                  open={!!removeApproverTarget}
+                  onOpenChange={open => !open && setRemoveApproverTarget(null)}
+                  title="Remove ad hoc approver"
+                  description={removeApproverTarget ? (
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">This removes a pending ad hoc approver from the current workflow step.</p>
+                      <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                        <div className="font-medium text-foreground">
+                          {removeApproverTarget.approverName || removeApproverTarget.approverRole || 'Approver'}
+                        </div>
+                        <div className="text-muted-foreground">{removeApproverTarget.stepName}</div>
+                      </div>
+                    </div>
+                  ) : undefined}
+                  reasonLabel="Removal reason"
+                  reasonPlaceholder="Explain why this approver is being removed"
+                  confirmText="Remove approver"
+                  variant="destructive"
+                  isLoading={approverSaving}
+                  onConfirm={removeAdHocApprover}
+                />
               </>
             ) : (
               <div className="flex-1 flex items-center justify-center text-gray-500">

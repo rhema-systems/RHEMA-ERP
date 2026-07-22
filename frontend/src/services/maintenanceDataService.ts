@@ -8,6 +8,8 @@ export interface Employee {
   email: string;
   department?: string;
   position?: string;
+  locationId?: string;
+  locationName?: string;
   isActive: boolean;
 }
 
@@ -36,6 +38,7 @@ export interface AssetCategory {
   name: string;
   code: string;
   description?: string;
+  assetType?: string;
   maintenanceType?: string;
   maintenanceFrequency?: string;
   isActive: boolean;
@@ -173,6 +176,8 @@ class MaintenanceDataService {
           email: emp.emailAddress,
           department: emp.departmentName,
           position: emp.positionTitle,
+          locationId: emp.locationId,
+          locationName: emp.locationName,
           isActive: emp.isActive !== false,
         }));
       
@@ -283,6 +288,7 @@ class MaintenanceDataService {
           name: category.name,
           code: category.code,
           description: category.description,
+          assetType: category.assetType,
           maintenanceType: category.maintenanceType,
           maintenanceFrequency: category.maintenanceFrequency,
           isActive: category.isActive ?? true

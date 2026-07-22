@@ -8,8 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
-import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowApprovalActions, WorkflowTabContent, WorkflowTabTrigger, useWorkflowRecord } from '@/components/workflow';
 import {
   Table,
   TableBody,
@@ -115,6 +114,32 @@ export default function PurchaseRequisitionDetailPage() {
     );
   };
 
+  const workflow = useWorkflowRecord({
+    entityType: 'PurchaseRequisition',
+    entityId: id,
+    entityLabel: 'Purchase Requisition',
+    entityNumber: requisition?.requisitionNumber,
+    status: requisition?.status || '',
+    currentStepName: requisition?.currentWorkflowStepName,
+    canSubmit: requisition?.status === 'Draft',
+    canApproveReject: requisition?.status === 'Pending Approval' || requisition?.status === 'Submitted',
+    enabled: Boolean(id && requisition),
+    commands: {
+      submit: () => purchasingService.submitPurchaseRequisition(id),
+      approve: ({ comments }) => purchasingService.approvePurchaseRequisition(id, {
+        approved: true,
+        comments: comments || undefined,
+      }),
+      reject: ({ comments }) => purchasingService.approvePurchaseRequisition(id, {
+        approved: false,
+        comments: comments || undefined,
+        rejectionReason: comments || undefined,
+      }),
+      afterAction: fetchRequisition,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
+
   // Submit/approve/reject UX is centralized in <WorkflowApprovalActions />.
 
   const handleConvertToPO = async () => {
@@ -179,8 +204,6 @@ export default function PurchaseRequisitionDetailPage() {
   }
 
   const canEdit = requisition.status === 'Draft';
-  const canSubmit = requisition.status === 'Draft';
-  const canApprove = requisition.status === 'Pending Approval' || requisition.status === 'Submitted';
   const canConvertToPO = requisition.status === 'Approved';
   const canCreateRfq = requisition.status === 'Approved';
   const canCreateTender = requisition.status === 'Approved';
@@ -219,35 +242,7 @@ export default function PurchaseRequisitionDetailPage() {
             </Link>
           )}
           
-          <WorkflowApprovalActions
-            entityType="PurchaseRequisition"
-            entityId={id}
-            entityLabel="Purchase Requisition"
-            entityNumber={requisition.requisitionNumber}
-            status={requisition.status}
-            currentStepName={requisition.currentWorkflowStepName}
-            loadWorkflowSummary
-            canSubmit={canSubmit}
-            canApproveReject={canApprove}
-            onSubmit={async () => {
-              await purchasingService.submitPurchaseRequisition(id);
-            }}
-            onApprove={async (comments) => {
-              await purchasingService.approvePurchaseRequisition(id, {
-                approved: true,
-                comments: comments || undefined,
-              });
-            }}
-            onReject={async (comments) => {
-              await purchasingService.approvePurchaseRequisition(id, {
-                approved: false,
-                comments: comments || undefined,
-                rejectionReason: comments || undefined,
-              });
-            }}
-            onAfterAction={fetchRequisition}
-            onOpenWorkflows={() => router.push('/administration/workflow')}
-          />
+          <WorkflowApprovalActions {...workflow.actionProps} />
           
           {canCreateTender && (
             <Button variant="outline" onClick={handleCreateTender}>
@@ -318,7 +313,7 @@ export default function PurchaseRequisitionDetailPage() {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="items">Items ({requisition.itemCount})</TabsTrigger>
-          <TabsTrigger value="approval">Approval History</TabsTrigger>
+          <WorkflowTabTrigger value="approval" />
         </TabsList>
 
         {/* Overview Tab */}
@@ -595,10 +590,11 @@ export default function PurchaseRequisitionDetailPage() {
           </Card>
         </TabsContent>
 
-        {/* Approval History Tab */}
-        <TabsContent value="approval" className="space-y-6">
-          <WorkflowApprovalHistoryPanel entityType="PurchaseRequisition" entityId={id} />
-        </TabsContent>
+        <WorkflowTabContent
+          value="approval"
+          className="space-y-6"
+          {...workflow.actionProps}
+        />
       </Tabs>
     </div>
   );

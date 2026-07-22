@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Button } from '../ui/button'
-import { Plus, Trash2, RefreshCw, Tags, Pencil, Database, Shield } from 'lucide-react'
+import { Copy, Plus, Trash2, RefreshCw, Tags, Pencil, Database, Shield } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs'
 import { useToast } from '../ui/use-toast'
 import { apiService, type TenantUserMapping } from '../../services/api.service'
 import authService from '../../services/auth'
+import { buildFallbackEntityTypes } from '../workflow/entityTypeMapping'
 
 type RecipientKind =
   | 'User'
@@ -60,6 +61,23 @@ interface WorkflowEntityTypeInfoDto {
   description?: string | null
   isActive?: boolean
 }
+
+const defaultNotificationTopicEntityTypes: WorkflowEntityTypeInfoDto[] = [
+  ...buildFallbackEntityTypes().map(et => ({
+    id: `fallback-${et.name}`,
+    code: et.code,
+    name: et.name,
+    description: et.description,
+    isActive: et.isActive,
+  })),
+  {
+    id: 'default-payroll-payslip-email',
+    code: 'PAYROLL_PAYSLIP_EMAIL',
+    name: 'PayrollPayslipEmail',
+    description: 'HR payroll payslip email notifications',
+    isActive: true,
+  },
+]
 
 interface NotificationTopicRecipientDto {
   id?: string
@@ -130,17 +148,52 @@ const kindOptions: { value: RecipientKind; label: string; hint: string }[] = [
 
 const activityOptions: string[] = [
   'Created',
+  'Drafted',
   'Submitted',
   'Published',
   'Assigned',
+  'Accepted',
   'Started',
+  'InProgress',
+  'Processed',
   'Completed',
+  'Closed',
+  'Reopened',
   'Approved',
   'Rejected',
+  'Returned',
+  'Reviewed',
   'Evaluated',
   'Awarded',
+  'Posted',
+  'Reversed',
   'Cancelled',
   'Updated',
+  'Deleted',
+  'Archived',
+  'Restored',
+  'Requested',
+  'RequestSubmitted',
+  'ApprovalRequested',
+  'ApprovalEscalated',
+  'Reminder',
+  'DueSoon',
+  'Overdue',
+  'Expired',
+  'RenewalDue',
+  'Generated',
+  'GeneratedAndSent',
+  'EmailQueued',
+  'EmailSent',
+  'EmailFailed',
+  'PaymentDue',
+  'PaymentReceived',
+  'PaymentFailed',
+  'Dispatched',
+  'Delivered',
+  'Received',
+  'CommentAdded',
+  'PayslipEmail',
   'QuoteSubmitted',
   'QuoteUpdated',
   'PartiallyAwarded',
@@ -156,8 +209,33 @@ const activityOptions: string[] = [
 
 const audienceOptions: string[] = [
   'Internal',
+  'Employee',
+  'Manager',
+  'Supervisor',
+  'Approver',
+  'Requester',
+  'Assignee',
+  'Owner',
+  'Department',
+  'Finance',
+  'HR',
+  'Payroll',
+  'Procurement',
+  'Inventory',
+  'Warehouse',
+  'Maintenance',
+  'IT',
+  'Compliance',
+  'Operations',
+  'Sales',
   'Supplier',
+  'Vendor',
   'Customer',
+  'BusinessPartner',
+  'External',
+  'PortalUser',
+  'Admin',
+  'TenantAdmin',
   'General',
 ]
 
@@ -198,6 +276,7 @@ const roleDataKeys: string[] = [
 const emailDataKeys: string[] = [
   'Email',
   'Emails',
+  'employee_email',
   'SupplierEmail',
   'CustomerEmail',
 ]
@@ -296,6 +375,33 @@ const buildTopicKey = (entityType: string, activity: string, audience: string) =
   const aud = normalizeKeySegment(audience)
   if (!et || !act || !aud) return ''
   return `${et}.${act}.${aud}`
+}
+const stringEqualsIgnoreCase = (left?: string | null, right?: string | null) =>
+  (left || '').toLowerCase() === (right || '').toLowerCase()
+const getTopicSegments = (topic: Pick<NotificationTopicDto, 'key' | 'entityType' | 'activity' | 'audience'>) => {
+  const parts = (topic.key || '').split('.').filter(Boolean)
+  return {
+    entityType: topic.entityType || parts[0] || '',
+    activity: topic.activity || parts[1] || '',
+    audience: topic.audience || parts[2] || '',
+  }
+}
+const mergeOptionValues = (...groups: Array<Array<string | null | undefined>>) => {
+  const seen = new Set<string>()
+  const values: string[] = []
+
+  groups.flat().forEach(raw => {
+    const value = (raw || '').trim()
+    if (!value) return
+
+    const key = value.toLowerCase()
+    if (seen.has(key)) return
+
+    seen.add(key)
+    values.push(value)
+  })
+
+  return values
 }
 
 const NotificationTopics: React.FC = () => {
@@ -449,10 +555,10 @@ const NotificationTopics: React.FC = () => {
   }
 
   const openEdit = (t: NotificationTopicDto) => {
-    const parts = (t.key || '').split('.').filter(Boolean)
-    const entityType = t.entityType || parts[0] || ''
-    const activity = t.activity || parts[1] || 'Updated'
-    const audience = t.audience || parts[2] || 'Internal'
+    const segments = getTopicSegments(t)
+    const entityType = segments.entityType
+    const activity = segments.activity || 'Updated'
+    const audience = segments.audience || 'Internal'
     setForm({
       id: t.id,
       key: t.key || '',
@@ -483,6 +589,50 @@ const NotificationTopics: React.FC = () => {
       })),
     })
     setEditOpen(true)
+  }
+
+  const openCopy = (t: NotificationTopicDto) => {
+    const segments = getTopicSegments(t)
+    const entityType = segments.entityType
+    const sourceActivity = segments.activity || 'Updated'
+    const audience = segments.audience || 'Internal'
+    let activity = `${sourceActivity}Copy`
+    let suffix = 2
+
+    while (topics.some(topic => stringEqualsIgnoreCase(topic.key, buildTopicKey(entityType, activity, audience)))) {
+      activity = `${sourceActivity}Copy${suffix}`
+      suffix += 1
+    }
+
+    setForm({
+      id: '',
+      key: '',
+      activity,
+      audience,
+      name: `${t.name || 'Notification Topic'} Copy`,
+      description: t.description || '',
+      entityType,
+      isSystem: false,
+      isRequired: false,
+      isActive: true,
+      enableInApp: !!t.enableInApp,
+      enableEmail: !!t.enableEmail,
+      enableSms: !!t.enableSms,
+      inAppTitleTemplate: t.inAppTitleTemplate || '',
+      inAppBodyTemplate: t.inAppBodyTemplate || '',
+      smsBodyTemplate: t.smsBodyTemplate || '',
+      actionUrlTemplate: t.actionUrlTemplate || '',
+      emailTemplateId: t.emailTemplateId || '',
+      recipients: (t.recipients || []).map(r => ({
+        recipientKind: (r.recipientKind as any) || 'Role',
+        recipientValue: r.recipientValue || '',
+        isSystem: false,
+        sendInApp: !!r.sendInApp,
+        sendEmail: !!r.sendEmail,
+        sendSms: !!(r as any).sendSms,
+      })),
+    })
+    setCreateOpen(true)
   }
 
   const upsertPayload = () => ({
@@ -695,6 +845,10 @@ const NotificationTopics: React.FC = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" onClick={() => openCopy(t)}>
+                          <Copy className="h-4 w-4 mr-2" />
+                          Copy
+                        </Button>
                         <Button variant="outline" size="sm" onClick={() => openEdit(t)}>
                           <Pencil className="h-4 w-4 mr-2" />
                           Edit
@@ -733,6 +887,7 @@ const NotificationTopics: React.FC = () => {
           <TopicForm
             form={form}
             setForm={setForm}
+            topics={topics}
             templates={templates}
             tenantUsers={tenantUsers}
             entityTypes={entityTypes}
@@ -761,6 +916,7 @@ const NotificationTopics: React.FC = () => {
           <TopicForm
             form={form}
             setForm={setForm}
+            topics={topics}
             templates={templates}
             tenantUsers={tenantUsers}
             entityTypes={entityTypes}
@@ -796,6 +952,7 @@ const NotificationTopics: React.FC = () => {
 const TopicForm: React.FC<{
   form: typeof emptyForm
   setForm: React.Dispatch<React.SetStateAction<typeof emptyForm>>
+  topics: NotificationTopicDto[]
   templates: NotificationTemplate[]
   tenantUsers: TenantUserMapping[]
   entityTypes: WorkflowEntityTypeInfoDto[]
@@ -805,7 +962,7 @@ const TopicForm: React.FC<{
   onAddRecipient: () => void
   onUpdateRecipient: (index: number, patch: Partial<NotificationTopicRecipientDto>) => void
   onRemoveRecipient: (index: number) => void
-}> = ({ form, setForm, templates, tenantUsers, entityTypes, roles, businessPartners, isEditMode, onAddRecipient, onUpdateRecipient, onRemoveRecipient }) => {
+}> = ({ form, setForm, topics, templates, tenantUsers, entityTypes, roles, businessPartners, isEditMode, onAddRecipient, onUpdateRecipient, onRemoveRecipient }) => {
   const update = (patch: Partial<typeof emptyForm>) => setForm(f => ({ ...f, ...patch }))
 
   const userOptions = useMemo(() => {
@@ -816,7 +973,33 @@ const TopicForm: React.FC<{
   }, [tenantUsers])
 
   const entityTypeOptions = useMemo(() => {
-    const list = (entityTypes || [])
+    const entityMap = new Map<string, WorkflowEntityTypeInfoDto>()
+    const topicEntityTypes = (topics || [])
+      .map(t => getTopicSegments(t).entityType)
+      .filter(Boolean)
+      .map(entityType => ({
+        id: `topic-${entityType}`,
+        code: '',
+        name: entityType,
+        isActive: true,
+      }))
+    const combinedEntityTypes = [...defaultNotificationTopicEntityTypes, ...(entityTypes || []), ...topicEntityTypes]
+    combinedEntityTypes.forEach(et => {
+      const entityTypeName = et?.name?.trim()
+      if (!entityTypeName) return
+      entityMap.set(entityTypeName.toLowerCase(), et)
+    })
+    const currentEntityType = form.entityType?.trim()
+    if (currentEntityType && !entityMap.has(currentEntityType.toLowerCase())) {
+      entityMap.set(currentEntityType.toLowerCase(), {
+        id: currentEntityType,
+        code: '',
+        name: currentEntityType,
+        isActive: true,
+      })
+    }
+
+    const list = Array.from(entityMap.values())
       .map(et => {
         const entityTypeName = et?.name?.trim()
         if (!entityTypeName) {
@@ -831,7 +1014,25 @@ const TopicForm: React.FC<{
       .filter((et): et is { value: string; label: string } => et !== null)
       .sort((a, b) => a.label.localeCompare(b.label))
     return list
-  }, [entityTypes])
+  }, [entityTypes, form.entityType, topics])
+
+  const existingTopicValues = useMemo(() => {
+    const segments = (topics || []).map(getTopicSegments)
+    return {
+      activities: segments.map(s => s.activity),
+      audiences: segments.map(s => s.audience),
+    }
+  }, [topics])
+
+  const activitySelectOptions = useMemo(
+    () => mergeOptionValues(activityOptions, existingTopicValues.activities, [form.activity]),
+    [existingTopicValues.activities, form.activity]
+  )
+
+  const audienceSelectOptions = useMemo(
+    () => mergeOptionValues(audienceOptions, existingTopicValues.audiences, [form.audience]),
+    [existingTopicValues.audiences, form.audience]
+  )
 
   const computedKey = useMemo(
     () => buildTopicKey(form.entityType, form.activity, form.audience),
@@ -865,34 +1066,62 @@ const TopicForm: React.FC<{
                 ))}
               </SelectContent>
             </Select>
+            <Input
+              value={form.entityType}
+              onChange={e => update({ entityType: e.target.value })}
+              placeholder="Type entity type"
+              disabled={isEditMode}
+            />
           </div>
 
           <div className="space-y-2">
             <Label>Activity</Label>
-            <Select value={form.activity} onValueChange={v => update({ activity: v })} disabled={isEditMode}>
+            <Select
+              value={form.activity ? form.activity : '__none__'}
+              onValueChange={v => update({ activity: v === '__none__' ? '' : v })}
+              disabled={isEditMode}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select activity..." />
               </SelectTrigger>
               <SelectContent>
-                {activityOptions.map(a => (
+                <SelectItem value="__none__">Select activity...</SelectItem>
+                {activitySelectOptions.map(a => (
                   <SelectItem key={a} value={a}>{a}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <Input
+              value={form.activity}
+              onChange={e => update({ activity: e.target.value })}
+              placeholder="Type activity"
+              disabled={isEditMode}
+            />
           </div>
 
           <div className="space-y-2">
             <Label>Audience</Label>
-            <Select value={form.audience} onValueChange={v => update({ audience: v })} disabled={isEditMode}>
+            <Select
+              value={form.audience ? form.audience : '__none__'}
+              onValueChange={v => update({ audience: v === '__none__' ? '' : v })}
+              disabled={isEditMode}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select audience..." />
               </SelectTrigger>
               <SelectContent>
-                {audienceOptions.map(a => (
+                <SelectItem value="__none__">Select audience...</SelectItem>
+                {audienceSelectOptions.map(a => (
                   <SelectItem key={a} value={a}>{a}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <Input
+              value={form.audience}
+              onChange={e => update({ audience: e.target.value })}
+              placeholder="Type audience"
+              disabled={isEditMode}
+            />
           </div>
 
           <div className="space-y-2">

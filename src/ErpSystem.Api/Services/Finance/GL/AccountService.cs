@@ -75,15 +75,71 @@ namespace ErpSystem.Api.Services.Finance.GL
             return account == null ? null : MapToDto(account);
         }
 
-        public async Task<IReadOnlyList<AccountDto>> GetAllAsync(CancellationToken cancellationToken = default)
+        public async Task<IReadOnlyList<AccountDto>> GetAllAsync(
+            string? accountType = null,
+            string? status = null,
+            bool? isMultiCurrency = null,
+            string? coaType = null,
+            string? search = null,
+            int? take = null,
+            CancellationToken cancellationToken = default)
         {
-            var query = _unitOfWork.Accounts
+            IQueryable<Account> query = _unitOfWork.Accounts
                 .GetQueryable(a => a.TenantId == TenantId)
                 .Include(a => a.SegmentValues);
 
-            var accounts = await query
+            if (!string.IsNullOrWhiteSpace(accountType) &&
+                Enum.TryParse<AccountType>(accountType.Trim(), ignoreCase: true, out var parsedAccountType))
+            {
+                query = query.Where(a => a.AccountType == parsedAccountType);
+            }
+
+            if (!string.IsNullOrWhiteSpace(status) &&
+                Enum.TryParse<AccountStatus>(status.Trim(), ignoreCase: true, out var parsedStatus))
+            {
+                query = query.Where(a => a.Status == parsedStatus);
+            }
+
+            if (isMultiCurrency.HasValue)
+            {
+                query = query.Where(a => a.IsMultiCurrency == isMultiCurrency.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(coaType))
+            {
+                var normalizedCoaType = coaType.Trim();
+                if (normalizedCoaType.Equals("Segmented", StringComparison.OrdinalIgnoreCase))
+                {
+                    query = query.Where(a => a.IsSegmented);
+                }
+                else if (normalizedCoaType.Equals("Standard", StringComparison.OrdinalIgnoreCase))
+                {
+                    query = query.Where(a => !a.IsSegmented);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim();
+                query = query.Where(a =>
+                    a.AccountCode.Contains(term) ||
+                    a.AccountNumber.Contains(term) ||
+                    a.AccountName.Contains(term) ||
+                    (a.AccountCategory != null && a.AccountCategory.Contains(term)) ||
+                    (a.AccountSubCategory != null && a.AccountSubCategory.Contains(term)));
+            }
+
+            IQueryable<Account> orderedQuery = query
                 .OrderBy(a => a.AccountNumber)
-                .ToListAsync(cancellationToken);
+                .ThenBy(a => a.AccountName);
+
+            if (take.HasValue)
+            {
+                var boundedTake = Math.Clamp(take.Value, 1, 5000);
+                orderedQuery = orderedQuery.Take(boundedTake);
+            }
+
+            var accounts = await orderedQuery.ToListAsync(cancellationToken);
 
             return accounts.Select(MapToDto).ToList();
         }

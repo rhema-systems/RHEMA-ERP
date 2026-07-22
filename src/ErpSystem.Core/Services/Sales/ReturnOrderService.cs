@@ -11,6 +11,9 @@ namespace ErpSystem.Core.Services.Sales;
 
 public class ReturnOrderService : IReturnOrderService
 {
+    private const string CreditNoteWorkflowEntityType = "CreditNote";
+    private const string RefundWorkflowEntityType = "Refund";
+
     private readonly IGenericRepository<ReturnOrder> _returnRepo;
     private readonly IGenericRepository<ReturnOrderLine> _returnLineRepo;
     private readonly IGenericRepository<CreditNote> _creditNoteRepo;
@@ -18,6 +21,8 @@ public class ReturnOrderService : IReturnOrderService
     private readonly IGenericRepository<Refund> _refundRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ILogger<ReturnOrderService> _logger;
 
     public ReturnOrderService(
@@ -28,6 +33,8 @@ public class ReturnOrderService : IReturnOrderService
         IGenericRepository<Refund> refundRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ILogger<ReturnOrderService> logger)
     {
         _returnRepo = returnRepo;
@@ -37,6 +44,8 @@ public class ReturnOrderService : IReturnOrderService
         _refundRepo = refundRepo;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _logger = logger;
     }
 
@@ -318,6 +327,75 @@ public class ReturnOrderService : IReturnOrderService
         };
     }
 
+    public async Task<CreditNoteDetailDto> SubmitCreditNoteForApprovalAsync(Guid id)
+    {
+        var cn = await _creditNoteRepo.GetByIdAsync(id)
+            ?? throw new InvalidOperationException($"Credit Note {id} not found");
+
+        if (cn.CreditNoteStatus != CreditNoteStatus.Draft)
+            throw new InvalidOperationException("Only draft credit notes can be submitted for approval");
+
+        var userId = _currentUserProvider.UserId;
+        if (userId == Guid.Empty)
+            throw new UnauthorizedAccessException("User is not authenticated");
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(CreditNoteWorkflowEntityType, id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start credit note workflow");
+
+        var adapter = _workflowStatusAdapterRegistry.GetAdapter(CreditNoteWorkflowEntityType);
+        adapter.ApplySubmitOutcome(cn, workflowResult.Outcome, userId);
+
+        await _creditNoteRepo.UpdateAsync(cn);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation("Credit Note {DocNumber} submitted for approval", cn.DocumentNumber);
+        return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+    }
+
+    public async Task<CreditNoteDetailDto> ProcessCreditNoteApprovalAsync(Guid id, CreditNoteApprovalDto dto)
+    {
+        var cn = await _creditNoteRepo.GetByIdAsync(id)
+            ?? throw new InvalidOperationException($"Credit Note {id} not found");
+
+        if (cn.CreditNoteStatus != CreditNoteStatus.PendingApproval)
+            throw new InvalidOperationException("Only pending approval credit notes can be approved or rejected");
+
+        var userId = _currentUserProvider.UserId;
+        if (userId == Guid.Empty)
+            throw new UnauthorizedAccessException("User is not authenticated");
+
+        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(CreditNoteWorkflowEntityType, id, userId);
+        if (!canApprove)
+            throw new UnauthorizedAccessException("You are not assigned to approve the current workflow step");
+
+        var comments = dto.IsApproved
+            ? dto.Comments
+            : dto.RejectionReason ?? dto.Comments;
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            CreditNoteWorkflowEntityType,
+            id,
+            userId,
+            dto.IsApproved ? "Approve" : "Reject",
+            comments);
+
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process credit note workflow approval");
+
+        var adapter = _workflowStatusAdapterRegistry.GetAdapter(CreditNoteWorkflowEntityType);
+        adapter.ApplyApprovalOutcome(cn, workflowResult.Outcome, userId, comments);
+
+        await _creditNoteRepo.UpdateAsync(cn);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "Credit Note {DocNumber} workflow approval processed. Approved: {Approved}",
+            cn.DocumentNumber,
+            dto.IsApproved);
+        return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+    }
+
     public async Task<CreditNoteDetailDto> ApproveCreditNoteAsync(Guid id)
     {
         var cn = await _creditNoteRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Credit Note {id} not found");
@@ -422,6 +500,75 @@ public class ReturnOrderService : IReturnOrderService
         };
     }
 
+    public async Task<RefundDetailDto> SubmitRefundForApprovalAsync(Guid id)
+    {
+        var refund = await _refundRepo.GetByIdAsync(id)
+            ?? throw new InvalidOperationException($"Refund {id} not found");
+
+        if (refund.RefundStatus != RefundStatus.Draft)
+            throw new InvalidOperationException("Only draft refunds can be submitted for approval");
+
+        var userId = _currentUserProvider.UserId;
+        if (userId == Guid.Empty)
+            throw new UnauthorizedAccessException("User is not authenticated");
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(RefundWorkflowEntityType, id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start refund workflow");
+
+        var adapter = _workflowStatusAdapterRegistry.GetAdapter(RefundWorkflowEntityType);
+        adapter.ApplySubmitOutcome(refund, workflowResult.Outcome, userId);
+
+        await _refundRepo.UpdateAsync(refund);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation("Refund {DocNumber} submitted for approval", refund.DocumentNumber);
+        return await GetRefundByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+    }
+
+    public async Task<RefundDetailDto> ProcessRefundApprovalAsync(Guid id, RefundApprovalDto dto)
+    {
+        var refund = await _refundRepo.GetByIdAsync(id)
+            ?? throw new InvalidOperationException($"Refund {id} not found");
+
+        if (refund.RefundStatus != RefundStatus.PendingApproval)
+            throw new InvalidOperationException("Only pending approval refunds can be approved or rejected");
+
+        var userId = _currentUserProvider.UserId;
+        if (userId == Guid.Empty)
+            throw new UnauthorizedAccessException("User is not authenticated");
+
+        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(RefundWorkflowEntityType, id, userId);
+        if (!canApprove)
+            throw new UnauthorizedAccessException("You are not assigned to approve the current workflow step");
+
+        var comments = dto.IsApproved
+            ? dto.Comments
+            : dto.RejectionReason ?? dto.Comments;
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            RefundWorkflowEntityType,
+            id,
+            userId,
+            dto.IsApproved ? "Approve" : "Reject",
+            comments);
+
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process refund workflow approval");
+
+        var adapter = _workflowStatusAdapterRegistry.GetAdapter(RefundWorkflowEntityType);
+        adapter.ApplyApprovalOutcome(refund, workflowResult.Outcome, userId, comments);
+
+        await _refundRepo.UpdateAsync(refund);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "Refund {DocNumber} workflow approval processed. Approved: {Approved}",
+            refund.DocumentNumber,
+            dto.IsApproved);
+        return await GetRefundByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+    }
+
     public async Task<RefundDetailDto> ApproveRefundAsync(Guid id)
     {
         var refund = await _refundRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Refund {id} not found");
@@ -442,6 +589,7 @@ public class ReturnOrderService : IReturnOrderService
         refund.ProcessedDate = DateTime.UtcNow;
         refund.ProcessedById = _currentUserProvider.UserId;
         refund.PaymentReference = paymentReference;
+        await ReleaseSourceAllocationsForRefundAsync(refund, paymentReference);
         await _refundRepo.UpdateAsync(refund);
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Refund {DocNumber} processed — {Amount} via {Method}", refund.DocumentNumber, refund.RefundAmount, refund.RefundMethod);
@@ -456,6 +604,83 @@ public class ReturnOrderService : IReturnOrderService
         await _refundRepo.UpdateAsync(refund);
         await _unitOfWork.SaveChangesAsync();
         return await GetRefundByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+    }
+
+    private async Task ReleaseSourceAllocationsForRefundAsync(Refund refund, string? paymentReference)
+    {
+        var salesOrderId = await ResolveRefundSalesOrderIdAsync(refund);
+        if (!salesOrderId.HasValue)
+        {
+            return;
+        }
+
+        var activeStatuses = new[] { "Reserved", "PendingApproval", "Approved", "Allocated", "Sold", "Leased" };
+        var allocationRepo = _unitOfWork.Repository<SalesAllocation>();
+        var historyRepo = _unitOfWork.Repository<SalesAllocationHistory>();
+        var allocations = await allocationRepo.GetQueryable()
+            .Where(a =>
+                a.SalesOrderId == salesOrderId.Value
+                && activeStatuses.Contains(a.Status)
+                && !a.IsDeleted)
+            .ToListAsync();
+
+        if (allocations.Count == 0)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var reason = $"Released after refund {refund.DocumentNumber} was processed";
+        if (!string.IsNullOrWhiteSpace(paymentReference))
+        {
+            reason = $"{reason}. Payment reference: {paymentReference}";
+        }
+
+        foreach (var allocation in allocations)
+        {
+            var previousStatus = allocation.Status;
+            allocation.Status = "Released";
+            allocation.ReleasedDate = now;
+            allocation.ReleaseReason = reason;
+            allocation.UpdatedAt = now;
+            allocation.UpdatedBy = _currentUserProvider.Username;
+            allocation.LastModifiedById = _currentUserProvider.UserId;
+
+            await allocationRepo.UpdateAsync(allocation);
+            await historyRepo.AddAsync(new SalesAllocationHistory
+            {
+                SalesAllocationId = allocation.Id,
+                Action = "RefundRelease",
+                FromStatus = previousStatus,
+                ToStatus = allocation.Status,
+                Notes = reason,
+                TenantId = allocation.TenantId,
+                PerformedById = _currentUserProvider.UserId == Guid.Empty ? null : _currentUserProvider.UserId,
+                PerformedByName = _currentUserProvider.Username,
+                PerformedAt = now
+            });
+        }
+    }
+
+    private async Task<Guid?> ResolveRefundSalesOrderIdAsync(Refund refund)
+    {
+        if (refund.ReturnOrderId.HasValue)
+        {
+            var returnOrder = await _returnRepo.GetByIdAsync(refund.ReturnOrderId.Value);
+            return returnOrder?.SalesOrderId;
+        }
+
+        if (refund.CreditNoteId.HasValue)
+        {
+            var creditNote = await _creditNoteRepo.GetByIdAsync(refund.CreditNoteId.Value);
+            if (creditNote?.ReturnOrderId.HasValue == true)
+            {
+                var returnOrder = await _returnRepo.GetByIdAsync(creditNote.ReturnOrderId.Value);
+                return returnOrder?.SalesOrderId;
+            }
+        }
+
+        return null;
     }
 
     // ═════════════════════════════════════

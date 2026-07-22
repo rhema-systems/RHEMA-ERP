@@ -150,6 +150,15 @@ public interface INotificationService
         ErpSystem.Core.DTOs.Notifications.CreateNotificationTemplateDto templateDto, Guid createdBy, Guid tenantId);
 
     /// <summary>
+    /// Updates an existing notification template
+    /// </summary>
+    Task<ErpSystem.Core.DTOs.Notifications.NotificationTemplateDto?> UpdateNotificationTemplateAsync(
+        Guid templateId,
+        ErpSystem.Core.DTOs.Notifications.UpdateNotificationTemplateDto templateDto,
+        Guid updatedBy,
+        Guid tenantId);
+
+    /// <summary>
     /// Deletes a notification template
     /// </summary>
     Task<bool> DeleteNotificationTemplateAsync(Guid templateId, Guid tenantId);

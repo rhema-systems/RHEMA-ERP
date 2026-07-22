@@ -376,7 +376,9 @@ public class PurchaseRequisitionsController : ControllerBase
                 return NotFound($"Purchase requisition with ID {id} not found");
             }
 
-            if (requisition.Status != "Pending Approval" && requisition.Status != "Draft")
+            if (requisition.Status != "Pending Approval" &&
+                requisition.Status != "Submitted" &&
+                requisition.Status != "Draft")
             {
                 return BadRequest($"Purchase requisition cannot be approved in current status: {requisition.Status}");
             }

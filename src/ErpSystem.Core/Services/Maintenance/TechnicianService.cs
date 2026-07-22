@@ -17,17 +17,20 @@ public class TechnicianService : ITechnicianService
     private readonly ITechnicianSkillAssignmentRepository _skillAssignmentRepository;
     private readonly ILogger<TechnicianService> _logger;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IUnitOfWork _unitOfWork;
 
     public TechnicianService(
         ITechnicianRepository technicianRepository,
         ITechnicianSkillAssignmentRepository skillAssignmentRepository,
         ILogger<TechnicianService> logger,
-        ICurrentUserProvider currentUserProvider)
+        ICurrentUserProvider currentUserProvider,
+        IUnitOfWork unitOfWork)
     {
         _technicianRepository = technicianRepository;
         _skillAssignmentRepository = skillAssignmentRepository;
         _logger = logger;
         _currentUserProvider = currentUserProvider;
+        _unitOfWork = unitOfWork;
     }
 
     #region Read-Only Operations (HR Integration)
@@ -61,7 +64,7 @@ public class TechnicianService : ITechnicianService
             // Sync with HR first to ensure we have latest data
             await SyncTechniciansFromHRAsync();
 
-            var technicians = await _technicianRepository.GetAllAsync();
+            var technicians = await _technicianRepository.GetTechniciansAsync();
             var result = new List<TechnicianDto>();
 
             foreach (var technician in technicians)
@@ -82,8 +85,8 @@ public class TechnicianService : ITechnicianService
     {
         try
         {
-            var allTechnicians = await _technicianRepository.GetAllAsync();
-            var filtered = allTechnicians.AsQueryable();
+            var allTechnicians = await _technicianRepository.GetTechniciansAsync();
+            var filtered = allTechnicians.AsEnumerable();
 
             // Apply filters
             if (!string.IsNullOrEmpty(filter.SearchTerm))
@@ -95,7 +98,12 @@ public class TechnicianService : ITechnicianService
 
             if (!string.IsNullOrEmpty(filter.Department))
             {
-                filtered = filtered.Where(t => t.Department.Name == filter.Department);
+                filtered = filtered.Where(t => string.Equals(t.Department?.Name, filter.Department, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrEmpty(filter.JobTitle))
+            {
+                filtered = filtered.Where(t => string.Equals(t.Position?.Title, filter.JobTitle, StringComparison.OrdinalIgnoreCase));
             }
 
             if (!string.IsNullOrEmpty(filter.Specialization))
@@ -106,6 +114,18 @@ public class TechnicianService : ITechnicianService
             if (!string.IsNullOrEmpty(filter.CertificationLevel))
             {
                 filtered = filtered.Where(t => t.CertificationLevel == filter.CertificationLevel);
+            }
+
+            if (!string.IsNullOrEmpty(filter.ExperienceLevel))
+            {
+                filtered = filtered.Where(t => string.Equals(t.ExperienceLevel, filter.ExperienceLevel, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrEmpty(filter.Location))
+            {
+                filtered = filtered.Where(t =>
+                    (t.Location != null && t.Location.Name.Contains(filter.Location, StringComparison.OrdinalIgnoreCase)) ||
+                    (t.Location != null && t.Location.Code != null && t.Location.Code.Contains(filter.Location, StringComparison.OrdinalIgnoreCase)));
             }
 
             if (filter.IsActive.HasValue)
@@ -394,23 +414,37 @@ public class TechnicianService : ITechnicianService
         {
             Id = employee.Id,
             EmployeeId = employee.Id, // Use the Employee's ID, not EmployeeNumber
+            EmployeeNumber = employee.EmployeeNumber,
             FirstName = employee.FirstName,
             LastName = employee.LastName,
             FullName = employee.FullName,
+            DisplayName = employee.DisplayName,
             Email = employee.Email,
+            EmailAddress = employee.EmailAddress,
             Phone = employee.Phone,
+            PhoneNumber = employee.Phone ?? string.Empty,
+            MobileNumber = employee.MobileNumber,
             Department = employee.Department?.Name ?? "",
             Position = employee.Position?.Title ?? "",
+            PositionTitle = employee.Position?.Title ?? "",
+            JobTitle = employee.Position?.Title,
+            EmploymentStatus = employee.StaffStatus.ToString(),
             Specialization = employee.Specialization ?? "",
             CertificationLevel = employee.CertificationLevel ?? "",
             ExperienceLevel = employee.ExperienceLevel ?? "",
             HireDate = employee.DateEmployed?.ToDateTime(TimeOnly.MinValue) ?? DateTime.MinValue,
             IsActive = employee.IsActive,
+            IsAvailable = employee.IsActive && employee.CurrentWorkload < employee.MaxWorkload,
             CurrentWorkload = employee.CurrentWorkload,
             MaxWorkload = employee.MaxWorkload,
             SkillsCount = skillAssignments.Count(),
             AverageRating = 0, // Would need to calculate from work orders
             CompletedWorkOrders = employee.AssignedWorkOrders.Count(wo => wo.Status == "Completed"),
+            CompletedWorkOrdersCount = employee.AssignedWorkOrders.Count(wo => wo.Status == "Completed"),
+            LocationId = employee.LocationId,
+            LocationName = employee.Location?.Name,
+            Location = employee.Location?.Name ?? "",
+            IsFromHRModule = true,
             LastSyncDate = employee.LastSyncDate
         };
     }
@@ -713,6 +747,48 @@ public class TechnicianService : ITechnicianService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting technicians by location: {LocationId}", locationId);
+            throw;
+        }
+    }
+
+    public async Task<TechnicianDto> AssignTechnicianLocationAsync(Guid technicianId, AssignTechnicianLocationDto dto)
+    {
+        try
+        {
+            var tenantId = _currentUserProvider.TenantId;
+            var technician = await _technicianRepository.GetByIdAsync(technicianId)
+                ?? throw new ArgumentException($"Technician with ID {technicianId} not found");
+
+            if (technician.TenantId != tenantId)
+            {
+                throw new ArgumentException($"Technician with ID {technicianId} not found");
+            }
+
+            Location? location = null;
+            if (dto.LocationId.HasValue && dto.LocationId.Value != Guid.Empty)
+            {
+                location = await _unitOfWork.Repository<Location>()
+                    .FirstOrDefaultAsync(l => l.Id == dto.LocationId.Value && l.TenantId == tenantId && l.IsActive);
+
+                if (location == null)
+                {
+                    throw new ArgumentException("The selected HR location was not found or is inactive");
+                }
+            }
+
+            technician.LocationId = location?.Id;
+            technician.Location = location;
+            technician.UpdatedAt = DateTime.UtcNow;
+            technician.UpdatedBy = _currentUserProvider.Username;
+
+            await _technicianRepository.UpdateAsync(technician);
+            await _technicianRepository.SaveChangesAsync();
+
+            return await MapToDto(technician);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error assigning technician {TechnicianId} to location", technicianId);
             throw;
         }
     }

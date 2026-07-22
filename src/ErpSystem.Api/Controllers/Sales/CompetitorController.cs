@@ -21,7 +21,11 @@ namespace ErpSystem.Api.Controllers.Sales
             return Ok(new { items, totalCount, page, pageSize, totalPages = (int)Math.Ceiling((double)totalCount / pageSize) });
         }
 
-        [HttpGet("{id}")]
+        [HttpGet("analytics")]
+        public async Task<IActionResult> GetAnalytics()
+            => Ok(await _service.GetCompetitorAnalyticsAsync());
+
+        [HttpGet("{id:guid}")]
         public async Task<IActionResult> GetCompetitor(Guid id)
         {
             var c = await _service.GetCompetitorByIdAsync(id);

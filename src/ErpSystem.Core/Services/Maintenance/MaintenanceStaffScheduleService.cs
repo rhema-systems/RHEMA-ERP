@@ -40,6 +40,8 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
     {
         try
         {
+            ValidateScheduleWindow(createDto.StartDateTime, createDto.EndDateTime);
+
             var technician = await _employeeRepository.GetByIdAsync(createDto.TechnicianId, e => e.Department);
             if (technician == null)
                 throw new ArgumentException($"Technician with ID {createDto.TechnicianId} not found in HR system");
@@ -47,6 +49,13 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
                 throw new InvalidOperationException($"Technician {technician.FullName} is not active");
             if (!technician.CanBeAssignedToMaintenance)
                 throw new InvalidOperationException($"Employee {technician.FullName} is not qualified for maintenance assignments");
+
+            await EnsureTechnicianMatchesWorkOrderLocationAsync(technician, createDto.WorkOrderId);
+
+            await EnsureTechnicianIsAvailableAsync(
+                createDto.TechnicianId,
+                createDto.StartDateTime,
+                createDto.EndDateTime);
 
             var schedule = new MaintenanceStaffSchedule
             {
@@ -89,6 +98,33 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
         try
         {
             var schedule = await _scheduleRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Schedule {id} not found");
+            var proposedTechnicianId = updateDto.TechnicianId ?? schedule.TechnicianId;
+            var proposedStart = updateDto.StartDateTime ?? schedule.StartDateTime;
+            var proposedEnd = updateDto.EndDateTime ?? schedule.EndDateTime;
+            ValidateScheduleWindow(proposedStart, proposedEnd);
+            var assignmentChanged = updateDto.TechnicianId.HasValue ||
+                updateDto.StartDateTime.HasValue ||
+                updateDto.EndDateTime.HasValue;
+            if (assignmentChanged)
+            {
+                var technician = await _employeeRepository.GetByIdAsync(proposedTechnicianId, e => e.Department);
+                if (technician == null)
+                    throw new ArgumentException($"Technician with ID {proposedTechnicianId} not found in HR system");
+                if (!technician.IsActive)
+                    throw new InvalidOperationException($"Technician {technician.FullName} is not active");
+                if (!technician.CanBeAssignedToMaintenance)
+                    throw new InvalidOperationException($"Employee {technician.FullName} is not qualified for maintenance assignments");
+
+                await EnsureTechnicianMatchesWorkOrderLocationAsync(technician, schedule.WorkOrderId);
+            }
+
+            if (updateDto.TechnicianId.HasValue)
+            {
+                schedule.TechnicianId = proposedTechnicianId;
+            }
+
+            await EnsureTechnicianIsAvailableAsync(proposedTechnicianId, proposedStart, proposedEnd, id);
+
             if (updateDto.StartDateTime.HasValue)
             {
                 schedule.StartDateTime = updateDto.StartDateTime.Value;
@@ -382,5 +418,69 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
             CreatedAt = schedule.CreatedAt,
             UpdatedAt = schedule.UpdatedAt
         };
+    }
+
+    private static void ValidateScheduleWindow(DateTime startDateTime, DateTime endDateTime)
+    {
+        if (endDateTime <= startDateTime)
+            throw new InvalidOperationException("Schedule end date/time must be after the start date/time.");
+    }
+
+    private async Task EnsureTechnicianMatchesWorkOrderLocationAsync(
+        ErpSystem.Core.Entities.HR.Employee technician,
+        Guid? workOrderId)
+    {
+        if (!workOrderId.HasValue)
+            return;
+
+        var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId.Value)
+            ?? throw new ArgumentException($"Work order {workOrderId.Value} not found");
+        var assetLocationId = workOrder.Asset?.CurrentSiteLocationId;
+
+        if (!assetLocationId.HasValue)
+        {
+            throw new InvalidOperationException(
+                $"Asset {workOrder.Asset?.AssetNumber ?? workOrder.AssetId.ToString()} must have a current site location before a technician can be scheduled.");
+        }
+
+        if (technician.LocationId != assetLocationId)
+        {
+            throw new InvalidOperationException(
+                $"Technician {technician.FullName} is not assigned to the asset's current location.");
+        }
+    }
+
+    private async Task EnsureTechnicianIsAvailableAsync(
+        Guid technicianId,
+        DateTime startDateTime,
+        DateTime endDateTime,
+        Guid? ignoreScheduleId = null)
+    {
+        var existingSchedules = await _scheduleRepository.GetByTechnicianIdAsync(technicianId);
+        var conflict = existingSchedules.FirstOrDefault(schedule =>
+            schedule.Id != ignoreScheduleId &&
+            IsScheduleBlocking(schedule.Status) &&
+            schedule.StartDateTime < endDateTime &&
+            schedule.EndDateTime > startDateTime);
+
+        if (conflict == null)
+            return;
+
+        var technician = await _employeeRepository.GetByIdAsync(technicianId);
+        var technicianName = technician?.FullName ?? "Technician";
+        var assignment = conflict.WorkOrder?.WorkOrderNumber
+            ?? conflict.JobCard?.JobCardNumber
+            ?? conflict.ScheduleType
+            ?? "another assignment";
+
+        throw new InvalidOperationException(
+            $"{technicianName} is already assigned to {assignment} from {conflict.StartDateTime:g} to {conflict.EndDateTime:g}.");
+    }
+
+    private static bool IsScheduleBlocking(string? status)
+    {
+        return !string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(status, "Canceled", StringComparison.OrdinalIgnoreCase);
     }
 }

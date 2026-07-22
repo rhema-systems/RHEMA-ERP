@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { LayoutDashboard, FileText, Package, Users, ClipboardCheck, Calendar, AlertTriangle, Clock, BarChart3, Wrench } from 'lucide-react';
+import { LayoutDashboard, FileText, Package, Users, ClipboardCheck, Calendar, AlertTriangle, Clock, BarChart3, Wrench, MapPin } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MaintenanceDashboardView } from '@/components/maintenance/MaintenanceDashboardView';
 import { apiService } from '@/services/api.service';
@@ -51,6 +51,13 @@ const maintenanceModules = [
     href: '/maintenance/assets',
     icon: Package,
     color: 'bg-purple-500',
+  },
+  {
+    title: 'Sites',
+    description: 'View HR locations, assigned assets, and move assets between sites',
+    href: '/maintenance/sites',
+    icon: MapPin,
+    color: 'bg-sky-500',
   },
   {
     title: 'Technicians',

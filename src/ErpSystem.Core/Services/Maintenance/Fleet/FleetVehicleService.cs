@@ -1,7 +1,10 @@
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Maintenance.Fleet;
@@ -37,9 +40,21 @@ public class FleetVehicleService : IFleetVehicleService
         var assetRepo = _unitOfWork.Repository<MaintenanceAsset>();
         var assignmentRepo = _unitOfWork.Repository<FleetVehicleAssignment>();
         var activeAssignmentsQ = assignmentRepo.GetQueryable(x => x.TenantId == tenantId && x.IsActive);
+        var fleetTripRepo = _unitOfWork.Repository<FleetTrip>();
+        var fleetTripActivityQ = fleetTripRepo.GetQueryable(x => x.TenantId == tenantId && !x.IsDeleted);
+        var maintenanceScheduleRepo = _unitOfWork.Repository<MaintenanceSchedule>();
+        var activeMaintenanceSchedulesQ = maintenanceScheduleRepo.GetQueryable(x => x.TenantId == tenantId && x.IsActive && !x.IsDeleted);
 
         var q = assetRepo.GetQueryable(a => a.TenantId == tenantId)
             .Where(a => a.IsFleetAsset);
+
+        var scope = await GetMaintenanceLocationScopeAsync();
+        if (scope.IsScoped)
+        {
+            q = scope.LocationId.HasValue
+                ? q.Where(a => a.CurrentSiteLocationId == scope.LocationId.Value)
+                : q.Where(a => false);
+        }
 
         // Optional filter for screens that specifically need an asset type (e.g., trip dispatch expects Vehicle assets).
         if (!string.IsNullOrWhiteSpace(assetType))
@@ -85,6 +100,32 @@ public class FleetVehicleService : IFleetVehicleService
                 Model = a.Model,
                 Mileage = a.Mileage,
                 OperatingHours = a.OperatingHours,
+                Location = a.Location,
+                CurrentProjectId = a.CurrentProjectId,
+                CurrentProjectName = a.CurrentProject != null ? a.CurrentProject.Title : null,
+                CurrentSiteLocationId = a.CurrentSiteLocationId,
+                CurrentSiteLocationName = a.CurrentSiteLocation != null ? a.CurrentSiteLocation.Name : null,
+                LastUsedAtUtc = fleetTripActivityQ
+                    .Where(x => x.VehicleAssetId == a.Id &&
+                        (x.Status == FleetTripStatuses.Dispatched || x.Status == FleetTripStatuses.Completed))
+                    .OrderByDescending(x => x.CompletedAt ?? x.ActualEndAt ?? x.DispatchedAt ?? x.ActualStartAt ?? x.PlannedStartAt ?? x.UpdatedAt ?? (DateTime?)x.CreatedAt)
+                    .Select(x => x.CompletedAt ?? x.ActualEndAt ?? x.DispatchedAt ?? x.ActualStartAt ?? x.PlannedStartAt ?? x.UpdatedAt ?? (DateTime?)x.CreatedAt)
+                    .FirstOrDefault()
+                    ?? a.LastMileageUpdate
+                    ?? a.LastOperatingHoursUpdate
+                    ?? (a.Status == AssetStatus.InUse ? (DateTime?)(a.UpdatedAt ?? a.CreatedAt) : null),
+                LastServiceDate = a.LastServiceDate,
+                NextServiceDue = a.NextServiceDue,
+                NextMaintenanceDate = activeMaintenanceSchedulesQ
+                    .Where(x => x.AssetId == a.Id)
+                    .OrderBy(x => x.NextDueDate)
+                    .Select(x => (DateTime?)x.NextDueDate)
+                    .FirstOrDefault(),
+                NextMaintenanceScheduleDueAt = activeMaintenanceSchedulesQ
+                    .Where(x => x.AssetId == a.Id)
+                    .OrderBy(x => x.NextDueDate)
+                    .Select(x => (DateTime?)x.NextDueDate)
+                    .FirstOrDefault(),
                 CurrentDriverEmployeeId = activeAssignmentsQ
                     .Where(x => x.VehicleAssetId == a.Id)
                     .OrderByDescending(x => x.AssignedFromUtc)
@@ -105,6 +146,48 @@ public class FleetVehicleService : IFleetVehicleService
             Page = page,
             PageSize = pageSize
         };
+    }
+
+    private async Task<(bool IsScoped, Guid? LocationId)> GetMaintenanceLocationScopeAsync()
+    {
+        if (!_currentUserProvider.IsAuthenticated)
+        {
+            return (false, null);
+        }
+
+        var unrestrictedRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Constants.Roles.SuperAdmin,
+            Constants.Roles.TenantAdmin,
+            Constants.Roles.Manager,
+            "MaintenanceManager",
+            "MaintenanceSupervisor",
+            "MaintenanceDirector",
+            "FleetManager",
+            "FleetSupervisor"
+        };
+
+        if ((_currentUserProvider.Roles ?? Enumerable.Empty<string>()).Any(unrestrictedRoles.Contains))
+        {
+            return (false, null);
+        }
+
+        if (!_currentUserProvider.Claims.TryGetValue("employee_id", out var employeeClaim) ||
+            !Guid.TryParse(employeeClaim, out var employeeId))
+        {
+            return (false, null);
+        }
+
+        var employee = await _unitOfWork.Repository<Employee>()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == _currentUserProvider.TenantId && e.IsActive, e => e.Department);
+
+        if (employee?.Department == null ||
+            !employee.Department.Name.Contains("Maintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, null);
+        }
+
+        return (true, employee.LocationId);
     }
 
     public async Task<MaintenanceAssetDto?> GetVehicleByIdAsync(Guid vehicleAssetId)

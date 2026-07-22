@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Services.Maintenance;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Maintenance.Fleet;
@@ -25,6 +26,7 @@ public sealed class FleetCostService : IFleetCostService
         if (pageSize > 100) pageSize = 100;
 
         var tenantId = _currentUserProvider.TenantId;
+        var baseCurrencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, tenantId);
         var repo = _unitOfWork.Repository<FleetCostEntry>();
 
         IQueryable<FleetCostEntry> q = repo
@@ -48,7 +50,7 @@ public sealed class FleetCostService : IFleetCostService
                 CostType = c.CostType,
                 Source = c.Source,
                 Amount = c.Amount,
-                CurrencyCode = c.CurrencyCode,
+                CurrencyCode = c.CurrencyCode == null || c.CurrencyCode == string.Empty ? baseCurrencyCode : c.CurrencyCode,
                 Notes = c.Notes,
                 FleetTripId = c.FleetTripId,
                 WorkOrderId = c.WorkOrderId,
@@ -69,6 +71,7 @@ public sealed class FleetCostService : IFleetCostService
         if (pageSize > 100) pageSize = 100;
 
         var tenantId = _currentUserProvider.TenantId;
+        var baseCurrencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, tenantId);
         var repo = _unitOfWork.Repository<FleetCostEntry>();
 
         IQueryable<FleetCostEntry> q = repo
@@ -92,7 +95,7 @@ public sealed class FleetCostService : IFleetCostService
                 CostType = c.CostType,
                 Source = c.Source,
                 Amount = c.Amount,
-                CurrencyCode = c.CurrencyCode,
+                CurrencyCode = c.CurrencyCode == null || c.CurrencyCode == string.Empty ? baseCurrencyCode : c.CurrencyCode,
                 Notes = c.Notes,
                 FleetTripId = c.FleetTripId,
                 WorkOrderId = c.WorkOrderId,
@@ -116,6 +119,7 @@ public sealed class FleetCostService : IFleetCostService
         var tenantId = _currentUserProvider.TenantId;
         var userId = _currentUserProvider.UserId;
         var now = DateTime.UtcNow;
+        var currencyCode = await MaintenanceCurrencyResolver.ResolveCurrencyCodeAsync(_unitOfWork, tenantId, dto.CurrencyCode);
 
         Guid vehicleAssetId;
         Guid? fleetTripId = null;
@@ -153,7 +157,7 @@ public sealed class FleetCostService : IFleetCostService
             CostType = string.IsNullOrWhiteSpace(dto.CostType) ? "Other" : dto.CostType.Trim(),
             Source = NormalizeSource(dto.Source),
             Amount = dto.Amount,
-            CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
+            CurrencyCode = currencyCode,
             Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim(),
             CreatedAt = now,
             CreatedById = userId
@@ -172,7 +176,7 @@ public sealed class FleetCostService : IFleetCostService
             CostType = entity.CostType,
             Source = entity.Source,
             Amount = entity.Amount,
-            CurrencyCode = entity.CurrencyCode,
+            CurrencyCode = entity.CurrencyCode ?? currencyCode,
             Notes = entity.Notes,
             FleetTripId = entity.FleetTripId
         };

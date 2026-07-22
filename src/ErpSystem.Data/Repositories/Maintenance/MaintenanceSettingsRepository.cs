@@ -26,6 +26,7 @@ public class MaintenanceSettingsRepository : GenericRepository<MaintenanceSettin
             TenantId = tenantId,
             FleetComplianceDueSoonDays = 7,
             BlockFleetDispatchWhenComplianceDueSoon = true,
+            DefaultFleetDefectBillingType = "Repairs",
             CreatedAt = DateTime.UtcNow,
             CreatedById = userId
         };
@@ -36,4 +37,3 @@ public class MaintenanceSettingsRepository : GenericRepository<MaintenanceSettin
         return settings;
     }
 }
-

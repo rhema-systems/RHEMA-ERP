@@ -12,8 +12,12 @@ namespace ErpSystem.Core.DTOs.Sales
         public decimal EstimatedMarketShare { get; set; }
         public bool IsActive { get; set; }
         public int DealCount { get; set; }
+        public int OpenDeals { get; set; }
         public int WonDeals { get; set; }
         public int LostDeals { get; set; }
+        public decimal TotalDealValue { get; set; }
+        public decimal OpenDealValue { get; set; }
+        public decimal WinRate { get; set; }
         public DateTime CreatedAt { get; set; }
     }
 
@@ -40,6 +44,7 @@ namespace ErpSystem.Core.DTOs.Sales
         public string? OurDifferentiator { get; set; }
         public string? LessonsLearned { get; set; }
         public DateTime ReportedDate { get; set; }
+        public DateTime? ResolvedDate { get; set; }
     }
 
     public class CreateCompetitorDto
@@ -68,6 +73,39 @@ namespace ErpSystem.Core.DTOs.Sales
         public string? OurDifferentiator { get; set; }
     }
 
+    public class CompetitorAnalyticsDto
+    {
+        public int TotalCompetitors { get; set; }
+        public int ActiveCompetitors { get; set; }
+        public int HighThreatCompetitors { get; set; }
+        public int CriticalThreatCompetitors { get; set; }
+        public int OpenCompetitiveDeals { get; set; }
+        public int WonDeals { get; set; }
+        public int LostDeals { get; set; }
+        public decimal TotalCompetitiveDealValue { get; set; }
+        public decimal OpenCompetitiveDealValue { get; set; }
+        public decimal WinRate { get; set; }
+        public decimal AverageMarketShare { get; set; }
+        public List<CompetitorThreatBreakdownDto> ThreatBreakdown { get; set; } = new();
+        public List<CompetitorIndustryBreakdownDto> IndustryBreakdown { get; set; } = new();
+        public List<CompetitorDealDto> RecentDeals { get; set; } = new();
+    }
+
+    public class CompetitorThreatBreakdownDto
+    {
+        public string ThreatLevel { get; set; } = string.Empty;
+        public int CompetitorCount { get; set; }
+        public int DealCount { get; set; }
+        public decimal OpenDealValue { get; set; }
+    }
+
+    public class CompetitorIndustryBreakdownDto
+    {
+        public string Industry { get; set; } = string.Empty;
+        public int CompetitorCount { get; set; }
+        public decimal AverageMarketShare { get; set; }
+    }
+
     // ── Sales Reporting DTOs ──
 
     public class SalesReportSummaryDto
@@ -84,9 +122,33 @@ namespace ErpSystem.Core.DTOs.Sales
         public decimal WeightedPipelineValue { get; set; }
         public int ActiveCampaigns { get; set; }
         public decimal CampaignSpend { get; set; }
+        public int ActiveAllocations { get; set; }
+        public int ReservedAllocations { get; set; }
+        public int SoldAllocations { get; set; }
+        public int LeasedAllocations { get; set; }
+        public int ReleasedAllocations { get; set; }
+        public decimal AllocationTrackedValue { get; set; }
+        public decimal ReservationExposure { get; set; }
+        public int ActiveSalesAgreements { get; set; }
+        public int AgreementsExpiringSoon { get; set; }
+        public int PendingRefunds { get; set; }
+        public decimal RefundExposure { get; set; }
+        public int CompetitorOpenDeals { get; set; }
+        public decimal CompetitorOpenDealValue { get; set; }
+        public decimal CompetitorWinRate { get; set; }
+        public int HighThreatCompetitors { get; set; }
         public List<TopProductDto> TopProducts { get; set; } = new();
         public List<TopSalesRepDto> TopSalesReps { get; set; } = new();
         public List<MonthlySalesDto> MonthlySales { get; set; } = new();
+        public List<SalesMetricBreakdownDto> AllocationBySource { get; set; } = new();
+        public List<SalesMetricBreakdownDto> AllocationByStatus { get; set; } = new();
+    }
+
+    public class SalesMetricBreakdownDto
+    {
+        public string Label { get; set; } = string.Empty;
+        public int Count { get; set; }
+        public decimal Amount { get; set; }
     }
 
     public class TopProductDto

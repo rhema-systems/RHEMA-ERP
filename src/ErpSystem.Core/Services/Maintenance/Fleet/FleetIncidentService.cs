@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Services.Maintenance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -33,6 +34,7 @@ public sealed class FleetIncidentService : IFleetIncidentService
         if (pageSize > 100) pageSize = 100;
 
         var tenantId = _currentUserProvider.TenantId;
+        var baseCurrencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, tenantId);
         var repo = _unitOfWork.Repository<FleetIncident>();
 
         IQueryable<FleetIncident> q = repo.GetQueryable(x => x.TenantId == tenantId && !x.IsDeleted)
@@ -77,7 +79,7 @@ public sealed class FleetIncidentService : IFleetIncidentService
                 DamageAssessment = x.DamageAssessment,
                 EstimatedRepairCost = x.EstimatedRepairCost,
                 ActualRepairCost = x.ActualRepairCost,
-                CurrencyCode = x.CurrencyCode,
+                CurrencyCode = x.CurrencyCode == null || x.CurrencyCode == string.Empty ? baseCurrencyCode : x.CurrencyCode,
                 InsuranceCompany = x.InsuranceCompany,
                 PolicyNumber = x.PolicyNumber,
                 ClaimNumber = x.ClaimNumber,
@@ -103,6 +105,7 @@ public sealed class FleetIncidentService : IFleetIncidentService
     {
         if (id == Guid.Empty) return null;
         var tenantId = _currentUserProvider.TenantId;
+        var baseCurrencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, tenantId);
 
         var repo = _unitOfWork.Repository<FleetIncident>();
         var x = await repo.GetQueryable(i => i.TenantId == tenantId && i.Id == id && !i.IsDeleted)
@@ -130,7 +133,7 @@ public sealed class FleetIncidentService : IFleetIncidentService
             DamageAssessment = x.DamageAssessment,
             EstimatedRepairCost = x.EstimatedRepairCost,
             ActualRepairCost = x.ActualRepairCost,
-            CurrencyCode = x.CurrencyCode,
+            CurrencyCode = x.CurrencyCode == null || x.CurrencyCode == string.Empty ? baseCurrencyCode : x.CurrencyCode,
             InsuranceCompany = x.InsuranceCompany,
             PolicyNumber = x.PolicyNumber,
             ClaimNumber = x.ClaimNumber,
@@ -155,6 +158,7 @@ public sealed class FleetIncidentService : IFleetIncidentService
         var tenantId = _currentUserProvider.TenantId;
         var userId = _currentUserProvider.UserId;
         var now = DateTime.UtcNow;
+        var currencyCode = await MaintenanceCurrencyResolver.ResolveCurrencyCodeAsync(_unitOfWork, tenantId, dto.CurrencyCode);
 
         var vehicleRepo = _unitOfWork.Repository<MaintenanceAsset>();
         var vehicle = await vehicleRepo.FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == dto.VehicleAssetId && !a.IsDeleted, a => a.AssetCategory);
@@ -179,7 +183,7 @@ public sealed class FleetIncidentService : IFleetIncidentService
             DamageAssessment = string.IsNullOrWhiteSpace(dto.DamageAssessment) ? null : dto.DamageAssessment.Trim(),
             EstimatedRepairCost = dto.EstimatedRepairCost,
             ActualRepairCost = dto.ActualRepairCost,
-            CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim(),
+            CurrencyCode = currencyCode,
             InsuranceCompany = string.IsNullOrWhiteSpace(dto.InsuranceCompany) ? null : dto.InsuranceCompany.Trim(),
             PolicyNumber = string.IsNullOrWhiteSpace(dto.PolicyNumber) ? null : dto.PolicyNumber.Trim(),
             ClaimNumber = string.IsNullOrWhiteSpace(dto.ClaimNumber) ? null : dto.ClaimNumber.Trim(),
@@ -219,6 +223,7 @@ public sealed class FleetIncidentService : IFleetIncidentService
         var repo = _unitOfWork.Repository<FleetIncident>();
         var entity = await repo.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id && !x.IsDeleted)
             ?? throw new ArgumentException("Incident not found.");
+        var currencyCode = await MaintenanceCurrencyResolver.ResolveCurrencyCodeAsync(_unitOfWork, tenantId, dto.CurrencyCode ?? entity.CurrencyCode);
 
         entity.VehicleAssetId = dto.VehicleAssetId;
         entity.FleetTripId = dto.FleetTripId;
@@ -233,7 +238,7 @@ public sealed class FleetIncidentService : IFleetIncidentService
         entity.DamageAssessment = string.IsNullOrWhiteSpace(dto.DamageAssessment) ? null : dto.DamageAssessment.Trim();
         entity.EstimatedRepairCost = dto.EstimatedRepairCost;
         entity.ActualRepairCost = dto.ActualRepairCost;
-        entity.CurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode) ? null : dto.CurrencyCode.Trim();
+        entity.CurrencyCode = currencyCode;
 
         entity.InsuranceCompany = string.IsNullOrWhiteSpace(dto.InsuranceCompany) ? null : dto.InsuranceCompany.Trim();
         entity.PolicyNumber = string.IsNullOrWhiteSpace(dto.PolicyNumber) ? null : dto.PolicyNumber.Trim();

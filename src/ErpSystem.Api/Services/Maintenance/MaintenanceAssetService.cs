@@ -1,12 +1,17 @@
 using AutoMapper;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using OfficeOpenXml;
+using OfficeOpenXml.Style;
 
 namespace ErpSystem.Api.Services.Maintenance;
 
@@ -20,6 +25,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
     private readonly ILogger<MaintenanceAssetService> _logger;
     private readonly ICurrentUserService _currentUserService;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ApplicationDbContext _context;
 
     public MaintenanceAssetService(
         IMaintenanceAssetRepository assetRepository,
@@ -29,7 +35,8 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         IMapper mapper,
         ILogger<MaintenanceAssetService> logger,
         ICurrentUserService currentUserService,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        ApplicationDbContext context)
     {
         _assetRepository = assetRepository;
         _categoryRepository = categoryRepository;
@@ -39,6 +46,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         _logger = logger;
         _currentUserService = currentUserService;
         _unitOfWork = unitOfWork;
+        _context = context;
     }
 
     public async Task<MaintenanceAssetDto> CreateAssetAsync(CreateMaintenanceAssetDto createDto)
@@ -192,8 +200,16 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         {
             var asset = await _assetRepository.GetByIdAsync(id,
                 a => a.AssetCategory!,
+                a => a.CurrentProject!,
+                a => a.CurrentSiteLocation!,
                 a => a.ParentAsset!,
                 a => a.ChildAssets!);
+
+            var scope = await GetMaintenanceLocationScopeAsync();
+            if (asset != null && scope.IsScoped && (!scope.LocationId.HasValue || asset.CurrentSiteLocationId != scope.LocationId.Value))
+            {
+                return null;
+            }
 
             return asset != null ? _mapper.Map<MaintenanceAssetDto>(asset) : null;
         }
@@ -241,13 +257,28 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         }
     }
 
-    public async Task<PagedResult<MaintenanceAssetListDto>> GetAssetsPagedAsync(int page, int pageSize, string? searchTerm = null, Guid? categoryId = null)
+    public async Task<PagedResult<MaintenanceAssetListDto>> GetAssetsPagedAsync(int page, int pageSize, string? searchTerm = null, Guid? categoryId = null, Guid? siteLocationId = null)
     {
         try
         {
             var query = _assetRepository.GetQueryable()
                 .Include(a => a.AssetCategory)
+                .Include(a => a.CurrentProject)
+                .Include(a => a.CurrentSiteLocation)
                 .AsQueryable();
+
+            var scope = await GetMaintenanceLocationScopeAsync();
+            if (scope.IsScoped)
+            {
+                query = scope.LocationId.HasValue
+                    ? query.Where(a => a.CurrentSiteLocationId == scope.LocationId.Value)
+                    : query.Where(a => false);
+            }
+
+            if (siteLocationId.HasValue && siteLocationId.Value != Guid.Empty)
+            {
+                query = query.Where(a => a.CurrentSiteLocationId == siteLocationId.Value);
+            }
 
             if (!string.IsNullOrEmpty(searchTerm))
             {
@@ -315,6 +346,10 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 Status = a.Status.ToString(),
                 Criticality = a.Criticality.ToString(),
                 Location = a.Location,
+                CurrentProjectId = a.CurrentProjectId,
+                CurrentProjectName = a.CurrentProject != null ? a.CurrentProject.Title : null,
+                CurrentSiteLocationId = a.CurrentSiteLocationId,
+                CurrentSiteLocationName = a.CurrentSiteLocation != null ? a.CurrentSiteLocation.Name : null,
                 CurrentValue = a.CurrentValue,
                 SerialNumber = a.SerialNumber,
                 PurchaseDate = a.PurchaseDate,
@@ -433,6 +468,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         {
             var allAssets = await _assetRepository.GetAllAsync(a => a.AssetCategory);
             var totalValue = await _assetRepository.GetTotalAssetValueAsync();
+            var today = DateTime.UtcNow.Date;
 
             var metrics = new AssetMetricsDto
             {
@@ -440,9 +476,15 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 ActiveAssets = allAssets.Count(a => a.Status == AssetStatus.Active),
                 MaintenanceAssets = allAssets.Count(a => a.Status == AssetStatus.Maintenance),
                 RetiredAssets = allAssets.Count(a => a.Status == AssetStatus.Retired),
+                CriticalAssets = allAssets.Count(a =>
+                    a.Criticality == AssetCriticality.Critical ||
+                    a.Status == AssetStatus.OutOfService),
+                AssetsRequiringMaintenance = allAssets.Count(a =>
+                    a.LastServiceDate == null ||
+                    (a.NextServiceDue.HasValue && a.NextServiceDue.Value.Date <= today)),
                 TotalValue = (decimal)totalValue,
                 AverageValue = allAssets.Any() ? (decimal)totalValue / allAssets.Count() : 0,
-                AssetsByCategory = allAssets.GroupBy(a => a.AssetCategory.Name)
+                AssetsByCategory = allAssets.GroupBy(a => a.AssetCategory?.Name ?? "Uncategorized")
                     .ToDictionary(g => g.Key, g => g.Count()),
                 AssetsByStatus = allAssets.GroupBy(a => a.Status.ToString())
                     .ToDictionary(g => g.Key, g => g.Count()),
@@ -568,6 +610,395 @@ public class MaintenanceAssetService : IMaintenanceAssetService
             throw;
         }
     }
+
+    public async Task<MaintenanceAssetDto> MoveAssetAsync(Guid assetId, MoveMaintenanceAssetDto moveDto)
+    {
+        var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
+        var scope = await GetMaintenanceLocationScopeAsync();
+        var asset = await _context.MaintenanceAssets
+            .Include(a => a.AssetCategory)
+            .Include(a => a.CurrentProject)
+            .Include(a => a.CurrentSiteLocation)
+            .FirstOrDefaultAsync(a => a.Id == assetId && a.TenantId == tenantId)
+            ?? throw new ArgumentException($"Asset with ID {assetId} not found");
+
+        if (scope.IsScoped && (!scope.LocationId.HasValue || asset.CurrentSiteLocationId != scope.LocationId.Value))
+        {
+            throw new UnauthorizedAccessException("You can only move assets assigned to your HR location/site.");
+        }
+
+        var targetProject = moveDto.ProjectId.HasValue
+            ? await _context.Projects.FirstOrDefaultAsync(p => p.Id == moveDto.ProjectId.Value && p.TenantId == tenantId)
+            : null;
+        if (moveDto.ProjectId.HasValue && targetProject == null)
+        {
+            throw new ArgumentException("The selected project was not found");
+        }
+
+        var targetSite = moveDto.SiteLocationId.HasValue
+            ? await _context.Locations.FirstOrDefaultAsync(l => l.Id == moveDto.SiteLocationId.Value && l.TenantId == tenantId && l.IsActive)
+            : null;
+        if (moveDto.SiteLocationId.HasValue && targetSite == null)
+        {
+            throw new ArgumentException("The selected site/location was not found or is inactive");
+        }
+
+        if (scope.IsScoped && (!scope.LocationId.HasValue || !moveDto.SiteLocationId.HasValue || moveDto.SiteLocationId.Value != scope.LocationId.Value))
+        {
+            throw new UnauthorizedAccessException("You can only assign assets to your HR location/site.");
+        }
+
+        var targetLocation = string.IsNullOrWhiteSpace(moveDto.Location)
+            ? targetSite?.Name
+            : moveDto.Location.Trim();
+
+        if (asset.CurrentProjectId == moveDto.ProjectId &&
+            asset.CurrentSiteLocationId == moveDto.SiteLocationId &&
+            string.Equals(asset.Location?.Trim(), targetLocation?.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The asset is already assigned to the selected project and site");
+        }
+
+        var movement = new MaintenanceAssetMovement
+        {
+            TenantId = tenantId,
+            AssetId = asset.Id,
+            FromProjectId = asset.CurrentProjectId,
+            FromProjectName = asset.CurrentProject?.Title,
+            ToProjectId = targetProject?.Id,
+            ToProjectName = targetProject?.Title,
+            FromSiteLocationId = asset.CurrentSiteLocationId,
+            FromSiteLocationName = asset.CurrentSiteLocation?.Name,
+            ToSiteLocationId = targetSite?.Id,
+            ToSiteLocationName = targetSite?.Name,
+            FromLocation = asset.Location,
+            ToLocation = targetLocation,
+            MovementType = "Transfer",
+            EffectiveDate = moveDto.EffectiveDate == default ? DateTime.UtcNow : moveDto.EffectiveDate,
+            Reason = moveDto.Reason.Trim(),
+            Notes = moveDto.Notes?.Trim(),
+            MovedByUserId = Guid.TryParse(_currentUserService.UserId, out var movedByUserId) ? movedByUserId : null,
+            CreatedBy = _currentUserService.UserName
+        };
+
+        asset.CurrentProjectId = targetProject?.Id;
+        asset.CurrentSiteLocationId = targetSite?.Id;
+        asset.Location = targetLocation;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = _currentUserService.UserName;
+
+        _context.MaintenanceAssetMovements.Add(movement);
+        await _context.SaveChangesAsync();
+
+        asset.CurrentProject = targetProject;
+        asset.CurrentSiteLocation = targetSite;
+        return _mapper.Map<MaintenanceAssetDto>(asset);
+    }
+
+    public async Task<IReadOnlyList<MaintenanceAssetMovementDto>> GetMovementHistoryAsync(Guid assetId)
+    {
+        var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
+        var assetExists = await _context.MaintenanceAssets.AnyAsync(a => a.Id == assetId && a.TenantId == tenantId);
+        if (!assetExists)
+        {
+            throw new ArgumentException($"Asset with ID {assetId} not found");
+        }
+
+        var movements = await _context.MaintenanceAssetMovements
+            .Where(m => m.AssetId == assetId && m.TenantId == tenantId)
+            .OrderByDescending(m => m.EffectiveDate)
+            .ThenByDescending(m => m.CreatedAt)
+            .ToListAsync();
+
+        return _mapper.Map<List<MaintenanceAssetMovementDto>>(movements);
+    }
+
+    public async Task<MaintenanceAssetLifecycleHistoryDto> GetLifecycleHistoryAsync(Guid assetId)
+    {
+        var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
+        var assetExists = await _context.MaintenanceAssets.AnyAsync(a => a.Id == assetId && a.TenantId == tenantId);
+        if (!assetExists)
+        {
+            throw new ArgumentException($"Asset with ID {assetId} not found");
+        }
+
+        var movements = await GetMovementHistoryAsync(assetId);
+        var workOrders = await _context.WorkOrders
+            .Where(w => w.AssetId == assetId && w.TenantId == tenantId)
+            .OrderByDescending(w => w.CreatedAt)
+            .Select(w => new MaintenanceAssetWorkOrderHistoryDto
+            {
+                Id = w.Id,
+                WorkOrderNumber = w.WorkOrderNumber,
+                Title = w.Title,
+                Status = w.Status,
+                WorkOrderType = w.WorkOrderType.Name,
+                MaintenanceType = w.MaintenanceType.Name,
+                CreatedAt = w.CreatedAt,
+                ActualCompletionDate = w.ActualCompletionDate,
+                ActualCost = w.ActualCost
+            })
+            .ToListAsync();
+
+        var inspections = await _context.AssetInspections
+            .Where(i => i.AssetId == assetId && i.TenantId == tenantId)
+            .OrderByDescending(i => i.InspectionDate)
+            .Select(i => new MaintenanceAssetInspectionHistoryDto
+            {
+                Id = i.Id,
+                TemplateName = i.InspectionTemplate.Name,
+                InspectionDate = i.InspectionDate,
+                Status = i.Status,
+                OverallResult = i.OverallResult,
+                Notes = i.Notes,
+                FailedItemCount = i.OverallResult == "Fail" ? 1 : 0,
+                FlaggedItemCount = i.OverallResult == "ConditionalPass" ? 1 : 0,
+                GeneratedWorkOrderId = null,
+                WorkflowEntityType = null
+            })
+            .ToListAsync();
+
+        var fleetInspections = await _context.FleetTripInspections
+            .Where(i => i.VehicleAssetId == assetId && i.TenantId == tenantId && !i.IsDeleted)
+            .OrderByDescending(i => i.StartedAtUtc)
+            .Select(i => new MaintenanceAssetInspectionHistoryDto
+            {
+                Id = i.Id,
+                TemplateName = i.InspectionTemplate.Name,
+                InspectionDate = i.CompletedAtUtc ?? i.StartedAtUtc,
+                Status = i.Status,
+                OverallResult = i.OverallResult,
+                Notes = i.Notes,
+                FailedItemCount = i.OverallResult == "Fail" ? 1 : 0,
+                FlaggedItemCount = i.OverallResult == "ConditionalPass" ? 1 : 0,
+                GeneratedWorkOrderId = null,
+                WorkflowEntityType = "FleetTripInspection"
+            })
+            .ToListAsync();
+
+        var fleetInspectionIds = fleetInspections.Select(i => i.Id).ToList();
+        if (fleetInspectionIds.Count > 0)
+        {
+            var workOrdersByInspection = await _context.FleetDefects
+                .Where(d => d.TenantId == tenantId && d.FleetTripInspectionId.HasValue &&
+                    fleetInspectionIds.Contains(d.FleetTripInspectionId.Value) && !d.IsDeleted)
+                .Select(d => new { InspectionId = d.FleetTripInspectionId!.Value, d.WorkOrderId })
+                .ToListAsync();
+            var workOrderLookup = workOrdersByInspection
+                .GroupBy(x => x.InspectionId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.WorkOrderId).FirstOrDefault(id => id.HasValue));
+            foreach (var inspection in fleetInspections)
+            {
+                if (workOrderLookup.TryGetValue(inspection.Id, out var workOrderId))
+                    inspection.GeneratedWorkOrderId = workOrderId;
+            }
+        }
+
+        inspections.AddRange(fleetInspections);
+        inspections = inspections.OrderByDescending(i => i.InspectionDate).ToList();
+
+        return new MaintenanceAssetLifecycleHistoryDto
+        {
+            AssetId = assetId,
+            Movements = movements.ToList(),
+            WorkOrderHistory = workOrders,
+            ServiceHistory = workOrders
+                .Where(w => w.ActualCompletionDate.HasValue ||
+                    string.Equals(w.Status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(w.Status, "Closed", StringComparison.OrdinalIgnoreCase))
+                .ToList(),
+            InspectionHistory = inspections
+        };
+    }
+
+    public async Task<MaintenanceAssetImportResultDto> ImportAssetsFromExcelAsync(Stream fileStream, string fileName)
+    {
+        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+        var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
+        var result = new MaintenanceAssetImportResultDto();
+
+        using var package = new ExcelPackage(fileStream);
+        var worksheet = package.Workbook.Worksheets.FirstOrDefault();
+        var rowCount = worksheet?.Dimension?.Rows ?? 0;
+        if (worksheet == null || rowCount < 2)
+        {
+            result.Errors.Add(new MaintenanceAssetImportErrorDto { RowNumber = 0, Field = "File", Error = "The spreadsheet has no asset rows" });
+            result.ErrorCount = 1;
+            return result;
+        }
+
+        var categories = (await _context.MaintenanceAssetCategories
+                .Where(c => c.TenantId == tenantId && c.IsActive)
+                .ToListAsync())
+            .GroupBy(c => (c.Code ?? c.Name).Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        foreach (var category in categories.Values.DistinctBy(c => c.Id).ToList())
+        {
+            categories.TryAdd(category.Name.Trim(), category);
+        }
+
+        var projects = (await _context.Projects.Where(p => p.TenantId == tenantId).ToListAsync())
+            .GroupBy(p => p.ProjectCode.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var sites = (await _context.Locations.Where(l => l.TenantId == tenantId && l.IsActive).ToListAsync())
+            .GroupBy(l => string.IsNullOrWhiteSpace(l.Code) ? l.Name.Trim() : l.Code.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        foreach (var site in sites.Values.DistinctBy(s => s.Id).ToList())
+        {
+            sites.TryAdd(site.Name.Trim(), site);
+        }
+
+        var existingNumbers = new HashSet<string>(
+            await _context.MaintenanceAssets.Where(a => a.TenantId == tenantId).Select(a => a.AssetNumber).ToListAsync(),
+            StringComparer.OrdinalIgnoreCase);
+        var assetsToCreate = new List<MaintenanceAsset>();
+        result.TotalRows = rowCount - 1;
+
+        for (var row = 2; row <= rowCount; row++)
+        {
+            var assetNumber = worksheet.Cells[row, 1].Text.Trim();
+            var name = worksheet.Cells[row, 2].Text.Trim();
+            var categoryKey = worksheet.Cells[row, 3].Text.Trim();
+            var errors = new List<MaintenanceAssetImportErrorDto>();
+
+            void AddError(string field, string error) => errors.Add(new MaintenanceAssetImportErrorDto
+            {
+                RowNumber = row,
+                AssetNumber = assetNumber,
+                Field = field,
+                Error = error
+            });
+
+            if (string.IsNullOrWhiteSpace(assetNumber)) AddError("Asset Number", "Required");
+            else if (existingNumbers.Contains(assetNumber)) AddError("Asset Number", "Duplicate asset number");
+            if (string.IsNullOrWhiteSpace(name)) AddError("Name", "Required");
+            if (string.IsNullOrWhiteSpace(categoryKey)) AddError("Category Code", "Required");
+            else if (!categories.ContainsKey(categoryKey)) AddError("Category Code", "Category was not found");
+
+            var projectCode = worksheet.Cells[row, 5].Text.Trim();
+            var siteCode = worksheet.Cells[row, 6].Text.Trim();
+            if (!string.IsNullOrWhiteSpace(projectCode) && !projects.ContainsKey(projectCode)) AddError("Project Code", "Project was not found");
+            if (!string.IsNullOrWhiteSpace(siteCode) && !sites.ContainsKey(siteCode)) AddError("Site Code", "Site/location was not found");
+
+            var purchaseDate = ParseImportDate(worksheet.Cells[row, 11].Text);
+            if (!string.IsNullOrWhiteSpace(worksheet.Cells[row, 11].Text) && !purchaseDate.HasValue) AddError("Purchase Date", "Invalid date");
+
+            if (errors.Count > 0)
+            {
+                result.Errors.AddRange(errors);
+                result.ErrorCount++;
+                continue;
+            }
+
+            var category = categories[categoryKey];
+            projects.TryGetValue(projectCode, out var project);
+            sites.TryGetValue(siteCode, out var site);
+            var statusText = worksheet.Cells[row, 14].Text.Trim();
+            var criticalityText = worksheet.Cells[row, 15].Text.Trim();
+            var ownershipText = worksheet.Cells[row, 19].Text.Trim();
+
+            var asset = new MaintenanceAsset
+            {
+                TenantId = tenantId,
+                AssetNumber = assetNumber,
+                Name = name,
+                AssetCategoryId = category.Id,
+                Description = NullIfEmpty(worksheet.Cells[row, 4].Text),
+                CurrentProjectId = project?.Id,
+                CurrentSiteLocationId = site?.Id,
+                Location = NullIfEmpty(worksheet.Cells[row, 7].Text) ?? site?.Name,
+                Manufacturer = NullIfEmpty(worksheet.Cells[row, 8].Text),
+                Model = NullIfEmpty(worksheet.Cells[row, 9].Text),
+                SerialNumber = NullIfEmpty(worksheet.Cells[row, 10].Text),
+                PurchaseDate = purchaseDate,
+                PurchasePrice = ParseImportDecimal(worksheet.Cells[row, 12].Text),
+                CurrentValue = ParseImportDecimal(worksheet.Cells[row, 13].Text),
+                Status = Enum.TryParse<AssetStatus>(statusText, true, out var status) ? status : AssetStatus.Active,
+                Criticality = Enum.TryParse<AssetCriticality>(criticalityText, true, out var criticality) ? criticality : AssetCriticality.Medium,
+                IsFleetAsset = ParseImportBool(worksheet.Cells[row, 16].Text),
+                LicensePlate = NullIfEmpty(worksheet.Cells[row, 17].Text),
+                VIN = NullIfEmpty(worksheet.Cells[row, 18].Text),
+                OwnershipType = Enum.TryParse<AssetOwnershipType>(ownershipText, true, out var ownership) ? ownership : AssetOwnershipType.Owned,
+                FuelType = NullIfEmpty(worksheet.Cells[row, 20].Text),
+                Year = int.TryParse(worksheet.Cells[row, 21].Text, out var year) ? year : null,
+                CreatedBy = _currentUserService.UserName
+            };
+
+            assetsToCreate.Add(asset);
+            existingNumbers.Add(assetNumber);
+            result.SuccessfulAssetNumbers.Add(assetNumber);
+        }
+
+        if (assetsToCreate.Count > 0)
+        {
+            await _context.MaintenanceAssets.AddRangeAsync(assetsToCreate);
+            await _context.SaveChangesAsync();
+
+            foreach (var asset in assetsToCreate)
+            {
+                var category = categories.Values.First(c => c.Id == asset.AssetCategoryId);
+                if (category.AutoGenerateSchedules)
+                {
+                    await CreateSchedulesForAssetFromCategoryAsync(asset, category);
+                }
+            }
+
+            await _unitOfWork.SaveChangesAsync();
+            result.SuccessCount = assetsToCreate.Count;
+        }
+
+        return result;
+    }
+
+    public Task<byte[]> GenerateImportTemplateAsync()
+    {
+        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+        using var package = new ExcelPackage();
+        var worksheet = package.Workbook.Worksheets.Add("Maintenance Assets");
+        var headers = new[]
+        {
+            "Asset Number*", "Name*", "Category Code*", "Description", "Project Code", "Site Code",
+            "Location", "Manufacturer", "Model", "Serial Number", "Purchase Date", "Purchase Price",
+            "Current Value", "Status", "Criticality", "Fleet Asset", "License Plate", "VIN",
+            "Ownership Type", "Fuel Type", "Year"
+        };
+
+        for (var column = 0; column < headers.Length; column++)
+        {
+            worksheet.Cells[1, column + 1].Value = headers[column];
+            worksheet.Cells[1, column + 1].Style.Font.Bold = true;
+            worksheet.Cells[1, column + 1].Style.Fill.PatternType = ExcelFillStyle.Solid;
+            worksheet.Cells[1, column + 1].Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightBlue);
+        }
+
+        var sample = new object?[]
+        {
+            "AST-2026-001", "Service Vehicle", "VEH", "Field support vehicle", "PRJ-001", "SITE-01",
+            "North Site", "Toyota", "Hilux", "SN-001", "2026-01-15", 250000, 240000,
+            "Active", "High", "Yes", "GT-1234-26", "VIN123456", "Owned", "Diesel", 2025
+        };
+        for (var column = 0; column < sample.Length; column++)
+        {
+            worksheet.Cells[2, column + 1].Value = sample[column];
+        }
+
+        worksheet.View.FreezePanes(2, 1);
+        worksheet.Cells.AutoFitColumns();
+        return Task.FromResult(package.GetAsByteArray());
+    }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static DateTime? ParseImportDate(string? value) =>
+        DateTime.TryParse(value, out var parsed) ? parsed : null;
+
+    private static decimal? ParseImportDecimal(string? value) =>
+        decimal.TryParse(value, out var parsed) ? parsed : null;
+
+    private static bool ParseImportBool(string? value) =>
+        string.Equals(value?.Trim(), "yes", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value?.Trim(), "true", StringComparison.OrdinalIgnoreCase) ||
+        value?.Trim() == "1";
 
     /// <summary>
     /// Creates one or more MaintenanceSchedule records for a newly created asset
@@ -819,6 +1250,53 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         }
 
         return false;
+    }
+
+    private async Task<(bool IsScoped, Guid? LocationId)> GetMaintenanceLocationScopeAsync()
+    {
+        if (!_currentUserService.IsAuthenticated || !_currentUserService.EmployeeId.HasValue)
+        {
+            return (false, null);
+        }
+
+        var unrestrictedRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Constants.Roles.SuperAdmin,
+            Constants.Roles.TenantAdmin,
+            Constants.Roles.Manager,
+            "MaintenanceManager",
+            "MaintenanceSupervisor",
+            "MaintenanceDirector",
+            "FleetManager",
+            "FleetSupervisor"
+        };
+
+        if ((_currentUserService.Roles ?? Enumerable.Empty<string>()).Any(unrestrictedRoles.Contains))
+        {
+            return (false, null);
+        }
+
+        var tenantId = _currentUserService.TenantId;
+        if (!tenantId.HasValue)
+        {
+            return (false, null);
+        }
+
+        var employee = await _context.Employees
+            .Include(e => e.Department)
+            .FirstOrDefaultAsync(e =>
+                e.Id == _currentUserService.EmployeeId.Value &&
+                e.TenantId == tenantId.Value &&
+                !e.IsDeleted &&
+                e.IsActive);
+
+        if (employee?.Department == null ||
+            !employee.Department.Name.Contains("Maintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, null);
+        }
+
+        return (true, employee.LocationId);
     }
 
 }

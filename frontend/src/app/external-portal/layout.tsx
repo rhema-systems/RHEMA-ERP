@@ -5,6 +5,7 @@ import { ExternalNavbar } from '@/components/external-portal/external-navbar';
 import { AuthGuard } from '@/components/auth/auth-guard';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { getAuthenticatedHomePath, isExternalPortalUser } from '@/lib/auth-routing';
 import { authService } from '@/services/auth';
 
 // External portal is auth-dependent and uses browser-only storage; disable static generation.
@@ -29,22 +30,12 @@ export default function ExternalPortalLayout({
       return;
     }
 
-    // Check if user has admin privileges
-    const isSuperAdmin = user.roles?.includes('SuperAdmin');
-    const isAdministrator = user.roles?.includes('Administrator');
-    const username = user.username?.toLowerCase() || '';
-    const isAdminUser = username === 'admin';
-    const hasAdminPrivileges = isSuperAdmin || isAdministrator || isAdminUser;
-
-    // Redirect internal users (LDAP) OR admin users to main ERP system
-    if (user.authenticationProvider !== 'Local' || hasAdminPrivileges) {
-      console.log('User is internal or has admin privileges, redirecting to dashboard');
-      router.push('/dashboard');
+    if (!isExternalPortalUser(user)) {
+      router.push(getAuthenticatedHomePath(user));
       setIsValidating(false);
       return;
     }
 
-    // User is authorized for external portal (Local auth without admin privileges)
     setIsAuthorized(true);
     setIsValidating(false);
   }, [router]);

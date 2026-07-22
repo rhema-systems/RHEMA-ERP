@@ -46,7 +46,7 @@ export interface CreateMaintenanceScheduleDto {
   priority: string;
   frequency: string;
   frequencyValue?: number;
-  frequencyUnit?: string;
+  frequencyUnit: string;
   frequencyInterval?: number;
   startDate?: string;
   nextDueDate: string;
@@ -137,7 +137,10 @@ class MaintenanceScheduleService {
   // Create new schedule
   async createSchedule(data: CreateMaintenanceScheduleDto): Promise<MaintenanceSchedule> {
     try {
-      const response = await apiService.post('/maintenance/schedules', data);
+      const response = await apiService.post('/maintenance/schedules', {
+        ...data,
+        frequencyUnit: data.frequencyUnit || 'Days',
+      });
       return response;
     } catch (error) {
       console.error('Error creating maintenance schedule:', error);
@@ -148,7 +151,10 @@ class MaintenanceScheduleService {
   // Update existing schedule
   async updateSchedule(id: string, data: UpdateMaintenanceScheduleDto): Promise<MaintenanceSchedule> {
     try {
-      const response = await apiService.put(`/maintenance/schedules/${id}`, data);
+      const response = await apiService.put(`/maintenance/schedules/${id}`, {
+        ...data,
+        frequencyUnit: data.frequencyUnit || 'Days',
+      });
       return response;
     } catch (error) {
       console.error(`Error updating schedule ${id}:`, error);

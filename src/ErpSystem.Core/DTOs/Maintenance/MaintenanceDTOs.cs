@@ -67,6 +67,8 @@ public class TechnicianDto
     public string? EmploymentStatus { get; set; }
     public int ActiveWorkOrdersCount { get; set; }
     public decimal PerformanceRating { get; set; }
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
     public string? Location { get; set; }
     public string? ShiftSchedule { get; set; }
     public decimal HourlyRate { get; set; }
@@ -176,6 +178,11 @@ public class UpdateTechnicianDto
     public string? Notes { get; set; }
 
     public bool IsActive { get; set; } = true;
+}
+
+public class AssignTechnicianLocationDto
+{
+    public Guid? LocationId { get; set; }
 }
 
 /// <summary>
@@ -324,6 +331,8 @@ public class TechnicianListDto
     public int ExpiredCertificationsCount { get; set; }
     public int ExpiringCertificationsCount { get; set; }
     public decimal PerformanceRating { get; set; }
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
     public string Location { get; set; } = string.Empty;
     public DateTime? LastSyncDate { get; set; }
 }
@@ -1140,6 +1149,7 @@ public class MaintenanceTypeDto
     public string Icon { get; set; } = string.Empty;
     public string Frequency { get; set; } = string.Empty;
     public string SkillLevel { get; set; } = string.Empty;
+    public decimal FixedAmount { get; set; }
     public string SafetyRequirements { get; set; } = string.Empty;
     public string ToolsRequired { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
@@ -1184,6 +1194,9 @@ public class CreateMaintenanceTypeDto
 
     [StringLength(50)]
     public string SkillLevel { get; set; } = "Basic";
+
+    [Range(0, double.MaxValue)]
+    public decimal FixedAmount { get; set; } = 0;
 
     [StringLength(1000)]
     public string SafetyRequirements { get; set; } = string.Empty;
@@ -1289,6 +1302,19 @@ public class InspectionTemplateDto
     public string Code { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
+    public string SheetType { get; set; } = "InspectionSheet";
+    public string TemplateScope { get; set; } = "General";
+    public string FleetInspectionKind { get; set; } = "Any";
+    public Guid? AssignedAssetCategoryId { get; set; }
+    public Guid? AssignedAssetId { get; set; }
+    public bool IsQrEnabled { get; set; }
+    public bool MobileOfflineEnabled { get; set; }
+    public int QrPayloadVersion { get; set; } = 1;
+    public bool AutoCreateWorkOrderOnFailure { get; set; }
+    public Guid? FailureWorkOrderTypeId { get; set; }
+    public Guid? FailureMaintenanceTypeId { get; set; }
+    public Guid? FailurePriorityLevelId { get; set; }
+    public string FailureBillingType { get; set; } = "Repairs";
     public string Frequency { get; set; } = string.Empty;
     public int EstimatedDuration { get; set; }
     public bool IsActive { get; set; }
@@ -1325,6 +1351,31 @@ public class CreateInspectionTemplateDto
 
     [Required, StringLength(50)]
     public string Category { get; set; } = string.Empty;
+
+    [Required, StringLength(50)]
+    public string SheetType { get; set; } = "InspectionSheet";
+
+    [StringLength(50)]
+    public string TemplateScope { get; set; } = "General";
+
+    [StringLength(30)]
+    public string FleetInspectionKind { get; set; } = "Any";
+
+    public Guid? AssignedAssetCategoryId { get; set; }
+    public Guid? AssignedAssetId { get; set; }
+
+    public bool IsQrEnabled { get; set; } = false;
+    public bool MobileOfflineEnabled { get; set; } = false;
+    public bool AutoCreateWorkOrderOnFailure { get; set; } = true;
+    public Guid? FailureWorkOrderTypeId { get; set; }
+    public Guid? FailureMaintenanceTypeId { get; set; }
+    public Guid? FailurePriorityLevelId { get; set; }
+
+    [StringLength(20)]
+    public string FailureBillingType { get; set; } = "Repairs";
+
+    [Range(1, 99)]
+    public int QrPayloadVersion { get; set; } = 1;
 
     [Required, StringLength(50)]
     public string Frequency { get; set; } = string.Empty;
@@ -1369,8 +1420,62 @@ public class InspectionTemplateFilterDto
     public int PageSize { get; set; } = 25;
     public string? SearchTerm { get; set; }
     public string? Category { get; set; }
+    public string? SheetType { get; set; }
     public string? Frequency { get; set; }
+    public string? TemplateScope { get; set; }
+    public string? FleetInspectionKind { get; set; }
+    public Guid? AssignedAssetCategoryId { get; set; }
+    public Guid? AssignedAssetId { get; set; }
+    public bool? IsQrEnabled { get; set; }
+    public bool? MobileOfflineEnabled { get; set; }
     public bool? IsActive { get; set; }
+}
+
+public class InspectionTemplateQrPackageRequestDto
+{
+    public Guid? AssetId { get; set; }
+    public Guid? AssetCategoryId { get; set; }
+    public Guid? FleetTripId { get; set; }
+    public string? InspectionKind { get; set; }
+    public string? FrontendBaseUrl { get; set; }
+    public bool IncludeEmbeddedPayload { get; set; } = true;
+    public int MaxQrPayloadBytes { get; set; } = 2500;
+}
+
+public class InspectionTemplateQrPackageDto
+{
+    public string Schema { get; set; } = "FleetInspectionQrPackage.v1";
+    public string PackageId { get; set; } = string.Empty;
+    public Guid TemplateId { get; set; }
+    public string TemplateName { get; set; } = string.Empty;
+    public string TemplateCode { get; set; } = string.Empty;
+    public string TemplateVersion { get; set; } = string.Empty;
+    public string SheetType { get; set; } = string.Empty;
+    public string TemplateScope { get; set; } = string.Empty;
+    public string FleetInspectionKind { get; set; } = string.Empty;
+    public string InspectionKind { get; set; } = string.Empty;
+    public Guid? AssetId { get; set; }
+    public string? AssetName { get; set; }
+    public string? AssetNumber { get; set; }
+    public Guid? AssetCategoryId { get; set; }
+    public string? AssetCategoryName { get; set; }
+    public Guid? FleetTripId { get; set; }
+    public bool IsQrEnabled { get; set; }
+    public bool MobileOfflineEnabled { get; set; }
+    public bool AllowPhotos { get; set; }
+    public int QrPayloadVersion { get; set; }
+    public DateTime GeneratedAtUtc { get; set; }
+    public string MobileUrl { get; set; } = string.Empty;
+    public string PayloadHash { get; set; } = string.Empty;
+    public string Signature { get; set; } = string.Empty;
+    public string CompactPayloadJson { get; set; } = string.Empty;
+    public string CompactPayloadBase64Url { get; set; } = string.Empty;
+    public string QrValue { get; set; } = string.Empty;
+    public string QrPayloadMode { get; set; } = "Reference";
+    public bool CanEmbedFullPayload { get; set; }
+    public int PayloadSizeBytes { get; set; }
+    public int MaxQrPayloadBytes { get; set; }
+    public List<InspectionChecklistItemDto> ChecklistItems { get; set; } = new();
 }
 
 // Maintenance Schedules DTOs
@@ -1476,8 +1581,8 @@ public class CreateMaintenanceScheduleDto
 
     public int FrequencyValue { get; set; } = 1;
 
-    [Required, StringLength(20)]
-    public string FrequencyUnit { get; set; } = string.Empty;
+    [StringLength(20)]
+    public string? FrequencyUnit { get; set; }
 
     [Range(1, 365)]
     public int FrequencyInterval { get; set; } = 1;
@@ -1964,6 +2069,8 @@ public class MaintenanceAssetDto
     public Guid AssetCategoryId { get; set; }
     public string? Manufacturer { get; set; }
     public string? Model { get; set; }
+    public int? Year { get; set; }
+    public string? OwnershipType { get; set; }
     public string? SerialNumber { get; set; }
     public string? LicensePlate { get; set; }
     public string? VIN { get; set; }
@@ -1972,6 +2079,10 @@ public class MaintenanceAssetDto
     public decimal? PurchasePrice { get; set; }
     public decimal? CurrentValue { get; set; }
     public string? Location { get; set; }
+    public Guid? CurrentProjectId { get; set; }
+    public string? CurrentProjectName { get; set; }
+    public Guid? CurrentSiteLocationId { get; set; }
+    public string? CurrentSiteLocationName { get; set; }
     public string Status { get; set; } = string.Empty;
     public string Criticality { get; set; } = string.Empty;
     public DateTime? WarrantyStartDate { get; set; }
@@ -2018,6 +2129,10 @@ public class MaintenanceAssetListDto
     public string Status { get; set; } = string.Empty;
     public string Criticality { get; set; } = string.Empty;
     public string? Location { get; set; }
+    public Guid? CurrentProjectId { get; set; }
+    public string? CurrentProjectName { get; set; }
+    public Guid? CurrentSiteLocationId { get; set; }
+    public string? CurrentSiteLocationName { get; set; }
     public decimal? CurrentValue { get; set; }
     public int ActiveWorkOrdersCount { get; set; }
     public DateTime? LastMaintenanceDate { get; set; }
@@ -2050,6 +2165,11 @@ public class CreateMaintenanceAssetDto
     [StringLength(100)]
     public string? Model { get; set; }
 
+    public int? Year { get; set; }
+
+    [StringLength(20)]
+    public string? OwnershipType { get; set; }
+
     [StringLength(50)]
     public string? SerialNumber { get; set; }
 
@@ -2068,6 +2188,9 @@ public class CreateMaintenanceAssetDto
 
     [StringLength(500)]
     public string? Location { get; set; }
+
+    public Guid? CurrentProjectId { get; set; }
+    public Guid? CurrentSiteLocationId { get; set; }
 
     [Required]
     [StringLength(20)]
@@ -2110,6 +2233,11 @@ public class UpdateMaintenanceAssetDto
     [StringLength(100)]
     public string? Model { get; set; }
 
+    public int? Year { get; set; }
+
+    [StringLength(20)]
+    public string? OwnershipType { get; set; }
+
     [StringLength(50)]
     public string? SerialNumber { get; set; }
 
@@ -2128,6 +2256,9 @@ public class UpdateMaintenanceAssetDto
 
     [StringLength(500)]
     public string? Location { get; set; }
+
+    public Guid? CurrentProjectId { get; set; }
+    public Guid? CurrentSiteLocationId { get; set; }
 
     [Required]
     [StringLength(20)]
@@ -2148,6 +2279,98 @@ public class UpdateMaintenanceAssetDto
     public string? DocumentLinks { get; set; }
     public string? Images { get; set; }
     public bool IsFleetAsset { get; set; } = false;
+}
+
+public class MoveMaintenanceAssetDto
+{
+    public Guid? ProjectId { get; set; }
+    public Guid? SiteLocationId { get; set; }
+
+    [StringLength(500)]
+    public string? Location { get; set; }
+
+    [Required, StringLength(500)]
+    public string Reason { get; set; } = string.Empty;
+
+    [StringLength(2000)]
+    public string? Notes { get; set; }
+
+    public DateTime EffectiveDate { get; set; } = DateTime.UtcNow;
+}
+
+public class MaintenanceAssetMovementDto
+{
+    public Guid Id { get; set; }
+    public Guid AssetId { get; set; }
+    public Guid? FromProjectId { get; set; }
+    public string? FromProjectName { get; set; }
+    public Guid? ToProjectId { get; set; }
+    public string? ToProjectName { get; set; }
+    public Guid? FromSiteLocationId { get; set; }
+    public string? FromSiteLocationName { get; set; }
+    public Guid? ToSiteLocationId { get; set; }
+    public string? ToSiteLocationName { get; set; }
+    public string? FromLocation { get; set; }
+    public string? ToLocation { get; set; }
+    public string MovementType { get; set; } = string.Empty;
+    public DateTime EffectiveDate { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string? Notes { get; set; }
+    public Guid? MovedByUserId { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class MaintenanceAssetWorkOrderHistoryDto
+{
+    public Guid Id { get; set; }
+    public string WorkOrderNumber { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? WorkOrderType { get; set; }
+    public string? MaintenanceType { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? ActualCompletionDate { get; set; }
+    public decimal ActualCost { get; set; }
+}
+
+public class MaintenanceAssetInspectionHistoryDto
+{
+    public Guid Id { get; set; }
+    public string TemplateName { get; set; } = string.Empty;
+    public DateTime InspectionDate { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? OverallResult { get; set; }
+    public string? Notes { get; set; }
+    public int FailedItemCount { get; set; }
+    public int FlaggedItemCount { get; set; }
+    public Guid? GeneratedWorkOrderId { get; set; }
+    public string? WorkflowEntityType { get; set; }
+}
+
+public class MaintenanceAssetLifecycleHistoryDto
+{
+    public Guid AssetId { get; set; }
+    public List<MaintenanceAssetMovementDto> Movements { get; set; } = new();
+    public List<MaintenanceAssetWorkOrderHistoryDto> ServiceHistory { get; set; } = new();
+    public List<MaintenanceAssetWorkOrderHistoryDto> WorkOrderHistory { get; set; } = new();
+    public List<MaintenanceAssetInspectionHistoryDto> InspectionHistory { get; set; } = new();
+}
+
+public class MaintenanceAssetImportErrorDto
+{
+    public int RowNumber { get; set; }
+    public string? AssetNumber { get; set; }
+    public string Field { get; set; } = string.Empty;
+    public string Error { get; set; } = string.Empty;
+}
+
+public class MaintenanceAssetImportResultDto
+{
+    public int TotalRows { get; set; }
+    public int SuccessCount { get; set; }
+    public int ErrorCount { get; set; }
+    public List<string> SuccessfulAssetNumbers { get; set; } = new();
+    public List<MaintenanceAssetImportErrorDto> Errors { get; set; } = new();
 }
 
 // MaintenanceAssetCategory DTOs
@@ -2446,6 +2669,8 @@ public class WorkOrderListDto
     public DateTime? ActualStartDate { get; set; }
     public DateTime? ActualEndDate { get; set; }
     public DateTime? ActualCompletionDate { get; set; }
+    public string BillingType { get; set; } = string.Empty;
+    public decimal FixedAmount { get; set; }
     public decimal EstimatedCost { get; set; }
     public decimal ActualCost { get; set; }
     public double EstimatedHours { get; set; }
@@ -2531,6 +2756,9 @@ public class CreateWorkOrderDto
 
     // Custom field values (JSON serialized)
     public Dictionary<string, object>? CustomFieldValues { get; set; }
+
+    // Inspection-origin work orders provide their own finding tasks.
+    public bool GenerateDefaultTasks { get; set; } = true;
 }
 
 public class UpdateWorkOrderDto : IValidatableObject
@@ -4242,6 +4470,8 @@ public class CreateMaintenanceStaffScheduleDto
 
 public class UpdateMaintenanceStaffScheduleDto
 {
+    public Guid? TechnicianId { get; set; }
+
     public DateTime? StartDateTime { get; set; }
     public DateTime? EndDateTime { get; set; }
 

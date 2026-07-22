@@ -578,6 +578,102 @@ public class EmployeeService : IEmployeeService
 
     #region 3) Relationship Management (subresources)
 
+        public async Task<IEnumerable<EmployeeContactDto>> GetContactsAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var items = await repo.FindAsync(e => e.EmployeeId == employeeId);
+        return items.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.ContactType.ToString()).Select(x => x.ToDto());
+    }
+
+    public async Task<EmployeeContactDto> AddContactAsync(CreateEmployeeContactDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        await EnsureEmployeeExistsAsync(dto.EmployeeId);
+
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var entity = dto.ToEntity();
+
+        if (entity.IsPrimary)
+        {
+            var existing = await repo.FindAsync(x => x.EmployeeId == dto.EmployeeId && x.IsPrimary);
+            foreach (var c in existing)
+            {
+                c.IsPrimary = false;
+                await repo.UpdateAsync(c);
+            }
+        }
+
+        await repo.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<EmployeeContactDto> UpdateContactAsync(UpdateEmployeeContactDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var entity = await repo.GetByIdAsync(dto.Id);
+        if (entity == null) throw new ArgumentException($"Contact '{dto.Id}' not found.");
+
+        dto.Apply(entity);
+
+        if (entity.IsPrimary)
+        {
+            var others = await repo.FindAsync(x => x.EmployeeId == entity.EmployeeId && x.Id != entity.Id && x.IsPrimary);
+            foreach (var c in others)
+            {
+                c.IsPrimary = false;
+                await repo.UpdateAsync(c);
+            }
+        }
+
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> RemoveContactAsync(Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var entity = await repo.GetByIdAsync(contactId);
+        if (entity == null) return false;
+
+        await repo.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+
+    public async Task<EmployeeContactDto> SetPrimaryContactAsync(Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var entity = await repo.GetByIdAsync(contactId);
+        if (entity == null) throw new ArgumentException($"Contact '{contactId}' not found.");
+
+        var existing = await repo.FindAsync(x => x.EmployeeId == entity.EmployeeId && x.IsPrimary && x.Id != entity.Id);
+        foreach (var c in existing)
+        {
+            c.IsPrimary = false;
+            await repo.UpdateAsync(c);
+        }
+
+        entity.IsPrimary = true;
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return entity.ToDto();
+    }
+
+    public async Task<EmployeeContactDto?> GetContactByIdAsync(Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<EmployeeContact>();
+        var entity = await repo.GetByIdAsync(contactId);
+        return entity?.ToDto();
+    }
+
     public async Task<IEnumerable<EmployeeEmergencyContactDto>> GetEmergencyContactsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<EmployeeEmergencyContact>();
@@ -696,94 +792,6 @@ public class EmployeeService : IEmployeeService
         return entity.ToDto();
     }
 
-    public async Task<IEnumerable<EmployeeContactDto>> GetContactsAsync(Guid employeeId, CancellationToken cancellationToken = default)
-    {
-        var repo = _unitOfWork.Repository<EmployeeContact>();
-        var items = await repo.FindAsync(e => e.EmployeeId == employeeId);
-        return items.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.ContactType.ToString()).Select(x => x.ToDto());
-    }
-
-    public async Task<EmployeeContactDto> AddContactAsync(CreateEmployeeContactDto dto, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(dto);
-        await EnsureEmployeeExistsAsync(dto.EmployeeId);
-
-        var repo = _unitOfWork.Repository<EmployeeContact>();
-        var entity = dto.ToEntity();
-
-        if (entity.IsPrimary)
-        {
-            var existing = await repo.FindAsync(x => x.EmployeeId == dto.EmployeeId && x.IsPrimary);
-            foreach (var c in existing)
-            {
-                c.IsPrimary = false;
-                await repo.UpdateAsync(c);
-            }
-        }
-
-        await repo.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return entity.ToDto();
-    }
-
-    public async Task<EmployeeContactDto> UpdateContactAsync(UpdateEmployeeContactDto dto, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(dto);
-
-        var repo = _unitOfWork.Repository<EmployeeContact>();
-        var entity = await repo.GetByIdAsync(dto.Id);
-        if (entity == null) throw new ArgumentException($"Contact '{dto.Id}' not found.");
-
-        dto.Apply(entity);
-
-        if (entity.IsPrimary)
-        {
-            var others = await repo.FindAsync(x => x.EmployeeId == entity.EmployeeId && x.Id != entity.Id && x.IsPrimary);
-            foreach (var c in others)
-            {
-                c.IsPrimary = false;
-                await repo.UpdateAsync(c);
-            }
-        }
-
-        await repo.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return entity.ToDto();
-    }
-
-    public async Task<bool> RemoveContactAsync(Guid contactId, CancellationToken cancellationToken = default)
-    {
-        var repo = _unitOfWork.Repository<EmployeeContact>();
-        var entity = await repo.GetByIdAsync(contactId);
-        if (entity == null) return false;
-
-        await repo.DeleteAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return true;
-    }
-
-    public async Task<EmployeeContactDto> SetPrimaryContactAsync(Guid contactId, CancellationToken cancellationToken = default)
-    {
-        var repo = _unitOfWork.Repository<EmployeeContact>();
-        var entity = await repo.GetByIdAsync(contactId);
-        if (entity == null) throw new ArgumentException($"Contact '{contactId}' not found.");
-
-        var existing = await repo.FindAsync(x => x.EmployeeId == entity.EmployeeId && x.IsPrimary && x.Id != entity.Id);
-        foreach (var c in existing)
-        {
-            c.IsPrimary = false;
-            await repo.UpdateAsync(c);
-        }
-
-        entity.IsPrimary = true;
-        await repo.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return entity.ToDto();
-    }
 
     public async Task<IEnumerable<EmployeeDependentReadDto>> GetDependentsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {

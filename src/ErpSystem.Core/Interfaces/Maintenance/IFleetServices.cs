@@ -10,6 +10,16 @@ public interface IFleetVehicleService
     Task<MaintenanceAssetDto> UpdateVehicleAsync(Guid vehicleAssetId, UpdateFleetVehicleDto dto);
 }
 
+public interface IFleetDriverDirectoryService
+{
+    Task<FleetDriverDirectoryDto> GetDriversPagedAsync(
+        int page,
+        int pageSize,
+        string? searchTerm = null,
+        string? licenseStatus = null,
+        bool? assigned = null);
+}
+
 public interface IFleetTripService
 {
     Task<PagedResult<FleetTripDto>> GetTripsPagedAsync(int page, int pageSize, string? searchTerm = null, string? status = null, Guid? vehicleAssetId = null);
@@ -75,9 +85,14 @@ public interface IFleetAssignmentService
 public interface IFleetInspectionService
 {
     Task<IReadOnlyList<FleetTripInspectionDto>> GetTripInspectionsAsync(Guid tripId);
+    Task<IReadOnlyList<FleetTripInspectionDto>> GetAssetInspectionsAsync(Guid assetId, int take = 50);
     Task<FleetTripInspectionDto?> GetByIdAsync(Guid id);
     Task<FleetTripInspectionDto> StartAsync(StartFleetTripInspectionDto dto);
     Task<FleetTripInspectionDto> CompleteAsync(Guid inspectionId, CompleteFleetTripInspectionDto dto);
+    Task<FleetTripInspectionDto> SubmitAssetInspectionAsync(Guid assetId, SubmitFleetAssetInspectionDto dto);
+    Task<FleetTripInspectionDto> SubmitForApprovalAsync(Guid inspectionId);
+    Task<FleetTripInspectionDto> ApproveAsync(Guid inspectionId, string? comments = null);
+    Task<FleetTripInspectionDto> RejectAsync(Guid inspectionId, string? comments = null);
     Task<bool> CancelAsync(Guid inspectionId, string? notes = null);
 }
 

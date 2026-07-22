@@ -9,8 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
-import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
-import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
+import { WorkflowApprovalActions, WorkflowTabContent, WorkflowTabTrigger, useWorkflowRecord } from '@/components/workflow';
 import {
   Table,
   TableBody,
@@ -125,6 +124,32 @@ export default function PurchaseOrderDetailPage() {
     );
   };
 
+  const workflow = useWorkflowRecord({
+    entityType: 'PurchaseOrder',
+    entityId: id,
+    entityLabel: 'Purchase Order',
+    entityNumber: order?.orderNumber,
+    status: order?.status || '',
+    currentStepName: order?.currentWorkflowStepName,
+    canSubmit: order?.status === 'Draft',
+    canApproveReject: order?.status === 'Pending Approval',
+    enabled: Boolean(id && order),
+    commands: {
+      submit: () => purchasingService.submitPurchaseOrder(id),
+      approve: ({ comments }) => purchasingService.approvePurchaseOrder(id, {
+        approved: true,
+        comments: comments || undefined,
+      }),
+      reject: ({ comments }) => purchasingService.approvePurchaseOrder(id, {
+        approved: false,
+        comments: comments || undefined,
+        rejectionReason: comments || undefined,
+      }),
+      afterAction: fetchOrder,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
+
   // (see header actions below)
 
   const calculateReceiptProgress = (orderedQty: number, receivedQty: number) => {
@@ -162,8 +187,6 @@ export default function PurchaseOrderDetailPage() {
   }
 
   const canEdit = order.status === 'Draft';
-  const canSubmit = order.status === 'Draft';
-  const canApprove = order.status === 'Pending Approval';
   const canReceive = order.status === 'Approved' || order.status === 'Sent' || 
                      order.status === 'Acknowledged' || order.status === 'Partially Received';
 
@@ -200,35 +223,7 @@ export default function PurchaseOrderDetailPage() {
             </Link>
           )}
           
-          <WorkflowApprovalActions
-            entityType="PurchaseOrder"
-            entityId={id}
-            entityLabel="Purchase Order"
-            entityNumber={order.orderNumber}
-            status={order.status}
-            currentStepName={order.currentWorkflowStepName}
-            loadWorkflowSummary
-            canSubmit={canSubmit}
-            canApproveReject={canApprove}
-            onSubmit={async () => {
-              await purchasingService.submitPurchaseOrder(id);
-            }}
-            onApprove={async (comments) => {
-              await purchasingService.approvePurchaseOrder(id, {
-                approved: true,
-                comments: comments || undefined,
-              });
-            }}
-            onReject={async (comments) => {
-              await purchasingService.approvePurchaseOrder(id, {
-                approved: false,
-                comments: comments || undefined,
-                rejectionReason: comments || undefined,
-              });
-            }}
-            onAfterAction={fetchOrder}
-            onOpenWorkflows={() => router.push('/administration/workflow')}
-          />
+          <WorkflowApprovalActions {...workflow.actionProps} />
           
           {canReceive && (
             <Link href={`/procurement/purchase-orders/${id}/receive`}>
@@ -278,7 +273,7 @@ export default function PurchaseOrderDetailPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="items">Items ({order.itemCount})</TabsTrigger>
           <TabsTrigger value="receipts">Receipts ({order.receipts?.length || 0})</TabsTrigger>
-          <TabsTrigger value="approval">Approval History</TabsTrigger>
+          <WorkflowTabTrigger value="approval" />
         </TabsList>
 
         {/* Overview Tab */}
@@ -797,10 +792,11 @@ export default function PurchaseOrderDetailPage() {
           </Card>
         </TabsContent>
 
-        {/* Approval History Tab */}
-        <TabsContent value="approval" className="space-y-6">
-          <WorkflowApprovalHistoryPanel entityType="PurchaseOrder" entityId={id} />
-        </TabsContent>
+        <WorkflowTabContent
+          value="approval"
+          className="space-y-6"
+          {...workflow.actionProps}
+        />
       </Tabs>
     </div>
   );

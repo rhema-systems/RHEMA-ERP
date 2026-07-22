@@ -15,7 +15,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
 import {
@@ -27,6 +26,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/hooks/use-toast';
 
 interface Technician {
   id: string;
@@ -35,15 +35,24 @@ interface Technician {
   phone: string;
   specialization: string;
   certifications: string[];
-  status: 'Available' | 'Busy' | 'On Break' | 'Off Duty';
+  status: 'Available' | 'Assigned' | 'Busy' | 'On Break' | 'Off Duty';
   currentAssignment?: string;
   skillLevel: 'Junior' | 'Senior' | 'Lead' | 'Expert';
   rating: number;
   totalWorkOrders: number;
   completedThisMonth: number;
+  locationId?: string | null;
+  locationName?: string | null;
   location: string;
   shiftStart: string;
   shiftEnd: string;
+}
+
+interface LocationLookup {
+  id: string;
+  name: string;
+  code?: string | null;
+  isActive?: boolean;
 }
 
 interface Assignment {
@@ -54,64 +63,294 @@ interface Assignment {
   assetName: string;
   priority: 'Low' | 'Medium' | 'High' | 'Critical';
   scheduledDate: string;
+  endDate?: string;
   estimatedHours: number;
   status: 'Scheduled' | 'In Progress' | 'Completed' | 'Cancelled';
 }
 
+interface WorkOrderActivity {
+  id: string;
+  workOrderNumber?: string;
+  title?: string;
+  assignedTechnicianId?: string;
+  status?: string;
+  actualCompletionDate?: string;
+  actualEndDate?: string;
+  updatedAt?: string;
+  createdAt?: string;
+}
+
+const isBlockingAssignment = (assignment: Assignment) =>
+  assignment.status !== 'Completed' &&
+  assignment.status !== 'Cancelled' &&
+  (!assignment.endDate || new Date(assignment.endDate) >= new Date());
+
+const normalizeSkillLevel = (value?: string): Technician['skillLevel'] => {
+  const normalized = (value || '').toLowerCase();
+  if (normalized.includes('expert')) return 'Expert';
+  if (normalized.includes('lead')) return 'Lead';
+  if (normalized.includes('senior')) return 'Senior';
+  return 'Junior';
+};
+
+const normalizeAssignmentStatus = (value?: string): Assignment['status'] => {
+  const normalized = (value || 'Scheduled').replace(/\s/g, '').toLowerCase();
+  if (normalized === 'inprogress') return 'In Progress';
+  if (normalized === 'completed') return 'Completed';
+  if (normalized === 'cancelled' || normalized === 'canceled') return 'Cancelled';
+  return 'Scheduled';
+};
+
+const parseDate = (value?: string) => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const isCurrentMonth = (date: Date | null) => {
+  if (!date) return false;
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+};
+
+const isCompletedWorkOrder = (status?: string) => {
+  const normalized = (status || '').replace(/\s/g, '').toLowerCase();
+  return normalized === 'completed' || normalized === 'closed';
+};
+
+const getWorkOrderCompletionDate = (workOrder: WorkOrderActivity) =>
+  parseDate(workOrder.actualCompletionDate) ||
+  parseDate(workOrder.actualEndDate) ||
+  parseDate(workOrder.updatedAt) ||
+  parseDate(workOrder.createdAt);
+
+const deriveTechnicianMetrics = (
+  technicianId: string,
+  raw: any,
+  assignments: Assignment[],
+  workOrders: WorkOrderActivity[]
+) => {
+  const technicianAssignments = assignments.filter((assignment) => assignment.technicianId === technicianId);
+  const assignedWorkOrderIds = new Set(
+    technicianAssignments
+      .map((assignment) => assignment.workOrderId)
+      .filter(Boolean)
+  );
+
+  const matchedWorkOrders = workOrders.filter((workOrder) =>
+    workOrder.assignedTechnicianId === technicianId || assignedWorkOrderIds.has(workOrder.id)
+  );
+
+  const totalWorkOrderIds = new Set<string>();
+  matchedWorkOrders.forEach((workOrder) => totalWorkOrderIds.add(workOrder.id));
+  assignedWorkOrderIds.forEach((workOrderId) => totalWorkOrderIds.add(workOrderId));
+
+  const completedWorkOrderIds = new Set(
+    matchedWorkOrders
+      .filter((workOrder) => isCompletedWorkOrder(workOrder.status) && isCurrentMonth(getWorkOrderCompletionDate(workOrder)))
+      .map((workOrder) => workOrder.id)
+  );
+
+  const completedScheduleOnlyCount = technicianAssignments.filter((assignment) =>
+    assignment.status === 'Completed' &&
+    isCurrentMonth(parseDate(assignment.endDate || assignment.scheduledDate)) &&
+    !completedWorkOrderIds.has(assignment.workOrderId)
+  ).length;
+
+  const hasDerivedActivity = assignments.length > 0 || workOrders.length > 0;
+  return {
+    totalWorkOrders: hasDerivedActivity
+      ? totalWorkOrderIds.size
+      : Number(raw.totalWorkOrders ?? raw.activeWorkOrdersCount ?? raw.completedWorkOrders ?? 0),
+    completedThisMonth: hasDerivedActivity
+      ? completedWorkOrderIds.size + completedScheduleOnlyCount
+      : Number(raw.completedThisMonth ?? raw.completedWorkOrders ?? 0),
+  };
+};
+
+const normalizeTechnician = (raw: any, assignments: Assignment[], workOrders: WorkOrderActivity[]): Technician => {
+  const id = raw.id || raw.employeeId || '';
+  const activeAssignments = assignments
+    .filter((assignment) => assignment.technicianId === id && isBlockingAssignment(assignment))
+    .sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
+  const currentOrNextAssignment = activeAssignments[0];
+  const isInProgress = activeAssignments.some((assignment) => assignment.status === 'In Progress');
+  const metrics = deriveTechnicianMetrics(id, raw, assignments, workOrders);
+
+  return {
+    id,
+    name: raw.name || raw.fullName || `${raw.firstName || ''} ${raw.lastName || ''}`.trim() || 'Unnamed Technician',
+    email: raw.email || raw.emailAddress || '',
+    phone: raw.phone || raw.mobileNumber || raw.telephoneNumber || '',
+    specialization: raw.specialization || raw.positionTitle || raw.position || 'General Maintenance',
+    certifications: Array.isArray(raw.certifications)
+      ? raw.certifications
+      : raw.certificationLevel
+        ? [raw.certificationLevel]
+        : [],
+    status: isInProgress ? 'Busy' : currentOrNextAssignment ? 'Assigned' : 'Available',
+    currentAssignment: currentOrNextAssignment
+      ? `${currentOrNextAssignment.workOrderTitle} - ${new Date(currentOrNextAssignment.scheduledDate).toLocaleString()}`
+      : undefined,
+    skillLevel: normalizeSkillLevel(raw.skillLevel || raw.experienceLevel),
+    rating: Number(raw.rating ?? raw.averageRating ?? raw.performanceRating ?? 0),
+    totalWorkOrders: metrics.totalWorkOrders,
+    completedThisMonth: metrics.completedThisMonth,
+    locationId: raw.locationId || raw.LocationId || null,
+    locationName: raw.locationName || raw.LocationName || raw.location?.name || null,
+    location: raw.locationName || raw.LocationName || raw.location?.name || raw.location || 'Unassigned site',
+    shiftStart: raw.shiftStart || 'N/A',
+    shiftEnd: raw.shiftEnd || 'N/A',
+  };
+};
+
+const mapScheduleToAssignment = (schedule: any): Assignment => {
+  const start = schedule.startDateTime || schedule.scheduledDate || new Date().toISOString();
+  const end = schedule.endDateTime || schedule.endDate;
+  const startTime = new Date(start).getTime();
+  const endTime = end ? new Date(end).getTime() : startTime;
+
+  return {
+    id: schedule.id,
+    technicianId: schedule.technicianId,
+    workOrderId: schedule.workOrderId || schedule.jobCardId || schedule.id,
+    workOrderTitle: schedule.workOrderNumber || schedule.jobCardNumber || schedule.scheduleType || 'Maintenance assignment',
+    assetName: schedule.workLocation || schedule.teamName || schedule.address || 'Maintenance',
+    priority: 'Medium',
+    scheduledDate: start,
+    endDate: end,
+    estimatedHours: Math.max(0, (endTime - startTime) / (1000 * 60 * 60)),
+    status: normalizeAssignmentStatus(schedule.status),
+  };
+};
+
 
 export default function TechniciansPage() {
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+  const { toast } = useToast();
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [filteredTechnicians, setFilteredTechnicians] = useState<Technician[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [locations, setLocations] = useState<LocationLookup[]>([]);
+  const [locationLookupError, setLocationLookupError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [specializationFilter, setSpecializationFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedTechnician, setSelectedTechnician] = useState<Technician | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [technicianDialogTab, setTechnicianDialogTab] = useState('details');
   const [isLoading, setIsLoading] = useState(false);
+  const [locationSelection, setLocationSelection] = useState('none');
+  const [assigningLocation, setAssigningLocation] = useState(false);
+  const specializationOptions = Array.from(new Set(technicians.map((tech) => tech.specialization).filter(Boolean))).sort();
+  const assignedOrBusyCount = technicians.filter((tech) => tech.status === 'Assigned' || tech.status === 'Busy').length;
+  const averageRating = technicians.length
+    ? technicians.reduce((sum, tech) => sum + tech.rating, 0) / technicians.length
+    : 0;
   
   // Load technicians from API
   useEffect(() => {
     const fetchTechniciansFromHR = async () => {
       setIsLoading(true);
       try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
         const token = localStorage.getItem('authToken');
-        const [techniciansResponse, assignmentsResponse] = await Promise.all([
-          fetch(`${API_URL}/maintenance/technicians`, {
+        const rangeStart = new Date();
+        rangeStart.setDate(rangeStart.getDate() - 30);
+        const rangeEnd = new Date();
+        rangeEnd.setDate(rangeEnd.getDate() + 180);
+
+        const fetchWorkOrders = async (): Promise<WorkOrderActivity[]> => {
+          const pageSize = 100;
+          const allWorkOrders: WorkOrderActivity[] = [];
+
+          for (let page = 1; page <= 10; page += 1) {
+            const response = await fetch(`${API_URL}/maintenance/work-orders?page=${page}&pageSize=${pageSize}`, {
+              headers: {
+                'Authorization': token ? `Bearer ${token}` : '',
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (!response.ok) break;
+
+            const data = await response.json();
+            const items = data.items || data.data || data || [];
+            allWorkOrders.push(...items);
+
+            if (!data.hasNext && (!data.totalPages || page >= data.totalPages)) {
+              break;
+            }
+          }
+
+          return allWorkOrders;
+        };
+
+        const [techniciansResponse, assignmentsResponse, locationsResponse, workOrderList] = await Promise.all([
+          fetch(`${API_URL}/maintenance/technicians?page=1&pageSize=100`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
             }
           }),
-          fetch(`${API_URL}/maintenance/assignments`, {
+          fetch(`${API_URL}/maintenance/staff-schedules/by-date-range?startDate=${encodeURIComponent(rangeStart.toISOString())}&endDate=${encodeURIComponent(rangeEnd.toISOString())}`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
             }
-          })
+          }),
+          fetch(`${API_URL}/Location/summary`, {
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+              'Content-Type': 'application/json'
+            }
+          }),
+          fetchWorkOrders()
         ]);
         
-        if (techniciansResponse.ok) {
-          const techniciansData = await techniciansResponse.json();
-          setTechnicians(techniciansData.data || techniciansData.items || techniciansData || []);
-        }
-        
+        let assignmentList: Assignment[] = [];
         if (assignmentsResponse.ok) {
           const assignmentsData = await assignmentsResponse.json();
-          setAssignments(assignmentsData.data || assignmentsData.items || assignmentsData || []);
+          assignmentList = (assignmentsData.data || assignmentsData.items || assignmentsData || [])
+            .map(mapScheduleToAssignment);
+          setAssignments(assignmentList);
+        } else {
+          setAssignments([]);
+        }
+
+        if (techniciansResponse.ok) {
+          const techniciansData = await techniciansResponse.json();
+          const technicianItems = techniciansData.data || techniciansData.items || techniciansData || [];
+          setTechnicians(technicianItems.map((tech: any) => normalizeTechnician(tech, assignmentList, workOrderList)));
+        }
+
+        if (locationsResponse.ok) {
+          const locationsData = await locationsResponse.json();
+          const locationItems: LocationLookup[] = Array.isArray(locationsData)
+            ? locationsData
+            : Array.isArray(locationsData?.items)
+              ? locationsData.items
+              : Array.isArray(locationsData?.data)
+                ? locationsData.data
+                : [];
+          setLocations(locationItems.filter((item) => item.isActive !== false));
+          setLocationLookupError(null);
+        } else {
+          setLocations([]);
+          setLocationLookupError(`Site lookup returned HTTP ${locationsResponse.status}`);
         }
       } catch (error) {
         console.error('Failed to fetch technicians from HR module:', error);
         setTechnicians([]);
         setAssignments([]);
+        setLocations([]);
+        setLocationLookupError(error instanceof Error ? error.message : 'Sites could not be loaded.');
       } finally {
         setIsLoading(false);
       }
     };
     
     fetchTechniciansFromHR();
-  }, []);
+  }, [API_URL]);
 
   useEffect(() => {
     let filtered = technicians;
@@ -138,6 +377,7 @@ export default function TechniciansPage() {
   const getStatusBadge = (status: Technician['status']) => {
     const colors = {
       'Available': 'bg-green-100 text-green-800',
+      'Assigned': 'bg-blue-100 text-blue-800',
       'Busy': 'bg-red-100 text-red-800',
       'On Break': 'bg-yellow-100 text-yellow-800',
       'Off Duty': 'bg-gray-100 text-gray-800',
@@ -181,7 +421,64 @@ export default function TechniciansPage() {
   };
 
   const getTechnicianAssignments = (technicianId: string) => {
-    return assignments.filter(assignment => assignment.technicianId === technicianId);
+    return assignments
+      .filter(assignment => assignment.technicianId === technicianId && isBlockingAssignment(assignment))
+      .sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
+  };
+
+  const getTechnicianSchedule = (technicianId: string) => {
+    return assignments
+      .filter(assignment => assignment.technicianId === technicianId)
+      .sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
+  };
+
+  const openTechnicianDialog = (technician: Technician, tab: string) => {
+    setSelectedTechnician(technician);
+    setTechnicianDialogTab(tab);
+    setLocationSelection(technician.locationId || 'none');
+    setIsViewDialogOpen(true);
+  };
+
+  const assignTechnicianLocation = async (technician: Technician, locationId: string) => {
+    setAssigningLocation(true);
+    try {
+      const token = localStorage.getItem('authToken') || localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/maintenance/technicians/${technician.id}/location`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ locationId: locationId === 'none' ? null : locationId })
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const updated = normalizeTechnician(await response.json(), assignments, []);
+      const merged: Technician = {
+        ...technician,
+        ...updated,
+        status: technician.status,
+        currentAssignment: technician.currentAssignment,
+        totalWorkOrders: technician.totalWorkOrders,
+        completedThisMonth: technician.completedThisMonth,
+        rating: technician.rating
+      };
+      setTechnicians((current) => current.map((item) => item.id === technician.id ? merged : item));
+      setSelectedTechnician((current) => current?.id === technician.id ? { ...current, ...merged } : current);
+      setLocationSelection(merged.locationId || 'none');
+      toast({ title: 'Technician site updated', description: `${merged.name} is now assigned to ${merged.location || 'no site'}.` });
+    } catch (error) {
+      toast({
+        title: 'Site assignment failed',
+        description: error instanceof Error ? error.message : 'The technician could not be assigned to the selected site.',
+        variant: 'destructive'
+      });
+    } finally {
+      setAssigningLocation(false);
+    }
   };
 
   const renderStarRating = (rating: number) => {
@@ -207,7 +504,7 @@ export default function TechniciansPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Technician Management</h1>
           <p className="text-muted-foreground">
-            View technician schedules, assignments, and performance
+            View Maintenance department employees, schedules, assignments, and performance
           </p>
         </div>
       </div>
@@ -220,8 +517,8 @@ export default function TechniciansPage() {
             <div>
               <h3 className="font-semibold text-blue-900">HR Module Integration</h3>
               <p className="text-sm text-blue-800 mt-1">
-                Technician data is synchronized from the HR module. To add, modify, or manage technician information, 
-                please use the <strong>HR Employee Management</strong> section. Changes made there will automatically 
+                Technicians are employees assigned to the Maintenance department in HR. To add, modify, or manage technician information,
+                please use the <strong>HR Employee Management</strong> section. Changes made there will automatically
                 appear here within a few minutes.
               </p>
               <div className="mt-2">
@@ -262,7 +559,7 @@ export default function TechniciansPage() {
           <CardContent>
             <div className="text-2xl font-bold">{technicians.length}</div>
             <p className="text-xs text-muted-foreground">
-              Active technicians
+              Maintenance department employees
             </p>
           </CardContent>
         </Card>
@@ -284,15 +581,15 @@ export default function TechniciansPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Currently Working</CardTitle>
-            <Clock className="h-4 w-4 text-red-600" />
+            <CardTitle className="text-sm font-medium">Assigned / Busy</CardTitle>
+            <Clock className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">
-              {technicians.filter(t => t.status === 'Busy').length}
+            <div className="text-2xl font-bold text-blue-600">
+              {assignedOrBusyCount}
             </div>
             <p className="text-xs text-muted-foreground">
-              On active assignments
+              On scheduled assignments
             </p>
           </CardContent>
         </Card>
@@ -304,7 +601,7 @@ export default function TechniciansPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-yellow-600">
-              {(technicians.reduce((sum, t) => sum + t.rating, 0) / technicians.length).toFixed(1)}
+              {averageRating.toFixed(1)}
             </div>
             <p className="text-xs text-muted-foreground">
               Team performance
@@ -338,11 +635,11 @@ export default function TechniciansPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Specializations</SelectItem>
-                  <SelectItem value="HVAC">HVAC</SelectItem>
-                  <SelectItem value="Electrical">Electrical</SelectItem>
-                  <SelectItem value="Plumbing">Plumbing</SelectItem>
-                  <SelectItem value="General Maintenance">General</SelectItem>
-                  <SelectItem value="Safety">Safety</SelectItem>
+                  {specializationOptions.map((specialization) => (
+                    <SelectItem key={specialization} value={specialization}>
+                      {specialization}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -355,6 +652,7 @@ export default function TechniciansPage() {
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="Available">Available</SelectItem>
+                  <SelectItem value="Assigned">Assigned</SelectItem>
                   <SelectItem value="Busy">Busy</SelectItem>
                   <SelectItem value="On Break">On Break</SelectItem>
                   <SelectItem value="Off Duty">Off Duty</SelectItem>
@@ -423,18 +721,26 @@ export default function TechniciansPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => {
-                          setSelectedTechnician(technician);
-                          setIsViewDialogOpen(true);
-                        }}
+                        onClick={() => openTechnicianDialog(technician, 'details')}
+                        title="View technician details"
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
+                        onClick={() => openTechnicianDialog(technician, 'schedule')}
+                        title="View technician schedule"
                       >
                         <Calendar className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openTechnicianDialog(technician, 'details')}
+                        title="Assign technician to site"
+                      >
+                        <UserCheck className="h-4 w-4" />
                       </Button>
                     </div>
                   </TableCell>
@@ -446,7 +752,15 @@ export default function TechniciansPage() {
       </Card>
 
       {/* View Technician Dialog */}
-      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+      <Dialog
+        open={isViewDialogOpen}
+        onOpenChange={(open) => {
+          setIsViewDialogOpen(open);
+          if (!open) {
+            setTechnicianDialogTab('details');
+          }
+        }}
+      >
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Technician Details</DialogTitle>
@@ -455,7 +769,7 @@ export default function TechniciansPage() {
             </DialogDescription>
           </DialogHeader>
           {selectedTechnician && (
-            <Tabs defaultValue="details" className="space-y-4">
+            <Tabs value={technicianDialogTab} onValueChange={setTechnicianDialogTab} className="space-y-4">
               <TabsList>
                 <TabsTrigger value="details">Personal Details</TabsTrigger>
                 <TabsTrigger value="assignments">Current Assignments</TabsTrigger>
@@ -499,6 +813,36 @@ export default function TechniciansPage() {
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Location</Label>
                       <p className="text-sm">{selectedTechnician.location}</p>
+                    </div>
+                    <div className="space-y-2 rounded-md border p-3">
+                      <Label className="text-sm font-medium">Assign / Move to Site</Label>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Select value={locationSelection} onValueChange={setLocationSelection}>
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Select HR location" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Unassigned</SelectItem>
+                            {locations.map((location) => (
+                              <SelectItem key={location.id} value={location.id}>
+                                {location.code ? `${location.code} · ` : ''}{location.name}
+                              </SelectItem>
+                            ))}
+                            {locations.length === 0 && (
+                              <SelectItem value="no-sites" disabled>No active HR locations configured</SelectItem>
+                            )}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          onClick={() => assignTechnicianLocation(selectedTechnician, locationSelection)}
+                          disabled={assigningLocation || locationSelection === (selectedTechnician.locationId || 'none') || locationSelection === 'no-sites'}
+                        >
+                          {assigningLocation ? 'Saving...' : 'Save Site'}
+                        </Button>
+                      </div>
+                      {locationLookupError && (
+                        <p className="text-xs text-destructive">{locationLookupError}</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -561,14 +905,27 @@ export default function TechniciansPage() {
                         <p className="text-sm">{selectedTechnician.shiftEnd}</p>
                       </div>
                     </div>
-                    <div className="mt-4 flex space-x-2">
-                      <Button size="sm" variant="outline">
-                        <Calendar className="h-4 w-4 mr-2" />
-                        View Full Schedule
-                      </Button>
-                      <Button size="sm" variant="outline">
-                        Assign Work Order
-                      </Button>
+                    <div className="mt-4 space-y-2">
+                      {getTechnicianSchedule(selectedTechnician.id).map((assignment) => (
+                        <div key={assignment.id} className="rounded-md border bg-muted/30 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium">{assignment.workOrderTitle}</p>
+                              <p className="text-xs text-muted-foreground">{assignment.assetName}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(assignment.scheduledDate).toLocaleString()}
+                                {assignment.endDate ? ` - ${new Date(assignment.endDate).toLocaleString()}` : ''}
+                              </p>
+                            </div>
+                            <Badge variant="outline">{assignment.status}</Badge>
+                          </div>
+                        </div>
+                      ))}
+                      {getTechnicianSchedule(selectedTechnician.id).length === 0 && (
+                        <p className="text-sm text-muted-foreground text-center py-6">
+                          No schedule entries found for this technician.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>

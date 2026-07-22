@@ -1009,62 +1009,94 @@ public class EnhancedMaintenanceWorkflowService : IEnhancedMaintenanceWorkflowSe
 
         var entityType = await ResolveOrCreateEntityTypeAsync(workflowDefinition.EntityType, tenantGuid);
 
+        var createdById = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? parsedUserId : Guid.Empty;
         var existing = await _workflowDefinitionRepository.GetByNameAsync(workflowDefinition.Name, tenantGuid);
-        if (existing != null)
-        {
-            var definition = await _workflowDefinitionRepository.GetWithDetailsAsync(existing.Id) ?? existing;
+        var definitionKey = existing?.DefinitionKey is { } key && key != Guid.Empty ? key : Guid.NewGuid();
+        var versions = existing == null
+            ? Array.Empty<WorkflowDefinition>()
+            : (await _workflowDefinitionRepository.GetVersionsAsync(definitionKey, tenantGuid)).ToArray();
+        var draft = versions.FirstOrDefault(definition =>
+            definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Draft);
 
-            if (definition.Instances?.Any(i => i.Status == WorkflowInstanceStatus.InProgress ||
-                                              i.Status == WorkflowInstanceStatus.Waiting) == true)
+        WorkflowDefinition nextDefinition;
+        if (draft != null)
+        {
+            nextDefinition = await _workflowDefinitionRepository.GetWithDetailsAsync(draft.Id) ?? draft;
+            if (nextDefinition.Instances.Any())
             {
-                _logger.LogWarning("Workflow definition {Name} has active instances; skipping update", definition.Name);
-                return definition;
+                throw new InvalidOperationException("A draft workflow version with instances cannot be replaced.");
             }
 
-            await _workflowTransitionRepository.DeleteRangeAsync(t => t.WorkflowDefinitionId == definition.Id);
+            await _workflowTransitionRepository.DeleteRangeAsync(t => t.WorkflowDefinitionId == nextDefinition.Id);
             await _workflowTransitionRepository.SaveChangesAsync();
-            await _workflowStepRepository.DeleteRangeAsync(s => s.WorkflowDefinitionId == definition.Id);
+            await _workflowStepRepository.DeleteRangeAsync(s => s.WorkflowDefinitionId == nextDefinition.Id);
             await _workflowStepRepository.SaveChangesAsync();
 
-            definition.Description = workflowDefinition.Description;
-            definition.Configuration = workflowDefinition.Configuration;
-            definition.EntityTypeId = entityType.Id;
-            definition.Version = Math.Max(1, definition.Version + 1);
-            definition.IsActive = true;
-            definition.UpdatedAt = DateTime.UtcNow;
-            definition.UpdatedBy = _currentUserService.UserName ?? "System";
-            definition.LastModifiedById = Guid.TryParse(_currentUserService.UserId, out var modifiedById)
-                ? modifiedById
-                : null;
-
-            await _workflowDefinitionRepository.UpdateAsync(definition);
+            nextDefinition.Description = workflowDefinition.Description;
+            nextDefinition.Configuration = workflowDefinition.Configuration;
+            nextDefinition.EntityTypeId = entityType.Id;
+            nextDefinition.UpdatedAt = DateTime.UtcNow;
+            nextDefinition.UpdatedBy = _currentUserService.UserName ?? "System";
+            nextDefinition.LastModifiedById = createdById;
+            await _workflowDefinitionRepository.UpdateAsync(nextDefinition);
             await _workflowDefinitionRepository.SaveChangesAsync();
+        }
+        else
+        {
+            var nextVersion = versions.Select(definition => definition.Version).DefaultIfEmpty(0).Max() + 1;
+            nextDefinition = new WorkflowDefinition
+            {
+                Id = Guid.NewGuid(),
+                DefinitionKey = definitionKey,
+                Name = workflowDefinition.Name,
+                Description = workflowDefinition.Description,
+                EntityTypeId = entityType.Id,
+                Configuration = workflowDefinition.Configuration,
+                TenantId = tenantGuid,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUserService.UserName ?? "System",
+                CreatedById = createdById,
+                IsActive = false,
+                LifecycleStatus = WorkflowDefinitionLifecycleStatus.Draft,
+                Version = nextVersion,
+                SupersedesDefinitionId = existing?.Id,
+                ChangeSummary = existing == null ? "Initial maintenance workflow" : $"Maintenance workflow update after version {existing.Version}"
+            };
 
-            await CreateStepsAndTransitionsAsync(definition, workflowDefinition, tenantGuid);
-            return definition;
+            await _workflowDefinitionRepository.AddAsync(nextDefinition);
+            await _workflowDefinitionRepository.SaveChangesAsync();
         }
 
-        var createdById = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? parsedUserId : Guid.Empty;
-        var newDefinition = new WorkflowDefinition
-        {
-            Id = Guid.NewGuid(),
-            Name = workflowDefinition.Name,
-            Description = workflowDefinition.Description,
-            EntityTypeId = entityType.Id,
-            Configuration = workflowDefinition.Configuration,
-            TenantId = tenantGuid,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = _currentUserService.UserName ?? "System",
-            CreatedById = createdById,
-            IsActive = true,
-            Version = 1
-        };
+        await CreateStepsAndTransitionsAsync(nextDefinition, workflowDefinition, tenantGuid);
 
-        await _workflowDefinitionRepository.AddAsync(newDefinition);
+        var now = DateTime.UtcNow;
+        foreach (var published in versions.Where(definition =>
+                     definition.Id != nextDefinition.Id &&
+                     definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published))
+        {
+            published.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+            published.IsActive = false;
+            published.RetiredAt = now;
+            published.RetiredById = createdById;
+            published.UpdatedAt = now;
+            published.UpdatedBy = _currentUserService.UserName ?? "System";
+            published.LastModifiedById = createdById;
+            await _workflowDefinitionRepository.UpdateAsync(published);
+        }
+
+        nextDefinition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published;
+        nextDefinition.IsActive = true;
+        nextDefinition.PublishedAt = now;
+        nextDefinition.PublishedById = createdById;
+        nextDefinition.RetiredAt = null;
+        nextDefinition.RetiredById = null;
+        nextDefinition.UpdatedAt = now;
+        nextDefinition.UpdatedBy = _currentUserService.UserName ?? "System";
+        nextDefinition.LastModifiedById = createdById;
+        await _workflowDefinitionRepository.UpdateAsync(nextDefinition);
         await _workflowDefinitionRepository.SaveChangesAsync();
 
-        await CreateStepsAndTransitionsAsync(newDefinition, workflowDefinition, tenantGuid);
-        return newDefinition;
+        return await _workflowDefinitionRepository.GetWithDetailsAsync(nextDefinition.Id) ?? nextDefinition;
     }
 
     private async Task<WorkflowInstance?> GetLatestWorkflowInstanceAsync(string entityId, string entityType)

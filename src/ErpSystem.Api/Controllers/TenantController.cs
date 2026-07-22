@@ -173,7 +173,13 @@ public class TenantController : ControllerBase
                 UserAudience = request.UserAudience,
                 WelcomeMessage = request.WelcomeMessage,
                 DefaultPriority = request.DefaultPriority,
-                EnableAutoSelection = request.EnableAutoSelection
+                EnableAutoSelection = request.EnableAutoSelection,
+
+                // Finance/company settings
+                BaseCurrency = NormalizeCurrencyCode(request.BaseCurrency),
+                BaseCurrencyName = request.BaseCurrencyName,
+                CurrencySymbol = request.CurrencySymbol,
+                CurrencyDecimalPlaces = NormalizeCurrencyDecimalPlaces(request.CurrencyDecimalPlaces)
             };
 
             var createdTenant = await _tenantService.CreateTenantAsync(tenant);
@@ -279,7 +285,11 @@ public class TenantController : ControllerBase
                 UserAudience = existingTenant.UserAudience,
                 WelcomeMessage = existingTenant.WelcomeMessage,
                 DefaultPriority = existingTenant.DefaultPriority,
-                EnableAutoSelection = existingTenant.EnableAutoSelection
+                EnableAutoSelection = existingTenant.EnableAutoSelection,
+                BaseCurrency = existingTenant.BaseCurrency,
+                BaseCurrencyName = existingTenant.BaseCurrencyName,
+                CurrencySymbol = existingTenant.CurrencySymbol,
+                CurrencyDecimalPlaces = existingTenant.CurrencyDecimalPlaces
             };
 
             // Parse status from request
@@ -332,6 +342,10 @@ public class TenantController : ControllerBase
             existingTenant.WelcomeMessage = request.WelcomeMessage;
             existingTenant.DefaultPriority = request.DefaultPriority;
             existingTenant.EnableAutoSelection = request.EnableAutoSelection;
+            existingTenant.BaseCurrency = NormalizeCurrencyCode(request.BaseCurrency);
+            existingTenant.BaseCurrencyName = request.BaseCurrencyName;
+            existingTenant.CurrencySymbol = request.CurrencySymbol;
+            existingTenant.CurrencyDecimalPlaces = NormalizeCurrencyDecimalPlaces(request.CurrencyDecimalPlaces);
 
             var updatedTenant = await _tenantService.UpdateTenantAsync(existingTenant);
 
@@ -381,7 +395,11 @@ public class TenantController : ControllerBase
                     UserAudience = request.UserAudience,
                     WelcomeMessage = request.WelcomeMessage,
                     DefaultPriority = request.DefaultPriority,
-                    EnableAutoSelection = request.EnableAutoSelection
+                    EnableAutoSelection = request.EnableAutoSelection,
+                    BaseCurrency = NormalizeCurrencyCode(request.BaseCurrency),
+                    BaseCurrencyName = request.BaseCurrencyName,
+                    CurrencySymbol = request.CurrencySymbol,
+                    CurrencyDecimalPlaces = NormalizeCurrencyDecimalPlaces(request.CurrencyDecimalPlaces)
                 };
 
                 await _auditLogService.LogUserActionAsync(
@@ -694,8 +712,30 @@ public class TenantController : ControllerBase
             UserAudience = tenant.UserAudience,
             WelcomeMessage = tenant.WelcomeMessage,
             DefaultPriority = tenant.DefaultPriority,
-            EnableAutoSelection = tenant.EnableAutoSelection
+            EnableAutoSelection = tenant.EnableAutoSelection,
+
+            // Finance/company settings
+            BaseCurrency = tenant.BaseCurrency,
+            BaseCurrencyName = tenant.BaseCurrencyName,
+            CurrencySymbol = tenant.CurrencySymbol,
+            CurrencyDecimalPlaces = tenant.CurrencyDecimalPlaces
         };
+    }
+
+    private static string NormalizeCurrencyCode(string? value)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? "GHS" : value.Trim().ToUpperInvariant();
+        return normalized.Length > 3 ? normalized[..3] : normalized;
+    }
+
+    private static int NormalizeCurrencyDecimalPlaces(int? value)
+    {
+        if (!value.HasValue || value.Value < 0)
+        {
+            return 2;
+        }
+
+        return Math.Min(value.Value, 6);
     }
 
     /// <summary>
@@ -764,6 +804,12 @@ public class TenantDto
     public string? WelcomeMessage { get; set; }
     public int DefaultPriority { get; set; } = 10;
     public bool EnableAutoSelection { get; set; } = false;
+
+    // Finance/company settings
+    public string BaseCurrency { get; set; } = "GHS";
+    public string? BaseCurrencyName { get; set; }
+    public string? CurrencySymbol { get; set; }
+    public int CurrencyDecimalPlaces { get; set; } = 2;
 }
 
 public class CreateTenantRequest
@@ -811,6 +857,12 @@ public class CreateTenantRequest
     public string? WelcomeMessage { get; set; }
     public int DefaultPriority { get; set; } = 10;
     public bool EnableAutoSelection { get; set; } = false;
+
+    // Finance/company settings
+    public string? BaseCurrency { get; set; }
+    public string? BaseCurrencyName { get; set; }
+    public string? CurrencySymbol { get; set; }
+    public int? CurrencyDecimalPlaces { get; set; }
 }
 
 public class TestLdapRequest
@@ -902,6 +954,12 @@ public class UpdateTenantRequest
     public string? WelcomeMessage { get; set; }
     public int DefaultPriority { get; set; } = 10;
     public bool EnableAutoSelection { get; set; } = false;
+
+    // Finance/company settings
+    public string? BaseCurrency { get; set; }
+    public string? BaseCurrencyName { get; set; }
+    public string? CurrencySymbol { get; set; }
+    public int? CurrencyDecimalPlaces { get; set; }
 }
 
 public class TenantModuleDto

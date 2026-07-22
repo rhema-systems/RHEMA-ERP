@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.DTOs.Finance;
 
 namespace ErpSystem.Core.Interfaces.Maintenance;
 
@@ -15,7 +16,7 @@ public interface IMaintenanceAssetService
     Task<MaintenanceAssetDto?> GetAssetByIdAsync(Guid id);
     Task<IEnumerable<MaintenanceAssetDto>> GetAssetsByIdsAsync(List<Guid> ids);
     Task<IEnumerable<MaintenanceAssetDto>> GetAllAssetsAsync();
-    Task<PagedResult<MaintenanceAssetListDto>> GetAssetsPagedAsync(int page, int pageSize, string? searchTerm = null, Guid? categoryId = null);
+    Task<PagedResult<MaintenanceAssetListDto>> GetAssetsPagedAsync(int page, int pageSize, string? searchTerm = null, Guid? categoryId = null, Guid? siteLocationId = null);
 
     // Business logic methods
     Task<bool> IsAssetNumberUniqueAsync(string assetNumber, Guid? excludeId = null);
@@ -29,6 +30,11 @@ public interface IMaintenanceAssetService
     Task UpdateAssetMileageAsync(Guid assetId, double mileage);
     Task<string> GenerateAssetNumberAsync(Guid categoryId);
     Task<IEnumerable<MaintenanceAssetDto>> GetAvailableVehiclesAsync();
+    Task<MaintenanceAssetDto> MoveAssetAsync(Guid assetId, MoveMaintenanceAssetDto moveDto);
+    Task<IReadOnlyList<MaintenanceAssetMovementDto>> GetMovementHistoryAsync(Guid assetId);
+    Task<MaintenanceAssetLifecycleHistoryDto> GetLifecycleHistoryAsync(Guid assetId);
+    Task<MaintenanceAssetImportResultDto> ImportAssetsFromExcelAsync(Stream fileStream, string fileName);
+    Task<byte[]> GenerateImportTemplateAsync();
 }
 
 public interface IMaintenanceAssetCategoryService
@@ -316,6 +322,7 @@ public interface IWorkOrderService
     Task<WorkOrderDto> ApproveWorkOrderAsync(Guid id, string? approvalNotes = null);
     Task<WorkOrderDto> StartWorkOrderAsync(Guid id);
     Task<WorkOrderDto> CompleteWorkOrderAsync(Guid id, CompleteWorkOrderDto completeDto);
+    Task<InvoiceDto> PostWorkOrderBillingToArInvoiceAsync(Guid id);
 
     // Business logic
     Task<IEnumerable<WorkOrderListDto>> GetOverdueWorkOrdersAsync();
@@ -476,6 +483,8 @@ public interface IInspectionTemplateService
     Task<IEnumerable<InspectionTemplateDto>> GetAllTemplatesAsync();
     Task<IEnumerable<InspectionTemplateDto>> GetTemplatesByCategoryAsync(string category);
     Task<IEnumerable<InspectionTemplateDto>> GetActiveTemplatesAsync();
+    Task<IEnumerable<InspectionTemplateDto>> GetTemplatesAsync(InspectionTemplateFilterDto filter);
+    Task<InspectionTemplateQrPackageDto> GetQrPackageAsync(Guid id, InspectionTemplateQrPackageRequestDto request);
 }
 
 public interface IAssetInspectionService
@@ -618,6 +627,7 @@ public interface ITechnicianService
     Task<TechnicianWorkloadDto> GetTechnicianWorkloadAsync(Guid technicianId, DateTime startDate, DateTime endDate);
     Task<TechnicianAvailabilityDto> GetTechnicianAvailabilityAsync(Guid technicianId, DateTime date);
     Task<IEnumerable<TechnicianDto>> GetTechniciansByLocationAsync(Guid locationId);
+    Task<TechnicianDto> AssignTechnicianLocationAsync(Guid technicianId, AssignTechnicianLocationDto dto);
     Task<TechnicianAnalyticsDto> GetTechnicianAnalyticsAsync(Guid technicianId, DateTime startDate, DateTime endDate);
     Task<SkillUtilizationDto> GetSkillUtilizationAsync(Guid skillId, DateTime startDate, DateTime endDate);
     Task<IEnumerable<TechnicianDto>> FindTechniciansForWorkOrderAsync(Guid workOrderId);

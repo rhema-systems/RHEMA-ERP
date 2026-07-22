@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
+ 
 "use client"
 
 import React, { useState, useMemo } from 'react'
@@ -278,11 +278,11 @@ export const MobileDataTable = <T extends Record<string, any>>({
 
   const renderTableView = () => (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[600px]">
-        <thead>
+      <table className="w-full min-w-[600px] text-[13px]">
+        <thead className="bg-slate-100/80 text-slate-700">
           <tr className="border-b">
             {allColumns.map((column) => (
-              <th key={column.key} className="text-left p-3 font-medium">
+              <th key={column.key} className="px-2.5 py-1.5 text-left text-xs font-semibold uppercase">
                 {sortable && column.sortable !== false ? (
                   <Button
                     variant="ghost"
@@ -305,7 +305,7 @@ export const MobileDataTable = <T extends Record<string, any>>({
                 )}
               </th>
             ))}
-            {actions.length > 0 && <th className="text-left p-3 font-medium">Actions</th>}
+            {actions.length > 0 && <th className="px-2.5 py-1.5 text-left text-xs font-semibold uppercase">Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -314,17 +314,18 @@ export const MobileDataTable = <T extends Record<string, any>>({
               key={index} 
               className={cn(
                 "border-b hover:bg-muted/50 transition-colors",
+                index % 2 === 0 ? "bg-white" : "bg-slate-50/80",
                 onRowClick && "cursor-pointer"
               )}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >
               {allColumns.map((column) => (
-                <td key={column.key} className="p-3">
+                <td key={column.key} className="px-2.5 py-1.5">
                   {renderValue(column, row)}
                 </td>
               ))}
               {actions.length > 0 && (
-                <td className="p-3">
+                <td className="px-2.5 py-1.5">
                   <div className="flex gap-1">
                     {actions.slice(0, 2).map((action, actionIndex) => (
                       <Button

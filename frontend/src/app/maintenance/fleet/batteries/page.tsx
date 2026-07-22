@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { formatFleetDateTime } from '@/lib/date-format';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 
 const BATTERY_POSITIONS = [
   { value: 'Main', label: 'Main' },
@@ -20,6 +21,7 @@ const BATTERY_POSITIONS = [
 const BATTERY_POSITION_VALUES = new Set(BATTERY_POSITIONS.map((p) => p.value));
 
 export default function FleetBatteriesPage() {
+  const { currencyCode, formatMoney } = useMaintenanceCurrency();
   const [vehicles, setVehicles] = React.useState<FleetVehicleListDto[]>([]);
   const [vehicleId, setVehicleId] = React.useState<string>('none');
   const [items, setItems] = React.useState<FleetBatteryDto[]>([]);
@@ -88,7 +90,7 @@ export default function FleetBatteriesPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ serialNumber: '', brand: '', spec: '', position: '', costAmount: '', currencyCode: '', status: 'Installed', notes: '' });
+    setForm({ serialNumber: '', brand: '', spec: '', position: '', costAmount: '', currencyCode, status: 'Installed', notes: '' });
     setOpen(true);
   };
 
@@ -100,7 +102,7 @@ export default function FleetBatteriesPage() {
       spec: b.spec ?? '',
       position: b.position ?? '',
       costAmount: '',
-      currencyCode: '',
+      currencyCode,
       status: b.status,
       notes: b.notes ?? '',
     });
@@ -136,7 +138,7 @@ export default function FleetBatteriesPage() {
       installedAtUtc: undefined,
       status: form.status,
       costAmount: parsedCost,
-      currencyCode: form.currencyCode || undefined,
+      currencyCode: form.currencyCode || currencyCode,
       notes: form.notes || undefined,
     };
     try {
@@ -385,7 +387,7 @@ export default function FleetBatteriesPage() {
             </div>
             <div className="space-y-2">
               <Label>Currency</Label>
-              <Input value={form.currencyCode} onChange={(e) => setForm((p) => ({ ...p, currencyCode: e.target.value }))} placeholder="USD" />
+              <Input value={form.currencyCode || currencyCode} disabled />
             </div>
 
             <div className="space-y-2 md:col-span-3">
@@ -449,7 +451,7 @@ export default function FleetBatteriesPage() {
                           {(e.fromStatus || '—') + ' → ' + (e.toStatus || '—')}
                         </td>
                         <td className="py-2 px-3 whitespace-nowrap">
-                          {e.costAmount ? `${e.costAmount.toLocaleString()}${e.currencyCode ? ` ${e.currencyCode}` : ''}` : '—'}
+                          {e.costAmount ? formatMoney(e.costAmount) : '—'}
                         </td>
                         <td className="py-2 px-3">
                           <div className="max-w-[520px] whitespace-pre-wrap break-words">{e.notes || '—'}</div>

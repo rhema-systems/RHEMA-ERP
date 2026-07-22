@@ -11,11 +11,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, Users, ClipboardList, ClipboardCheck, History, FileText, Wrench, Package, Trash2, Pencil, FlaskConical, CalendarClock, DollarSign, HelpCircle, ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, CalendarIcon, ShieldCheck, Camera, Image, X, Receipt } from 'lucide-react';
+import { Plus, Search, Eye, Edit, Calendar, AlertCircle, CheckCircle, Clock, ChevronDown, User, Users, ClipboardList, ClipboardCheck, History, FileText, Wrench, Package, Trash2, Pencil, FlaskConical, CalendarClock, DollarSign, HelpCircle, ExternalLink, ArrowUp, ArrowDown, ArrowUpDown, CalendarIcon, ShieldCheck, Camera, Image, X, Receipt, MoreHorizontal, Play, PauseCircle, RotateCcw } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { useMaintenanceCurrency } from '@/hooks/useMaintenanceCurrency';
 import {
   Dialog,
   DialogContent,
@@ -35,6 +36,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Table,
   TableBody,
@@ -59,6 +67,7 @@ import qualityControlService, { QualityValidationResult } from '@/services/quali
 import workOrderToolService, { WorkOrderToolDto, WorkOrderToolSummaryDto, AllocateWorkOrderToolDto, CheckoutWorkOrderToolDto, ReturnWorkOrderToolDto } from '@/services/workOrderToolService';
 import { toolCheckoutService, MaintenanceToolDto } from '@/services/toolCheckoutService';
 import workOrderPartService, { WorkOrderPartDto, CreateWorkOrderPartDto, InventoryItemDto, WarehouseLocationDto, WarehouseDto, WarehouseInventoryDto } from '@/services/workOrderPartService';
+import workOrderService from '@/services/workOrderService';
 import { fileUploadService } from '@/services/fileUploadService';
 import { ClientOnly } from '@/components/ClientOnly';
 import workOrderLaborService, { WorkOrderLaborDto, CreateWorkOrderLaborDto } from '@/services/workOrderLaborService';
@@ -73,6 +82,8 @@ interface Employee {
   email: string;
   department?: string;
   position?: string;
+  locationId?: string;
+  locationName?: string;
   isActive: boolean;
 }
 
@@ -89,7 +100,7 @@ type WorkOrder = Omit<ApiWorkOrder, 'status' | 'workOrderTypeId' | 'maintenanceT
   jobCardId?: string;
   jobCardNumber?: string;
   maintenanceTypeName?: string;
-  billingType?: 'Maintenance' | 'Repairs';
+  billingType?: string;
   fixedAmount?: number;
   status: ApiWorkOrder['status'] | 'Draft' | 'Approved';
 };
@@ -157,6 +168,7 @@ const normalizeWorkOrderTool = (tool: Partial<WorkOrderToolDto> & { id: string; 
 
 function WorkOrdersPageContent() {
   const { toast } = useToast();
+  const { formatMoney, amountLabel, mileageRateLabel } = useMaintenanceCurrency();
   const searchParams = useSearchParams();
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<WorkOrder[]>([]);
@@ -280,6 +292,7 @@ function WorkOrdersPageContent() {
   const [billingDeleteReason, setBillingDeleteReason] = useState('');
   const [isBillingDeleteDialogOpen, setIsBillingDeleteDialogOpen] = useState(false);
   const [isDeletingBillingLine, setIsDeletingBillingLine] = useState(false);
+  const [isPostingArInvoice, setIsPostingArInvoice] = useState(false);
 
   // Task photo preview state
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
@@ -292,7 +305,7 @@ function WorkOrdersPageContent() {
   // Helper function to get file URL from storage path
   const getFileUrl = (filePath: string | undefined | null): string => {
     if (!filePath) return '';
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5000';
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || '';
     // Ensure path has leading slash
     const normalizedPath = filePath.startsWith('/') ? filePath : `/${filePath}`;
     // Add /uploads prefix if not already present
@@ -638,6 +651,354 @@ function WorkOrdersPageContent() {
     return `${technicianNames[0]} +${technicianNames.length - 1} more`;
   };
 
+  const loadAdmissionChecklistForWorkOrder = async (order: WorkOrder) => {
+    if (!order.jobCardId) {
+      setAdmissionChecklist(null);
+      return;
+    }
+
+    setLoadingChecklist(true);
+    try {
+      const checklistData = await assetConditionService.getAdmissionRecordForJobCard(order.jobCardId);
+      setAdmissionChecklist(checklistData);
+    } catch (error) {
+      console.error('Error loading admission checklist:', error);
+      setAdmissionChecklist(null);
+    } finally {
+      setLoadingChecklist(false);
+    }
+  };
+
+  const loadWorkOrderDetailData = async (order: WorkOrder) => {
+    setLoadingTasks(true);
+    setLoadingParts(true);
+    setLoadingTools(true);
+    setLoadingChecklist(Boolean(order.jobCardId));
+    setSelectedOrderTasks([]);
+    setWorkOrderParts([]);
+    setWorkOrderTools([]);
+    setWorkOrderLabor([]);
+    setStaffSchedules([]);
+    setExpenses([]);
+    setAdmissionChecklist(null);
+
+    try {
+      const workOrderDetails = (await maintenanceApiService.getWorkOrderById(order.id)) as WorkOrder;
+      const effectiveOrder = { ...order, ...workOrderDetails } as WorkOrder;
+      const resolvedWorkOrderTypeId = getSelectedWorkOrderTypeId(effectiveOrder);
+      const normalizedEffectiveOrder = {
+        ...effectiveOrder,
+        ...(resolvedWorkOrderTypeId ? { workOrderTypeId: resolvedWorkOrderTypeId } : {}),
+      };
+      setSelectedOrder(prev => prev ? { ...prev, ...workOrderDetails, ...(resolvedWorkOrderTypeId ? { workOrderTypeId: resolvedWorkOrderTypeId } : {}) } : normalizedEffectiveOrder);
+
+      const loadedLabor = Array.isArray(workOrderDetails.labor) ? workOrderDetails.labor : [];
+      setWorkOrderLabor(loadedLabor);
+
+      if (Array.isArray(workOrderDetails.tasks)) {
+        setSelectedOrderTasks(workOrderDetails.tasks);
+      }
+
+      let loadedParts: WorkOrderPartDto[] = [];
+      let loadedTools: WorkOrderToolDto[] = [];
+
+      if (effectiveOrder.status === 'Completed' || effectiveOrder.status === 'Cancelled') {
+        loadedParts = Array.isArray(workOrderDetails.parts)
+          ? (workOrderDetails.parts as unknown as WorkOrderPartDto[])
+          : [];
+        setWorkOrderParts(loadedParts);
+
+        const historicalTools = Array.isArray(workOrderDetails.tools)
+          ? workOrderDetails.tools.map(normalizeWorkOrderTool)
+          : [];
+        loadedTools = historicalTools;
+        setWorkOrderTools(historicalTools);
+      } else {
+        try {
+          loadedParts = await workOrderPartService.getPartsByWorkOrder(order.id);
+          setWorkOrderParts(loadedParts);
+        } catch (error) {
+          console.error('Error loading current parts:', error);
+          setWorkOrderParts([]);
+        }
+
+        try {
+          const [toolsData, summaryData] = await Promise.all([
+            workOrderToolService.getWorkOrderTools(order.id),
+            workOrderToolService.getToolSummary(order.id),
+          ]);
+          loadedTools = toolsData;
+          setWorkOrderTools(toolsData);
+          setToolSummary(summaryData);
+        } catch (error) {
+          console.error('Error loading current tools:', error);
+          setWorkOrderTools([]);
+          setToolSummary(null);
+        }
+      }
+
+      if (!loadedTools.length) {
+        try {
+          loadedTools = await workOrderToolService.getWorkOrderTools(order.id);
+          setWorkOrderTools(loadedTools);
+        } catch {
+          loadedTools = [];
+        }
+      }
+
+      try {
+        const schedulesData = await maintenanceApiService.getStaffSchedulesByWorkOrder(order.id);
+        const enrichedSchedules = enrichSchedulesWithFullNames(schedulesData || []);
+        setStaffSchedules(enrichedSchedules);
+      } catch (error) {
+        console.error('Error loading schedules:', error);
+        setStaffSchedules([]);
+      }
+
+      let expensesData: MaintenanceExpense[] = [];
+      try {
+        const [expensesList, expensesTotal] = await Promise.all([
+          maintenanceApiService.getExpensesByWorkOrder(order.id),
+          maintenanceApiService.getTotalExpensesByWorkOrder(order.id),
+        ]);
+        expensesData = expensesList || [];
+        setExpenses(expensesData);
+        setTotalExpenses(expensesTotal || 0);
+      } catch (error) {
+        console.error('Error loading expenses:', error);
+        setExpenses([]);
+        setTotalExpenses(0);
+      }
+
+      await loadAdmissionChecklistForWorkOrder(normalizedEffectiveOrder);
+
+      const billingTotal = calculateBillingTabTotal(
+        normalizedEffectiveOrder,
+        loadedParts,
+        loadedLabor,
+        expensesData,
+        getBillableToolCostTotal(loadedTools)
+      );
+      setWorkOrderCosts(prev => ({ ...prev, [order.id]: billingTotal }));
+    } catch (error) {
+      console.error('Error fetching work order details:', error);
+      setSelectedOrderTasks([]);
+      setWorkOrderParts([]);
+    } finally {
+      setLoadingTasks(false);
+      setLoadingParts(false);
+      setLoadingTools(false);
+      setLoadingChecklist(false);
+    }
+  };
+
+  const handleOpenWorkOrderDetails = async (order: WorkOrder) => {
+    setSelectedOrder(order);
+    setActiveTab('details');
+    setIsViewDialogOpen(true);
+    await loadWorkOrderDetailData(order);
+  };
+
+  const canEditOrScheduleWorkOrder = (order?: WorkOrder | null) => {
+    if (!order) return false;
+    return order.status !== 'InProgress'
+      && order.status !== 'Completed'
+      && order.status !== 'Cancelled';
+  };
+
+  const handleOpenWorkOrderEdit = async (order: WorkOrder) => {
+    if (!canEditOrScheduleWorkOrder(order)) {
+      toast({
+        title: 'Pause work order first',
+        description: 'Started work orders cannot be edited or rescheduled until they are paused.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSelectedOrder(order);
+    setIsEditDialogOpen(true);
+    setLoadingParts(true);
+    setLoadingTools(true);
+    setLoadingSchedules(true);
+    setLoadingExpenses(true);
+    setLoadingChecklist(Boolean(order.jobCardId));
+    setWorkOrderParts([]);
+    setWorkOrderTools([]);
+    setSelectedTools([]);
+    setStaffSchedules([]);
+    setExpenses([]);
+    setAdmissionChecklist(null);
+
+    try {
+      const [existingParts, existingTools, existingSchedules, existingExpenses] = await Promise.all([
+        workOrderPartService.getPartsByWorkOrder(order.id).catch((error) => {
+          console.error('Error loading consumables:', error);
+          return [] as WorkOrderPartDto[];
+        }),
+        workOrderToolService.getWorkOrderTools(order.id).catch((error) => {
+          console.error('Error loading work order tools:', error);
+          return [] as WorkOrderToolDto[];
+        }),
+        maintenanceApiService.getStaffSchedulesByWorkOrder(order.id).catch((error) => {
+          console.error('Error loading schedules:', error);
+          return [] as MaintenanceStaffSchedule[];
+        }),
+        maintenanceApiService.getExpensesByWorkOrder(order.id).catch((error) => {
+          console.error('Error loading expenses:', error);
+          return [] as MaintenanceExpense[];
+        }),
+      ]);
+
+      setWorkOrderParts(existingParts);
+      setWorkOrderTools(existingTools);
+      setSelectedTools(existingTools.map(tool => tool.toolId));
+      setStaffSchedules(enrichSchedulesWithFullNames(existingSchedules));
+      setExpenses(existingExpenses);
+      await loadAdmissionChecklistForWorkOrder(order);
+    } finally {
+      setLoadingParts(false);
+      setLoadingTools(false);
+      setLoadingSchedules(false);
+      setLoadingExpenses(false);
+      setLoadingChecklist(false);
+    }
+  };
+
+  const isMaintenanceBillingValue = (billingType?: string | null) =>
+    billingType?.toLowerCase() === 'maintenance';
+
+  const isMaintenanceBillingWorkOrder = (order?: WorkOrder | null) =>
+    isMaintenanceBillingValue(order?.billingType);
+
+  const getMaintenanceTypeFixedAmount = (order?: WorkOrder | null) => {
+    if (!order?.maintenanceTypeId) return 0;
+    const maintenanceType = maintenanceTypes.find((type) => type.id === order.maintenanceTypeId);
+    return Number(maintenanceType?.fixedAmount || maintenanceType?.FixedAmount || 0);
+  };
+
+  const normalizeSelectId = (value?: unknown) => {
+    const text = typeof value === 'string' ? value.trim() : '';
+    return text && text !== '00000000-0000-0000-0000-000000000000' ? text : undefined;
+  };
+
+  const getWorkOrderTypeNameFromOrder = (order?: WorkOrder | null) => {
+    const nestedType = (order as any)?.workOrderType;
+    const candidates = [
+      (order as any)?.workOrderTypeName,
+      typeof nestedType === 'object' ? nestedType?.name : undefined,
+      typeof nestedType === 'string' ? nestedType : undefined,
+      order?.type,
+    ];
+
+    return candidates.find((candidate) => typeof candidate === 'string' && candidate.trim())?.trim() || '';
+  };
+
+  const getSelectedWorkOrderTypeId = (order?: WorkOrder | null) => {
+    const nestedType = (order as any)?.workOrderType;
+    const explicitId = normalizeSelectId(order?.workOrderTypeId) ||
+      normalizeSelectId(typeof nestedType === 'object' ? nestedType?.id : undefined);
+
+    if (explicitId) {
+      return explicitId;
+    }
+
+    const name = getWorkOrderTypeNameFromOrder(order);
+    if (!name) {
+      return undefined;
+    }
+
+    const normalizedName = name.toLowerCase();
+    return workOrderTypes.find((type) =>
+      type.name?.toLowerCase() === normalizedName ||
+      type.code?.toLowerCase() === normalizedName
+    )?.id;
+  };
+
+  const getSelectedWorkOrderTypeLabel = (order?: WorkOrder | null, typeId?: string) => {
+    const matchedType = typeId ? workOrderTypes.find((type) => type.id === typeId) : undefined;
+    return matchedType?.name || getWorkOrderTypeNameFromOrder(order) || 'Current Work Order Type';
+  };
+
+  const getMaintenanceBillingTotal = (order?: WorkOrder | null) =>
+    Number(order?.fixedAmount || getMaintenanceTypeFixedAmount(order) || 0);
+
+  const calculateBillingTabTotal = (
+    order: WorkOrder | null | undefined,
+    parts: WorkOrderPartDto[],
+    labor: any[],
+    expensesList: MaintenanceExpense[],
+    toolCost: number
+  ) => {
+    if (isMaintenanceBillingWorkOrder(order)) {
+      return getMaintenanceBillingTotal(order);
+    }
+
+    return (
+      parts.reduce((sum, part) => sum + Number(part.totalCost || 0), 0) +
+      labor.reduce((sum, record) => sum + Number(record.totalCost || 0), 0) +
+      Number(toolCost || 0) +
+      expensesList.reduce((sum, expense) => sum + Number(expense.amount || 0), 0)
+    );
+  };
+
+  const isBlockingScheduleStatus = (status?: string) => {
+    const normalized = (status || '').replace(/\s/g, '').toLowerCase();
+    return normalized !== 'completed' && normalized !== 'cancelled' && normalized !== 'canceled';
+  };
+
+  const parseScheduleDate = (value?: string) => {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+
+  const schedulesOverlap = (
+    candidateStart: Date,
+    candidateEnd: Date,
+    scheduleStart?: string,
+    scheduleEnd?: string,
+  ) => {
+    const existingStart = parseScheduleDate(scheduleStart);
+    const existingEnd = parseScheduleDate(scheduleEnd);
+    if (!existingStart || !existingEnd) return false;
+    return existingStart < candidateEnd && existingEnd > candidateStart;
+  };
+
+  const getScheduleConflictLabel = (schedule: MaintenanceStaffSchedule) => {
+    const assignment = schedule.workOrderNumber || schedule.jobCardNumber || schedule.scheduleType || 'another assignment';
+    const start = parseScheduleDate(schedule.startDateTime);
+    const end = parseScheduleDate(schedule.endDateTime);
+    if (!start || !end) return assignment;
+    return `${assignment} (${format(start, 'MMM d, HH:mm')} - ${format(end, 'MMM d, HH:mm')})`;
+  };
+
+  const getTechnicianScheduleConflict = (technicianId: string) => {
+    const candidateStart = parseScheduleDate(scheduleForm.startDateTime);
+    const candidateEnd = parseScheduleDate(scheduleForm.endDateTime);
+    const allSchedules = [
+      ...Object.values(workOrderSchedulesMap).flat(),
+      ...staffSchedules,
+    ];
+
+    return allSchedules.find((schedule) => {
+      if (schedule.technicianId !== technicianId || schedule.id === editingSchedule?.id) {
+        return false;
+      }
+
+      if (!isBlockingScheduleStatus(schedule.status)) {
+        return false;
+      }
+
+      if (candidateStart && candidateEnd) {
+        return schedulesOverlap(candidateStart, candidateEnd, schedule.startDateTime, schedule.endDateTime);
+      }
+
+      const existingEnd = parseScheduleDate(schedule.endDateTime);
+      return !existingEnd || existingEnd >= new Date();
+    });
+  };
+
   // Load warehouse inventory when warehouse changes (consumables: itemType=1, tools: itemType=4)
   useEffect(() => {
     if (!selectedWarehouse) return;
@@ -744,11 +1105,12 @@ function WorkOrdersPageContent() {
     if (!selectedOrder) return;
 
     try {
+      const resolvedWorkOrderTypeId = getSelectedWorkOrderTypeId(selectedOrder);
       const updateData = {
         id: selectedOrder.id,
         title: selectedOrder.title,
         description: selectedOrder.description,
-        workOrderTypeId: selectedOrder.workOrderTypeId,
+        workOrderTypeId: resolvedWorkOrderTypeId,
         maintenanceTypeId: selectedOrder.maintenanceTypeId,
         priorityLevelId: selectedOrder.priorityLevelId,
         assignedTechnicianId: selectedOrder.assignedTechnicianId,
@@ -796,7 +1158,7 @@ function WorkOrdersPageContent() {
     const colors = {
       'Draft': 'bg-gray-100 text-gray-800',
       'Open': 'bg-blue-100 text-blue-800',
-      'Approved': 'bg-purple-100 text-purple-800',
+      'Approved': 'bg-blue-100 text-blue-800',
       'InProgress': 'bg-yellow-100 text-yellow-800',
       'OnHold': 'bg-orange-100 text-orange-800',
       'Completed': 'bg-green-100 text-green-800',
@@ -808,7 +1170,7 @@ function WorkOrdersPageContent() {
         {status === 'InProgress' ? 'In Progress' :
          status === 'OnHold' ? 'On Hold' :
          status === 'Draft' ? 'Draft' :
-         status === 'Approved' ? 'Approved' :
+         status === 'Approved' ? 'Ready' :
          status}
       </Badge>
     );
@@ -832,18 +1194,23 @@ function WorkOrdersPageContent() {
     );
   };
 
-  // Calculate actual cost for a work order (for list display)
-  const getWorkOrderActualCost = (orderId: string): number => {
-    // Check cache first
-    if (workOrderCosts[orderId] !== undefined) {
-      return workOrderCosts[orderId];
+  // Mirrors the Billing tab total in the list display.
+  const getWorkOrderActualCost = (order: WorkOrder): number => {
+    if (workOrderCosts[order.id] !== undefined) {
+      return workOrderCosts[order.id];
     }
-    return 0; // Will be calculated when work order details are loaded
+
+    const apiBillingTotal = Number(order.actualCost || 0);
+    if (apiBillingTotal > 0) {
+      return apiBillingTotal;
+    }
+
+    return isMaintenanceBillingWorkOrder(order) ? getMaintenanceBillingTotal(order) : 0;
   };
 
   const getCostBadge = (cost: number) => {
     if (cost === 0) {
-      return <Badge variant="outline" className="text-xs text-muted-foreground">$0.00</Badge>;
+      return <Badge variant="outline" className="text-xs text-muted-foreground">{formatMoney(0)}</Badge>;
     }
 
     // Color code based on cost magnitude
@@ -857,7 +1224,7 @@ function WorkOrdersPageContent() {
 
     return (
       <Badge variant="outline" className={`text-xs font-semibold ${colorClass}`}>
-        ${cost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        {formatMoney(cost)}
       </Badge>
     );
   };
@@ -885,11 +1252,7 @@ function WorkOrdersPageContent() {
   ) => {
     if (!selectedOrder?.id) return;
 
-    const total =
-      parts.reduce((sum, part) => sum + Number(part.totalCost || 0), 0) +
-      labor.reduce((sum, record) => sum + Number(record.totalCost || 0), 0) +
-      Number(toolCost || 0) +
-      expensesList.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+    const total = calculateBillingTabTotal(selectedOrder, parts, labor, expensesList, toolCost);
 
     setWorkOrderCosts(prev => ({ ...prev, [selectedOrder.id]: total }));
   };
@@ -915,24 +1278,29 @@ function WorkOrdersPageContent() {
       };
     });
 
-    const laborLines: BillingLineItem[] = workOrderLabor.map((labor: any) => {
-      const quantity = Number(labor.hoursWorked ?? labor.hours ?? 0);
-      const unitPrice = Number(labor.hourlyRate || 0);
-      const totalAmount = Number(labor.totalCost || quantity * unitPrice);
-      const technicianName = labor.technician?.fullName || labor.technicianName || 'Labor';
+    const laborEntries = workOrderLabor
+      .map((labor: any) => {
+        const quantity = Number(labor.hoursWorked ?? labor.hours ?? 0);
+        const totalAmount = Number(labor.totalCost || quantity * Number(labor.hourlyRate || 0));
+        return { quantity, totalAmount };
+      })
+      .filter((labor) => labor.quantity > 0 || labor.totalAmount > 0);
 
-      return {
-        key: `labor-${labor.id}`,
-        id: labor.id,
-        type: 'labor',
-        category: 'Labor',
-        description: technicianName,
-        quantity,
-        unitPrice,
-        totalAmount,
-        canDelete,
-      };
-    });
+    const totalLaborHours = laborEntries.reduce((sum, labor) => sum + labor.quantity, 0);
+    const totalLaborCost = laborEntries.reduce((sum, labor) => sum + labor.totalAmount, 0);
+    const laborLines: BillingLineItem[] = laborEntries.length > 0
+      ? [{
+          key: 'labor-summary',
+          id: 'labor-summary',
+          type: 'labor',
+          category: 'Labor',
+          description: `Labour total (${laborEntries.length} entries)`,
+          quantity: totalLaborHours,
+          unitPrice: totalLaborHours > 0 ? totalLaborCost / totalLaborHours : 0,
+          totalAmount: totalLaborCost,
+          canDelete: false,
+        }]
+      : [];
 
     const toolLines: BillingLineItem[] = workOrderTools
       .filter(tool => !tool.isExcludedFromBilling)
@@ -1057,6 +1425,29 @@ function WorkOrdersPageContent() {
     }
   };
 
+  const handlePostArInvoice = async () => {
+    if (!selectedOrder?.id) return;
+
+    setIsPostingArInvoice(true);
+    try {
+      const invoice = await workOrderService.postArInvoice(selectedOrder.id);
+      toast({
+        title: 'AR invoice created',
+        description: `Draft invoice ${invoice.invoiceNumber} created for ${formatMoney(invoice.totalAmount)}.`,
+        className: 'bg-green-50 border-green-200',
+      });
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || 'Failed to post work order billing to AR invoice';
+      toast({
+        title: 'Posting failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsPostingArInvoice(false);
+    }
+  };
+
   const updateWorkOrderStatus = async (orderId: string, newStatus: WorkOrder['status']) => {
     try {
       // If trying to complete work order, validate quality control first
@@ -1173,7 +1564,7 @@ function WorkOrdersPageContent() {
   const handleTaskStatusUpdate = async (taskId: string, newStatus: string, actualHours: number | null = null, completionNotes: string | null = null, technicianId: string | null = null) => {
     try {
       // Update task status via API
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/maintenance/work-orders/tasks/${taskId}/status`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || '/api'}/maintenance/work-orders/tasks/${taskId}/status`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -1216,11 +1607,12 @@ function WorkOrdersPageContent() {
   };
 
   const handleCompleteTaskClick = (task: WorkOrderTask) => {
+    const usesFixedMaintenanceBilling = isMaintenanceBillingWorkOrder(selectedOrder);
     setSelectedTask(task);
     setTaskActualHours(task.actualHours || task.estimatedHours);
     setTaskCompletionNotes('');
     setTaskLaborType('Regular');
-    setTaskHourlyRate(50); // Default hourly rate - could be fetched from technician profile
+    setTaskHourlyRate(usesFixedMaintenanceBilling ? 0 : 50); // Default hourly rate - could be fetched from technician profile
     // Pre-select technician from scheduled technicians for this work order
     // First try to find a matching scheduled technician, otherwise use the first scheduled technician
     const scheduledTechnicianIds = staffSchedules.map(s => s.technicianId);
@@ -1241,8 +1633,8 @@ function WorkOrdersPageContent() {
       // Complete the task first - pass the technician ID to save it on the task
       await handleTaskStatusUpdate(selectedTask.id, 'Completed', taskActualHours, taskCompletionNotes, taskTechnicianId || null);
 
-      // Auto-create labor record if hours > 0 and hourly rate is set and technician is selected
-      if (taskActualHours > 0 && taskHourlyRate > 0 && taskTechnicianId) {
+      // Fixed maintenance billing does not auto-create task labour cost. Manual external labour stays on the Labour tab.
+      if (!isMaintenanceBillingWorkOrder(selectedOrder) && taskActualHours > 0 && taskHourlyRate >= 0 && taskTechnicianId) {
         const laborData: CreateWorkOrderLaborDto = {
           workOrderId: selectedOrder.id,
           technicianId: taskTechnicianId,
@@ -1473,6 +1865,19 @@ function WorkOrdersPageContent() {
     workOrderLabor.reduce((sum, labor: any) => sum + Number(labor.totalCost || 0), 0) +
     getBillableToolCostTotal() +
     expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const selectedWorkOrderTypeId = selectedOrder ? getSelectedWorkOrderTypeId(selectedOrder) : undefined;
+  const selectedWorkOrderTypeLabel = getSelectedWorkOrderTypeLabel(selectedOrder, selectedWorkOrderTypeId);
+  const selectedWorkOrderTypeIsInOptions = Boolean(
+    selectedWorkOrderTypeId && workOrderTypes.some((type) => type.id === selectedWorkOrderTypeId)
+  );
+  const selectedOrderAsset = selectedOrder
+    ? assets.find((asset) => asset.id.toLowerCase() === selectedOrder.assetId.toLowerCase())
+    : undefined;
+  const selectedAssetLocationId = selectedOrderAsset?.currentSiteLocationId;
+  const locationScopedTechnicians = selectedAssetLocationId
+    ? technicians.filter((technician) =>
+        technician.locationId?.toLowerCase() === selectedAssetLocationId.toLowerCase())
+    : [];
 
   return (
     <div className="space-y-6">
@@ -1531,7 +1936,7 @@ function WorkOrdersPageContent() {
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="Draft">Draft</SelectItem>
                   <SelectItem value="Open">Open</SelectItem>
-                  <SelectItem value="Approved">Approved</SelectItem>
+                  <SelectItem value="Approved">Ready</SelectItem>
                   <SelectItem value="InProgress">In Progress</SelectItem>
                   <SelectItem value="OnHold">On Hold</SelectItem>
                   <SelectItem value="Completed">Completed</SelectItem>
@@ -1604,7 +2009,7 @@ function WorkOrdersPageContent() {
                 <TableHead>Technician</TableHead>
                 <SortHeader label="Status" column="status" />
                 <SortHeader label="Priority" column="priority" />
-                <TableHead>Actual Cost</TableHead>
+                <TableHead>Bill Amount</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -1662,9 +2067,69 @@ function WorkOrdersPageContent() {
                     </div>
                   </TableCell>
                   <TableCell>{getPriorityBadge(order.priority)}</TableCell>
-                  <TableCell>{getCostBadge(getWorkOrderActualCost(order.id))}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center space-x-2">
+                  <TableCell>{getCostBadge(getWorkOrderActualCost(order))}</TableCell>
+                  <TableCell className="text-right">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" title="Actions" aria-label={`Actions for ${order.workOrderNumber}`}>
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-56">
+                        <DropdownMenuItem onSelect={() => void handleOpenWorkOrderDetails(order)}>
+                          <Eye className="mr-2 h-4 w-4" />
+                          View Details
+                        </DropdownMenuItem>
+                        {canEditOrScheduleWorkOrder(order) && (
+                          <DropdownMenuItem onSelect={() => void handleOpenWorkOrderEdit(order)}>
+                            <Edit className="mr-2 h-4 w-4" />
+                            Edit / Schedule
+                          </DropdownMenuItem>
+                        )}
+                        {(order.status === 'Draft' || order.status === 'Open' || order.status === 'Approved') && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                setWorkOrderToStart(order);
+                                setIsStartWorkOrderDialogOpen(true);
+                              }}
+                            >
+                              <Play className="mr-2 h-4 w-4" />
+                              Start Work Order
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                        {order.status === 'InProgress' && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                setWorkOrderToSubmitQC(order);
+                                setIsSubmitQCDialogOpen(true);
+                              }}
+                            >
+                              <ShieldCheck className="mr-2 h-4 w-4" />
+                              Submit for QC
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => void updateWorkOrderStatus(order.id, 'OnHold')}>
+                              <PauseCircle className="mr-2 h-4 w-4" />
+                              Pause
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                        {order.status === 'OnHold' && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onSelect={() => void updateWorkOrderStatus(order.id, 'InProgress')}>
+                              <RotateCcw className="mr-2 h-4 w-4" />
+                              Resume
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <div className="hidden">
                       <Button
                         size="sm"
                         variant="outline"
@@ -1692,6 +2157,7 @@ function WorkOrdersPageContent() {
                             console.log('Tasks in response:', workOrderDetails.tasks);
                             console.log('Parts in response:', workOrderDetails.parts);
                             console.log('Labor in response:', workOrderDetails.labor);
+                            const billingOrder = { ...order, ...workOrderDetails } as WorkOrder;
 
                             // Update selectedOrder with full details to ensure assignedTechnicianId is available
                             setSelectedOrder(prev => prev ? { ...prev, ...workOrderDetails } : workOrderDetails);
@@ -1830,19 +2296,25 @@ function WorkOrdersPageContent() {
                               setLoadingChecklist(false);
                             }
 
-                            // Calculate and cache total cost for this work order (after all data is loaded)
-                            const laborCost = (workOrderDetails.labor || []).reduce((sum: number, l: any) => sum + (l.totalCost || 0), 0);
-                            const partsCost = (workOrderDetails.parts || []).reduce((sum: number, p: any) => sum + (p.totalCost || 0), 0);
-                            // Get tool cost from summary if available
-                            let toolsCost = 0;
+                            // Cache the same total shown on the Billing tab.
+                            let billingTools = Array.isArray(workOrderDetails.tools)
+                              ? workOrderDetails.tools.map(normalizeWorkOrderTool)
+                              : [];
                             try {
-                              const summary = await workOrderToolService.getToolSummary(order.id);
-                              toolsCost = summary?.totalRentalCost || 0;
+                              const toolsData = await workOrderToolService.getWorkOrderTools(order.id);
+                              if (toolsData.length) {
+                                billingTools = toolsData;
+                              }
                             } catch {
-                              toolsCost = 0;
+                              billingTools = [];
                             }
-                            const expensesCost = expensesData.reduce((sum, e) => sum + e.amount, 0);
-                            const totalCost = laborCost + partsCost + toolsCost + expensesCost;
+                            const totalCost = calculateBillingTabTotal(
+                              billingOrder,
+                              workOrderDetails.parts || [],
+                              workOrderDetails.labor || [],
+                              expensesData,
+                              getBillableToolCostTotal(billingTools)
+                            );
 
                             setWorkOrderCosts(prev => ({ ...prev, [order.id]: totalCost }));
                           } catch (error) {
@@ -1858,16 +2330,8 @@ function WorkOrdersPageContent() {
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
-                      {/* Draft status actions */}
+                      {/* Draft records can still be edited; no separate work order approval is required. */}
                       {order.status === 'Draft' && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => updateWorkOrderStatus(order.id, 'Open')}
-                          >
-                            Approve
-                          </Button>
                           <Button
                             size="sm"
                             variant="outline"
@@ -1935,10 +2399,9 @@ function WorkOrdersPageContent() {
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
-                        </>
                       )}
-                      {/* Open/Approved status actions */}
-                      {(order.status === 'Open' || order.status === 'Approved') && (
+                      {/* Ready status actions */}
+                      {(order.status === 'Draft' || order.status === 'Open' || order.status === 'Approved') && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -2075,7 +2538,7 @@ function WorkOrdersPageContent() {
                         <div className="flex justify-between text-xs text-muted-foreground">
                           <span>Estimated Cost</span>
                           <span className="font-medium">
-                            ${((selectedOrder.estimatedCost ?? 0)).toFixed(2)}
+                            {formatMoney(selectedOrder.estimatedCost ?? 0)}
                           </span>
                         </div>
                       </CardContent>
@@ -2098,23 +2561,23 @@ function WorkOrdersPageContent() {
                             <>
                               <div className="flex justify-between text-xs text-muted-foreground">
                                 <span>Labor</span>
-                                <span className="font-medium">${laborCost.toFixed(2)}</span>
+                                <span className="font-medium">{formatMoney(laborCost)}</span>
                               </div>
                               <div className="flex justify-between text-xs text-muted-foreground">
                                 <span>Parts</span>
-                                <span className="font-medium">${partsCost.toFixed(2)}</span>
+                                <span className="font-medium">{formatMoney(partsCost)}</span>
                               </div>
                               <div className="flex justify-between text-xs text-muted-foreground">
                                 <span>Tools</span>
-                                <span className="font-medium">${toolsCost.toFixed(2)}</span>
+                                <span className="font-medium">{formatMoney(toolsCost)}</span>
                               </div>
                               <div className="flex justify-between text-xs text-muted-foreground">
                                 <span>Expenses</span>
-                                <span className="font-medium">${expensesCost.toFixed(2)}</span>
+                                <span className="font-medium">{formatMoney(expensesCost)}</span>
                               </div>
                               <div className="mt-2 border-t pt-2 flex justify-between text-xs">
                                 <span className="font-semibold">Actual Total</span>
-                                <span className="font-semibold">${actualTotal.toFixed(2)}</span>
+                                <span className="font-semibold">{formatMoney(actualTotal)}</span>
                               </div>
                             </>
                           );
@@ -2157,7 +2620,7 @@ function WorkOrdersPageContent() {
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Type</Label>
-                      <p className="text-sm">{selectedOrder.type}</p>
+                      <p className="text-sm">{selectedWorkOrderTypeLabel}</p>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Estimated Hours</Label>
@@ -2508,78 +2971,79 @@ function WorkOrdersPageContent() {
                     <p className="text-sm text-muted-foreground">No tasks found for this work order</p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {selectedOrderTasks.map((task, index) => (
-                      <div key={task.id} className="border rounded-lg p-4 hover:bg-accent/50 transition-colors">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex items-start gap-3 flex-1">
-                            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary font-semibold text-sm flex-shrink-0">
+                      <div key={task.id} className="border rounded-md px-3 py-2 hover:bg-accent/50 transition-colors">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 flex-1 items-start gap-2">
+                            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                               {index + 1}
                             </div>
-                            <div className="flex-1">
-                              <h4 className="font-semibold text-base mb-1">{task.taskName}</h4>
+                            <div className="min-w-0 flex-1">
+                              <h4 className="truncate text-sm font-semibold">{task.taskName}</h4>
                               {task.description && (
-                                <p className="text-sm text-muted-foreground">{task.description}</p>
+                                <p className="truncate text-xs text-muted-foreground">{task.description}</p>
                               )}
                             </div>
                           </div>
-                          <Badge
-                            variant={task.status === 'Completed' ? 'default' : task.status === 'InProgress' ? 'secondary' : 'outline'}
-                            className="ml-2 flex-shrink-0"
-                          >
-                            {task.status}
-                          </Badge>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground pl-11">
-                          <div className="flex items-center gap-1.5">
-                            <User className="h-4 w-4" />
-                            <span className="font-medium">{task.assignedTechnician?.fullName || 'Unassigned'}</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <Clock className="h-4 w-4" />
-                            <span>{task.actualHours}h / {task.estimatedHours}h</span>
-                          </div>
-                          {task.isRequired && (
-                            <Badge variant="outline" className="text-xs">Required</Badge>
-                          )}
-                        </div>
-                        {/* Task action buttons */}
-                        {selectedOrder.status !== 'Completed' && selectedOrder.status !== 'Cancelled' && (
-                          <div className="flex gap-2 mt-3 pl-11">
-                            {task.status === 'Pending' && (
+                          <div className="ml-2 flex shrink-0 items-center gap-2">
+                            <Badge
+                              variant={task.status === 'Completed' ? 'default' : task.status === 'InProgress' ? 'secondary' : 'outline'}
+                              className="h-5 px-2 py-0 text-[11px] leading-5"
+                            >
+                              {task.status}
+                            </Badge>
+                            {selectedOrder.status !== 'Completed' && selectedOrder.status !== 'Cancelled' && task.status === 'Pending' && (
                               <Button
                                 size="sm"
                                 variant="outline"
+                                className="h-7 px-2 text-xs"
                                 onClick={() => handleTaskStatusUpdate(task.id, 'InProgress')}
                               >
-                                Start Task
+                                Start
                               </Button>
                             )}
-                            {task.status === 'InProgress' && (
+                            {selectedOrder.status !== 'Completed' && selectedOrder.status !== 'Cancelled' && task.status === 'InProgress' && (
                               <Button
                                 size="sm"
                                 variant="outline"
+                                className="h-7 px-2 text-xs"
                                 onClick={() => handleCompleteTaskClick(task)}
                               >
                                 Mark Complete
                               </Button>
                             )}
-                            {task.status === 'Completed' && task.completedAt && (
-                              <p className="text-xs text-muted-foreground flex items-center gap-1">
-                                <CheckCircle className="h-3 w-3 text-green-600" />
-                                Completed on {new Date(task.completedAt).toLocaleString()}
-                              </p>
-                            )}
+                          </div>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-8 text-xs text-muted-foreground">
+                          <div className="flex items-center gap-1.5">
+                            <User className="h-3.5 w-3.5" />
+                            <span className="font-medium">{task.assignedTechnician?.fullName || 'Unassigned'}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Clock className="h-3.5 w-3.5" />
+                            <span>{task.actualHours}h / {task.estimatedHours}h</span>
+                          </div>
+                          {task.isRequired && (
+                            <Badge variant="outline" className="h-5 px-2 py-0 text-[11px] leading-5">Required</Badge>
+                          )}
+                        </div>
+                        {task.status === 'Completed' && task.completedAt && (
+                          <div className="mt-1 flex gap-2 pl-8">
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <CheckCircle className="h-3 w-3 text-green-600" />
+                              Completed on {new Date(task.completedAt).toLocaleString()}
+                            </p>
                           </div>
                         )}
 
                         {/* Task Photo Section */}
-                        <div className="mt-3 pl-11">
+                        <div className="mt-2 pl-8">
                           {task.photoPath ? (
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2">
                               <div className="relative group">
                                 <div
-                                  className="relative h-16 w-24 rounded-lg overflow-hidden border-2 border-muted bg-muted/30 cursor-pointer hover:border-primary/50 transition-all shadow-sm hover:shadow-md"
+                                  className="relative h-12 w-16 cursor-pointer overflow-hidden rounded-md border border-muted bg-muted/30 shadow-sm transition-all hover:border-primary/50 hover:shadow-md"
                                   onClick={() => {
                                     setPreviewPhotoUrl(getFileUrl(task.photoPath));
                                     setPreviewPhotoTaskName(task.taskName);
@@ -2598,7 +3062,7 @@ function WorkOrdersPageContent() {
                                   <Button
                                     size="icon"
                                     variant="destructive"
-                                    className="absolute -top-2 -right-2 h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                                    className="absolute -right-2 -top-2 h-5 w-5 opacity-0 shadow-md transition-opacity group-hover:opacity-100"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleTaskPhotoDelete(task.id);
@@ -2613,7 +3077,7 @@ function WorkOrdersPageContent() {
                                   <Image className="h-3 w-3" />
                                   Task Photo
                                 </span>
-                                <span className="text-xs text-muted-foreground">
+                                <span className="text-[11px] text-muted-foreground">
                                   Click to view full size
                                 </span>
                               </div>
@@ -2696,7 +3160,7 @@ function WorkOrdersPageContent() {
                             <CardTitle className="text-sm">Rental Cost</CardTitle>
                           </CardHeader>
                           <CardContent>
-                            <p className="text-2xl font-bold">${toolSummary.totalRentalCost.toFixed(2)}</p>
+                            <p className="text-2xl font-bold">{formatMoney(toolSummary.totalRentalCost)}</p>
                           </CardContent>
                         </Card>
                       </div>
@@ -2839,7 +3303,7 @@ function WorkOrdersPageContent() {
                               )}
                               <div>
                                 <span className="text-muted-foreground">Daily Rate:</span>
-                                <span className="ml-2 font-medium">${tool.dailyRentalRate.toFixed(2)}</span>
+                                <span className="ml-2 font-medium">{formatMoney(tool.dailyRentalRate)}</span>
                               </div>
                               {tool.isCheckedOut && tool.checkedOutByName && (
                                 <div>
@@ -3176,7 +3640,7 @@ function WorkOrdersPageContent() {
                                 <TableCell>
                                   {expense.expenseDate ? format(new Date(expense.expenseDate), 'PPP') : 'N/A'}
                                 </TableCell>
-                                <TableCell className="font-medium">${expense.amount.toFixed(2)}</TableCell>
+                                <TableCell className="font-medium">{formatMoney(expense.amount)}</TableCell>
                                 <TableCell>{expense.vendor || '-'}</TableCell>
                                 <TableCell>
                                   <Badge variant={expense.isApproved ? 'default' : 'secondary'}>
@@ -3191,7 +3655,7 @@ function WorkOrdersPageContent() {
                       <div className="bg-muted/50 rounded-lg p-4">
                         <div className="flex justify-between items-center">
                           <span className="text-sm font-medium">Total Expenses:</span>
-                          <span className="text-2xl font-bold text-green-600">${expenses.reduce((sum, e) => sum + e.amount, 0).toFixed(2)}</span>
+                          <span className="text-2xl font-bold text-green-600">{formatMoney(expenses.reduce((sum, e) => sum + e.amount, 0))}</span>
                         </div>
                       </div>
                     </>
@@ -3217,8 +3681,11 @@ function WorkOrdersPageContent() {
                         <Button
                           size="sm"
                           onClick={() => {
+                            const assignedTechnicianIsLocal = locationScopedTechnicians.some(
+                              (technician) => technician.id === selectedOrder.assignedTechnicianId
+                            );
                             setLaborForm({
-                              technicianId: selectedOrder.assignedTechnicianId || '',
+                              technicianId: assignedTechnicianIsLocal ? selectedOrder.assignedTechnicianId || '' : '',
                               hours: 0,
                               hourlyRate: 50,
                               laborType: 'Regular',
@@ -3270,8 +3737,8 @@ function WorkOrdersPageContent() {
                                 </TableCell>
                                 <TableCell>{labor.workDate ? format(new Date(labor.workDate), 'MMM dd, yyyy') : (labor.startTime ? format(new Date(labor.startTime), 'MMM dd, yyyy') : 'N/A')}</TableCell>
                                 <TableCell>{labor.hoursWorked?.toFixed(2) || labor.hours?.toFixed(2) || '0.00'}</TableCell>
-                                <TableCell>${labor.hourlyRate?.toFixed(2) || '0.00'}/hr</TableCell>
-                                <TableCell className="text-right font-medium">${labor.totalCost?.toFixed(2) || '0.00'}</TableCell>
+                                <TableCell>{formatMoney(labor.hourlyRate ?? 0)}/hr</TableCell>
+                                <TableCell className="text-right font-medium">{formatMoney(labor.totalCost ?? 0)}</TableCell>
                                 <TableCell className="max-w-[200px] truncate">{labor.notes || '-'}</TableCell>
                               </TableRow>
                             ))}
@@ -3286,7 +3753,7 @@ function WorkOrdersPageContent() {
                           <div className="text-right">
                             <span className="text-sm text-muted-foreground">Total Labour Cost: </span>
                             <span className="text-lg font-bold">
-                              ${workOrderLabor.reduce((sum: number, l: any) => sum + (l.totalCost || 0), 0).toFixed(2)}
+                              {formatMoney(workOrderLabor.reduce((sum: number, l: any) => sum + (l.totalCost || 0), 0))}
                             </span>
                           </div>
                         </div>
@@ -3307,19 +3774,30 @@ function WorkOrdersPageContent() {
                           <Receipt className="h-5 w-5 text-green-600" />
                           <CardTitle className="text-lg text-green-800">Billing Summary</CardTitle>
                         </div>
-                        <Badge variant={selectedOrder.billingType === 'Maintenance' ? 'default' : 'secondary'} className="text-sm">
-                          {selectedOrder.billingType || 'Repairs'} Billing
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={isMaintenanceBillingWorkOrder(selectedOrder) ? 'default' : 'secondary'} className="text-sm">
+                            {selectedOrder.billingType || 'Repairs'} Billing
+                          </Badge>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handlePostArInvoice}
+                            disabled={isPostingArInvoice}
+                          >
+                            <FileText className="mr-2 h-4 w-4" />
+                            {isPostingArInvoice ? 'Posting...' : 'Post AR Invoice'}
+                          </Button>
+                        </div>
                       </div>
                       <CardDescription className="text-green-700">
-                        {selectedOrder.billingType === 'Maintenance'
+                        {isMaintenanceBillingWorkOrder(selectedOrder)
                           ? 'This work order uses fixed pricing from the maintenance type configuration'
                           : 'This work order uses itemized costing (parts, labor, tools, expenses)'}
                       </CardDescription>
                     </CardHeader>
                   </Card>
 
-                  {selectedOrder.billingType === 'Maintenance' ? (
+                  {isMaintenanceBillingWorkOrder(selectedOrder) ? (
                     /* Fixed Amount Billing */
                     <Card>
                       <CardHeader>
@@ -3336,7 +3814,7 @@ function WorkOrdersPageContent() {
                           <div>
                             <p className="text-sm text-muted-foreground">Fixed Amount</p>
                             <p className="text-3xl font-bold text-green-700">
-                              ${(selectedOrder.fixedAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {formatMoney(selectedOrder.fixedAmount || getMaintenanceTypeFixedAmount(selectedOrder))}
                             </p>
                           </div>
                           <div className="text-right">
@@ -3389,8 +3867,8 @@ function WorkOrdersPageContent() {
                                   <TableCell className="text-right">
                                     {Number.isInteger(line.quantity) ? line.quantity : line.quantity.toFixed(2)}
                                   </TableCell>
-                                  <TableCell className="text-right">${line.unitPrice.toFixed(2)}</TableCell>
-                                  <TableCell className="text-right font-medium">${line.totalAmount.toFixed(2)}</TableCell>
+                                  <TableCell className="text-right">{formatMoney(line.unitPrice)}</TableCell>
+                                  <TableCell className="text-right font-medium">{formatMoney(line.totalAmount)}</TableCell>
                                   <TableCell className="text-right">
                                     {line.canDelete ? (
                                       <Button
@@ -3428,7 +3906,7 @@ function WorkOrdersPageContent() {
                               <p className="text-xs text-green-600">Sum of all itemized costs</p>
                             </div>
                             <p className="text-3xl font-bold text-green-800">
-                              ${itemizedBillingTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {formatMoney(itemizedBillingTotal)}
                             </p>
                           </div>
                         </CardContent>
@@ -3477,16 +3955,16 @@ function WorkOrdersPageContent() {
                         </div>
                       )}
 
-                      {selectedOrder.status === 'Approved' || selectedOrder.status === 'InProgress' || selectedOrder.status === 'Completed' ? (
+                      {selectedOrder.status === 'Open' || selectedOrder.status === 'Approved' || selectedOrder.status === 'InProgress' || selectedOrder.status === 'Completed' ? (
                         <div className="relative">
                           <div className="absolute -left-[1.6rem] w-4 h-4 rounded-full bg-muted border-4 border-background" />
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
                               <CheckCircle className="h-4 w-4 text-green-600" />
-                              <span className="font-semibold text-sm">Work Order Approved</span>
+                              <span className="font-semibold text-sm">Ready for Execution</span>
                             </div>
                             <p className="text-xs text-muted-foreground">
-                              Approved for execution
+                              Released from the approved job card
                             </p>
                           </div>
                         </div>
@@ -3584,7 +4062,7 @@ function WorkOrdersPageContent() {
                     <div className="space-y-2">
                       <Label htmlFor="edit-workOrderType">Work Order Type</Label>
                       <Select
-                        value={selectedOrder.workOrderTypeId || 'none'}
+                        value={selectedWorkOrderTypeId || 'none'}
                         onValueChange={(value) => setSelectedOrder({
                           ...selectedOrder,
                           workOrderTypeId: value === 'none' ? undefined : value
@@ -3596,6 +4074,11 @@ function WorkOrdersPageContent() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">Not Selected</SelectItem>
+                          {selectedWorkOrderTypeId && !selectedWorkOrderTypeIsInOptions && (
+                            <SelectItem value={selectedWorkOrderTypeId}>
+                              {selectedWorkOrderTypeLabel}
+                            </SelectItem>
+                          )}
                           {workOrderTypes.map((type) => (
                             <SelectItem key={type.id} value={type.id}>
                               {type.name}
@@ -4253,8 +4736,8 @@ function WorkOrdersPageContent() {
                               <TableCell className="font-medium">{part.itemCode}</TableCell>
                               <TableCell>{part.itemName}</TableCell>
                               <TableCell>{part.quantityRequired}</TableCell>
-                              <TableCell>${part.unitCost.toFixed(2)}</TableCell>
-                              <TableCell>${part.totalCost.toFixed(2)}</TableCell>
+                              <TableCell>{formatMoney(part.unitCost)}</TableCell>
+                              <TableCell>{formatMoney(part.totalCost)}</TableCell>
                               <TableCell>
                                 <div className="flex gap-2">
                                   <Button
@@ -4298,7 +4781,7 @@ function WorkOrdersPageContent() {
                       <tfoot>
                         <TableRow className="bg-muted/50 font-semibold">
                           <TableCell colSpan={5} className="text-right">Total:</TableCell>
-                          <TableCell>${workOrderParts.reduce((sum, part) => sum + part.totalCost, 0).toFixed(2)}</TableCell>
+                          <TableCell>{formatMoney(workOrderParts.reduce((sum, part) => sum + part.totalCost, 0))}</TableCell>
                           <TableCell></TableCell>
                         </TableRow>
                       </tfoot>
@@ -4540,7 +5023,7 @@ function WorkOrdersPageContent() {
                     <div className="bg-muted p-4 rounded-md">
                       <div className="flex justify-between items-center">
                         <span className="text-sm font-medium">Total Expenses:</span>
-                        <span className="text-xl font-bold">${totalExpenses.toFixed(2)}</span>
+                        <span className="text-xl font-bold">{formatMoney(totalExpenses)}</span>
                       </div>
                     </div>
                   )}
@@ -4579,7 +5062,7 @@ function WorkOrdersPageContent() {
                                 <Badge variant="outline">{expense.expenseType}</Badge>
                               </TableCell>
                               <TableCell>{expense.description}</TableCell>
-                              <TableCell className="font-semibold">${expense.amount.toFixed(2)}</TableCell>
+                              <TableCell className="font-semibold">{formatMoney(expense.amount)}</TableCell>
                               <TableCell>
                                 <Badge
                                   variant={expense.status === 'Approved' ? 'default' : expense.status === 'Pending' ? 'secondary' : 'outline'}
@@ -4686,7 +5169,7 @@ function WorkOrdersPageContent() {
                         <tfoot>
                           <TableRow className="bg-muted/50 font-semibold">
                             <TableCell colSpan={4} className="text-right">Total:</TableCell>
-                            <TableCell className="font-bold">${expenses.reduce((sum, exp) => sum + exp.amount, 0).toFixed(2)}</TableCell>
+                            <TableCell className="font-bold">{formatMoney(expenses.reduce((sum, exp) => sum + exp.amount, 0))}</TableCell>
                             <TableCell></TableCell>
                           </TableRow>
                         </tfoot>
@@ -4990,9 +5473,11 @@ function WorkOrdersPageContent() {
       <Dialog open={isTaskCompletionDialogOpen} onOpenChange={setIsTaskCompletionDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Complete Task & Record Labour</DialogTitle>
+            <DialogTitle>{isMaintenanceBillingWorkOrder(selectedOrder) ? 'Complete Task' : 'Complete Task & Record Labour'}</DialogTitle>
             <DialogDescription>
-              Enter actual hours worked - a labour record will be created automatically
+              {isMaintenanceBillingWorkOrder(selectedOrder)
+                ? 'Record task completion. This maintenance work order uses fixed billing, so task labour cost is not computed here.'
+                : 'Enter actual hours worked - a labour record will be created automatically'}
             </DialogDescription>
           </DialogHeader>
           {selectedTask && (
@@ -5024,7 +5509,7 @@ function WorkOrdersPageContent() {
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className={`grid gap-4 ${isMaintenanceBillingWorkOrder(selectedOrder) ? 'grid-cols-1' : 'grid-cols-2'}`}>
                 <div className="space-y-2">
                   <Label htmlFor="actualHours">Actual Hours <span className="text-red-500">*</span></Label>
                   <Input
@@ -5038,32 +5523,36 @@ function WorkOrdersPageContent() {
                   />
                   <p className="text-xs text-muted-foreground">Estimated: {selectedTask.estimatedHours} hrs</p>
                 </div>
+                {!isMaintenanceBillingWorkOrder(selectedOrder) && (
+                  <div className="space-y-2">
+                    <Label htmlFor="hourlyRate">Hourly Rate <span className="text-red-500">*</span></Label>
+                    <Input
+                      id="hourlyRate"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={taskHourlyRate}
+                      onChange={(e) => setTaskHourlyRate(parseFloat(e.target.value) || 0)}
+                      placeholder="Rate per hour"
+                    />
+                  </div>
+                )}
+              </div>
+              {!isMaintenanceBillingWorkOrder(selectedOrder) && (
                 <div className="space-y-2">
-                  <Label htmlFor="hourlyRate">Hourly Rate <span className="text-red-500">*</span></Label>
-                  <Input
-                    id="hourlyRate"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={taskHourlyRate}
-                    onChange={(e) => setTaskHourlyRate(parseFloat(e.target.value) || 0)}
-                    placeholder="Rate per hour"
-                  />
+                  <Label htmlFor="laborType">Labour Type</Label>
+                  <Select value={taskLaborType} onValueChange={setTaskLaborType}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select labour type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Regular">Regular</SelectItem>
+                      <SelectItem value="Overtime">Overtime</SelectItem>
+                      <SelectItem value="Emergency">Emergency</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="laborType">Labour Type</Label>
-                <Select value={taskLaborType} onValueChange={setTaskLaborType}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select labour type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Regular">Regular</SelectItem>
-                    <SelectItem value="Overtime">Overtime</SelectItem>
-                    <SelectItem value="Emergency">Emergency</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="completionNotes">Completion Notes (Optional)</Label>
                 <Textarea
@@ -5074,11 +5563,11 @@ function WorkOrdersPageContent() {
                   rows={3}
                 />
               </div>
-              {taskActualHours > 0 && taskHourlyRate > 0 && taskTechnicianId && (
+              {!isMaintenanceBillingWorkOrder(selectedOrder) && taskActualHours > 0 && taskHourlyRate >= 0 && taskTechnicianId && (
                 <div className="bg-muted/50 rounded-lg p-3">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Labour Cost:</span>
-                    <span className="font-semibold">${(taskActualHours * taskHourlyRate).toFixed(2)}</span>
+                    <span className="font-semibold">{formatMoney(taskActualHours * taskHourlyRate)}</span>
                   </div>
                 </div>
               )}
@@ -5088,7 +5577,10 @@ function WorkOrdersPageContent() {
             <Button variant="outline" onClick={() => setIsTaskCompletionDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCompleteTaskSubmit} disabled={taskActualHours <= 0 || taskHourlyRate <= 0 || !taskTechnicianId}>
+            <Button
+              onClick={handleCompleteTaskSubmit}
+              disabled={taskActualHours <= 0 || !taskTechnicianId || (!isMaintenanceBillingWorkOrder(selectedOrder) && taskHourlyRate < 0)}
+            >
               Complete Task
             </Button>
           </DialogFooter>
@@ -5112,18 +5604,25 @@ function WorkOrdersPageContent() {
               <Select
                 value={laborForm.technicianId}
                 onValueChange={(value) => setLaborForm({...laborForm, technicianId: value})}
+                disabled={!selectedAssetLocationId || locationScopedTechnicians.length === 0}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select technician" />
                 </SelectTrigger>
                 <SelectContent>
-                  {technicians.map((tech) => (
+                  {locationScopedTechnicians.map((tech) => (
                     <SelectItem key={tech.id} value={tech.id}>
                       {tech.firstName} {tech.lastName}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {!selectedAssetLocationId && (
+                <p className="text-xs text-amber-600">Assign the asset to a site location before selecting a technician.</p>
+              )}
+              {selectedAssetLocationId && locationScopedTechnicians.length === 0 && (
+                <p className="text-xs text-amber-600">No maintenance technicians are assigned to this asset location.</p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -5183,7 +5682,7 @@ function WorkOrdersPageContent() {
               <div className="bg-muted/50 rounded-lg p-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Labour Cost:</span>
-                  <span className="font-semibold">${(laborForm.hours * laborForm.hourlyRate).toFixed(2)}</span>
+                  <span className="font-semibold">{formatMoney(laborForm.hours * laborForm.hourlyRate)}</span>
                 </div>
               </div>
             )}
@@ -5416,7 +5915,7 @@ function WorkOrdersPageContent() {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Unit Cost</p>
-                <p className="text-lg font-semibold">${partToConsume?.unitCost.toFixed(2) || '0.00'}</p>
+                <p className="text-lg font-semibold">{formatMoney(partToConsume?.unitCost ?? 0)}</p>
               </div>
             </div>
 
@@ -5519,18 +6018,29 @@ function WorkOrdersPageContent() {
                 <Select
                   value={scheduleForm.technicianId}
                   onValueChange={(value) => setScheduleForm({ ...scheduleForm, technicianId: value })}
+                  disabled={!selectedAssetLocationId || locationScopedTechnicians.length === 0}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select technician" />
                   </SelectTrigger>
                   <SelectContent>
-                    {technicians.map((tech) => (
-                      <SelectItem key={tech.id} value={tech.id}>
-                        {tech.firstName} {tech.lastName}
-                      </SelectItem>
-                    ))}
+                    {locationScopedTechnicians.map((tech) => {
+                      const conflict = getTechnicianScheduleConflict(tech.id);
+                      return (
+                        <SelectItem key={tech.id} value={tech.id} disabled={Boolean(conflict)}>
+                          {tech.firstName} {tech.lastName}
+                          {conflict ? ` - assigned to ${getScheduleConflictLabel(conflict)}` : ''}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
+                {!selectedAssetLocationId && (
+                  <p className="text-xs text-amber-600">Assign the asset to a site location before scheduling a technician.</p>
+                )}
+                {selectedAssetLocationId && locationScopedTechnicians.length === 0 && (
+                  <p className="text-xs text-amber-600">No maintenance technicians are assigned to this asset location.</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="schedule-type">Schedule Type</Label>
@@ -5671,6 +6181,16 @@ function WorkOrdersPageContent() {
                   return;
                 }
 
+                const scheduleConflict = getTechnicianScheduleConflict(scheduleForm.technicianId);
+                if (scheduleConflict) {
+                  toast({
+                    title: 'Technician unavailable',
+                    description: `This employee is already assigned to ${getScheduleConflictLabel(scheduleConflict)}.`,
+                    variant: 'destructive',
+                  });
+                  return;
+                }
+
                 const technician = technicians.find(t => t.id === scheduleForm.technicianId);
                 const vehicle = availableVehicles.find(v => v.id === scheduleForm.assignedVehicleId);
                 const newSchedule: MaintenanceStaffSchedule = {
@@ -5769,7 +6289,7 @@ function WorkOrdersPageContent() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="amount">Amount ($) <span className="text-red-500">*</span></Label>
+                <Label htmlFor="amount">{amountLabel} <span className="text-red-500">*</span></Label>
                 <Input
                   id="amount"
                   type="number"
@@ -5803,7 +6323,7 @@ function WorkOrdersPageContent() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="mileage-rate">Mileage Rate ($/mile)</Label>
+                  <Label htmlFor="mileage-rate">{mileageRateLabel}</Label>
                   <Input
                     id="mileage-rate"
                     type="number"
@@ -6171,7 +6691,7 @@ function WorkOrdersPageContent() {
       {/* Task Photo Preview Modal */}
       {previewPhotoUrl && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4"
           onClick={() => {
             setPreviewPhotoUrl(null);
             setPreviewPhotoTaskName('');

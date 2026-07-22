@@ -140,6 +140,7 @@ public class Technician : TenantEntity
     /// <summary>
     /// Team memberships for this technician
     /// </summary>
+    [NotMapped]
     public virtual ICollection<TechnicianTeamMember> TeamMemberships { get; set; } = new List<TechnicianTeamMember>();
 
     /// <summary>

@@ -2,6 +2,8 @@ using System.ComponentModel.DataAnnotations;
 
 namespace ErpSystem.Core.DTOs.Workflow;
 
+using ErpSystem.Core.Enums;
+
 #region Workflow Definition Management DTOs
 
 /// <summary>
@@ -10,11 +12,17 @@ namespace ErpSystem.Core.DTOs.Workflow;
 public class WorkflowDefinitionAdminDto
 {
     public Guid Id { get; set; }
+    public Guid DefinitionKey { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string EntityType { get; set; } = string.Empty;
     public int Version { get; set; }
     public bool IsActive { get; set; }
+    public WorkflowDefinitionLifecycleStatus LifecycleStatus { get; set; }
+    public string? ChangeSummary { get; set; }
+    public Guid? SupersedesDefinitionId { get; set; }
+    public DateTime? PublishedAt { get; set; }
+    public DateTime? RetiredAt { get; set; }
     public string? Configuration { get; set; }
     public DateTime CreatedDate { get; set; }
     public DateTime? LastModifiedDate { get; set; }
@@ -64,6 +72,9 @@ public class UpdateWorkflowDefinitionAdminDto
     [StringLength(500)]
     public string? Description { get; set; }
 
+    [StringLength(50)]
+    public string? EntityType { get; set; }
+
     public bool IsActive { get; set; }
 
     public string? Configuration { get; set; }
@@ -71,6 +82,40 @@ public class UpdateWorkflowDefinitionAdminDto
     public List<CreateWorkflowStepDto>? Steps { get; set; }
 
     public List<CreateWorkflowTransitionDto>? Transitions { get; set; }
+}
+
+public class CloneWorkflowDefinitionDraftDto
+{
+    [StringLength(500)]
+    public string? ChangeSummary { get; set; }
+}
+
+public class WorkflowDefinitionVersionDto
+{
+    public Guid Id { get; set; }
+    public Guid DefinitionKey { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int Version { get; set; }
+    public WorkflowDefinitionLifecycleStatus LifecycleStatus { get; set; }
+    public bool IsActive { get; set; }
+    public string? ChangeSummary { get; set; }
+    public Guid? SupersedesDefinitionId { get; set; }
+    public DateTime CreatedDate { get; set; }
+    public DateTime? PublishedAt { get; set; }
+    public DateTime? RetiredAt { get; set; }
+    public int ActiveInstancesCount { get; set; }
+}
+
+public class WorkflowDefinitionComparisonDto
+{
+    public Guid DefinitionKey { get; set; }
+    public Guid FromDefinitionId { get; set; }
+    public int FromVersion { get; set; }
+    public Guid ToDefinitionId { get; set; }
+    public int ToVersion { get; set; }
+    public bool HasChanges => Changes.Count > 0;
+    public bool HasPotentiallyBreakingChanges { get; set; }
+    public List<string> Changes { get; set; } = new();
 }
 
 #endregion

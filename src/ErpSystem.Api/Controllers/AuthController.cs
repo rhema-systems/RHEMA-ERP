@@ -2143,11 +2143,13 @@ namespace ErpSystem.Api.Controllers
 
                     _logger.LogInformation("Generated password reset URL: {ResetUrl}", resetUrl);
 
+                    var tenantName = await ResolvePasswordResetTenantNameAsync(user, request.TenantCode);
+
                     var emailDto = new ErpSystem.Core.Interfaces.Common.EmailDto
                     {
                         To = user.Email ?? string.Empty,
                         Subject = "Password Reset Request",
-                        Body = GeneratePasswordResetEmailBody(user.FirstName, resetUrl),
+                        Body = GeneratePasswordResetEmailBody(user.FirstName, resetUrl, tenantName),
                         IsHtml = true
                     };
 
@@ -2309,8 +2311,40 @@ namespace ErpSystem.Api.Controllers
             return Convert.ToBase64String(hashBytes)[..16]; // Take first 16 characters
         }
 
-        private static string GeneratePasswordResetEmailBody(string firstName, string resetUrl)
+        private async Task<string> ResolvePasswordResetTenantNameAsync(ApplicationUser user, string? tenantCode)
         {
+            Tenant? tenant = null;
+
+            if (!string.IsNullOrWhiteSpace(tenantCode))
+            {
+                tenant = await _context.Tenants
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(t =>
+                        !t.IsDeleted &&
+                        t.Code == tenantCode &&
+                        (t.Id == user.TenantId || t.UserTenants.Any(ut => ut.UserId == user.Id && !ut.IsDeleted)));
+            }
+
+            tenant ??= await _context.Tenants
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => !t.IsDeleted && t.Id == user.TenantId);
+
+            tenant ??= await _context.UserTenants
+                .AsNoTracking()
+                .Where(ut => !ut.IsDeleted && ut.UserId == user.Id && ut.Status == UserTenantStatus.Active)
+                .Where(ut => ut.Tenant != null && !ut.Tenant.IsDeleted)
+                .Select(ut => ut.Tenant)
+                .FirstOrDefaultAsync();
+
+            return string.IsNullOrWhiteSpace(tenant?.Name) ? "ERP System" : tenant.Name;
+        }
+
+        private static string GeneratePasswordResetEmailBody(string firstName, string resetUrl, string tenantName)
+        {
+            var displayFirstName = System.Net.WebUtility.HtmlEncode(firstName);
+            var displayTenantName = System.Net.WebUtility.HtmlEncode(tenantName);
+            var displayResetUrl = System.Net.WebUtility.HtmlEncode(resetUrl);
+
             return $@"
                 <!DOCTYPE html>
                 <html>
@@ -2330,18 +2364,18 @@ namespace ErpSystem.Api.Controllers
                             <h2>Password Reset Request</h2>
                         </div>
                         <div class='content'>
-                            <p>Hello {firstName},</p>
+                            <p>Hello {displayFirstName},</p>
                             <p>We received a request to reset your password. Click the button below to set a new password:</p>
                             <p style='text-align: center; margin: 30px 0;'>
-                                <a href='{resetUrl}' class='button'>Reset Password</a>
+                                <a href='{displayResetUrl}' class='button'>Reset Password</a>
                             </p>
                             <p>Or copy and paste this link in your browser:</p>
-                            <p><code>{resetUrl}</code></p>
+                            <p><code>{displayResetUrl}</code></p>
                             <p><strong>This link will expire in 15 minutes.</strong></p>
                             <p>If you did not request a password reset, you can ignore this email.</p>
                         </div>
                         <div class='footer'>
-                            <p>&copy; {DateTime.Now.Year} Your Company. All rights reserved.</p>
+                            <p>&copy; {DateTime.Now.Year} {displayTenantName}. All rights reserved.</p>
                         </div>
                     </div>
                 </body>

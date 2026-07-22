@@ -33,6 +33,7 @@ public class QualityChecklistController : ControllerBase
     public async Task<ActionResult<object[]>> GetAllChecklists(
         [FromQuery] string? workOrderType = null,
         [FromQuery] string? assetCategory = null,
+        [FromQuery] string? maintenanceType = null,
         [FromQuery] bool? isActive = null)
     {
         try
@@ -44,6 +45,10 @@ public class QualityChecklistController : ControllerBase
             var query = _context.QualityControlChecklists.AsQueryable();
 
             // Apply filters
+            workOrderType = NormalizeScopeValue(workOrderType);
+            assetCategory = NormalizeScopeValue(assetCategory);
+            maintenanceType = NormalizeScopeValue(maintenanceType);
+
             if (!string.IsNullOrEmpty(workOrderType))
             {
                 query = query.Where(c => c.WorkOrderType == workOrderType);
@@ -52,6 +57,11 @@ public class QualityChecklistController : ControllerBase
             if (!string.IsNullOrEmpty(assetCategory))
             {
                 query = query.Where(c => c.AssetCategory == assetCategory);
+            }
+
+            if (!string.IsNullOrEmpty(maintenanceType))
+            {
+                query = query.Where(c => c.MaintenanceType == maintenanceType);
             }
 
             if (isActive.HasValue)
@@ -67,8 +77,11 @@ public class QualityChecklistController : ControllerBase
                 name = c.Name,
                 description = c.Description,
                 workOrderType = c.WorkOrderType,
+                workOrderTypeId = c.WorkOrderTypeId?.ToString(),
                 assetCategory = c.AssetCategory,
+                assetCategoryId = c.AssetCategoryId?.ToString(),
                 maintenanceType = c.MaintenanceType,
+                maintenanceTypeId = c.MaintenanceTypeId?.ToString(),
                 isMandatory = c.IsMandatory,
                 isActive = c.IsActive,
                 minimumPassingScore = c.MinimumPassingScore,
@@ -121,8 +134,11 @@ public class QualityChecklistController : ControllerBase
                 name = checklistData.Name,
                 description = checklistData.Description,
                 workOrderType = checklistData.WorkOrderType,
+                workOrderTypeId = checklistData.WorkOrderTypeId?.ToString(),
                 assetCategory = checklistData.AssetCategory,
+                assetCategoryId = checklistData.AssetCategoryId?.ToString(),
                 maintenanceType = checklistData.MaintenanceType,
+                maintenanceTypeId = checklistData.MaintenanceTypeId?.ToString(),
                 isMandatory = checklistData.IsMandatory,
                 isActive = checklistData.IsActive,
                 minimumPassingScore = checklistData.MinimumPassingScore,
@@ -171,29 +187,52 @@ public class QualityChecklistController : ControllerBase
             Guid? workOrderTypeId = request.WorkOrderTypeId;
             Guid? assetCategoryId = request.AssetCategoryId;
             Guid? maintenanceTypeId = request.MaintenanceTypeId;
+            var workOrderTypeName = NormalizeScopeValue(request.WorkOrderType);
+            var assetCategoryName = NormalizeScopeValue(request.AssetCategory);
+            var maintenanceTypeName = NormalizeScopeValue(request.MaintenanceType);
+
+            if (!HasAnyChecklistScope(workOrderTypeName, workOrderTypeId, assetCategoryName, assetCategoryId, maintenanceTypeName, maintenanceTypeId))
+            {
+                return BadRequest("Select at least one checklist scope: maintenance type, work order type, or asset category.");
+            }
 
             // Look up WorkOrderType by name if ID not provided
-            if (!workOrderTypeId.HasValue && !string.IsNullOrEmpty(request.WorkOrderType))
+            if (!workOrderTypeId.HasValue && !string.IsNullOrEmpty(workOrderTypeName))
             {
                 var workOrderType = await _context.WorkOrderTypes
-                    .FirstOrDefaultAsync(w => w.Name == request.WorkOrderType && w.TenantId == tenantId);
+                    .FirstOrDefaultAsync(w => w.Name == workOrderTypeName && w.TenantId == tenantId);
                 workOrderTypeId = workOrderType?.Id;
             }
 
             // Look up AssetCategory by name if ID not provided
-            if (!assetCategoryId.HasValue && !string.IsNullOrEmpty(request.AssetCategory))
+            if (!assetCategoryId.HasValue && !string.IsNullOrEmpty(assetCategoryName))
             {
                 var assetCategory = await _context.MaintenanceAssetCategories
-                    .FirstOrDefaultAsync(a => a.Name == request.AssetCategory && a.TenantId == tenantId);
+                    .FirstOrDefaultAsync(a => a.Name == assetCategoryName && a.TenantId == tenantId);
                 assetCategoryId = assetCategory?.Id;
             }
 
             // Look up MaintenanceType by name if ID not provided
-            if (!maintenanceTypeId.HasValue && !string.IsNullOrEmpty(request.MaintenanceType))
+            if (!maintenanceTypeId.HasValue && !string.IsNullOrEmpty(maintenanceTypeName))
             {
                 var maintenanceType = await _context.MaintenanceTypes
-                    .FirstOrDefaultAsync(m => m.Name == request.MaintenanceType && m.TenantId == tenantId);
+                    .FirstOrDefaultAsync(m => m.Name == maintenanceTypeName && m.TenantId == tenantId);
                 maintenanceTypeId = maintenanceType?.Id;
+            }
+
+            var scopeConflictMessage = await GetChecklistScopeConflictMessageAsync(
+                tenantId,
+                null,
+                maintenanceTypeId,
+                maintenanceTypeName,
+                workOrderTypeId,
+                workOrderTypeName,
+                assetCategoryId,
+                assetCategoryName);
+
+            if (!string.IsNullOrWhiteSpace(scopeConflictMessage))
+            {
+                return BadRequest(new { message = scopeConflictMessage });
             }
 
             // Convert items to JSON
@@ -209,11 +248,11 @@ public class QualityChecklistController : ControllerBase
                 Id = checklistId,
                 Name = request.Name,
                 Description = request.Description,
-                WorkOrderType = request.WorkOrderType,
+                WorkOrderType = workOrderTypeName,
                 WorkOrderTypeId = workOrderTypeId,
-                AssetCategory = request.AssetCategory,
+                AssetCategory = assetCategoryName,
                 AssetCategoryId = assetCategoryId,
-                MaintenanceType = request.MaintenanceType,
+                MaintenanceType = maintenanceTypeName,
                 MaintenanceTypeId = maintenanceTypeId,
                 IsMandatory = request.IsMandatory,
                 IsActive = true,
@@ -294,29 +333,55 @@ public class QualityChecklistController : ControllerBase
             Guid? workOrderTypeId = request.WorkOrderTypeId;
             Guid? assetCategoryId = request.AssetCategoryId;
             Guid? maintenanceTypeId = request.MaintenanceTypeId;
+            var workOrderTypeName = NormalizeScopeValue(request.WorkOrderType);
+            var assetCategoryName = NormalizeScopeValue(request.AssetCategory);
+            var maintenanceTypeName = NormalizeScopeValue(request.MaintenanceType);
+
+            if (!HasAnyChecklistScope(workOrderTypeName, workOrderTypeId, assetCategoryName, assetCategoryId, maintenanceTypeName, maintenanceTypeId))
+            {
+                return BadRequest("Select at least one checklist scope: maintenance type, work order type, or asset category.");
+            }
 
             // Look up WorkOrderType by name if ID not provided
-            if (!workOrderTypeId.HasValue && !string.IsNullOrEmpty(request.WorkOrderType))
+            if (!workOrderTypeId.HasValue && !string.IsNullOrEmpty(workOrderTypeName))
             {
                 var workOrderType = await _context.WorkOrderTypes
-                    .FirstOrDefaultAsync(w => w.Name == request.WorkOrderType && w.TenantId == existingChecklist.TenantId);
+                    .FirstOrDefaultAsync(w => w.Name == workOrderTypeName && w.TenantId == existingChecklist.TenantId);
                 workOrderTypeId = workOrderType?.Id;
             }
 
             // Look up AssetCategory by name if ID not provided
-            if (!assetCategoryId.HasValue && !string.IsNullOrEmpty(request.AssetCategory))
+            if (!assetCategoryId.HasValue && !string.IsNullOrEmpty(assetCategoryName))
             {
                 var assetCategory = await _context.MaintenanceAssetCategories
-                    .FirstOrDefaultAsync(a => a.Name == request.AssetCategory && a.TenantId == existingChecklist.TenantId);
+                    .FirstOrDefaultAsync(a => a.Name == assetCategoryName && a.TenantId == existingChecklist.TenantId);
                 assetCategoryId = assetCategory?.Id;
             }
 
             // Look up MaintenanceType by name if ID not provided
-            if (!maintenanceTypeId.HasValue && !string.IsNullOrEmpty(request.MaintenanceType))
+            if (!maintenanceTypeId.HasValue && !string.IsNullOrEmpty(maintenanceTypeName))
             {
                 var maintenanceType = await _context.MaintenanceTypes
-                    .FirstOrDefaultAsync(m => m.Name == request.MaintenanceType && m.TenantId == existingChecklist.TenantId);
+                    .FirstOrDefaultAsync(m => m.Name == maintenanceTypeName && m.TenantId == existingChecklist.TenantId);
                 maintenanceTypeId = maintenanceType?.Id;
+            }
+
+            if (request.IsActive)
+            {
+                var scopeConflictMessage = await GetChecklistScopeConflictMessageAsync(
+                    existingChecklist.TenantId,
+                    existingChecklist.Id,
+                    maintenanceTypeId,
+                    maintenanceTypeName,
+                    workOrderTypeId,
+                    workOrderTypeName,
+                    assetCategoryId,
+                    assetCategoryName);
+
+                if (!string.IsNullOrWhiteSpace(scopeConflictMessage))
+                {
+                    return BadRequest(new { message = scopeConflictMessage });
+                }
             }
 
             // Convert items to JSON
@@ -330,11 +395,11 @@ public class QualityChecklistController : ControllerBase
             // Update properties
             existingChecklist.Name = request.Name;
             existingChecklist.Description = request.Description;
-            existingChecklist.WorkOrderType = request.WorkOrderType;
+            existingChecklist.WorkOrderType = workOrderTypeName;
             existingChecklist.WorkOrderTypeId = workOrderTypeId;
-            existingChecklist.AssetCategory = request.AssetCategory;
+            existingChecklist.AssetCategory = assetCategoryName;
             existingChecklist.AssetCategoryId = assetCategoryId;
-            existingChecklist.MaintenanceType = request.MaintenanceType;
+            existingChecklist.MaintenanceType = maintenanceTypeName;
             existingChecklist.MaintenanceTypeId = maintenanceTypeId;
             existingChecklist.IsMandatory = request.IsMandatory;
             existingChecklist.IsActive = request.IsActive;
@@ -596,13 +661,141 @@ public class QualityChecklistController : ControllerBase
         public int weight { get; set; }
     }
 
+    private static string? NormalizeScopeValue(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ||
+            string.Equals(trimmed, "none", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : trimmed;
+    }
+
+    private static bool HasAnyChecklistScope(
+        string? workOrderType,
+        Guid? workOrderTypeId,
+        string? assetCategory,
+        Guid? assetCategoryId,
+        string? maintenanceType,
+        Guid? maintenanceTypeId)
+    {
+        return HasScope(maintenanceTypeId, maintenanceType) ||
+            HasScope(workOrderTypeId, workOrderType) ||
+            HasScope(assetCategoryId, assetCategory);
+    }
+
+    private async Task<string?> GetChecklistScopeConflictMessageAsync(
+        Guid tenantId,
+        Guid? excludeChecklistId,
+        Guid? maintenanceTypeId,
+        string? maintenanceTypeName,
+        Guid? workOrderTypeId,
+        string? workOrderTypeName,
+        Guid? assetCategoryId,
+        string? assetCategoryName)
+    {
+        var matchingScope = await _context.QualityControlChecklists
+            .Where(c => c.TenantId == tenantId && c.IsActive)
+            .Where(c => !excludeChecklistId.HasValue || c.Id != excludeChecklistId.Value)
+            .ToListAsync();
+
+        var duplicate = matchingScope.FirstOrDefault(checklist =>
+            SameScopeLevel(
+                checklist.MaintenanceTypeId,
+                checklist.MaintenanceType,
+                maintenanceTypeId,
+                maintenanceTypeName) &&
+            SameScopeLevel(
+                checklist.WorkOrderTypeId,
+                checklist.WorkOrderType,
+                workOrderTypeId,
+                workOrderTypeName) &&
+            SameScopeLevel(
+                checklist.AssetCategoryId,
+                checklist.AssetCategory,
+                assetCategoryId,
+                assetCategoryName));
+
+        if (duplicate == null)
+        {
+            return null;
+        }
+
+        return $"A quality checklist template already exists for this scope ({DescribeChecklistScope(maintenanceTypeName, workOrderTypeName, assetCategoryName)}): {duplicate.Name}. Add the next priority value to make the template more specific, or update the existing template.";
+    }
+
+    private static bool SameScopeLevel(Guid? existingId, string? existingName, Guid? requestedId, string? requestedName)
+    {
+        var existingHasScope = HasScope(existingId, existingName);
+        var requestedHasScope = HasScope(requestedId, requestedName);
+
+        if (existingHasScope != requestedHasScope)
+        {
+            return false;
+        }
+
+        if (!existingHasScope)
+        {
+            return true;
+        }
+
+        return ScopeValuesMatch(existingId, existingName, requestedId, requestedName);
+    }
+
+    private static bool HasScope(Guid? id, string? name)
+    {
+        return (id.HasValue && id.Value != Guid.Empty) || !string.IsNullOrWhiteSpace(NormalizeScopeValue(name));
+    }
+
+    private static bool ScopeValuesMatch(Guid? existingId, string? existingName, Guid? requestedId, string? requestedName)
+    {
+        var existingScopeId = existingId.GetValueOrDefault();
+        var requestedScopeId = requestedId.GetValueOrDefault();
+
+        if (existingScopeId != Guid.Empty && requestedScopeId != Guid.Empty)
+        {
+            return existingScopeId == requestedScopeId;
+        }
+
+        var existingScopeName = NormalizeScopeValue(existingName);
+        var requestedScopeName = NormalizeScopeValue(requestedName);
+
+        return !string.IsNullOrWhiteSpace(existingScopeName) &&
+            !string.IsNullOrWhiteSpace(requestedScopeName) &&
+            string.Equals(existingScopeName, requestedScopeName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DescribeChecklistScope(string? maintenanceTypeName, string? workOrderTypeName, string? assetCategoryName)
+    {
+        var parts = new List<string>();
+        var maintenanceType = NormalizeScopeValue(maintenanceTypeName);
+        var workOrderType = NormalizeScopeValue(workOrderTypeName);
+        var assetCategory = NormalizeScopeValue(assetCategoryName);
+
+        if (!string.IsNullOrWhiteSpace(maintenanceType))
+        {
+            parts.Add($"Maintenance Type: {maintenanceType}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(workOrderType))
+        {
+            parts.Add($"Work Order Type: {workOrderType}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(assetCategory))
+        {
+            parts.Add($"Asset Category: {assetCategory}");
+        }
+
+        return parts.Count == 0 ? "No scope" : string.Join(", ", parts);
+    }
+
     public class CreateChecklistRequest
     {
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
-        public string WorkOrderType { get; set; } = string.Empty;
+        public string? WorkOrderType { get; set; }
         public Guid? WorkOrderTypeId { get; set; }
-        public string AssetCategory { get; set; } = string.Empty;
+        public string? AssetCategory { get; set; }
         public Guid? AssetCategoryId { get; set; }
         public string? MaintenanceType { get; set; }
         public Guid? MaintenanceTypeId { get; set; }
@@ -615,9 +808,9 @@ public class QualityChecklistController : ControllerBase
     {
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
-        public string WorkOrderType { get; set; } = string.Empty;
+        public string? WorkOrderType { get; set; }
         public Guid? WorkOrderTypeId { get; set; }
-        public string AssetCategory { get; set; } = string.Empty;
+        public string? AssetCategory { get; set; }
         public Guid? AssetCategoryId { get; set; }
         public string? MaintenanceType { get; set; }
         public Guid? MaintenanceTypeId { get; set; }

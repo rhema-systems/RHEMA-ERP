@@ -61,6 +61,10 @@ public class FinanceDataSeeder
             await SeedAccountsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
+            // 6.5 Seed Payroll GL accounts used by HR payroll posting
+            await SeedPayrollAccountsAsync(tenantId, baseDate);
+            await _context.SaveChangesAsync();
+
             // 7. Seed Fixed Asset Categories
             await SeedFixedAssetCategoriesAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
@@ -819,6 +823,177 @@ public class FinanceDataSeeder
         
         _logger.LogInformation($"Seeded {newAccounts.Count} new accounts with segmentation");
     }
+
+    private async Task SeedPayrollAccountsAsync(Guid tenantId, DateTime baseDate)
+    {
+        var payrollAccounts = GetPayrollChartOfAccounts(tenantId, baseDate);
+        var payrollCodes = payrollAccounts.Select(a => a.AccountCode).ToList();
+        var existingAccounts = await _context.Accounts
+            .Where(a => a.TenantId == tenantId && payrollCodes.Contains(a.AccountCode))
+            .ToListAsync();
+
+        foreach (var account in payrollAccounts)
+        {
+            var existing = existingAccounts.FirstOrDefault(a => a.AccountCode == account.AccountCode);
+            if (existing == null)
+            {
+                _context.Accounts.Add(account);
+                continue;
+            }
+
+            existing.AccountNumber = account.AccountNumber;
+            existing.AccountName = account.AccountName;
+            existing.AccountType = account.AccountType;
+            existing.AccountCategory = account.AccountCategory;
+            existing.AccountSubCategory = account.AccountSubCategory;
+            existing.Description = account.Description;
+            existing.CurrencyCode = account.CurrencyCode;
+            existing.IsMultiCurrency = account.IsMultiCurrency;
+            existing.IsSegmented = account.IsSegmented;
+            existing.IsIFRSClassified = account.IsIFRSClassified;
+            existing.IsBaseClassified = account.IsBaseClassified;
+            existing.IsLocalClassified = account.IsLocalClassified;
+            existing.AllowDirectPosting = account.AllowDirectPosting;
+            existing.IsControlAccount = account.IsControlAccount;
+            existing.BudgetTrackingEnabled = account.BudgetTrackingEnabled;
+            existing.Status = AccountStatus.Active;
+            existing.IsSystemAccount = true;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedBy = "System";
+        }
+
+        _logger.LogInformation("Ensured {Count} payroll GL accounts in Finance chart of accounts.", payrollAccounts.Count);
+    }
+
+    private static List<Account> GetPayrollChartOfAccounts(Guid tenantId, DateTime baseDate)
+        =>
+        [
+            new Account
+            {
+                Id = Guid.Parse("00000005-1010-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1010",
+                AccountNumber = "001-000-1010",
+                AccountName = "Cash and Bank - Payroll Clearing",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Current Assets",
+                AccountSubCategory = "Cash and Bank",
+                Description = "Default bank and cash clearing account used by payroll net pay journals.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = true,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = true,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                IsSystemAccount = true,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-1120-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1120",
+                AccountNumber = "001-000-1120",
+                AccountName = "Staff Loans and Salary Advances",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Current Assets",
+                AccountSubCategory = "Employee Receivables",
+                Description = "Receivable account for staff loan repayments, salary advances, and related payroll recoveries.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = true,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = true,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                IsSystemAccount = true,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-2120-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "2120",
+                AccountNumber = "001-000-2120",
+                AccountName = "Accrued Payroll Payables",
+                AccountType = AccountType.Liability,
+                AccountCategory = "Current Liabilities",
+                AccountSubCategory = "Payroll Payables",
+                Description = "Default liability account for accrued payroll deductions, taxes, pensions, and contribution payables.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = true,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = true,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                IsSystemAccount = true,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-4920-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "4920",
+                AccountNumber = "001-000-4920",
+                AccountName = "Payroll Recoveries and Interest Income",
+                AccountType = AccountType.Revenue,
+                AccountCategory = "Other Income",
+                AccountSubCategory = "Payroll Recoveries",
+                Description = "Income account for payroll loan interest and recoveries credited from payroll runs.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = true,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = true,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                IsSystemAccount = true,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-6020-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "6020",
+                AccountNumber = "001-000-6020",
+                AccountName = "Salaries, Wages and Payroll Costs",
+                AccountType = AccountType.Expense,
+                AccountCategory = "Operating Expenses",
+                AccountSubCategory = "Payroll Costs",
+                Description = "Default payroll expense account for basic salary, allowances, overtime, employer contributions, and arrears.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = true,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = true,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = true,
+                Status = AccountStatus.Active,
+                IsSystemAccount = true,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            }
+        ];
 
     private List<Account> GetStandardChartOfAccounts(Guid tenantId, DateTime baseDate)
     {

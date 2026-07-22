@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Services.Maintenance;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Maintenance.Fleet;
@@ -100,6 +101,7 @@ public class FleetFuelService : IFleetFuelService
         if (dto.Quantity <= 0) throw new ArgumentException("Quantity must be greater than 0.");
 
         var tenantId = _currentUserProvider.TenantId;
+        var currencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, tenantId);
         var vehicle = await _unitOfWork.Repository<MaintenanceAsset>()
             .FirstOrDefaultAsync(a => a.Id == dto.VehicleAssetId && a.TenantId == tenantId, a => a.AssetCategory);
 
@@ -158,7 +160,7 @@ public class FleetFuelService : IFleetFuelService
                 CostType = "Fuel",
                 Source = "FuelTransaction",
                 Amount = entity.TotalCost.Value,
-                CurrencyCode = null,
+                CurrencyCode = currencyCode,
                 Notes = "Fuel transaction",
                 CreatedAt = DateTime.UtcNow,
                 CreatedById = _currentUserProvider.UserId
@@ -178,6 +180,7 @@ public class FleetFuelService : IFleetFuelService
         if (dto.Quantity <= 0) throw new ArgumentException("Quantity must be greater than 0.");
 
         var tenantId = _currentUserProvider.TenantId;
+        var currencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, tenantId);
 
         var repo = _unitOfWork.Repository<FleetFuelTransaction>();
         var entity = await repo.FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId);
@@ -237,7 +240,7 @@ public class FleetFuelService : IFleetFuelService
                     CostType = "Fuel",
                     Source = "FuelTransaction",
                     Amount = entity.TotalCost.Value,
-                    CurrencyCode = null,
+                    CurrencyCode = currencyCode,
                     Notes = "Fuel transaction",
                     CreatedAt = DateTime.UtcNow,
                     CreatedById = _currentUserProvider.UserId
@@ -251,6 +254,7 @@ public class FleetFuelService : IFleetFuelService
                 existingCost.CostType = "Fuel";
                 existingCost.Source = "FuelTransaction";
                 existingCost.Amount = entity.TotalCost.Value;
+                existingCost.CurrencyCode = string.IsNullOrWhiteSpace(existingCost.CurrencyCode) ? currencyCode : existingCost.CurrencyCode;
                 existingCost.UpdatedAt = DateTime.UtcNow;
                 existingCost.LastModifiedById = _currentUserProvider.UserId;
             }

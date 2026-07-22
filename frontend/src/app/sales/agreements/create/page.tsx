@@ -10,14 +10,23 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
-import { ArrowLeft, Plus, Save, Trash2, FileText, DollarSign, MapPin, Milestone, Building2 } from 'lucide-react';
+import { ArrowLeft, Plus, Save, Trash2, FileText, DollarSign, MapPin, Milestone } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   salesAgreementService, type CreateSalesAgreementDto,
   type CreateSalesAgreementLineDto, type CreateSalesAgreementMilestoneDto
 } from '@/services/salesAgreementService';
-import { projectService, type ProjectReleasedUnitSalesLookupDto } from '@/services/projectService';
+import { salesAllocationService } from '@/services/salesAllocationService';
+import { projectService } from '@/services/projectService';
 import apiService from '@/services/api.service';
+import {
+  parseSaleableSourceContextFromParams,
+  saleableItemToContext,
+  SaleableSourceQuickStart,
+  type SaleableAgreementIntent,
+  type SalesLinkedSourceContext,
+} from '../../components/SaleableSourceQuickStart';
+import type { SalesSaleableItemDto, SalesSaleableSourceDto } from '@/services/salesSetupService';
 
 interface CustomerOption {
   id: string;
@@ -25,25 +34,36 @@ interface CustomerOption {
   partnerCode: string;
 }
 
-interface LinkedProjectContext {
-  projectId: string;
-  projectCode?: string;
-  projectTitle?: string;
-  projectUnitId?: string;
-  projectUnitCode?: string;
-  projectUnitName?: string;
+interface CrmHandoffContext {
+  contextLabel?: string;
+  quoteId?: string;
+  quoteName?: string;
+  opportunityId?: string;
+  opportunityName?: string;
+  leadId?: string;
+  leadName?: string;
+  currency?: string;
+  estimatedValue?: number;
 }
 
-type AgreementQuickStartIntent = 'agreement' | 'lease';
+const buildCrmReferenceText = (context: CrmHandoffContext | null) => {
+  if (!context) {
+    return '';
+  }
+
+  return [
+    context.contextLabel ? `CRM Context: ${context.contextLabel}` : undefined,
+    context.quoteName ? `Quote: ${context.quoteName}` : undefined,
+    context.opportunityName ? `Opportunity: ${context.opportunityName}` : undefined,
+    context.leadName ? `Lead: ${context.leadName}` : undefined,
+  ].filter(Boolean).join(' | ');
+};
 
 export default function CreateSalesAgreementPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [linkedProjectContext, setLinkedProjectContext] = useState<LinkedProjectContext | null>(null);
-  const [releasedUnits, setReleasedUnits] = useState<ProjectReleasedUnitSalesLookupDto[]>([]);
-  const [releasedUnitsLoading, setReleasedUnitsLoading] = useState(false);
-  const [releasedUnitsSearch, setReleasedUnitsSearch] = useState('');
-  const [selectedReleasedUnitId, setSelectedReleasedUnitId] = useState('');
+  const [linkedSourceContext, setLinkedSourceContext] = useState<SalesLinkedSourceContext | null>(null);
+  const [crmHandoffContext, setCrmHandoffContext] = useState<CrmHandoffContext | null>(null);
 
   // Customer search
   const [customerSearch, setCustomerSearch] = useState('');
@@ -103,26 +123,30 @@ export default function CreateSalesAgreementPage() {
     }
 
     const params = new URLSearchParams(window.location.search);
-    const projectId = params.get('projectId');
-    const projectCode = params.get('projectCode') || undefined;
-    const projectTitle = params.get('projectTitle') || undefined;
-    const projectUnitId = params.get('projectUnitId') || undefined;
-    const projectUnitCode = params.get('projectUnitCode') || undefined;
-    const projectUnitName = params.get('projectUnitName') || undefined;
     const customerId = params.get('customerId');
     const customerName = params.get('customerName');
     const propertyReference = params.get('propertyReference');
     const agreementType = params.get('agreementType');
+    const sourceContext = parseSaleableSourceContextFromParams(params);
+    const crmContext: CrmHandoffContext = {
+      contextLabel: params.get('crmContext') || undefined,
+      quoteId: params.get('quoteId') || undefined,
+      quoteName: params.get('quoteName') || undefined,
+      opportunityId: params.get('opportunityId') || undefined,
+      opportunityName: params.get('opportunityName') || undefined,
+      leadId: params.get('leadId') || undefined,
+      leadName: params.get('leadName') || undefined,
+      currency: params.get('currency') || undefined,
+      estimatedValue: params.get('estimatedValue') ? Number(params.get('estimatedValue')) : undefined,
+    };
+    const hasCrmContext = Object.values(crmContext).some((value) => value !== undefined && value !== null && value !== '');
 
-    if (projectId) {
-      setLinkedProjectContext({
-        projectId,
-        projectCode,
-        projectTitle,
-        projectUnitId,
-        projectUnitCode,
-        projectUnitName,
-      });
+    if (sourceContext) {
+      setLinkedSourceContext(sourceContext);
+    }
+
+    if (hasCrmContext) {
+      setCrmHandoffContext(crmContext);
     }
 
     setForm((current) => ({
@@ -131,6 +155,18 @@ export default function CreateSalesAgreementPage() {
       customerName: customerName || current.customerName,
       agreementType: agreementType || current.agreementType,
       propertyReference: propertyReference || current.propertyReference,
+      agreementTitle: sourceContext?.itemName
+        ? `${sourceContext.itemName} ${agreementType === 'LeaseAgreement' ? 'Lease' : 'Agreement'}`
+        : crmContext.quoteName
+          ? `${crmContext.quoteName} Agreement`
+          : crmContext.opportunityName
+            ? `${crmContext.opportunityName} Agreement`
+        : current.agreementTitle,
+      agreedValue: sourceContext?.estimatedValue ?? crmContext.estimatedValue ?? current.agreedValue,
+      minimumCommitment: sourceContext?.estimatedValue ?? crmContext.estimatedValue ?? current.minimumCommitment,
+      maximumCommitment: sourceContext?.estimatedValue ?? crmContext.estimatedValue ?? current.maximumCommitment,
+      currency: sourceContext?.currency || crmContext.currency || current.currency,
+      internalNotes: current.internalNotes || (hasCrmContext ? buildCrmReferenceText(crmContext) : current.internalNotes),
     }));
 
     if (customerName) {
@@ -138,61 +174,53 @@ export default function CreateSalesAgreementPage() {
     }
   }, []);
 
-  useEffect(() => {
-    if (linkedProjectContext) {
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      try {
-        setReleasedUnitsLoading(true);
-        const items = await projectService.getReleasedProjectUnitsForSales(releasedUnitsSearch, 50);
-        setReleasedUnits(items.filter((item) => item.canCreateSalesAgreement || item.canCreateLeaseAgreement));
-      } catch {
-        setReleasedUnits([]);
-      } finally {
-        setReleasedUnitsLoading(false);
-      }
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [linkedProjectContext, releasedUnitsSearch]);
-
-  const selectedReleasedUnit = releasedUnits.find((item) => item.projectUnitId === selectedReleasedUnitId);
-
-  const applyReleasedUnit = (unit: ProjectReleasedUnitSalesLookupDto, intent: AgreementQuickStartIntent) => {
+  const applySaleableItem = (
+    item: SalesSaleableItemDto,
+    source: SalesSaleableSourceDto,
+    intent: SaleableAgreementIntent,
+  ) => {
     const isLeaseIntent = intent === 'lease';
-    setLinkedProjectContext({
-      projectId: unit.projectId,
-      projectCode: unit.projectCode,
-      projectTitle: unit.projectTitle,
-      projectUnitId: unit.projectUnitId,
-      projectUnitCode: unit.projectUnitCode,
-      projectUnitName: unit.projectUnitName,
-    });
+    const context = saleableItemToContext(item, source);
+    setLinkedSourceContext(context);
     setForm((current) => ({
       ...current,
-      businessPartnerId: unit.customerBusinessPartnerId || current.businessPartnerId,
-      customerName: unit.customerBusinessPartnerName || current.customerName,
-      propertyReference: unit.propertyReference || current.propertyReference,
-      propertyType: unit.suggestedPropertyType || current.propertyType,
-      propertyDescription: unit.suggestedPropertyDescription || current.propertyDescription,
-      propertyLocation: unit.suggestedPropertyLocation || current.propertyLocation,
-      agreedValue: unit.basePrice ?? current.agreedValue,
-      minimumCommitment: unit.basePrice ?? current.minimumCommitment,
-      maximumCommitment: unit.basePrice ?? current.maximumCommitment,
-      currency: unit.currency || current.currency,
+      businessPartnerId: item.customerId || current.businessPartnerId,
+      customerName: item.customerName || current.customerName,
+      propertyReference: item.propertyReference || current.propertyReference,
+      propertyType: item.itemType || current.propertyType,
+      propertyDescription: current.propertyDescription || item.itemName,
+      agreedValue: item.estimatedValue ?? current.agreedValue,
+      minimumCommitment: item.estimatedValue ?? current.minimumCommitment,
+      maximumCommitment: item.estimatedValue ?? current.maximumCommitment,
+      currency: item.currency || source.defaultCurrency || current.currency,
       agreementType: isLeaseIntent
-        ? unit.suggestedLeaseAgreementType || current.agreementType
-        : unit.suggestedAgreementType || current.agreementType,
+        ? item.suggestedLeaseAgreementType || current.agreementType
+        : item.suggestedAgreementType || current.agreementType,
       agreementTitle: current.agreementTitle || (isLeaseIntent
-        ? unit.suggestedLeaseAgreementTitle || `${unit.projectTitle} - ${unit.projectUnitName} Lease`
-        : unit.suggestedAgreementTitle || `${unit.projectTitle} - ${unit.projectUnitName} Agreement`),
+        ? `${item.itemName} Lease`
+        : `${item.itemName} Agreement`),
     }));
-    if (unit.customerBusinessPartnerName) {
-      setCustomerSearch(unit.customerBusinessPartnerName);
+    if (item.customerName) {
+      setCustomerSearch(item.customerName);
     }
-    setSelectedReleasedUnitId(unit.projectUnitId);
+    setLines((current) => {
+      const nextLine: CreateSalesAgreementLineDto = {
+        description: item.propertyReference ? `${item.itemName} - ${item.propertyReference}` : item.itemName,
+        productCode: item.itemCode,
+        agreedPrice: item.estimatedValue || 0,
+        minimumQuantity: 1,
+        maximumQuantity: 1,
+        unit: item.areaSquareMeters ? 'Unit' : 'EA',
+        discountPercentage: 0,
+        notes: source.displayName,
+      };
+
+      if (current.length === 0) {
+        return [nextLine];
+      }
+
+      return current.map((line, index) => index === 0 ? { ...line, ...nextLine } : line);
+    });
   };
 
   const selectCustomer = (c: CustomerOption) => {
@@ -224,6 +252,17 @@ export default function CreateSalesAgreementPage() {
 
     try {
       setLoading(true);
+      if (linkedSourceContext?.sourceId && linkedSourceContext.sourceItemId) {
+        const activeCheck = await salesAllocationService.hasActiveAllocation(
+          linkedSourceContext.sourceId,
+          linkedSourceContext.sourceItemId,
+        );
+        if (activeCheck.hasActiveAllocation) {
+          toast.error('This saleable item already has an active reservation or allocation.');
+          return;
+        }
+      }
+
       const data: CreateSalesAgreementDto = {
         businessPartnerId: form.businessPartnerId,
         agreementTitle: form.agreementTitle,
@@ -252,11 +291,33 @@ export default function CreateSalesAgreementPage() {
       };
 
       const result = await salesAgreementService.createAgreement(data);
-      if (linkedProjectContext?.projectUnitId) {
+      if (linkedSourceContext?.projectUnitId) {
         try {
-          await projectService.linkSalesAgreementToProjectUnit(linkedProjectContext.projectUnitId, result.id);
+          await projectService.linkSalesAgreementToProjectUnit(linkedSourceContext.projectUnitId, result.id);
         } catch (linkError: any) {
           toast.warning(linkError?.message || 'Agreement created, but the project unit could not be linked automatically.');
+        }
+      }
+      if (linkedSourceContext?.sourceId && linkedSourceContext.sourceItemId) {
+        try {
+          await salesAllocationService.createAllocation({
+            saleableSourceId: linkedSourceContext.sourceId,
+            sourceItemId: linkedSourceContext.sourceItemId,
+            sourceItemCode: linkedSourceContext.itemCode || linkedSourceContext.projectUnitCode,
+            sourceItemName: linkedSourceContext.itemName || linkedSourceContext.projectUnitName || form.agreementTitle,
+            sourceItemType: linkedSourceContext.itemType || form.propertyType || undefined,
+            businessPartnerId: form.businessPartnerId,
+            customerName: form.customerName || linkedSourceContext.customerName,
+            salesAgreementId: result.id,
+            allocationType: form.agreementType === 'LeaseAgreement' ? 'Lease' : 'Reservation',
+            status: 'Reserved',
+            estimatedValue: linkedSourceContext.estimatedValue,
+            agreedValue: form.agreedValue,
+            currency: form.currency,
+            notes: `Reserved from Sales Agreement ${result.documentNumber || result.id}`,
+          });
+        } catch (allocationError: any) {
+          toast.warning(allocationError?.message || 'Agreement created, but the saleable item reservation could not be recorded.');
         }
       }
       toast.success('Agreement created successfully');
@@ -284,98 +345,29 @@ export default function CreateSalesAgreementPage() {
         <Button onClick={handleSubmit} disabled={loading}><Save className="h-4 w-4 mr-2" />{loading ? 'Saving...' : 'Save Draft'}</Button>
       </div>
 
-      {linkedProjectContext && (
-        <Card className="border-blue-200 bg-blue-50/40">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2 text-sm font-medium text-blue-700">
-              <Building2 className="h-4 w-4" />
-              Creating Agreement For Project-Linked Unit
-            </div>
-            <div className="mt-2 text-sm text-slate-700">
-              <p className="font-semibold">
-                {linkedProjectContext.projectCode}
-                {linkedProjectContext.projectTitle ? ` • ${linkedProjectContext.projectTitle}` : ''}
-              </p>
-              <p>
-                {linkedProjectContext.projectUnitCode || linkedProjectContext.projectUnitName || 'Linked project unit'}
-                {linkedProjectContext.projectUnitCode && linkedProjectContext.projectUnitName
-                  ? ` • ${linkedProjectContext.projectUnitName}`
-                  : ''}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <SaleableSourceQuickStart
+        mode="agreement"
+        linkedContext={linkedSourceContext}
+        onUseAgreement={applySaleableItem}
+      />
 
-      {!linkedProjectContext && (
-        <Card className="border-dashed border-blue-200">
-          <CardHeader>
-            <CardTitle className="text-base">Start From Released Project Unit</CardTitle>
-            <CardDescription>Pick a released unit to prefill customer and property context before drafting the agreement.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
-              <Input
-                placeholder="Search by project code, title, unit, or customer..."
-                value={releasedUnitsSearch}
-                onChange={(event) => setReleasedUnitsSearch(event.target.value)}
-              />
-              <Select value={selectedReleasedUnitId || 'none'} onValueChange={(value) => setSelectedReleasedUnitId(value === 'none' ? '' : value)}>
-                <SelectTrigger><SelectValue placeholder="Select released unit" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Select released unit</SelectItem>
-                  {releasedUnits.map((unit) => (
-                    <SelectItem key={unit.projectUnitId} value={unit.projectUnitId}>
-                      {unit.projectCode} - {unit.projectUnitCode || unit.projectUnitName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      {crmHandoffContext ? (
+        <Card className="border-blue-200 bg-blue-50/60">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
+            <div>
+              <div className="font-medium text-blue-900">Started from CRM</div>
+              <div className="text-blue-700">
+                {buildCrmReferenceText(crmHandoffContext) || 'CRM context will be carried into this agreement.'}
+              </div>
             </div>
-            {releasedUnitsLoading ? (
-              <p className="text-sm text-muted-foreground">Loading released units...</p>
-            ) : null}
-            {!releasedUnitsLoading && releasedUnits.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No released project units are currently ready for agreement handoff.</p>
-            ) : null}
-            {selectedReleasedUnit ? (
-              <div className="rounded-lg border bg-slate-50 p-4 text-sm text-slate-700">
-                <div className="font-semibold text-slate-900">
-                  {selectedReleasedUnit.projectCode}
-                  {selectedReleasedUnit.projectTitle ? ` • ${selectedReleasedUnit.projectTitle}` : ''}
-                </div>
-                <div className="mt-1">
-                  {selectedReleasedUnit.projectUnitCode || selectedReleasedUnit.projectUnitName}
-                  {selectedReleasedUnit.projectUnitCode && selectedReleasedUnit.projectUnitName
-                    ? ` • ${selectedReleasedUnit.projectUnitName}`
-                    : ''}
-                </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  {selectedReleasedUnit.customerBusinessPartnerName || 'No customer assigned'}
-                  {selectedReleasedUnit.basePrice != null ? ` • ${selectedReleasedUnit.currency} ${selectedReleasedUnit.basePrice.toLocaleString()}` : ''}
-                  {selectedReleasedUnit.suggestedLeaseAgreementType ? ` • Lease form: ${selectedReleasedUnit.suggestedLeaseAgreementType}` : ''}
-                </div>
+            {crmHandoffContext.estimatedValue ? (
+              <div className="font-medium text-blue-900">
+                {(crmHandoffContext.currency || form.currency)} {crmHandoffContext.estimatedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </div>
             ) : null}
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                disabled={!selectedReleasedUnit || !selectedReleasedUnit.canCreateSalesAgreement}
-                onClick={() => selectedReleasedUnit && applyReleasedUnit(selectedReleasedUnit, 'agreement')}
-              >
-                Use For Sales Agreement
-              </Button>
-              <Button
-                variant="outline"
-                disabled={!selectedReleasedUnit || !selectedReleasedUnit.canCreateLeaseAgreement}
-                onClick={() => selectedReleasedUnit && applyReleasedUnit(selectedReleasedUnit, 'lease')}
-              >
-                Use For {selectedReleasedUnit?.suggestedLeaseAgreementType || 'Lease'} Agreement
-              </Button>
-            </div>
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
       {/* Customer & Type */}
       <Card>

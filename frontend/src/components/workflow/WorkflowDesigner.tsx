@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 'use client';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
@@ -32,6 +31,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command';
 import { workflowApiService } from '@/services/workflow-api.service';
@@ -47,17 +47,23 @@ import type {
   CreateWorkflowTransitionDto,
   WorkflowStepConfigurationDto,
   WorkflowAssignmentRuleDto,
+  WorkflowApprovalConflictRuleDto,
+  WorkflowQualityCheckDto,
   WorkflowVariableInfo,
   WorkflowEntityTypeInfo
 } from '@/types/workflow';
 import { buildFallbackEntityTypes, filterEntityTypesByModule, isEntityTypeInList, moduleEntityTypeMap } from './entityTypeMapping';
 import {
   WorkflowStepType,
+  WorkflowDefinitionLifecycleStatus,
   WorkflowApprovalType,
+  WorkflowApprovalActivationMode,
+  WorkflowApprovalActorSource,
   WorkflowAssignmentType,
   WorkflowRejectionHandling,
   WorkflowConditionType,
-  WorkflowLogicalOperator
+  WorkflowLogicalOperator,
+  WorkflowSignatureMethod
 } from '@/types/workflow';
 
 import {
@@ -65,7 +71,7 @@ import {
   FileText, Mail, Phone, MessageSquare, Database, Code,
   GitBranch, CheckCircle, XCircle, AlertCircle, Timer,
   User as UserIcon, UserCheck, Building, Zap, Bell, Upload, Download,
-  ChevronsUpDown, Check
+  ChevronsUpDown, Check, Plus, Trash2
 } from 'lucide-react';
 
 import { StartNode } from './nodes/StartNode';
@@ -84,6 +90,10 @@ interface WorkflowDesignerProps {
   onClose: () => void;
   onSave: (workflow: any) => void;
 }
+
+type WorkflowDeleteTarget =
+  | { type: 'node'; id: string; label: string }
+  | { type: 'transition'; id: string; label: string };
 
 // Custom node types for different workflow elements
 const nodeTypes: NodeTypes = {
@@ -185,6 +195,79 @@ const normalizeStepType = (stepType: unknown): WorkflowStepType => {
   return WorkflowStepType.Manual;
 };
 
+const normalizeAssignmentType = (assignmentType: unknown): WorkflowAssignmentType | undefined => {
+  if (typeof assignmentType === 'number') {
+    return assignmentType as WorkflowAssignmentType;
+  }
+
+  if (typeof assignmentType === 'string') {
+    const normalized = assignmentType.trim().toLowerCase();
+    switch (normalized) {
+      case 'user':
+      case '0':
+        return WorkflowAssignmentType.User;
+      case 'role':
+      case '1':
+        return WorkflowAssignmentType.Role;
+      case 'dynamic':
+      case '2':
+        return WorkflowAssignmentType.Dynamic;
+      case 'requestormanager':
+      case 'requestor_manager':
+      case 'requestor-manager':
+      case '3':
+        return WorkflowAssignmentType.RequestorManager;
+      case 'previousstepuser':
+      case 'previous_step_user':
+      case 'previous-step-user':
+      case '4':
+        return WorkflowAssignmentType.PreviousStepUser;
+      default:
+        return undefined;
+    }
+  }
+
+  return undefined;
+};
+
+const normalizeApprovalType = (approvalType: unknown): WorkflowApprovalType | undefined => {
+  if (typeof approvalType === 'number') {
+    return approvalType as WorkflowApprovalType;
+  }
+
+  if (typeof approvalType === 'string') {
+    const normalized = approvalType.trim().toLowerCase();
+    switch (normalized) {
+      case 'single':
+      case '0':
+        return WorkflowApprovalType.Single;
+      case 'multiple':
+      case '1':
+        return WorkflowApprovalType.Multiple;
+      case 'consensus':
+      case '2':
+        return WorkflowApprovalType.Consensus;
+      case 'majority':
+      case '3':
+        return WorkflowApprovalType.Majority;
+      default:
+        return undefined;
+    }
+  }
+
+  return undefined;
+};
+
+const normalizeStringList = (values: unknown): string[] => {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+};
+
 // Node palette for drag and drop
 const nodePalette = [
   { type: 'start', label: 'Start', icon: Play, color: 'bg-green-500' },
@@ -216,6 +299,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WorkflowDeleteTarget | null>(null);
   const [workflowName, setWorkflowName] = useState('');
   const [workflowDescription, setWorkflowDescription] = useState('');
   const [entityType, setEntityType] = useState('WorkOrder');
@@ -237,6 +321,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   const [availableUsers, setAvailableUsers] = useState<User[]>([]);
   const [roleSearch, setRoleSearch] = useState('');
   const [userSearch, setUserSearch] = useState('');
+  const [approverDialogOpen, setApproverDialogOpen] = useState(false);
+  const [checklistDialogOpen, setChecklistDialogOpen] = useState(false);
   const [conditionVariables, setConditionVariables] = useState<WorkflowVariableInfo[]>([]);
   const [variablesLoading, setVariablesLoading] = useState(false);
   const [availableEntityTypes, setAvailableEntityTypes] = useState<WorkflowEntityTypeInfo[]>([]);
@@ -247,6 +333,19 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   const customEntityTypeValue = '__custom__';
 
   const isGuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+  const selectedWorkflowOption =
+    activeWorkflowId ? workflowOptions.find((item) => item.id === activeWorkflowId) : undefined;
+  const selectedWorkflowLiveInstanceCount = selectedWorkflowOption?.activeInstancesCount ?? 0;
+  const selectedWorkflowIsImmutable = selectedWorkflowOption != null &&
+    selectedWorkflowOption.lifecycleStatus !== WorkflowDefinitionLifecycleStatus.Draft;
+  const selectedWorkflowHasLiveInstances = selectedWorkflowLiveInstanceCount > 0 || selectedWorkflowIsImmutable;
+  const workflowLiveInstanceLockMessage =
+    selectedWorkflowIsImmutable
+      ? `Version ${selectedWorkflowOption?.version ?? ''} is ${selectedWorkflowOption?.lifecycleStatus === WorkflowDefinitionLifecycleStatus.Published ? 'published' : 'retired'} and is read-only. Clone it as a new draft to make changes.`
+      : selectedWorkflowLiveInstanceCount === 1
+      ? 'This workflow has 1 live instance and cannot be edited. Complete or cancel that instance first, or create a separate workflow for future records.'
+      : `This workflow has ${selectedWorkflowLiveInstanceCount} live instances and cannot be edited. Complete or cancel those instances first, or create a separate workflow for future records.`;
 
   const inferModuleForEntityType = (entityTypeName?: string | null) => {
     const key = (entityTypeName || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
@@ -686,9 +785,42 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     return null;
   };
 
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      if (selectedWorkflowHasLiveInstances) {
+        const selectionChanges = changes.filter((change) => change.type === 'select');
+        if (selectionChanges.length > 0) {
+          onNodesChange(selectionChanges);
+        }
+        return;
+      }
+
+      onNodesChange(changes);
+    },
+    [onNodesChange, selectedWorkflowHasLiveInstances]
+  );
+
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      if (selectedWorkflowHasLiveInstances) {
+        const selectionChanges = changes.filter((change) => change.type === 'select');
+        if (selectionChanges.length > 0) {
+          onEdgesChange(selectionChanges);
+        }
+        return;
+      }
+
+      onEdgesChange(changes);
+    },
+    [onEdgesChange, selectedWorkflowHasLiveInstances]
+  );
+
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
-    [setEdges]
+    (params: Connection) => {
+      if (selectedWorkflowHasLiveInstances) return;
+      setEdges((eds) => addEdge(params, eds));
+    },
+    [selectedWorkflowHasLiveInstances, setEdges]
   );
 
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
@@ -705,12 +837,13 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  }, []);
+    event.dataTransfer.dropEffect = selectedWorkflowHasLiveInstances ? 'none' : 'move';
+  }, [selectedWorkflowHasLiveInstances]);
 
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
+      if (selectedWorkflowHasLiveInstances) return;
 
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect();
       const type = event.dataTransfer.getData('application/reactflow');
@@ -736,15 +869,133 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
       setNodes((nds) => nds.concat(newNode));
     },
-    [reactFlowInstance, nodes.length, setNodes]
+    [reactFlowInstance, nodes.length, selectedWorkflowHasLiveInstances, setNodes]
   );
+
+  const deleteSelectedNode = useCallback(() => {
+    if (selectedWorkflowHasLiveInstances) {
+      toast.error('Workflow is read-only', {
+        description: workflowLiveInstanceLockMessage,
+      });
+      return;
+    }
+
+    if (!selectedNode) return;
+
+    if (selectedNode.type === 'start') {
+      toast.error('The start node cannot be deleted.');
+      return;
+    }
+
+    const nodeLabel = selectedNode.data?.label || selectedNode.type || 'this node';
+    setDeleteTarget({ type: 'node', id: selectedNode.id, label: String(nodeLabel) });
+  }, [
+    selectedNode,
+    selectedWorkflowHasLiveInstances,
+    workflowLiveInstanceLockMessage,
+  ]);
+
+  const deleteSelectedEdge = useCallback(() => {
+    if (selectedWorkflowHasLiveInstances) {
+      toast.error('Workflow is read-only', {
+        description: workflowLiveInstanceLockMessage,
+      });
+      return;
+    }
+
+    if (!selectedEdge) return;
+
+    setDeleteTarget({
+      type: 'transition',
+      id: selectedEdge.id,
+      label: selectedEdge.label?.toString() || 'this transition',
+    });
+  }, [
+    selectedEdge,
+    selectedWorkflowHasLiveInstances,
+    workflowLiveInstanceLockMessage,
+  ]);
+
+  const confirmDeleteTarget = useCallback(() => {
+    if (!deleteTarget) return;
+
+    if (deleteTarget.type === 'node') {
+      setNodes((currentNodes) => currentNodes.filter((node) => node.id !== deleteTarget.id));
+      setEdges((currentEdges) =>
+        currentEdges.filter((edge) => edge.source !== deleteTarget.id && edge.target !== deleteTarget.id)
+      );
+      setSelectedNode((current) => current?.id === deleteTarget.id ? null : current);
+      setSelectedEdge(null);
+      setIsPropertiesOpen(false);
+      setApproverDialogOpen(false);
+      setChecklistDialogOpen(false);
+      setDeleteTarget(null);
+      toast.success('Workflow step deleted');
+      return;
+    }
+
+    setEdges((currentEdges) => currentEdges.filter((edge) => edge.id !== deleteTarget.id));
+    setSelectedEdge((current) => current?.id === deleteTarget.id ? null : current);
+    setIsPropertiesOpen(false);
+    setDeleteTarget(null);
+    toast.success('Workflow transition deleted');
+  }, [deleteTarget, setEdges, setNodes]);
+
+  useEffect(() => {
+    if (!isOpen || approverDialogOpen || checklistDialogOpen || deleteTarget) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+
+      const target = event.target as HTMLElement | null;
+      const targetTag = target?.tagName?.toLowerCase();
+      if (
+        target?.isContentEditable ||
+        targetTag === 'input' ||
+        targetTag === 'textarea' ||
+        targetTag === 'select'
+      ) {
+        return;
+      }
+
+      if (!selectedNode && !selectedEdge) return;
+
+      event.preventDefault();
+      if (selectedNode) {
+        deleteSelectedNode();
+        return;
+      }
+
+      deleteSelectedEdge();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    approverDialogOpen,
+    checklistDialogOpen,
+    deleteTarget,
+    deleteSelectedEdge,
+    deleteSelectedNode,
+    isOpen,
+    selectedEdge,
+    selectedNode,
+  ]);
 
   const getDefaultNodeData = (type: string) => {
     switch (type) {
       case 'task':
         return {
           assignee: '',
+          taskActionType: 'general',
+          taskAssigneeType: 'currentActor',
+          taskAssigneeUserId: '',
+          taskAssigneeRole: '',
+          taskDynamicExpression: '',
+          documentName: '',
           dueDate: '',
+          estimatedHours: '',
           priority: 'medium',
           instructions: '',
           requiredFields: []
@@ -754,7 +1005,12 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
           approvers: [],
           approverRoles: [],
           approverUsers: [],
-          approvalType: 'any', // any, all, sequence
+          approvalType: 'any',
+          approvalActivationMode: 'parallel',
+          minApprovalsRequired: 1,
+          preventInitiatorApproval: true,
+          requireDistinctApprovers: true,
+          approvalConflictRules: [],
           escalationTimeout: 24,
           escalationTo: '',
           conditions: []
@@ -799,12 +1055,29 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   };
 
   const onDragStart = (event: React.DragEvent, nodeType: string) => {
+    if (selectedWorkflowHasLiveInstances) {
+      event.preventDefault();
+      event.dataTransfer.effectAllowed = 'none';
+      return;
+    }
+
     event.dataTransfer.setData('application/reactflow', nodeType);
     event.dataTransfer.effectAllowed = 'move';
     setDraggedType(nodeType);
   };
 
   const handleSave = async () => {
+    if (selectedWorkflowHasLiveInstances) {
+      toast.error('Workflow is read-only', {
+        description: workflowLiveInstanceLockMessage,
+      });
+      return;
+    }
+
+    if (!handleValidate(false)) {
+      return;
+    }
+
     setIsSaving(true);
     try {
       const payload = buildDefinitionPayload();
@@ -816,7 +1089,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         const updateDto: UpdateWorkflowDefinitionAdminDto = {
           name: payload.name,
           description: payload.description,
-          isActive: true,
+          entityType: payload.entityType,
+          isActive: false,
           configuration: payload.configuration,
           steps: payload.steps,
           transitions: payload.transitions,
@@ -827,7 +1101,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
           name: payload.name,
           description: payload.description,
           entityType: payload.entityType,
-          isActive: true,
+          isActive: false,
           configuration: payload.configuration,
           steps: payload.steps,
           transitions: payload.transitions,
@@ -847,11 +1121,17 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         }
         return [...prev, {
           id: savedDefinition.id,
+          definitionKey: savedDefinition.definitionKey,
           name: savedDefinition.name,
           description: savedDefinition.description,
           entityType: savedDefinition.entityType,
           version: savedDefinition.version,
           isActive: savedDefinition.isActive,
+          lifecycleStatus: savedDefinition.lifecycleStatus,
+          changeSummary: savedDefinition.changeSummary,
+          supersedesDefinitionId: savedDefinition.supersedesDefinitionId,
+          publishedAt: savedDefinition.publishedAt,
+          retiredAt: savedDefinition.retiredAt,
           configuration: savedDefinition.configuration,
           createdDate: savedDefinition.createdDate,
           lastModifiedDate: savedDefinition.lastModifiedDate,
@@ -865,6 +1145,12 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       onSave(savedDefinition);
     } catch (error) {
       console.error('Failed to save workflow:', error);
+      const message = error instanceof Error ? error.message : 'Unable to save workflow.';
+      toast.error('Failed to save workflow', {
+        description: message.includes('live instances') || message.includes('active instances')
+          ? 'This workflow has live instances and cannot be edited. Complete or cancel those instances first, or create a separate workflow for future records.'
+          : message,
+      });
     } finally {
       setIsSaving(false);
     }
@@ -925,6 +1211,17 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       const duplicateCount = usedNames.get(normalizedName) ?? 0;
       usedNames.set(normalizedName, duplicateCount + 1);
       const stepName = duplicateCount === 0 ? baseName : `${baseName} (${duplicateCount + 1})`;
+      const estimatedHoursValue = Number(node.data?.estimatedHours);
+      const estimatedHours = Number.isFinite(estimatedHoursValue) && estimatedHoursValue > 0
+        ? estimatedHoursValue
+        : undefined;
+      const approverRoles = normalizeStringList(node.data?.approverRoles || node.data?.approvers);
+      const requiredRole =
+        node.type === 'approval' && approverRoles.length > 0
+          ? approverRoles[0]
+          : node.type === 'task' && node.data?.taskAssigneeType === 'role' && node.data?.taskAssigneeRole
+            ? node.data.taskAssigneeRole
+            : undefined;
       return {
         id: stepId,
         name: stepName,
@@ -932,6 +1229,8 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         stepType: mapNodeTypeToStepType(node.type),
         order: index + 1,
         isRequired: true,
+        requiredRole,
+        estimatedHours,
         configuration: buildStepConfiguration(node),
       };
     });
@@ -1075,15 +1374,30 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   };
 
   const buildNodeDataFromStep = (step: WorkflowDefinitionDto['steps'][number]) => {
-    const baseData: Record<string, any> = { label: step.name };
+    const stepChecklist = step.configuration?.qualityConfig?.qualityChecks?.map((item, index) => ({
+      ...item,
+      id: item.id || `check-${index + 1}`,
+    })) ?? [];
+    const baseData: Record<string, any> = {
+      label: step.name,
+      instructions: step.description || '',
+      estimatedHours: step.estimatedHours?.toString() || '',
+      dueDate: step.estimatedHours ? `${step.estimatedHours}h` : '',
+      stepChecklist,
+    };
     if (normalizeStepType(step.stepType) === WorkflowStepType.Approval) {
       const approvalConfig = step.configuration?.approvalConfig;
-      const approverRoles = approvalConfig?.approverRules
-        ?.filter(rule => rule.assignmentType === WorkflowAssignmentType.Role && rule.role)
+      const configuredApproverRoles = approvalConfig?.approverRules
+        ?.filter(rule => normalizeAssignmentType(rule.assignmentType) === WorkflowAssignmentType.Role && rule.role)
         .map(rule => rule.role ?? '')
         .filter(Boolean) ?? [];
+      const approverRoles = configuredApproverRoles.length > 0
+        ? configuredApproverRoles
+        : step.requiredRole
+          ? [step.requiredRole]
+          : [];
       const approverUsers = approvalConfig?.approverRules
-        ?.filter(rule => rule.assignmentType === WorkflowAssignmentType.User && rule.userId)
+        ?.filter(rule => normalizeAssignmentType(rule.assignmentType) === WorkflowAssignmentType.User && rule.userId)
         .map(rule => rule.userId ?? '')
         .filter(Boolean) ?? [];
       return {
@@ -1091,8 +1405,98 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         approvers: approverRoles,
         approverRoles,
         approverUsers,
-        approvalType: approvalConfig ? mapApprovalTypeToLabel(approvalConfig.approvalType) : 'any',
+        approvalType: approvalConfig
+          ? normalizeApprovalType(approvalConfig.approvalType) === WorkflowApprovalType.Single && approvalConfig.minApprovalsRequired > 1
+            ? 'minimum'
+            : mapApprovalTypeToLabel(approvalConfig.approvalType)
+          : 'any',
+        approvalActivationMode:
+          approvalConfig?.activationMode === WorkflowApprovalActivationMode.Sequential ||
+          String(approvalConfig?.activationMode).toLowerCase() === 'sequential'
+            ? 'sequential'
+            : 'parallel',
+        minApprovalsRequired: approvalConfig?.minApprovalsRequired || 1,
+        preventInitiatorApproval: approvalConfig?.preventInitiatorApproval === true,
+        requireDistinctApprovers: approvalConfig?.requireDistinctApprovers === true,
+        approvalConflictRules: approvalConfig?.conflictRules || [],
+        requireElectronicSignature: approvalConfig?.signaturePolicy?.isRequired === true,
+        signatureMethod: approvalConfig?.signaturePolicy?.method ?? WorkflowSignatureMethod.Attestation,
+        requiredSigningRole: approvalConfig?.signaturePolicy?.requiredSigningRole || '',
+        requireValidCertificateChain: approvalConfig?.signaturePolicy?.requireValidCertificateChain === true,
+        signatureAttestation: approvalConfig?.signaturePolicy?.attestationText || 'I confirm that I reviewed and approve this transaction.',
+        approvalChecklist: stepChecklist,
       };
+    }
+
+    if (normalizeStepType(step.stepType) === WorkflowStepType.Manual) {
+      const assignmentRule = step.configuration?.assignmentRules?.[0];
+      if (!assignmentRule) {
+        return {
+          ...baseData,
+          taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
+          taskAssigneeType: 'currentActor',
+          documentName: step.configuration?.taskConfig?.documentName || '',
+          priority: 'medium',
+        };
+      }
+
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.Role && assignmentRule.role) {
+        return {
+          ...baseData,
+          taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
+          taskAssigneeType: 'role',
+          taskAssigneeRole: assignmentRule.role,
+          assignee: assignmentRule.role,
+          documentName: step.configuration?.taskConfig?.documentName || '',
+          priority: 'medium',
+        };
+      }
+
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.User && assignmentRule.userId) {
+        return {
+          ...baseData,
+          taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
+          taskAssigneeType: 'user',
+          taskAssigneeUserId: assignmentRule.userId,
+          assignee: assignmentRule.userId,
+          documentName: step.configuration?.taskConfig?.documentName || '',
+          priority: 'medium',
+        };
+      }
+
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.Dynamic && assignmentRule.dynamicExpression) {
+        return {
+          ...baseData,
+          taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
+          taskAssigneeType: 'dynamic',
+          taskDynamicExpression: assignmentRule.dynamicExpression,
+          assignee: assignmentRule.dynamicExpression,
+          documentName: step.configuration?.taskConfig?.documentName || '',
+          priority: 'medium',
+        };
+      }
+
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.RequestorManager) {
+        return {
+          ...baseData,
+          taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
+          taskAssigneeType: 'requestorManager',
+          assignee: 'Requestor Manager',
+          documentName: step.configuration?.taskConfig?.documentName || '',
+          priority: 'medium',
+        };
+      }
+
+      if (normalizeAssignmentType(assignmentRule.assignmentType) === WorkflowAssignmentType.PreviousStepUser) {
+        return {
+          ...baseData,
+          taskActionType: step.configuration?.taskConfig?.taskActionType || 'general',
+          taskAssigneeType: 'previousStepUser',
+          assignee: 'Previous Step User',
+          documentName: step.configuration?.taskConfig?.documentName || '',
+          priority: 'medium',
+        };
+      }
     }
 
     const assignmentRule = step.configuration?.assignmentRules?.find(rule => rule.role);
@@ -1106,16 +1510,55 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     return baseData;
   };
 
+  const buildRequirementKey = (value?: string) => {
+    const normalized = (value || 'task-document')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+
+    return normalized || 'task-document';
+  };
+
+  const readStepChecklist = (data?: any): WorkflowQualityCheckDto[] =>
+    ((data?.stepChecklist || data?.approvalChecklist || []) as WorkflowQualityCheckDto[]);
+
+  const buildStepChecklist = (data?: any): WorkflowQualityCheckDto[] =>
+    readStepChecklist(data)
+      .filter(item => item?.name?.trim())
+      .map((item, index) => ({
+        id: item.id || `check-${index + 1}`,
+        name: item.name.trim(),
+        description: item.description?.trim() || '',
+        isRequired: item.isRequired !== false,
+        requiresDocument: item.requiresDocument === true,
+        documentType: item.documentType?.trim() || undefined,
+        documentName: item.documentName?.trim() || undefined,
+        applicabilityCondition: item.applicabilityCondition,
+        expectedValue: item.expectedValue,
+        validationExpression: item.validationExpression,
+      }));
+
   const buildStepConfiguration = (node: Node): WorkflowStepConfigurationDto | undefined => {
+    const stepChecklist = buildStepChecklist(node.data);
+    const qualityConfig = stepChecklist.length > 0
+      ? {
+          qualityConfig: {
+            qualityChecks: stepChecklist,
+          },
+        }
+      : {};
+
     if (node.type === 'approval') {
-      const approverRoles = (node.data?.approverRoles || node.data?.approvers || []).filter((role: string) => role);
-      const approverUsers = (node.data?.approverUsers || []).filter((userId: string) => userId);
+      const approverRoles = normalizeStringList(node.data?.approverRoles || node.data?.approvers);
+      const approverUsers = normalizeStringList(node.data?.approverUsers);
       const approverRules: WorkflowAssignmentRuleDto[] = [];
+      const sequentialApprovals = node.data?.approvalActivationMode === 'sequential';
 
       approverRoles.forEach((role: string, index: number) => {
         approverRules.push({
           assignmentType: WorkflowAssignmentType.Role,
           role,
+          approvalGroup: sequentialApprovals ? index + 1 : 1,
           priority: approverRoles.length - index,
         });
       });
@@ -1124,6 +1567,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         approverRules.push({
           assignmentType: WorkflowAssignmentType.User,
           userId,
+          approvalGroup: sequentialApprovals ? approverRoles.length + index + 1 : 1,
           priority: approverUsers.length - index,
         });
       });
@@ -1131,44 +1575,151 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       return {
         approvalConfig: {
           approvalType: mapApprovalTypeToEnum(node.data?.approvalType),
+          activationMode: sequentialApprovals
+            ? WorkflowApprovalActivationMode.Sequential
+            : WorkflowApprovalActivationMode.Parallel,
           approverRules,
-          minApprovalsRequired: 1,
+          minApprovalsRequired: Math.max(Number(node.data?.minApprovalsRequired) || 1, 1),
           rejectionHandling: WorkflowRejectionHandling.StopWorkflow,
+          preventInitiatorApproval: node.data?.preventInitiatorApproval === true,
+          requireDistinctApprovers: node.data?.requireDistinctApprovers === true,
+          conflictRules: ((node.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[])
+            .filter(rule => rule?.name?.trim())
+            .map(rule => ({
+              id: rule.id,
+              name: rule.name.trim(),
+              isEnabled: rule.isEnabled !== false,
+              actorSource: rule.actorSource,
+              sourceStepName: rule.sourceStepName?.trim() || undefined,
+              contextField: rule.contextField?.trim() || undefined,
+              message: rule.message?.trim() || undefined,
+            })),
+          signaturePolicy: node.data?.requireElectronicSignature === true ? {
+            isRequired: true,
+            method: Number(node.data?.signatureMethod ?? WorkflowSignatureMethod.Attestation) as WorkflowSignatureMethod,
+            requiredSigningRole: node.data?.requiredSigningRole?.trim() || undefined,
+            requireValidCertificateChain: node.data?.requireValidCertificateChain === true,
+            attestationText: node.data?.signatureAttestation?.trim() || 'I confirm that I reviewed and approve this transaction.',
+          } : undefined,
         },
+        ...qualityConfig,
       };
     }
 
-    if (node.type === 'task' && node.data?.assignee) {
-      return {
-        assignmentRules: [{
-          assignmentType: WorkflowAssignmentType.Role,
-          role: node.data.assignee,
-          priority: 1,
-        }],
+    if (node.type === 'task') {
+      const taskAssigneeType = node.data?.taskAssigneeType || 'currentActor';
+      const taskActionType = node.data?.taskActionType || 'general';
+      const documentName = node.data?.documentName?.trim() || '';
+      const taskConfig = {
+        taskActionType,
+        documentName: documentName || undefined,
+        requiresDocument: taskActionType === 'document',
+        documentRequirementKey: taskActionType === 'document'
+          ? buildRequirementKey(documentName || node.data?.label || node.id)
+          : undefined,
+        instructions: node.data?.instructions?.trim() || undefined,
       };
+      const configuration: WorkflowStepConfigurationDto = {
+        taskConfig,
+        ...qualityConfig,
+      };
+
+      if (taskAssigneeType === 'user' && node.data?.taskAssigneeUserId) {
+        return {
+          ...configuration,
+          assignmentRules: [{
+            assignmentType: WorkflowAssignmentType.User,
+            userId: node.data.taskAssigneeUserId,
+            priority: 1,
+          }],
+        };
+      }
+
+      if (taskAssigneeType === 'dynamic' && node.data?.taskDynamicExpression) {
+        return {
+          ...configuration,
+          assignmentRules: [{
+            assignmentType: WorkflowAssignmentType.Dynamic,
+            dynamicExpression: node.data.taskDynamicExpression,
+            priority: 1,
+          }],
+        };
+      }
+
+      if (taskAssigneeType === 'requestorManager') {
+        return {
+          ...configuration,
+          assignmentRules: [{
+            assignmentType: WorkflowAssignmentType.RequestorManager,
+            priority: 1,
+          }],
+        };
+      }
+
+      if (taskAssigneeType === 'previousStepUser') {
+        return {
+          ...configuration,
+          assignmentRules: [{
+            assignmentType: WorkflowAssignmentType.PreviousStepUser,
+            priority: 1,
+          }],
+        };
+      }
+
+      if (taskAssigneeType === 'role' && node.data?.taskAssigneeRole) {
+        return {
+          ...configuration,
+          assignmentRules: [{
+            assignmentType: WorkflowAssignmentType.Role,
+            role: node.data.taskAssigneeRole,
+            priority: 1,
+          }],
+        };
+      }
+
+      if (node.data?.assignee) {
+        return {
+          ...configuration,
+          assignmentRules: [{
+            assignmentType: WorkflowAssignmentType.Role,
+            role: node.data.assignee,
+            priority: 1,
+          }],
+        };
+      }
+
+      return configuration;
     }
 
     return undefined;
   };
 
-  const mapApprovalTypeToEnum = (value?: string): WorkflowApprovalType => {
-    switch ((value || '').toLowerCase()) {
+  const mapApprovalTypeToEnum = (value?: unknown): WorkflowApprovalType => {
+    if (typeof value === 'number') {
+      return value as WorkflowApprovalType;
+    }
+
+    switch ((typeof value === 'string' ? value : '').toLowerCase()) {
       case 'all':
         return WorkflowApprovalType.Consensus;
-      case 'sequence':
-        return WorkflowApprovalType.Multiple;
+      case 'majority':
+        return WorkflowApprovalType.Majority;
+      case 'minimum':
+        return WorkflowApprovalType.Single;
       case 'any':
       default:
         return WorkflowApprovalType.Single;
     }
   };
 
-  const mapApprovalTypeToLabel = (value?: WorkflowApprovalType): string => {
-    switch (value) {
+  const mapApprovalTypeToLabel = (value?: unknown): string => {
+    switch (normalizeApprovalType(value)) {
       case WorkflowApprovalType.Consensus:
         return 'all';
       case WorkflowApprovalType.Multiple:
-        return 'sequence';
+        return 'all';
+      case WorkflowApprovalType.Majority:
+        return 'majority';
       case WorkflowApprovalType.Single:
       default:
         return 'any';
@@ -1220,7 +1771,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     console.log('Testing workflow...');
   };
 
-  const handleValidate = () => {
+  const handleValidate = (showSuccess = true) => {
     // Validate workflow structure
     const errors = [];
     
@@ -1240,19 +1791,77 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
 
     const approvalNodes = nodes.filter(node => node.type === 'approval');
     approvalNodes.forEach(node => {
-      const roles = (node.data?.approverRoles || node.data?.approvers || []) as string[];
-      const users = (node.data?.approverUsers || []) as string[];
+      const roles = normalizeStringList(node.data?.approverRoles || node.data?.approvers);
+      const users = normalizeStringList(node.data?.approverUsers);
       if (roles.length === 0 && users.length === 0) {
         errors.push(`Approval step "${node.data?.label || 'Approval'}" must have at least one approver role or user`);
       }
+
+      const minimumApprovals = Math.max(Number(node.data?.minApprovalsRequired) || 1, 1);
+      if (minimumApprovals > roles.length + users.length) {
+        errors.push(`Approval step "${node.data?.label || 'Approval'}" requires ${minimumApprovals} approvals but only ${roles.length + users.length} approval slots are configured`);
+      }
+
+      const conflictRules = (node.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[];
+      conflictRules.forEach((rule, index) => {
+        if (!rule.name?.trim()) {
+          errors.push(`Approval step "${node.data?.label || 'Approval'}" has an unnamed SOD rule at row ${index + 1}`);
+        }
+        if (rule.actorSource === WorkflowApprovalActorSource.SpecificStepActor && !rule.sourceStepName?.trim()) {
+          errors.push(`SOD rule "${rule.name || index + 1}" must select a source workflow step`);
+        }
+        if (rule.actorSource === WorkflowApprovalActorSource.ContextUser && !rule.contextField?.trim()) {
+          errors.push(`SOD rule "${rule.name || index + 1}" must define a workflow context user field`);
+        }
+      });
+
     });
+
+    const taskNodes = nodes.filter(node => node.type === 'task');
+    taskNodes.forEach(node => {
+      const assignmentType = node.data?.taskAssigneeType || 'currentActor';
+      if (assignmentType === 'user' && !node.data?.taskAssigneeUserId) {
+        errors.push(`Task step "${node.data?.label || 'Task'}" must have a user selected`);
+      }
+
+      if (assignmentType === 'role' && !node.data?.taskAssigneeRole) {
+        errors.push(`Task step "${node.data?.label || 'Task'}" must have a role selected`);
+      }
+
+      if (assignmentType === 'dynamic' && !node.data?.taskDynamicExpression?.trim()) {
+        errors.push(`Task step "${node.data?.label || 'Task'}" must have a dynamic user field`);
+      }
+
+      if (node.data?.taskActionType === 'document' && !node.data?.documentName?.trim()) {
+        errors.push(`Task step "${node.data?.label || 'Task'}" must name the required document`);
+      }
+    });
+
+    nodes
+      .filter(node => !['start', 'end'].includes(node.type || ''))
+      .forEach(node => {
+        const checklist = readStepChecklist(node.data);
+        checklist.forEach((item, index) => {
+          if (!item.name?.trim()) {
+            errors.push(`Step "${node.data?.label || 'Workflow step'}" has a blank checklist item at row ${index + 1}`);
+          }
+          if (item.requiresDocument && !item.documentType?.trim()) {
+            errors.push(`Checklist item "${item.name || index + 1}" in step "${node.data?.label || 'Workflow step'}" must define a document type`);
+          }
+          if (item.requiresDocument && !item.documentName?.trim()) {
+            errors.push(`Checklist item "${item.name || index + 1}" in step "${node.data?.label || 'Workflow step'}" must define a document name`);
+          }
+        });
+      });
     
     if (errors.length > 0) {
       toast.error(errors.length === 1 ? errors[0] : `Validation errors: ${errors.join(' • ')}`);
       return false;
     }
     
-    toast.success('Workflow validation successful');
+    if (showSuccess) {
+      toast.success('Workflow validation successful');
+    }
     return true;
   };
 
@@ -1392,6 +2001,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
   };
 
   const updateSelectedNode = (updates: Record<string, any>) => {
+    if (selectedWorkflowHasLiveInstances) return;
     if (!selectedNode) return;
     const updatedNode = {
       ...selectedNode,
@@ -1403,7 +2013,93 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     setSelectedNode(updatedNode);
   };
 
+  const updateApprovalChecklist = (nextChecklist: WorkflowQualityCheckDto[]) => {
+    updateSelectedNode({
+      stepChecklist: nextChecklist,
+      ...(selectedNode?.type === 'approval' ? { approvalChecklist: nextChecklist } : {}),
+    });
+  };
+
+  const addApprovalChecklistItem = () => {
+    const currentChecklist = readStepChecklist(selectedNode?.data);
+    updateApprovalChecklist([
+      ...currentChecklist,
+      {
+        id: `check-${Date.now()}`,
+        name: '',
+        description: '',
+        isRequired: true,
+        requiresDocument: false,
+      },
+    ]);
+  };
+
+  const updateApprovalChecklistItem = (itemId: string, updates: Partial<WorkflowQualityCheckDto>) => {
+    const currentChecklist = readStepChecklist(selectedNode?.data);
+    updateApprovalChecklist(
+      currentChecklist.map((item) =>
+        item.id === itemId
+          ? { ...item, ...updates }
+          : item
+      )
+    );
+  };
+
+  const removeApprovalChecklistItem = (itemId: string) => {
+    const currentChecklist = readStepChecklist(selectedNode?.data);
+    updateApprovalChecklist(currentChecklist.filter((item) => item.id !== itemId));
+  };
+
+  const updateApprovalConflictRules = (rules: WorkflowApprovalConflictRuleDto[]) => {
+    updateSelectedNode({ approvalConflictRules: rules });
+  };
+
+  const addApprovalConflictRule = () => {
+    const currentRules = (selectedNode?.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[];
+    updateApprovalConflictRules([
+      ...currentRules,
+      {
+        id: `sod-${Date.now()}`,
+        name: '',
+        isEnabled: true,
+        actorSource: WorkflowApprovalActorSource.PreviousStepActor,
+      },
+    ]);
+  };
+
+  const applyEnterpriseSodPreset = () => {
+    const fields = [
+      ['Requester cannot approve', 'requestedById'],
+      ['Document creator cannot approve', 'createdById'],
+      ['Evaluator cannot approve award', 'evaluatorUserId'],
+      ['PO creator cannot confirm receipt', 'purchaseOrderCreatedById'],
+      ['Invoice processor cannot approve payment', 'invoiceProcessedById'],
+      ['Inventory issuer cannot approve adjustment', 'inventoryIssuedById'],
+    ];
+    const existing = (selectedNode?.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[];
+    const existingFields = new Set(existing.map(rule => rule.contextField).filter(Boolean));
+    updateApprovalConflictRules([
+      ...existing,
+      ...fields.filter(([, contextField]) => !existingFields.has(contextField)).map(([name, contextField]) => ({
+        id: crypto.randomUUID(), name, isEnabled: true,
+        actorSource: WorkflowApprovalActorSource.ContextUser, contextField,
+        message: `${name}.`,
+      })),
+    ]);
+  };
+
+  const updateApprovalConflictRule = (ruleId: string, updates: Partial<WorkflowApprovalConflictRuleDto>) => {
+    const currentRules = (selectedNode?.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[];
+    updateApprovalConflictRules(currentRules.map(rule => rule.id === ruleId ? { ...rule, ...updates } : rule));
+  };
+
+  const removeApprovalConflictRule = (ruleId: string) => {
+    const currentRules = (selectedNode?.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[];
+    updateApprovalConflictRules(currentRules.filter(rule => rule.id !== ruleId));
+  };
+
   const updateSelectedEdge = (updates: Record<string, any>) => {
+    if (selectedWorkflowHasLiveInstances) return;
     if (!selectedEdge) return;
     const updatedEdge = {
       ...selectedEdge,
@@ -1420,9 +2116,6 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
     return fullName ? `${fullName} (${user.username})` : user.username;
   };
-
-  const selectedWorkflowOption =
-    activeWorkflowId ? workflowOptions.find((item) => item.id === activeWorkflowId) : undefined;
 
   const workflowPickerLabel =
     selectedWorkflowOption?.name ||
@@ -1458,9 +2151,41 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     entityTypeModuleFilter
   );
 
+  const selectedApproverRoles =
+    selectedNode?.type === 'approval'
+      ? normalizeStringList(selectedNode.data?.approverRoles || selectedNode.data?.approvers)
+      : [];
+  const selectedApproverUsers =
+    selectedNode?.type === 'approval'
+      ? normalizeStringList(selectedNode.data?.approverUsers)
+      : [];
+  const selectedApprovalChecklist =
+    selectedNode && !['start', 'end'].includes(selectedNode.type || '')
+      ? readStepChecklist(selectedNode.data)
+      : [];
+  const selectedApprovalConflictRules =
+    selectedNode?.type === 'approval'
+      ? ((selectedNode.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[])
+      : [];
+  const availableSodSourceSteps = nodes
+    .filter(node => node.id !== selectedNode?.id && !['start', 'end'].includes(node.type || ''))
+    .map(node => String(node.data?.label || '').trim())
+    .filter(Boolean);
+  const requiredApprovalChecklistCount = selectedApprovalChecklist.filter((item) => item.isRequired !== false).length;
+  const filteredAvailableRoles = availableRoles.filter((role) =>
+    role.name.toLowerCase().includes(roleSearch.toLowerCase())
+  );
+  const filteredAvailableUsers = availableUsers.filter((user) =>
+    formatUserLabel(user).toLowerCase().includes(userSearch.toLowerCase())
+  );
+  const selectedTaskUser = selectedNode?.type === 'task' && selectedNode.data?.taskAssigneeUserId
+    ? availableUsers.find((user) => user.id === selectedNode.data.taskAssigneeUserId)
+    : undefined;
+
   if (!isOpen) return null;
 
   return (
+    <>
       <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-[95vw] max-h-[95vh] p-0">
         <div className="flex flex-col h-[95vh]">
@@ -1470,26 +2195,39 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
             <div className="flex items-start justify-between gap-3 pr-12">
               <div>
                 <DialogTitle className="text-xl font-semibold">
-                  {workflowId ? 'Edit Workflow' : 'Create New Workflow'}
+                  {selectedWorkflowIsImmutable ? 'View Workflow' : workflowId ? 'Edit Workflow' : 'Create New Workflow'}
                 </DialogTitle>
                 <div className="text-xs text-muted-foreground mt-1">
                   Pick an existing workflow to load it, or start a new one.
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handleValidate}>
+                <Button variant="outline" size="sm" onClick={() => handleValidate()}>
                   Validate
                 </Button>
                 <Button variant="outline" size="sm" onClick={handleTest}>
                   <Play className="h-4 w-4 mr-2" />
                   Test
                 </Button>
-                <Button onClick={handleSave} disabled={isSaving}>
+                <Button
+                  onClick={handleSave}
+                  disabled={isSaving || selectedWorkflowHasLiveInstances}
+                  title={selectedWorkflowHasLiveInstances
+                    ? workflowLiveInstanceLockMessage
+                    : undefined}
+                >
                   <Save className="h-4 w-4 mr-2" />
                   {isSaving ? 'Saving...' : 'Save'}
                 </Button>
               </div>
             </div>
+
+            {selectedWorkflowHasLiveInstances && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{workflowLiveInstanceLockMessage}</span>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
               <div className="md:col-span-4 flex flex-col space-y-1">
@@ -1568,13 +2306,18 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                   placeholder="Optional description"
                   value={workflowDescription}
                   onChange={(e) => setWorkflowDescription(e.target.value)}
+                  disabled={selectedWorkflowHasLiveInstances}
                   className="w-full"
                 />
               </div>
 
               <div className="md:col-span-2 flex flex-col space-y-1">
                 <Label className="text-xs text-muted-foreground">Module</Label>
-                <Select value={entityTypeModuleFilter} onValueChange={setEntityTypeModuleFilter}>
+                <Select
+                  value={entityTypeModuleFilter}
+                  onValueChange={setEntityTypeModuleFilter}
+                  disabled={selectedWorkflowHasLiveInstances}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="All Modules" />
                   </SelectTrigger>
@@ -1594,6 +2337,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                 <Select
                   value={isCustomEntityType ? customEntityTypeValue : entityType}
                   onValueChange={handleEntityTypeSelect}
+                  disabled={selectedWorkflowHasLiveInstances}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder={entityTypesLoading ? 'Loading...' : 'Entity Type'} />
@@ -1616,6 +2360,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                     placeholder="e.g. PurchaseRequisition"
                     value={entityType}
                     onChange={(e) => setEntityType(e.target.value)}
+                    disabled={selectedWorkflowHasLiveInstances}
                     className="w-full"
                   />
                 </div>
@@ -1654,8 +2399,14 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                         return (
                           <div
                             key={item.type}
-                            className={`flex items-center space-x-2 p-2 rounded cursor-pointer hover:bg-gray-100 ${item.color} text-white`}
-                            draggable
+                            className={cn(
+                              'flex items-center space-x-2 p-2 rounded text-white',
+                              selectedWorkflowHasLiveInstances
+                                ? 'cursor-not-allowed opacity-60'
+                                : 'cursor-pointer hover:bg-gray-100',
+                              item.color
+                            )}
+                            draggable={!selectedWorkflowHasLiveInstances}
                             onDragStart={(event) => onDragStart(event, item.type)}
                           >
                             <IconComponent className="h-4 w-4" />
@@ -1676,8 +2427,13 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                         return (
                           <div
                             key={module.id}
-                            className="flex items-center space-x-2 p-2 rounded cursor-pointer hover:bg-gray-100 border"
-                            draggable
+                            className={cn(
+                              'flex items-center space-x-2 p-2 rounded border',
+                              selectedWorkflowHasLiveInstances
+                                ? 'cursor-not-allowed opacity-60'
+                                : 'cursor-pointer hover:bg-gray-100'
+                            )}
+                            draggable={!selectedWorkflowHasLiveInstances}
                             onDragStart={(event) => {
                               onDragStart(event, 'integration');
                               // Set module-specific data
@@ -1700,14 +2456,18 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                 <ReactFlow
                   nodes={nodes}
                   edges={edges}
-                  onNodesChange={onNodesChange}
-                  onEdgesChange={onEdgesChange}
+                  onNodesChange={handleNodesChange}
+                  onEdgesChange={handleEdgesChange}
                   onConnect={onConnect}
                   onInit={setReactFlowInstance}
                   onDrop={onDrop}
                   onDragOver={onDragOver}
                   onNodeClick={onNodeClick}
                   onEdgeClick={onEdgeClick}
+                  nodesDraggable={!selectedWorkflowHasLiveInstances}
+                  nodesConnectable={!selectedWorkflowHasLiveInstances}
+                  deleteKeyCode={null}
+                  elementsSelectable
                   nodeTypes={nodeTypes}
                   fitView
                 >
@@ -1724,13 +2484,30 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                 <div className="p-4">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-medium">Node Properties</h3>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setIsPropertiesOpen(false)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={deleteSelectedNode}
+                        disabled={selectedWorkflowHasLiveInstances || selectedNode.type === 'start'}
+                        title={
+                          selectedNode.type === 'start'
+                            ? 'The start node cannot be deleted'
+                            : 'Delete this workflow step'
+                        }
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setIsPropertiesOpen(false)}
+                        title="Close properties"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                   
                   <ScrollArea className="h-[calc(100vh-200px)]">
@@ -1752,6 +2529,252 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                       </div>
 
                       {/* Conditional properties based on node type */}
+                      {selectedNode.type === 'task' && (
+                        <>
+                          <Separator />
+                          <div>
+                            <Label>Task Action</Label>
+                            <Select
+                              value={selectedNode.data?.taskActionType || 'general'}
+                              onValueChange={(value) => updateSelectedNode({ taskActionType: value })}
+                              disabled={selectedWorkflowHasLiveInstances}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select task action" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="general">General Task</SelectItem>
+                                <SelectItem value="document">Attach Document</SelectItem>
+                                <SelectItem value="review">Review / Validate</SelectItem>
+                                <SelectItem value="update-record">Update Record</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {selectedNode.data?.taskActionType === 'document' && (
+                            <div>
+                              <Label>Document Requirement</Label>
+                              <Input
+                                value={selectedNode.data?.documentName || ''}
+                                placeholder="e.g. Signed customer approval"
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onChange={(e) => updateSelectedNode({ documentName: e.target.value })}
+                              />
+                            </div>
+                          )}
+
+                          <div>
+                            <Label>Assign To</Label>
+                            <Select
+                              value={selectedNode.data?.taskAssigneeType || 'currentActor'}
+                              disabled={selectedWorkflowHasLiveInstances}
+                              onValueChange={(value) => {
+                                const assigneeLabel =
+                                  value === 'requestorManager'
+                                    ? 'Requestor Manager'
+                                    : value === 'previousStepUser'
+                                      ? 'Previous Step User'
+                                      : value === 'dynamic'
+                                        ? selectedNode.data?.taskDynamicExpression || 'Dynamic User'
+                                        : '';
+
+                                updateSelectedNode({
+                                  taskAssigneeType: value,
+                                  taskAssigneeUserId: '',
+                                  taskAssigneeRole: value === 'role' ? selectedNode.data?.taskAssigneeRole || '' : '',
+                                  taskDynamicExpression: value === 'dynamic' ? selectedNode.data?.taskDynamicExpression || '' : '',
+                                  assignee: assigneeLabel,
+                                });
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select assignee mode" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="currentActor">Current / Previous Actor</SelectItem>
+                                <SelectItem value="role">Role</SelectItem>
+                                <SelectItem value="user">Specific User</SelectItem>
+                                <SelectItem value="requestorManager">Requestor Manager</SelectItem>
+                                <SelectItem value="previousStepUser">Previous Step User</SelectItem>
+                                <SelectItem value="dynamic">Dynamic User From Context</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {(selectedNode.data?.taskAssigneeType || 'currentActor') === 'role' && (
+                            <div>
+                              <Label>Role</Label>
+                              <Select
+                                value={selectedNode.data?.taskAssigneeRole || ''}
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onValueChange={(value) =>
+                                  updateSelectedNode({
+                                    taskAssigneeType: 'role',
+                                    taskAssigneeRole: value,
+                                    assignee: value,
+                                  })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select role" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {availableRoles.map((role) => (
+                                    <SelectItem key={role.id} value={role.name}>
+                                      {role.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+
+                          {(selectedNode.data?.taskAssigneeType || 'currentActor') === 'user' && (
+                            <div>
+                              <Label>User</Label>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="w-full justify-between"
+                                    disabled={selectedWorkflowHasLiveInstances}
+                                  >
+                                    <span className="truncate">
+                                      {selectedTaskUser
+                                        ? formatUserLabel(selectedTaskUser)
+                                        : 'Select user'}
+                                    </span>
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[280px] p-0" align="start">
+                                  <Command>
+                                    <CommandInput placeholder="Search users..." />
+                                    <CommandList>
+                                      <CommandEmpty>No users found.</CommandEmpty>
+                                      <CommandGroup>
+                                        {availableUsers.map((user) => (
+                                          <CommandItem
+                                            key={user.id}
+                                            value={`${formatUserLabel(user)} ${user.email || ''}`}
+                                            onSelect={() =>
+                                              updateSelectedNode({
+                                                taskAssigneeType: 'user',
+                                                taskAssigneeUserId: user.id,
+                                                assignee: formatUserLabel(user),
+                                              })
+                                            }
+                                          >
+                                            <Check
+                                              className={cn(
+                                                'mr-2 h-4 w-4',
+                                                selectedNode.data?.taskAssigneeUserId === user.id
+                                                  ? 'opacity-100'
+                                                  : 'opacity-0'
+                                              )}
+                                            />
+                                            <span className="truncate">{formatUserLabel(user)}</span>
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          )}
+
+                          {(selectedNode.data?.taskAssigneeType || 'currentActor') === 'dynamic' && (
+                            <div>
+                              <Label>Dynamic User Field</Label>
+                              <Input
+                                value={selectedNode.data?.taskDynamicExpression || ''}
+                                placeholder="e.g. technicianId"
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onChange={(e) =>
+                                  updateSelectedNode({
+                                    taskDynamicExpression: e.target.value,
+                                    assignee: e.target.value || 'Dynamic User',
+                                  })
+                                }
+                              />
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <Label>Priority</Label>
+                              <Select
+                                value={selectedNode.data?.priority || 'medium'}
+                                onValueChange={(value) => updateSelectedNode({ priority: value })}
+                                disabled={selectedWorkflowHasLiveInstances}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Priority" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="low">Low</SelectItem>
+                                  <SelectItem value="medium">Medium</SelectItem>
+                                  <SelectItem value="high">High</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <Label>Due Hours</Label>
+                              <Input
+                                type="number"
+                                min="0"
+                                value={selectedNode.data?.estimatedHours || ''}
+                                placeholder="24"
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onChange={(e) =>
+                                  updateSelectedNode({
+                                    estimatedHours: e.target.value,
+                                    dueDate: e.target.value ? `${e.target.value}h` : '',
+                                  })
+                                }
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <Label>Instructions</Label>
+                            <Textarea
+                              value={selectedNode.data?.instructions || ''}
+                              placeholder="What should this person do?"
+                              rows={4}
+                              disabled={selectedWorkflowHasLiveInstances}
+                              onChange={(e) => updateSelectedNode({ instructions: e.target.value })}
+                            />
+                          </div>
+
+                          <div className="rounded-md border bg-white p-3 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <Label>Step Checklist</Label>
+                                <p className="text-xs text-muted-foreground">
+                                  The task owner must complete required checks before submitting this step.
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setChecklistDialogOpen(true)}
+                              >
+                                <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                                Configure
+                              </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Badge variant="secondary">{selectedApprovalChecklist.length} items</Badge>
+                              <Badge variant="secondary">{requiredApprovalChecklistCount} required</Badge>
+                            </div>
+                          </div>
+                        </>
+                      )}
+
                       {selectedNode.type === 'approval' && (
                         <>
                           <Separator />
@@ -1767,9 +2790,193 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                               <SelectContent>
                                 <SelectItem value="any">Any Approver</SelectItem>
                                 <SelectItem value="all">All Approvers</SelectItem>
-                                <SelectItem value="sequence">Sequential</SelectItem>
+                                <SelectItem value="majority">Majority</SelectItem>
+                                <SelectItem value="minimum">Minimum Number</SelectItem>
                               </SelectContent>
                             </Select>
+                          </div>
+
+                          <div>
+                            <Label>Approval Sequence</Label>
+                            <Select
+                              value={selectedNode.data?.approvalActivationMode || 'parallel'}
+                              disabled={selectedWorkflowHasLiveInstances}
+                              onValueChange={(value) => updateSelectedNode({ approvalActivationMode: value })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select approval sequence" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="parallel">Parallel</SelectItem>
+                                <SelectItem value="sequential">Sequential</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Sequential mode activates approvers one at a time in the configured order.
+                            </p>
+                          </div>
+
+                          {(selectedNode.data?.approvalType === 'minimum' || selectedNode.data?.approvalType === 'majority') && (
+                            <div>
+                              <Label>Minimum Approvals</Label>
+                              <Input
+                                type="number"
+                                min="1"
+                                value={selectedNode.data?.minApprovalsRequired || 1}
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onChange={(event) =>
+                                  updateSelectedNode({ minApprovalsRequired: Math.max(Number(event.target.value) || 1, 1) })
+                                }
+                              />
+                            </div>
+                          )}
+
+                          <div className="space-y-2 rounded-md border bg-white p-3">
+                            <Label>Approval Controls</Label>
+                            <label className="flex items-start gap-2 text-sm">
+                              <Checkbox
+                                checked={selectedNode.data?.preventInitiatorApproval === true}
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onCheckedChange={(checked) =>
+                                  updateSelectedNode({ preventInitiatorApproval: checked === true })
+                                }
+                              />
+                              <span>Prevent the workflow initiator from approving this step</span>
+                            </label>
+                            <label className="flex items-start gap-2 text-sm">
+                              <Checkbox
+                                checked={selectedNode.data?.requireDistinctApprovers === true}
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onCheckedChange={(checked) =>
+                                  updateSelectedNode({ requireDistinctApprovers: checked === true })
+                                }
+                              />
+                              <span>Require a different user for each approval slot</span>
+                            </label>
+                          </div>
+
+                          <div className="space-y-3 rounded-md border bg-white p-3">
+                            <label className="flex items-center gap-2 text-sm"><Checkbox checked={selectedNode.data?.requireElectronicSignature === true} disabled={selectedWorkflowHasLiveInstances} onCheckedChange={checked => updateSelectedNode({ requireElectronicSignature: checked === true })} />Require electronic signature</label>
+                            {selectedNode.data?.requireElectronicSignature === true && <>
+                              <Select value={String(selectedNode.data?.signatureMethod ?? WorkflowSignatureMethod.Attestation)} disabled={selectedWorkflowHasLiveInstances} onValueChange={value => updateSelectedNode({ signatureMethod: Number(value) })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+                                <SelectItem value={String(WorkflowSignatureMethod.Attestation)}>Attestation</SelectItem><SelectItem value={String(WorkflowSignatureMethod.DigitalCertificate)}>Digital certificate</SelectItem><SelectItem value={String(WorkflowSignatureMethod.ExternalProvider)}>External provider</SelectItem>
+                              </SelectContent></Select>
+                              <Input value={selectedNode.data?.requiredSigningRole || ''} placeholder="Required signing role (optional)" disabled={selectedWorkflowHasLiveInstances} onChange={event => updateSelectedNode({ requiredSigningRole: event.target.value })} />
+                              <Textarea value={selectedNode.data?.signatureAttestation || 'I confirm that I reviewed and approve this transaction.'} disabled={selectedWorkflowHasLiveInstances} onChange={event => updateSelectedNode({ signatureAttestation: event.target.value })} />
+                              {Number(selectedNode.data?.signatureMethod) === WorkflowSignatureMethod.DigitalCertificate && <label className="flex items-center gap-2 text-sm"><Checkbox checked={selectedNode.data?.requireValidCertificateChain === true} disabled={selectedWorkflowHasLiveInstances} onCheckedChange={checked => updateSelectedNode({ requireValidCertificateChain: checked === true })} />Require valid certificate chain</label>}
+                            </>}
+                          </div>
+
+                          <div className="space-y-3 rounded-md border bg-white p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <Label>Cross-Step SOD Rules</Label>
+                                <p className="text-xs text-muted-foreground">Block conflicting actors from approving this step.</p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={selectedWorkflowHasLiveInstances}
+                                onClick={addApprovalConflictRule}
+                              >
+                                <Plus className="mr-1 h-3.5 w-3.5" />
+                                Add
+                              </Button>
+                              <Button type="button" variant="outline" size="sm" disabled={selectedWorkflowHasLiveInstances} onClick={applyEnterpriseSodPreset}>
+                                ERP preset
+                              </Button>
+                            </div>
+
+                            {selectedApprovalConflictRules.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">No cross-step conflicts configured.</p>
+                            ) : (
+                              <div className="space-y-3">
+                                {selectedApprovalConflictRules.map((rule) => (
+                                  <div key={rule.id} className="space-y-2 border-t pt-3 first:border-t-0 first:pt-0">
+                                    <div className="flex items-center gap-2">
+                                      <Input
+                                        value={rule.name || ''}
+                                        placeholder="Rule name"
+                                        disabled={selectedWorkflowHasLiveInstances}
+                                        onChange={(event) => updateApprovalConflictRule(rule.id, { name: event.target.value })}
+                                      />
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="shrink-0 text-red-600"
+                                        disabled={selectedWorkflowHasLiveInstances}
+                                        onClick={() => removeApprovalConflictRule(rule.id)}
+                                        aria-label="Remove SOD rule"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                    <Select
+                                      value={String(rule.actorSource)}
+                                      disabled={selectedWorkflowHasLiveInstances}
+                                      onValueChange={(value) => updateApprovalConflictRule(rule.id, {
+                                        actorSource: Number(value) as WorkflowApprovalActorSource,
+                                        sourceStepName: undefined,
+                                        contextField: undefined,
+                                      })}
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Conflicting actor" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value={String(WorkflowApprovalActorSource.PreviousStepActor)}>Previous step actor</SelectItem>
+                                        <SelectItem value={String(WorkflowApprovalActorSource.AnyPreviousApprover)}>Any prior approver</SelectItem>
+                                        <SelectItem value={String(WorkflowApprovalActorSource.SpecificStepActor)}>Actor from named step</SelectItem>
+                                        <SelectItem value={String(WorkflowApprovalActorSource.ContextUser)}>User from workflow field</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+
+                                    {rule.actorSource === WorkflowApprovalActorSource.SpecificStepActor && (
+                                      <Select
+                                        value={rule.sourceStepName || ''}
+                                        disabled={selectedWorkflowHasLiveInstances}
+                                        onValueChange={(value) => updateApprovalConflictRule(rule.id, { sourceStepName: value })}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select source step" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {availableSodSourceSteps.map((stepName) => (
+                                            <SelectItem key={stepName} value={stepName}>{stepName}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    )}
+
+                                    {rule.actorSource === WorkflowApprovalActorSource.ContextUser && (
+                                      <Input
+                                        value={rule.contextField || ''}
+                                        placeholder="Context user field, e.g. requestedById"
+                                        disabled={selectedWorkflowHasLiveInstances}
+                                        onChange={(event) => updateApprovalConflictRule(rule.id, { contextField: event.target.value })}
+                                      />
+                                    )}
+
+                                    <Input
+                                      value={rule.message || ''}
+                                      placeholder="Optional blocking message"
+                                      disabled={selectedWorkflowHasLiveInstances}
+                                      onChange={(event) => updateApprovalConflictRule(rule.id, { message: event.target.value })}
+                                    />
+                                    <label className="flex items-center gap-2 text-xs">
+                                      <Checkbox
+                                        checked={rule.isEnabled !== false}
+                                        disabled={selectedWorkflowHasLiveInstances}
+                                        onCheckedChange={(checked) => updateApprovalConflictRule(rule.id, { isEnabled: checked === true })}
+                                      />
+                                      Enabled
+                                    </label>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                           
                           <div>
@@ -1777,75 +2984,62 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                             <Input type="number" placeholder="24" />
                           </div>
                           
-                          <div>
-                            <Label>Approver Roles</Label>
-                            <Input
-                              placeholder="Filter roles"
-                              value={roleSearch}
-                              onChange={(e) => setRoleSearch(e.target.value)}
-                              className="mb-2"
-                            />
-                            <div className="max-h-32 overflow-y-auto rounded border bg-white p-2 space-y-2">
-                              {availableRoles.length === 0 && (
-                                <div className="text-xs text-muted-foreground">No roles available</div>
-                              )}
-                              {availableRoles
-                                .filter(role => role.name.toLowerCase().includes(roleSearch.toLowerCase()))
-                                .map(role => {
-                                  const selectedRoles: string[] = selectedNode.data?.approverRoles || selectedNode.data?.approvers || [];
-                                  const isChecked = selectedRoles.includes(role.name);
-                                  return (
-                                    <div key={role.id} className="flex items-center space-x-2">
-                                      <Checkbox
-                                        checked={isChecked}
-                                        onCheckedChange={(checked) => {
-                                          const currentRoles: string[] = selectedNode.data?.approverRoles || selectedNode.data?.approvers || [];
-                                          const nextRoles = checked
-                                            ? Array.from(new Set([...currentRoles, role.name]))
-                                            : currentRoles.filter((r: string) => r !== role.name);
-                                          updateSelectedNode({ approverRoles: nextRoles, approvers: nextRoles });
-                                        }}
-                                      />
-                                      <span className="text-xs">{role.name}</span>
-                                    </div>
-                                  );
-                                })}
+                          <div className="rounded-md border bg-white p-3 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <Label>Approvers</Label>
+                                <p className="text-xs text-muted-foreground">
+                                  Choose roles or named users allowed to complete this step.
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setApproverDialogOpen(true)}
+                              >
+                                <Users className="h-3.5 w-3.5 mr-1" />
+                                Configure
+                              </Button>
                             </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Badge variant="secondary">{selectedApproverRoles.length} roles</Badge>
+                              <Badge variant="secondary">{selectedApproverUsers.length} users</Badge>
+                            </div>
+                            {(selectedApproverRoles.length > 0 || selectedApproverUsers.length > 0) && (
+                              <p className="text-xs text-muted-foreground line-clamp-2">
+                                {[
+                                  ...selectedApproverRoles,
+                                  ...selectedApproverUsers
+                                    .map((userId) => availableUsers.find((user) => user.id === userId))
+                                    .filter((user): user is User => Boolean(user))
+                                    .map(formatUserLabel),
+                                ].slice(0, 6).join(', ')}
+                              </p>
+                            )}
                           </div>
 
-                          <div>
-                            <Label>Approver Users</Label>
-                            <Input
-                              placeholder="Filter users"
-                              value={userSearch}
-                              onChange={(e) => setUserSearch(e.target.value)}
-                              className="mb-2"
-                            />
-                            <div className="max-h-32 overflow-y-auto rounded border bg-white p-2 space-y-2">
-                              {availableUsers.length === 0 && (
-                                <div className="text-xs text-muted-foreground">No users available</div>
-                              )}
-                              {availableUsers
-                                .filter(user => formatUserLabel(user).toLowerCase().includes(userSearch.toLowerCase()))
-                                .map(user => {
-                                  const selectedUsers: string[] = selectedNode.data?.approverUsers || [];
-                                  const isChecked = selectedUsers.includes(user.id);
-                                  return (
-                                    <div key={user.id} className="flex items-center space-x-2">
-                                      <Checkbox
-                                        checked={isChecked}
-                                        onCheckedChange={(checked) => {
-                                          const currentUsers: string[] = selectedNode.data?.approverUsers || [];
-                                          const nextUsers = checked
-                                            ? Array.from(new Set([...currentUsers, user.id]))
-                                            : currentUsers.filter((u: string) => u !== user.id);
-                                          updateSelectedNode({ approverUsers: nextUsers });
-                                        }}
-                                      />
-                                      <span className="text-xs">{formatUserLabel(user)}</span>
-                                    </div>
-                                  );
-                                })}
+                          <div className="rounded-md border bg-white p-3 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <Label>Step Checklist</Label>
+                                <p className="text-xs text-muted-foreground">
+                                  Required checks must be satisfied before this approval can be completed.
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setChecklistDialogOpen(true)}
+                              >
+                                <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                                Configure
+                              </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Badge variant="secondary">{selectedApprovalChecklist.length} items</Badge>
+                              <Badge variant="secondary">{requiredApprovalChecklistCount} required</Badge>
                             </div>
                           </div>
                         </>
@@ -2081,13 +3275,26 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                 <div className="p-4">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-medium">Transition Properties</h3>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setIsPropertiesOpen(false)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={deleteSelectedEdge}
+                        disabled={selectedWorkflowHasLiveInstances}
+                        title="Delete this transition"
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setIsPropertiesOpen(false)}
+                        title="Close properties"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
 
                   <ScrollArea className="h-[calc(100vh-200px)]">
@@ -2193,5 +3400,256 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         </div>
       </DialogContent>
     </Dialog>
+
+      <Dialog open={approverDialogOpen} onOpenChange={setApproverDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Configure Approvers</DialogTitle>
+            <DialogDescription>
+              Select the roles or users that can approve the selected workflow step.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <Label>Approver Roles</Label>
+                <Badge variant="secondary">{selectedApproverRoles.length} selected</Badge>
+              </div>
+              <Input
+                placeholder="Filter roles"
+                value={roleSearch}
+                onChange={(e) => setRoleSearch(e.target.value)}
+              />
+              <ScrollArea className="h-[360px] rounded-md border bg-white">
+                <div className="p-3 space-y-2">
+                  {availableRoles.length === 0 && (
+                    <div className="text-xs text-muted-foreground">No roles available</div>
+                  )}
+                  {availableRoles.length > 0 && filteredAvailableRoles.length === 0 && (
+                    <div className="text-xs text-muted-foreground">No matching roles</div>
+                  )}
+                  {filteredAvailableRoles.map((role) => {
+                    const isChecked = selectedApproverRoles.includes(role.name);
+                    return (
+                      <div key={role.id} className="flex items-center space-x-2">
+                        <Checkbox
+                          checked={isChecked}
+                          disabled={selectedWorkflowHasLiveInstances}
+                          onCheckedChange={(checked) => {
+                            const currentRoles: string[] =
+                              normalizeStringList(selectedNode?.data?.approverRoles || selectedNode?.data?.approvers);
+                            const nextRoles = checked
+                              ? Array.from(new Set([...currentRoles, role.name]))
+                              : currentRoles.filter((r: string) => r !== role.name);
+                            updateSelectedNode({ approverRoles: nextRoles, approvers: nextRoles });
+                          }}
+                        />
+                        <span className="text-sm">{role.name}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <Label>Approver Users</Label>
+                <Badge variant="secondary">{selectedApproverUsers.length} selected</Badge>
+              </div>
+              <Input
+                placeholder="Filter users"
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+              />
+              <ScrollArea className="h-[360px] rounded-md border bg-white">
+                <div className="p-3 space-y-2">
+                  {availableUsers.length === 0 && (
+                    <div className="text-xs text-muted-foreground">No users available</div>
+                  )}
+                  {availableUsers.length > 0 && filteredAvailableUsers.length === 0 && (
+                    <div className="text-xs text-muted-foreground">No matching users</div>
+                  )}
+                  {filteredAvailableUsers.map((user) => {
+                    const isChecked = selectedApproverUsers.includes(user.id);
+                    return (
+                      <div key={user.id} className="flex items-center space-x-2">
+                        <Checkbox
+                          checked={isChecked}
+                          disabled={selectedWorkflowHasLiveInstances}
+                          onCheckedChange={(checked) => {
+                            const currentUsers: string[] = normalizeStringList(selectedNode?.data?.approverUsers);
+                            const nextUsers = checked
+                              ? Array.from(new Set([...currentUsers, user.id]))
+                              : currentUsers.filter((u: string) => u !== user.id);
+                            updateSelectedNode({ approverUsers: nextUsers });
+                          }}
+                        />
+                        <span className="text-sm">{formatUserLabel(user)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" onClick={() => setApproverDialogOpen(false)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={checklistDialogOpen} onOpenChange={setChecklistDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Configure Step Checklist</DialogTitle>
+            <DialogDescription>
+              Define the checks and evidence required before this workflow step can continue.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary">{selectedApprovalChecklist.length} items</Badge>
+              <Badge variant="secondary">{requiredApprovalChecklistCount} required</Badge>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addApprovalChecklistItem}
+              disabled={selectedWorkflowHasLiveInstances}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Add Item
+            </Button>
+          </div>
+
+          <ScrollArea className="h-[430px] pr-4">
+            {selectedApprovalChecklist.length === 0 ? (
+              <div className="rounded-md border border-dashed bg-white p-4 text-sm text-muted-foreground">
+                No checklist items for this step.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {selectedApprovalChecklist.map((item, index) => {
+                  const itemId = item.id || `check-${index + 1}`;
+                  return (
+                    <div key={itemId} className="rounded-md border bg-white p-3 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 space-y-2">
+                          <Input
+                            value={item.name || ''}
+                            placeholder="Checklist item"
+                            disabled={selectedWorkflowHasLiveInstances}
+                            onChange={(e) => updateApprovalChecklistItem(itemId, { name: e.target.value })}
+                          />
+                          <Textarea
+                            value={item.description || ''}
+                            placeholder="Optional description"
+                            rows={2}
+                            disabled={selectedWorkflowHasLiveInstances}
+                            onChange={(e) => updateApprovalChecklistItem(itemId, { description: e.target.value })}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-600 hover:text-red-700"
+                          onClick={() => removeApprovalChecklistItem(itemId)}
+                          aria-label="Remove checklist item"
+                          disabled={selectedWorkflowHasLiveInstances}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={item.isRequired !== false}
+                            disabled={selectedWorkflowHasLiveInstances}
+                            onCheckedChange={(checked) =>
+                              updateApprovalChecklistItem(itemId, { isRequired: checked === true })
+                            }
+                          />
+                          Required
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={item.requiresDocument === true}
+                            disabled={selectedWorkflowHasLiveInstances}
+                            onCheckedChange={(checked) =>
+                              updateApprovalChecklistItem(itemId, {
+                                requiresDocument: checked === true,
+                                ...(
+                                  checked === true
+                                    ? {}
+                                    : { documentType: undefined, documentName: undefined }
+                                ),
+                              })
+                            }
+                          />
+                          Requires document evidence
+                        </label>
+                      </div>
+                      {item.requiresDocument === true && (
+                        <div className="grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <Label htmlFor={`check-document-type-${itemId}`}>Document type</Label>
+                            <Input
+                              id={`check-document-type-${itemId}`}
+                              value={item.documentType || ''}
+                              placeholder="e.g. Tax clearance certificate"
+                              disabled={selectedWorkflowHasLiveInstances}
+                              onChange={(event) =>
+                                updateApprovalChecklistItem(itemId, { documentType: event.target.value })
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor={`check-document-name-${itemId}`}>Document name</Label>
+                            <Input
+                              id={`check-document-name-${itemId}`}
+                              value={item.documentName || ''}
+                              placeholder="e.g. Current GRA clearance"
+                              disabled={selectedWorkflowHasLiveInstances}
+                              onChange={(event) =>
+                                updateApprovalChecklistItem(itemId, { documentName: event.target.value })
+                              }
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </ScrollArea>
+
+          <DialogFooter>
+            <Button type="button" onClick={() => setChecklistDialogOpen(false)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ConfirmationDialog
+        open={!!deleteTarget}
+        onOpenChange={open => !open && setDeleteTarget(null)}
+        title={deleteTarget?.type === 'node' ? 'Delete workflow step' : 'Delete transition'}
+        description={deleteTarget?.type === 'node'
+          ? `Delete "${deleteTarget.label}" and all connected transitions?`
+          : `Delete ${deleteTarget?.label || 'this transition'}?`}
+        confirmText={deleteTarget?.type === 'node' ? 'Delete step' : 'Delete transition'}
+        variant="destructive"
+        onConfirm={confirmDeleteTarget}
+      />
+    </>
   );
 }

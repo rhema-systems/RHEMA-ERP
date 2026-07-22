@@ -7,7 +7,7 @@ namespace ErpSystem.Api.Controllers.Maintenance;
 
 [ApiController]
 [Route("api/maintenance/[controller]")]
-[Authorize(Roles = "SuperAdmin,TenantAdmin")]
+[Authorize]
 public class MaintenanceSettingsController : ControllerBase
 {
     private readonly IMaintenanceSettingsService _settingsService;
@@ -20,6 +20,7 @@ public class MaintenanceSettingsController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = "MaintenanceRead")]
     public async Task<ActionResult<MaintenanceSettingsDto>> GetSettings()
     {
         try
@@ -35,6 +36,7 @@ public class MaintenanceSettingsController : ControllerBase
     }
 
     [HttpPut]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin")]
     public async Task<ActionResult<MaintenanceSettingsDto>> UpdateSettings([FromBody] UpdateMaintenanceSettingsDto dto)
     {
         try
@@ -58,4 +60,3 @@ public class MaintenanceSettingsController : ControllerBase
         }
     }
 }
-

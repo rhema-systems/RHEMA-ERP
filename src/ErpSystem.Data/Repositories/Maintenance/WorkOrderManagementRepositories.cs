@@ -14,7 +14,7 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
     private static IQueryable<WorkOrder> ApplyIncludes(IQueryable<WorkOrder> query)
     {
         return query
-            .Include(wo => wo.JobCard)
+            .Include(wo => wo.JobCard)!.ThenInclude(jc => jc.CustomerBusinessPartner)
             .Include(wo => wo.Asset)!.ThenInclude(a => a.AssetCategory)
             .Include(wo => wo.PriorityLevel)
             .Include(wo => wo.MaintenanceType)

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
+ 
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -164,7 +164,7 @@ export default function InitiateBidPage() {
     if (!tenderId) return;
 
     try {
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
       const token = localStorage.getItem('token') || localStorage.getItem('authToken');
       const response = await fetch(`${API_BASE_URL}/procurement/TenderBids/initiation-status/${tenderId}`, {
         headers: {

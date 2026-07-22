@@ -36,6 +36,7 @@ public class QualityCertificateService
                 .Include(wo => wo.MaintenanceType)
                 .Include(wo => wo.PriorityLevel)
                 .Include(wo => wo.JobCard)
+                    .ThenInclude(jc => jc.CustomerBusinessPartner)
                 .FirstOrDefaultAsync(wo => wo.Id == qualityCheck.WorkOrderId) ?? throw new Exception($"Work order {qualityCheck.WorkOrderId} not found");
 
             // Parse checklist items and results
@@ -140,6 +141,7 @@ public class QualityCertificateService
 
                 AddRow(table, "Work Order Number:", workOrder.WorkOrderNumber);
                 AddRow(table, "Job Card Number:", workOrder.JobCard?.JobCardNumber ?? "N/A");
+                AddRow(table, "Customer:", workOrder.JobCard?.CustomerBusinessPartner?.PartnerName ?? "N/A");
                 AddRow(table, "Title:", workOrder.Title);
                 AddRow(table, "Asset:", workOrder.Asset?.Name ?? "Unknown");
                 AddRow(table, "Location:", workOrder.Asset?.Location ?? "N/A");

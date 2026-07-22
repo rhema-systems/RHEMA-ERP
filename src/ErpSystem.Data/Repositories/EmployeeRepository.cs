@@ -428,6 +428,7 @@ namespace ErpSystem.Data.Repositories
         {
             // Prefer explicit flag, but keep the department-code fallback for backward compatibility.
             return await WithBasicIncludes(BaseQuery())
+                .Include(e => e.Location)
                 .Where(e =>
                     e.IsActive &&
                     (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation) &&

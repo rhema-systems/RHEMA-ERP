@@ -334,11 +334,13 @@ app.UseRouting();
 // CORS must be after UseRouting and before UseAuthentication
 app.UseCors("ErpSystemCorsPolicy");
 
-// Rate limiting should be after CORS but before authentication
-app.UseRateLimiter();
-
 app.UseAuthentication();
 app.UseMiddleware<JwtBlacklistMiddleware>();
+
+// Rate limiting depends on authenticated user claims for ERP/external users.
+// Auth endpoints remain anonymous here, so login/password-reset throttling still applies by IP.
+app.UseRateLimiter();
+
 app.UseMiddleware<ExternalUserAccessMiddleware>();
 app.UseAuthorization();
 

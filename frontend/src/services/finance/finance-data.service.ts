@@ -40,11 +40,16 @@ class FinanceDataService {
         status?: string;
         isMultiCurrency?: boolean;
         coaType?: 'Standard' | 'Segmented';
+        search?: string;
+        take?: number;
     }): Promise<Account[]> {
         const queryParams = new URLSearchParams();
         if (filters?.accountType) queryParams.append('accountType', filters.accountType);
         if (filters?.status) queryParams.append('status', filters.status);
         if (filters?.isMultiCurrency !== undefined) queryParams.append('isMultiCurrency', String(filters.isMultiCurrency));
+        if (filters?.coaType) queryParams.append('coaType', filters.coaType);
+        if (filters?.search) queryParams.append('search', filters.search);
+        if (filters?.take !== undefined) queryParams.append('take', String(filters.take));
 
         const endpoint = `/finance/accounts${queryParams.toString() ? `?${queryParams}` : ''}`;
         return apiService.get<Account[]>(endpoint);

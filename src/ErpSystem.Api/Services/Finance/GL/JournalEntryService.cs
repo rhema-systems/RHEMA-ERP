@@ -212,7 +212,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 // Validate Control Account Posting
                 if (account.IsControlAccount)
                 {
-                    var allowedModules = new[] { "AP", "AR", "INVENTORY", "TAX", "BANK", "SYSTEM", "POS" };
+                    var allowedModules = new[] { "AP", "AR", "INVENTORY", "TAX", "BANK", "SYSTEM", "POS", "PAYROLL" };
                     bool isSystemPosting = !string.IsNullOrEmpty(entry.SourceModule) && allowedModules.Contains(entry.SourceModule.ToUpper());
                     
                     if (!isSystemPosting)

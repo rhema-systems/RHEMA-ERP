@@ -10,6 +10,7 @@ public partial class ProjectService
 {
     private const string MaterialIssueExpensePrefix = "Material issue from requisition";
     private const string MaterialReturnExpensePrefix = "Material return from requisition";
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Threading.SemaphoreSlim> ProjectMaterialCostSyncLocks = new();
 
     public async Task<IEnumerable<ProjectMaterialCostEntryDto>> GetMaterialCostEntriesAsync(Guid projectId)
     {
@@ -132,6 +133,23 @@ public partial class ProjectService
             return;
         }
 
+        var syncLock = ProjectMaterialCostSyncLocks.GetOrAdd(
+            _currentUserProvider.TenantId.ToString("N"),
+            _ => new System.Threading.SemaphoreSlim(1, 1));
+
+        await syncLock.WaitAsync();
+        try
+        {
+            await SyncProjectMaterialCostsCoreAsync(distinctProjectIds);
+        }
+        finally
+        {
+            syncLock.Release();
+        }
+    }
+
+    private async Task SyncProjectMaterialCostsCoreAsync(IReadOnlyCollection<Guid> distinctProjectIds)
+    {
         var projectRepo = _unitOfWork.Repository<Project>();
         var projects = (await projectRepo.FindAsync(x => x.TenantId == _currentUserProvider.TenantId && distinctProjectIds.Contains(x.Id))).ToList();
         if (projects.Count == 0)
@@ -235,16 +253,6 @@ public partial class ProjectService
                     x.TenantId == _currentUserProvider.TenantId
                     && inventoryItemIds.Contains(x.Id)))
                 .ToDictionary(x => x.Id, x => x);
-
-        var ledgerRepo = _unitOfWork.Repository<ProjectMaterialCostEntry>();
-        var existingEntries = (await ledgerRepo.FindAsync(x =>
-                x.TenantId == _currentUserProvider.TenantId
-                && distinctProjectIds.Contains(x.ProjectId)))
-            .ToList();
-        if (existingEntries.Count > 0)
-        {
-            await ledgerRepo.HardDeleteRangeAsync(existingEntries);
-        }
 
         var newEntries = new List<ProjectMaterialCostEntry>();
 
@@ -482,13 +490,139 @@ public partial class ProjectService
             }
         }
 
-        if (newEntries.Count > 0)
+        var ledgerRepo = _unitOfWork.Repository<ProjectMaterialCostEntry>();
+        var generatedEntries = newEntries
+            .Select(entry => new { Entry = entry, SourceKey = GetMaterialCostSourceKey(entry) })
+            .Where(x => x.SourceKey != null)
+            .GroupBy(x => x.SourceKey!, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First().Entry)
+            .ToList();
+
+        var generatedSourceKeys = generatedEntries
+            .Select(GetMaterialCostSourceKey)
+            .Where(x => x != null)
+            .Select(x => x!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var sourceTransactionIds = generatedEntries
+            .Where(x => x.SourceTransactionId.HasValue)
+            .Select(x => x.SourceTransactionId!.Value)
+            .Distinct()
+            .ToHashSet();
+
+        var existingEntries = sourceTransactionIds.Count == 0
+            ? new List<ProjectMaterialCostEntry>()
+            : (await ledgerRepo.FindAsync(x =>
+                    x.TenantId == _currentUserProvider.TenantId
+                    && x.SourceTransactionId.HasValue
+                    && sourceTransactionIds.Contains(x.SourceTransactionId.Value)))
+                .ToList();
+
+        var existingProjectEntries = (await ledgerRepo.FindAsync(x =>
+                x.TenantId == _currentUserProvider.TenantId
+                && distinctProjectIds.Contains(x.ProjectId)))
+            .ToList();
+
+        existingEntries = existingEntries
+            .Concat(existingProjectEntries)
+            .GroupBy(x => x.Id)
+            .Select(x => x.First())
+            .ToList();
+
+        var existingEntriesBySourceKey = existingEntries
+            .Select(entry => new { Entry = entry, SourceKey = GetMaterialCostSourceKey(entry) })
+            .Where(x => x.SourceKey != null)
+            .GroupBy(x => x.SourceKey!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.First().Entry, StringComparer.OrdinalIgnoreCase);
+
+        var entriesToInsert = new List<ProjectMaterialCostEntry>();
+        foreach (var generatedEntry in generatedEntries)
         {
-            await ledgerRepo.AddRangeAsync(newEntries);
+            var sourceKey = GetMaterialCostSourceKey(generatedEntry);
+            if (sourceKey != null && existingEntriesBySourceKey.TryGetValue(sourceKey, out var existingEntry))
+            {
+                ApplyMaterialCostEntrySnapshot(existingEntry, generatedEntry, _currentUserProvider.Username, _currentUserProvider.UserId);
+                continue;
+            }
+
+            entriesToInsert.Add(generatedEntry);
         }
 
-        await RecalculateProjectActualCostsAsync(projects, distinctProjectIds, newEntries);
+        var obsoleteEntries = existingProjectEntries
+            .Where(entry =>
+            {
+                var sourceKey = GetMaterialCostSourceKey(entry);
+                return sourceKey != null
+                    && IsManagedMaterialCostSourceType(entry.SourceTransactionType)
+                    && !generatedSourceKeys.Contains(sourceKey);
+            })
+            .ToList();
+
+        if (obsoleteEntries.Count > 0)
+        {
+            await ledgerRepo.HardDeleteRangeAsync(obsoleteEntries);
+        }
+
+        if (entriesToInsert.Count > 0)
+        {
+            await ledgerRepo.AddRangeAsync(entriesToInsert);
+        }
+
+        await RecalculateProjectActualCostsAsync(projects, distinctProjectIds, generatedEntries);
         await _unitOfWork.SaveChangesAsync();
+    }
+
+    private static string? GetMaterialCostSourceKey(ProjectMaterialCostEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.SourceTransactionType) || !entry.SourceTransactionId.HasValue)
+        {
+            return null;
+        }
+
+        return $"{entry.SourceTransactionType.Trim().ToUpperInvariant()}:{entry.SourceTransactionId.Value:N}";
+    }
+
+    private static bool IsManagedMaterialCostSourceType(string? sourceTransactionType)
+    {
+        return sourceTransactionType is not null
+            && (string.Equals(sourceTransactionType, "StockMovement", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(sourceTransactionType, "InventoryRequisitionItem", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(sourceTransactionType, "PurchaseReceiptAccepted", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(sourceTransactionType, "PurchaseReceiptPendingInspection", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(sourceTransactionType, "PurchaseReturnItem", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void ApplyMaterialCostEntrySnapshot(
+        ProjectMaterialCostEntry target,
+        ProjectMaterialCostEntry source,
+        string? updatedBy,
+        Guid? updatedById)
+    {
+        target.ProjectId = source.ProjectId;
+        target.EntryDate = source.EntryDate;
+        target.EntryType = source.EntryType;
+        target.PostingState = source.PostingState;
+        target.AffectsActualCost = source.AffectsActualCost;
+        target.IsReversed = source.IsReversed;
+        target.SourceDocumentType = source.SourceDocumentType;
+        target.SourceDocumentId = source.SourceDocumentId;
+        target.SourceDocumentNumber = source.SourceDocumentNumber;
+        target.SourceTransactionType = source.SourceTransactionType;
+        target.SourceTransactionId = source.SourceTransactionId;
+        target.InventoryItemId = source.InventoryItemId;
+        target.InventoryItemCode = source.InventoryItemCode;
+        target.InventoryItemName = source.InventoryItemName;
+        target.Quantity = source.Quantity;
+        target.UnitOfMeasure = source.UnitOfMeasure;
+        target.UnitCost = source.UnitCost;
+        target.Amount = source.Amount;
+        target.Currency = source.Currency;
+        target.HasMissingSourceLink = source.HasMissingSourceLink;
+        target.HasReversalGap = source.HasReversalGap;
+        target.Notes = source.Notes;
+        target.UpdatedAt = DateTime.UtcNow;
+        target.UpdatedBy = updatedBy;
+        target.LastModifiedById = updatedById;
     }
 
     private async Task<List<ProjectMaterialCostEntry>> GetMaterialCostEntryEntitiesAsync(IEnumerable<Guid> projectIds)

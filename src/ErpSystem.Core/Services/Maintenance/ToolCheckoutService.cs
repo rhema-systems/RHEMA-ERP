@@ -120,7 +120,7 @@ public class ToolCheckoutService : IToolCheckoutService
     /// <summary>
     /// Return a checked-out tool
     /// </summary>
-    public async Task<ToolReturnResult> ReturnToolAsync(Guid checkoutId, Guid returnedByUserId, ReturnToolDto dto)
+    public async Task<ToolReturnResult> ReturnToolAsync(Guid checkoutId, Guid returnedByEmployeeId, ReturnToolDto dto)
     {
         try
         {
@@ -139,7 +139,7 @@ public class ToolCheckoutService : IToolCheckoutService
 
             // Update checkout record
             checkout.ActualReturnDate = returnDate;
-            checkout.CheckedInById = returnedByUserId;
+            checkout.CheckedInById = returnedByEmployeeId;
             checkout.Status = isOverdue ? "Overdue" : "Returned";
             checkout.ConditionOnReturn = dto.ConditionOnReturn;
             checkout.ReturnNotes = dto.ReturnNotes;
@@ -147,7 +147,7 @@ public class ToolCheckoutService : IToolCheckoutService
             checkout.DamageDescription = dto.DamageDescription;
             checkout.DamageCost = dto.DamageCost;
             checkout.UpdatedAt = returnDate;
-            checkout.UpdatedBy = returnedByUserId.ToString();
+            checkout.UpdatedBy = returnedByEmployeeId.ToString();
 
             await _checkoutRepository.UpdateAsync(checkout);
 

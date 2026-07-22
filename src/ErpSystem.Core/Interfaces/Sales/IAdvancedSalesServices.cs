@@ -8,6 +8,7 @@ namespace ErpSystem.Core.Interfaces.Sales
     public interface ICompetitorService
     {
         Task<(IEnumerable<CompetitorSummaryDto> Items, int TotalCount)> GetCompetitorsAsync(int page, int pageSize, string? search = null, string? threatLevel = null);
+        Task<CompetitorAnalyticsDto> GetCompetitorAnalyticsAsync();
         Task<CompetitorDetailDto?> GetCompetitorByIdAsync(Guid id);
         Task<CompetitorDetailDto> CreateCompetitorAsync(CreateCompetitorDto dto);
         Task<CompetitorDetailDto> UpdateCompetitorAsync(Guid id, CreateCompetitorDto dto);

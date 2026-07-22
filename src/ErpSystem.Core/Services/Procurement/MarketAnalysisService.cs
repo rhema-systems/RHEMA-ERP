@@ -42,9 +42,9 @@ public class MarketAnalysisService : IMarketAnalysisService
     }
 
     public async Task<PagedResult<MarketAnalysisDto>> GetAnalysesAsync(
-        int page, int pageSize, string? search = null, string? itemCategory = null)
+        int page, int pageSize, string? search = null, string? itemCategory = null, string? status = null)
     {
-        var result = await _analysisRepository.GetAnalysesAsync(page, pageSize, search, null, itemCategory);
+        var result = await _analysisRepository.GetAnalysesAsync(page, pageSize, search, status, itemCategory);
         return new PagedResult<MarketAnalysisDto>
         {
             Items = result.Items.Select(MapToDto).ToList(),
@@ -104,11 +104,18 @@ public class MarketAnalysisService : IMarketAnalysisService
             AnalysisPeriodStart = dto.AnalysisPeriodStart,
             AnalysisPeriodEnd = dto.AnalysisPeriodEnd,
             HistoricalAveragePrice = dto.HistoricalAveragePrice,
+            PreviousPrice = dto.PreviousPrice,
             CurrentMarketPrice = dto.CurrentMarketPrice,
             ForecastedPrice = dto.ForecastedPrice,
             PriceTrend = dto.PriceTrend,
             PriceChangePercent = dto.PriceChangePercent,
+            PriceVariancePercent = dto.PriceVariancePercent ?? CalculateVariance(dto.CurrentMarketPrice, dto.PreviousPrice ?? dto.HistoricalAveragePrice),
             Currency = dto.Currency,
+            LeadTimeDays = dto.LeadTimeDays,
+            MarketAvailability = dto.MarketAvailability,
+            SupplyRiskLevel = dto.SupplyRiskLevel,
+            InflationImpactPercent = dto.InflationImpactPercent,
+            RecommendedBudgetAdjustmentPercent = dto.RecommendedBudgetAdjustmentPercent,
             MarketRiskLevel = dto.MarketRiskLevel,
             RiskFactors = dto.RiskFactors,
             Opportunities = dto.Opportunities,
@@ -140,11 +147,18 @@ public class MarketAnalysisService : IMarketAnalysisService
         analysis.AnalysisPeriodStart = dto.AnalysisPeriodStart;
         analysis.AnalysisPeriodEnd = dto.AnalysisPeriodEnd;
         analysis.HistoricalAveragePrice = dto.HistoricalAveragePrice;
+        analysis.PreviousPrice = dto.PreviousPrice;
         analysis.CurrentMarketPrice = dto.CurrentMarketPrice;
         analysis.ForecastedPrice = dto.ForecastedPrice;
         analysis.PriceTrend = dto.PriceTrend;
         analysis.PriceChangePercent = dto.PriceChangePercent;
+        analysis.PriceVariancePercent = dto.PriceVariancePercent ?? CalculateVariance(dto.CurrentMarketPrice, dto.PreviousPrice ?? dto.HistoricalAveragePrice);
         analysis.Currency = dto.Currency;
+        analysis.LeadTimeDays = dto.LeadTimeDays;
+        analysis.MarketAvailability = dto.MarketAvailability;
+        analysis.SupplyRiskLevel = dto.SupplyRiskLevel;
+        analysis.InflationImpactPercent = dto.InflationImpactPercent;
+        analysis.RecommendedBudgetAdjustmentPercent = dto.RecommendedBudgetAdjustmentPercent;
         analysis.MarketRiskLevel = dto.MarketRiskLevel;
         analysis.RiskFactors = dto.RiskFactors;
         analysis.Opportunities = dto.Opportunities;
@@ -305,7 +319,46 @@ public class MarketAnalysisService : IMarketAnalysisService
         };
     }
 
+    public async Task<MarketSurveySummaryDto> GetMarketSurveySummaryAsync(Guid analysisId)
+    {
+        var analysis = await _analysisRepository.GetWithPriceHistoriesAsync(analysisId);
+        if (analysis == null) throw new KeyNotFoundException($"Market analysis with ID {analysisId} not found");
+
+        var quotes = analysis.PriceHistories?
+            .Where(p => !p.IsDeleted)
+            .Where(p => p.PriceSource.Equals("Quote", StringComparison.OrdinalIgnoreCase)
+                || p.PriceSource.Equals("MarketSurvey", StringComparison.OrdinalIgnoreCase)
+                || p.PriceSource.Equals("SupplierQuote", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(p => p.PriceDate)
+            .ToList() ?? new List<PriceHistory>();
+
+        var averagePrice = quotes.Any() ? Math.Round(quotes.Average(q => q.UnitPrice), 4) : analysis.CurrentMarketPrice;
+        var lowestQuote = quotes.OrderBy(q => q.UnitPrice).FirstOrDefault();
+        var highestPrice = quotes.Any() ? quotes.Max(q => q.UnitPrice) : analysis.CurrentMarketPrice;
+
+        return new MarketSurveySummaryDto
+        {
+            MarketAnalysisId = analysisId,
+            QuoteCount = quotes.Count,
+            AverageMarketPrice = averagePrice,
+            LowestPrice = lowestQuote?.UnitPrice ?? analysis.CurrentMarketPrice,
+            HighestPrice = highestPrice,
+            RecommendedPlanningEstimate = averagePrice,
+            Currency = quotes.Select(q => q.Currency).FirstOrDefault(c => !string.IsNullOrWhiteSpace(c)) ?? analysis.Currency,
+            LowestPriceSupplierId = lowestQuote?.SupplierId,
+            LowestPriceSupplierName = lowestQuote?.SupplierName,
+            LatestQuoteDate = quotes.FirstOrDefault()?.PriceDate,
+            Quotes = quotes.Select(MapToPriceHistoryDto).ToList()
+        };
+    }
+
     #region Mapping Methods
+
+    private static decimal? CalculateVariance(decimal currentPrice, decimal? previousPrice)
+    {
+        if (!previousPrice.HasValue || previousPrice.Value <= 0) return null;
+        return Math.Round(((currentPrice - previousPrice.Value) / previousPrice.Value) * 100, 2);
+    }
 
     private static MarketAnalysisDto MapToDto(MarketAnalysis analysis)
     {
@@ -320,11 +373,18 @@ public class MarketAnalysisService : IMarketAnalysisService
             AnalysisPeriodStart = analysis.AnalysisPeriodStart,
             AnalysisPeriodEnd = analysis.AnalysisPeriodEnd,
             HistoricalAveragePrice = analysis.HistoricalAveragePrice,
+            PreviousPrice = analysis.PreviousPrice,
             CurrentMarketPrice = analysis.CurrentMarketPrice,
             ForecastedPrice = analysis.ForecastedPrice,
             PriceTrend = analysis.PriceTrend,
             PriceChangePercent = analysis.PriceChangePercent,
+            PriceVariancePercent = analysis.PriceVariancePercent,
             Currency = analysis.Currency,
+            LeadTimeDays = analysis.LeadTimeDays,
+            MarketAvailability = analysis.MarketAvailability,
+            SupplyRiskLevel = analysis.SupplyRiskLevel,
+            InflationImpactPercent = analysis.InflationImpactPercent,
+            RecommendedBudgetAdjustmentPercent = analysis.RecommendedBudgetAdjustmentPercent,
             MarketRiskLevel = analysis.MarketRiskLevel,
             RiskFactors = analysis.RiskFactors,
             Opportunities = analysis.Opportunities,
@@ -352,11 +412,18 @@ public class MarketAnalysisService : IMarketAnalysisService
             AnalysisPeriodStart = analysis.AnalysisPeriodStart,
             AnalysisPeriodEnd = analysis.AnalysisPeriodEnd,
             HistoricalAveragePrice = analysis.HistoricalAveragePrice,
+            PreviousPrice = analysis.PreviousPrice,
             CurrentMarketPrice = analysis.CurrentMarketPrice,
             ForecastedPrice = analysis.ForecastedPrice,
             PriceTrend = analysis.PriceTrend,
             PriceChangePercent = analysis.PriceChangePercent,
+            PriceVariancePercent = analysis.PriceVariancePercent,
             Currency = analysis.Currency,
+            LeadTimeDays = analysis.LeadTimeDays,
+            MarketAvailability = analysis.MarketAvailability,
+            SupplyRiskLevel = analysis.SupplyRiskLevel,
+            InflationImpactPercent = analysis.InflationImpactPercent,
+            RecommendedBudgetAdjustmentPercent = analysis.RecommendedBudgetAdjustmentPercent,
             MarketRiskLevel = analysis.MarketRiskLevel,
             RiskFactors = analysis.RiskFactors,
             Opportunities = analysis.Opportunities,

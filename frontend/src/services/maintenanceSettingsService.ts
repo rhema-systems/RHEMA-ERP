@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem('token') || localStorage.getItem('authToken');
@@ -14,6 +14,10 @@ export interface MaintenanceSettingsDto {
   fleetComplianceDueSoonDays: number;
   blockFleetDispatchWhenComplianceDueSoon: boolean;
   requirePredefinedFleetTripDestinationOnDispatch: boolean;
+  defaultFleetDefectWorkOrderTypeId?: string | null;
+  defaultFleetDefectMaintenanceTypeId?: string | null;
+  defaultFleetDefectPriorityLevelId?: string | null;
+  defaultFleetDefectBillingType: 'Repairs' | 'Maintenance' | string;
   createdAt: string;
   createdById?: string;
   updatedAt?: string;
@@ -23,6 +27,10 @@ export interface UpdateMaintenanceSettingsDto {
   fleetComplianceDueSoonDays: number;
   blockFleetDispatchWhenComplianceDueSoon: boolean;
   requirePredefinedFleetTripDestinationOnDispatch: boolean;
+  defaultFleetDefectWorkOrderTypeId?: string | null;
+  defaultFleetDefectMaintenanceTypeId?: string | null;
+  defaultFleetDefectPriorityLevelId?: string | null;
+  defaultFleetDefectBillingType: 'Repairs' | 'Maintenance' | string;
 }
 
 export const maintenanceSettingsService = {

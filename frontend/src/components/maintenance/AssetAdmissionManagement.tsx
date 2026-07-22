@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, Search, Eye, Calendar, AlertTriangle, CheckCircle2, Clock, FileText, Camera, MapPin } from 'lucide-react';
+import { Plus, Search, Eye, Calendar, AlertTriangle, CheckCircle2, Clock, FileText, ExternalLink, MapPin, MoreHorizontal } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,13 @@ import {
   DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Table,
   TableBody,
@@ -34,7 +41,7 @@ import assetAdmissionService, {
   CreateDischargeRequest,
   AssetDischarge
 } from '@/services/assetAdmissionService';
-import maintenanceApiService, { Asset } from '@/services/maintenanceApiService';
+import maintenanceApiService, { Asset, JobCard as MaintenanceJobCard } from '@/services/maintenanceApiService';
 import assetConditionService, {
   AssetConditionChecklistTemplateDto,
   AssetConditionRecordDto,
@@ -78,6 +85,7 @@ export default function AssetAdmissionManagement() {
   // Data from services
   const [assets, setAssets] = useState<Asset[]>([]);
   const [workOrders, setWorkOrders] = useState<any[]>([]);
+  const [jobCards, setJobCards] = useState<MaintenanceJobCard[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [stats, setStats] = useState({
     totalActive: 0,
@@ -129,12 +137,13 @@ export default function AssetAdmissionManagement() {
     const loadData = async () => {
       setLoadingData(true);
       try {
-        const [assetsResponse, admissionsResponse, dischargesResponse, statsResponse, workOrdersResponse] = await Promise.all([
+        const [assetsResponse, admissionsResponse, dischargesResponse, statsResponse, workOrdersResponse, jobCardsResponse] = await Promise.all([
           maintenanceApiService.getAssets(),
           assetAdmissionService.getAdmissions(initialFilter || {}),
           assetAdmissionService.getDischarges(),
           assetAdmissionService.getAdmissionStats(),
-          maintenanceApiService.getWorkOrders().catch(() => ({ items: [] }))
+          maintenanceApiService.getWorkOrders().catch(() => ({ items: [] })),
+          maintenanceApiService.getJobCards().catch(() => [])
         ]);
 
         setAssets(assetsResponse.items || []);
@@ -143,6 +152,7 @@ export default function AssetAdmissionManagement() {
         setFilteredAdmissions(admissionsResponse.items || []);
         setStats(statsResponse || { totalActive: 0, totalCompleted: 0, averageStayDays: 0 });
         setWorkOrders(workOrdersResponse.items || []);
+        setJobCards(Array.isArray(jobCardsResponse) ? jobCardsResponse : []);
       } catch (error) {
         console.error('Error loading data:', error);
         setAssets([]);
@@ -150,6 +160,7 @@ export default function AssetAdmissionManagement() {
         setDischarges([]);
         setFilteredAdmissions([]);
         setWorkOrders([]);
+        setJobCards([]);
       } finally {
         setLoadingData(false);
       }
@@ -191,15 +202,69 @@ export default function AssetAdmissionManagement() {
     }
   }, [searchParams]);
 
+  const getJobCardReference = React.useCallback((jobCardId?: string) => {
+    if (!jobCardId) return null;
+
+    const jobCard = jobCards.find(card => card.id === jobCardId);
+    const linkedWorkOrder = workOrders.find(order => order.jobCardId === jobCardId);
+
+    return {
+      id: jobCardId,
+      number: jobCard?.jobCardNumber || linkedWorkOrder?.jobCardNumber || 'Open Job Card',
+      title: jobCard?.title,
+    };
+  }, [jobCards, workOrders]);
+
+  const openJobCard = (jobCardId?: string) => {
+    if (!jobCardId) return;
+    window.open(`/maintenance/job-cards?id=${jobCardId}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const renderJobCardCell = (jobCardId?: string) => {
+    const jobCard = getJobCardReference(jobCardId);
+
+    if (!jobCard) {
+      return <span className="text-muted-foreground text-sm">-</span>;
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={() => openJobCard(jobCard.id)}
+        className="inline-flex items-center gap-1 hover:opacity-70 hover:scale-105 transition-all cursor-pointer"
+        title={jobCard.title ? `Open ${jobCard.number} - ${jobCard.title}` : 'Open job card in new tab'}
+      >
+        <Badge variant="outline" className="text-xs hover:border-blue-400">
+          {jobCard.number}
+        </Badge>
+        <ExternalLink className="h-3 w-3 text-muted-foreground" />
+      </button>
+    );
+  };
+
+  const handleViewAdmission = (admission: AssetAdmission) => {
+    setSelectedDischarge(null);
+    setSelectedAdmission(admission);
+    setIsViewDialogOpen(true);
+  };
+
+  const handleViewDischarge = (discharge: AssetDischarge) => {
+    setSelectedAdmission(null);
+    setSelectedDischarge(discharge);
+    setIsViewDialogOpen(true);
+  };
+
   // Filter admissions based on search and filters
   useEffect(() => {
     let filtered = admissions;
 
     if (searchTerm) {
+      const search = searchTerm.toLowerCase();
       filtered = filtered.filter(admission =>
-        admission.assetName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        admission.admissionNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        admission.assetNumber.toLowerCase().includes(searchTerm.toLowerCase())
+        admission.assetName.toLowerCase().includes(search) ||
+        admission.admissionNumber.toLowerCase().includes(search) ||
+        admission.assetNumber.toLowerCase().includes(search) ||
+        (getJobCardReference(admission.jobCardId)?.number || '').toLowerCase().includes(search)
       );
     }
 
@@ -212,7 +277,7 @@ export default function AssetAdmissionManagement() {
     }
 
     setFilteredAdmissions(filtered);
-  }, [admissions, searchTerm, statusFilter, typeFilter]);
+  }, [admissions, searchTerm, statusFilter, typeFilter, getJobCardReference]);
 
   const handleCreateAdmission = async () => {
     try {
@@ -285,18 +350,38 @@ export default function AssetAdmissionManagement() {
     }
   };
 
+  const handleGenerateCertificate = async (discharge: AssetDischarge) => {
+    try {
+      await assetAdmissionService.generateCompletionCertificate(discharge.id);
+      toast({
+        title: 'Certificate generated',
+        description: `Completion certificate generated for ${discharge.dischargeNumber}.`,
+      });
+      await refreshData();
+    } catch (error: any) {
+      console.error('Error generating certificate:', error);
+      toast({
+        title: 'Error',
+        description: error?.message || 'Failed to generate completion certificate.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const refreshData = async () => {
     try {
-      const [admissionsResponse, dischargesResponse, statsResponse] = await Promise.all([
+      const [admissionsResponse, dischargesResponse, statsResponse, jobCardsResponse] = await Promise.all([
         assetAdmissionService.getAdmissions(),
         assetAdmissionService.getDischarges(),
-        assetAdmissionService.getAdmissionStats()
+        assetAdmissionService.getAdmissionStats(),
+        maintenanceApiService.getJobCards().catch(() => [])
       ]);
 
       setAdmissions(admissionsResponse.items || []);
       setDischarges(dischargesResponse.items || []);
       setFilteredAdmissions(admissionsResponse.items || []);
       setStats(statsResponse || { totalActive: 0, totalCompleted: 0, averageStayDays: 0 });
+      setJobCards(Array.isArray(jobCardsResponse) ? jobCardsResponse : []);
     } catch (error) {
       console.error('Error refreshing data:', error);
     }
@@ -457,7 +542,10 @@ export default function AssetAdmissionManagement() {
           textValue: '',
           numericValue: undefined,
           selectedOption: '',
-          comment: ''
+          comment: '',
+          repairReplacementAction: item.allowRepairReplacement
+            ? (item.defaultRepairReplacementAction || 'None')
+            : undefined
         };
       });
       setItemResponses(responses);
@@ -931,6 +1019,7 @@ export default function AssetAdmissionManagement() {
                 <TableRow>
                   <TableHead>Admission #</TableHead>
                   <TableHead>Asset</TableHead>
+                  <TableHead>Job Card</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Condition</TableHead>
                   <TableHead>Location</TableHead>
@@ -949,6 +1038,7 @@ export default function AssetAdmissionManagement() {
                         <div className="text-sm text-muted-foreground">{admission.assetNumber}</div>
                       </div>
                     </TableCell>
+                    <TableCell>{renderJobCardCell(admission.jobCardId)}</TableCell>
                     <TableCell>{getTypeBadge(admission.admissionType)}</TableCell>
                     <TableCell>{getConditionBadge(admission.assetConditionOnAdmission)}</TableCell>
                     <TableCell>
@@ -959,54 +1049,46 @@ export default function AssetAdmissionManagement() {
                     </TableCell>
                     <TableCell>{getStatusBadge(admission.status)}</TableCell>
                     <TableCell>{new Date(admission.admissionDate).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center space-x-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setSelectedAdmission(admission);
-                            setIsViewDialogOpen(true);
-                          }}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleOpenConditionInspection(admission, 'Admission')}
-                          title="Admission Condition Checklist"
-                        >
-                          <ClipboardCheck className="h-4 w-4" />
-                        </Button>
-
-                        {admission.status === 'Active' && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleOpenConditionInspection(admission, 'Discharge')}
-                              title="Discharge Condition Checklist"
-                              className="bg-orange-50 hover:bg-orange-100"
-                            >
-                              <ClipboardCheck className="h-4 w-4 mr-1" />
-                              Check
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setNewDischarge(prev => ({ ...prev, admissionId: admission.id }));
-                                setIsDischargeDialogOpen(true);
-                              }}
-                              className="bg-green-50 hover:bg-green-100"
-                            >
-                              Discharge
-                            </Button>
-                          </>
-                        )}
-                      </div>
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" title="Actions" aria-label={`Actions for ${admission.admissionNumber}`}>
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem onSelect={() => handleViewAdmission(admission)}>
+                            <Eye className="mr-2 h-4 w-4" />
+                            View Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => void handleOpenConditionInspection(admission, 'Admission')}>
+                            <ClipboardCheck className="mr-2 h-4 w-4" />
+                            Admission Checklist
+                          </DropdownMenuItem>
+                          {admission.status === 'Active' && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-amber-700 focus:text-amber-800"
+                                onSelect={() => void handleOpenConditionInspection(admission, 'Discharge')}
+                              >
+                                <ClipboardCheck className="mr-2 h-4 w-4" />
+                                Discharge Checklist
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-green-700 focus:text-green-800"
+                                onSelect={() => {
+                                  setNewDischarge(prev => ({ ...prev, admissionId: admission.id }));
+                                  setIsDischargeDialogOpen(true);
+                                }}
+                              >
+                                <CheckCircle2 className="mr-2 h-4 w-4" />
+                                Discharge Asset
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1028,6 +1110,7 @@ export default function AssetAdmissionManagement() {
                 <TableRow>
                   <TableHead>Discharge #</TableHead>
                   <TableHead>Asset</TableHead>
+                  <TableHead>Job Card</TableHead>
                   <TableHead>Condition</TableHead>
                   <TableHead>Quality Check</TableHead>
                   <TableHead>Customer Acceptance</TableHead>
@@ -1046,6 +1129,7 @@ export default function AssetAdmissionManagement() {
                         <div className="text-sm text-muted-foreground">{discharge.assetNumber}</div>
                       </div>
                     </TableCell>
+                    <TableCell>{renderJobCardCell(discharge.jobCardId)}</TableCell>
                     <TableCell>{getConditionBadge(discharge.assetConditionOnDischarge)}</TableCell>
                     <TableCell>
                       {discharge.qualityCheckPassed ? (
@@ -1078,30 +1162,29 @@ export default function AssetAdmissionManagement() {
                       )}
                     </TableCell>
                     <TableCell>{new Date(discharge.dischargeDate).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center space-x-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setSelectedDischarge(discharge);
-                            setIsViewDialogOpen(true);
-                          }}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-
-                        {!discharge.certificateGenerated && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => assetAdmissionService.generateCompletionCertificate(discharge.id)}
-                            className="bg-blue-50 hover:bg-blue-100"
-                          >
-                            <FileText className="h-4 w-4" />
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" title="Actions" aria-label={`Actions for ${discharge.dischargeNumber}`}>
+                            <MoreHorizontal className="h-4 w-4" />
                           </Button>
-                        )}
-                      </div>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem onSelect={() => handleViewDischarge(discharge)}>
+                            <Eye className="mr-2 h-4 w-4" />
+                            View Details
+                          </DropdownMenuItem>
+                          {!discharge.certificateGenerated && (
+                            <DropdownMenuItem
+                              className="text-blue-700 focus:text-blue-800"
+                              onSelect={() => void handleGenerateCertificate(discharge)}
+                            >
+                              <FileText className="mr-2 h-4 w-4" />
+                              Generate Certificate
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1287,6 +1370,167 @@ export default function AssetAdmissionManagement() {
                 Discharge Asset
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </ClientOnly>
+
+      {/* View Details Dialog */}
+      <ClientOnly>
+        <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                {selectedAdmission
+                  ? `Admission ${selectedAdmission.admissionNumber}`
+                  : selectedDischarge
+                    ? `Discharge ${selectedDischarge.dischargeNumber}`
+                    : 'Maintenance Admission Details'}
+              </DialogTitle>
+              <DialogDescription>
+                {selectedAdmission
+                  ? 'Asset admission details and linked job card information.'
+                  : 'Asset discharge details and completion information.'}
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedAdmission && (
+              <div className="space-y-5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Asset</Label>
+                    <p className="font-medium">{selectedAdmission.assetName}</p>
+                    <p className="text-sm text-muted-foreground">{selectedAdmission.assetNumber}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Job Card</Label>
+                    <div className="mt-1">{renderJobCardCell(selectedAdmission.jobCardId)}</div>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Admission Type</Label>
+                    <div className="mt-1">{getTypeBadge(selectedAdmission.admissionType)}</div>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Status</Label>
+                    <div className="mt-1">{getStatusBadge(selectedAdmission.status)}</div>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Condition</Label>
+                    <div className="mt-1">{getConditionBadge(selectedAdmission.assetConditionOnAdmission)}</div>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Admission Date</Label>
+                    <p className="font-medium">{new Date(selectedAdmission.admissionDate).toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Location</Label>
+                    <p className="font-medium">{selectedAdmission.bayOrStation || selectedAdmission.admissionLocation || 'Not specified'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Admitted By</Label>
+                    <p className="font-medium">{selectedAdmission.admittedBy || 'N/A'}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 rounded-md border bg-muted/20 p-3">
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Mileage</Label>
+                    <p className="font-medium">{selectedAdmission.mileageReading ?? '-'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Hours</Label>
+                    <p className="font-medium">{selectedAdmission.hoursReading ?? '-'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Fuel Level</Label>
+                    <p className="font-medium">{selectedAdmission.fuelLevel ?? '-'}%</p>
+                  </div>
+                </div>
+
+                {(selectedAdmission.admissionNotes || selectedAdmission.observedProblems) && (
+                  <div className="space-y-3">
+                    {selectedAdmission.admissionNotes && (
+                      <div>
+                        <Label className="text-sm text-muted-foreground">Admission Notes</Label>
+                        <p className="mt-1 rounded-md border bg-muted/20 p-3 text-sm">{selectedAdmission.admissionNotes}</p>
+                      </div>
+                    )}
+                    {selectedAdmission.observedProblems && (
+                      <div>
+                        <Label className="text-sm text-muted-foreground">Observed Problems</Label>
+                        <p className="mt-1 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{selectedAdmission.observedProblems}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {selectedDischarge && (
+              <div className="space-y-5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Asset</Label>
+                    <p className="font-medium">{selectedDischarge.assetName}</p>
+                    <p className="text-sm text-muted-foreground">{selectedDischarge.assetNumber}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Job Card</Label>
+                    <div className="mt-1">{renderJobCardCell(selectedDischarge.jobCardId)}</div>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Discharge Date</Label>
+                    <p className="font-medium">{new Date(selectedDischarge.dischargeDate).toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Condition on Discharge</Label>
+                    <div className="mt-1">{getConditionBadge(selectedDischarge.assetConditionOnDischarge)}</div>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Quality Check</Label>
+                    <div className="mt-1">
+                      {selectedDischarge.qualityCheckPassed ? (
+                        <Badge className="bg-green-100 text-green-800">Passed</Badge>
+                      ) : (
+                        <Badge className="bg-red-100 text-red-800">Failed</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-muted-foreground">Customer Acceptance</Label>
+                    <div className="mt-1">
+                      {selectedDischarge.customerAcceptance ? (
+                        <Badge className="bg-green-100 text-green-800">Accepted</Badge>
+                      ) : (
+                        <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {(selectedDischarge.workCompleted || selectedDischarge.dischargeNotes || selectedDischarge.remainingIssues) && (
+                  <div className="space-y-3">
+                    {selectedDischarge.workCompleted && (
+                      <div>
+                        <Label className="text-sm text-muted-foreground">Work Completed</Label>
+                        <p className="mt-1 rounded-md border bg-muted/20 p-3 text-sm">{selectedDischarge.workCompleted}</p>
+                      </div>
+                    )}
+                    {selectedDischarge.dischargeNotes && (
+                      <div>
+                        <Label className="text-sm text-muted-foreground">Discharge Notes</Label>
+                        <p className="mt-1 rounded-md border bg-muted/20 p-3 text-sm">{selectedDischarge.dischargeNotes}</p>
+                      </div>
+                    )}
+                    {selectedDischarge.remainingIssues && (
+                      <div>
+                        <Label className="text-sm text-muted-foreground">Remaining Issues</Label>
+                        <p className="mt-1 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{selectedDischarge.remainingIssues}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       </ClientOnly>
@@ -1540,6 +1784,40 @@ export default function AssetAdmissionManagement() {
                           }))}
                         />
                       </div>
+
+                      {item.allowRepairReplacement && inspectionType === 'Admission' && (
+                        <div className="mt-3 p-3 border rounded-lg bg-orange-50 dark:bg-orange-950/20">
+                          <div className="flex flex-wrap items-center gap-4">
+                            <Label className="text-sm font-medium">Repair/Replace Action</Label>
+                            <Select
+                              value={itemResponses[item.id]?.repairReplacementAction || item.defaultRepairReplacementAction || 'None'}
+                              onValueChange={(value) => {
+                                const repairReplacementAction = value as SubmitAssetConditionItemDto['repairReplacementAction'];
+                                setItemResponses(prev => ({
+                                  ...prev,
+                                  [item.id]: { ...prev[item.id], checklistItemId: item.id, repairReplacementAction }
+                                }));
+                              }}
+                            >
+                              <SelectTrigger className="w-40">
+                                <SelectValue placeholder="Select action" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="None">None</SelectItem>
+                                <SelectItem value="Repair">Repair</SelectItem>
+                                <SelectItem value="Replace">Replace</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {itemResponses[item.id]?.repairReplacementAction && itemResponses[item.id]?.repairReplacementAction !== 'None' && (
+                              <span className="text-xs text-muted-foreground">
+                                Est. {itemResponses[item.id]?.repairReplacementAction === 'Repair'
+                                  ? `${item.estimatedRepairHours ?? 1} hrs`
+                                  : `${item.estimatedReplacementHours ?? 1} hrs`}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

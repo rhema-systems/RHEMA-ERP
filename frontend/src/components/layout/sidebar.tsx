@@ -222,7 +222,26 @@ const navigationItems: NavItem[] = [
     icon: UserCheck,
     children: [
       { title: 'Employees', href: '/hr/employees', icon: Users },
-      { title: 'Payroll', href: '/hr/payroll', icon: CreditCard },
+      {
+        title: 'Payroll',
+        href: '/hr/payroll',
+        icon: CreditCard,
+        children: [
+          { title: 'Run Desk', href: '/hr/payroll#runs', icon: CalendarClock },
+          { title: 'Employee Profiles', href: '/hr/payroll/employee-profiles', icon: Users },
+          { title: 'Bonus Exceptions', href: '/hr/payroll/bonus-exceptions', icon: Award },
+          { title: 'Salary Advance', href: '/hr/payroll/salary-advance', icon: DollarSign },
+          { title: 'Loan Transaction', href: '/hr/payroll/loan-transaction', icon: CreditCard },
+          { title: 'Loan Transaction Amendment', href: '/hr/payroll/loan-transaction-amendment', icon: RotateCcw },
+          { title: 'Loan Repayment', href: '/hr/payroll/loan-repayment', icon: FileCheck },
+          { title: 'Tax Relief', href: '/hr/payroll/tax-relief', icon: Tag },
+          { title: 'Allowances & Ded Exception', href: '/hr/payroll/allowances-deductions-exception', icon: CheckSquare },
+          { title: 'Promotion Arrears', href: '/hr/payroll/promotion-arrears', icon: TrendingUp },
+          { title: 'Overtime Summary', href: '/hr/payroll/overtime-summary', icon: Clock },
+          { title: 'Opening Balance', href: '/hr/payroll/opening-balance', icon: Database },
+          { title: 'Contributions', href: '/hr/payroll/contributions', icon: CreditCard },
+        ],
+      },
       { title: 'Attendance', href: '/hr/attendance', icon: UserCheck },
       { title: 'Leave Management', href: '/hr/leave', icon: UserCheck },
       { title: 'Performance', href: '/hr/performance', icon: BarChart3 },
@@ -238,6 +257,7 @@ const navigationItems: NavItem[] = [
       { title: 'Job Cards', href: '/maintenance/job-cards', icon: FileText },
       { title: 'Work Orders', href: '/maintenance/work-orders', icon: FileText },
       { title: 'Assets', href: '/maintenance/assets', icon: Package },
+      { title: 'Sites', href: '/maintenance/sites', icon: MapPin },
       { title: 'Asset Admission', href: '/maintenance/asset-admission', icon: ClipboardCheck },
       { title: 'Technicians', href: '/maintenance/technicians', icon: Users },
       { title: 'Quality Control', href: '/maintenance/quality-control', icon: ClipboardCheck },
@@ -249,8 +269,7 @@ const navigationItems: NavItem[] = [
       // { title: 'Inspections', href: '/maintenance/inspections', icon: ClipboardCheck },
       { title: 'Maintenance History', href: '/maintenance/history', icon: Clock },
       { title: 'Tool Management', href: '/maintenance/tools', icon: Wrench },
-      // Reports temporarily hidden
-      // { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
+      { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
       // Asset Analytics temporarily hidden
       // { title: 'Asset Analytics', href: '/maintenance/analytics', icon: BarChart3 },
     ],
@@ -263,6 +282,7 @@ const navigationItems: NavItem[] = [
     children: [
       { title: 'Dashboard', href: '/maintenance/fleet/dashboard', icon: LayoutDashboard },
       { title: 'Fleets', href: '/maintenance/fleet/vehicles', icon: Truck },
+      { title: 'Drivers', href: '/maintenance/fleet/drivers', icon: UserCheck },
       { title: 'Trips', href: '/maintenance/fleet/trips', icon: MapPin },
       { title: 'Compliance', href: '/maintenance/fleet/compliance', icon: ShieldCheck },
       { title: 'Fuel (Reports)', href: '/maintenance/fleet/fuel', icon: Droplet },
@@ -336,12 +356,14 @@ const navigationItems: NavItem[] = [
         href: '/procurement/planning',
         icon: Target,
         children: [
+          { title: 'Overview', href: '/procurement/planning', icon: LayoutDashboard },
           { title: 'Procurement Plans', href: '/procurement/planning/plans', icon: Target },
           { title: 'Budgets', href: '/procurement/planning/budgets', icon: DollarSign },
           { title: 'Schedules', href: '/procurement/planning/schedules', icon: Calendar },
           { title: 'Market Analysis', href: '/procurement/planning/market-analysis', icon: TrendingUp },
           { title: 'Supplier Consolidation', href: '/procurement/planning/supplier-consolidation', icon: Users },
           { title: 'Emergency Plans', href: '/procurement/planning/emergency-plans', icon: AlertCircle },
+          { title: 'Reports', href: '/procurement/planning/reports', icon: FileText },
         ],
       },
       // { title: 'Suppliers', href: '/procurement/suppliers', icon: Briefcase },
@@ -411,7 +433,9 @@ const navigationItems: NavItem[] = [
     href: '/sales',
     icon: ShoppingCart,
     children: [
+      { title: 'Sales Overview', href: '/sales', icon: LayoutDashboard },
       { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
+      { title: 'Allocations', href: '/sales/allocations', icon: MapPin },
       { title: 'Delivery Notes', href: '/sales/deliveries', icon: Truck },
       { title: 'Sales Agreements', href: '/sales/agreements', icon: FileText },
       {
@@ -540,7 +564,7 @@ const navigationItems: NavItem[] = [
     children: [
       { title: 'Financial Reports', href: '/reports?module=financial', icon: CreditCard },
       { title: 'Sales Reports', href: '/reports?module=sales', icon: ShoppingCart },
-      { title: 'HR Reports', href: '/reports?module=hr', icon: UserCheck },
+      { title: 'HR Reports', href: '/reports/hr', icon: UserCheck },
       { title: 'Inventory Reports', href: '/reports?module=inventory', icon: Package },
       { title: 'Estate Reports', href: '/reports?module=estate', icon: Home },
       { title: 'Development Reports', href: '/reports?module=development', icon: Code },
@@ -589,7 +613,11 @@ const navigationItems: NavItem[] = [
           { title: 'Departments', href: '/administration/hr/departments', icon: Building },
           { title: 'Employee Categories', href: '/administration/hr/categories', icon: Users },
           { title: 'Leave Types', href: '/administration/hr/leave-types', icon: UserCheck },
-          { title: 'Payroll Components', href: '/administration/hr/payroll-components', icon: CreditCard },
+          {
+            title: 'Payroll',
+            href: '/administration/hr/payroll',
+            icon: CreditCard,
+          },
         ],
       },
       {
@@ -628,6 +656,7 @@ const navigationItems: NavItem[] = [
         href: '/administration/sales',
         icon: ShoppingCart,
         children: [
+          { title: 'Sales Setup', href: '/administration/sales', icon: Settings },
           { title: 'Customer Categories', href: '/administration/sales/customer-categories', icon: Users },
           { title: 'Sales Territories', href: '/administration/sales/territories', icon: Building },
           { title: 'Price Lists', href: '/administration/sales/price-lists', icon: CreditCard },
@@ -1104,7 +1133,7 @@ export function Sidebar({ className }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-0 p-2">
+        <nav className="flex-1 space-y-0 overflow-y-auto p-2">
         {filterNavItems(navigationItems).map((item) => {
           const Icon = item.icon;
           const hasChildren = item.children && item.children.length > 0;

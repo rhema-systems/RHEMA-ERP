@@ -42,7 +42,7 @@ public class AssetUsageTrackingService : IAssetUsageTrackingService
             ExternalReferenceId = createDto.ExternalReferenceId,
             AdditionalMetrics = createDto.AdditionalMetrics,
             Notes = createDto.Notes,
-            RecordedById = _currentUserService.UserId != null ? Guid.Parse(_currentUserService.UserId) : (Guid?)null,
+            RecordedById = _currentUserService.EmployeeId,
             IsValidated = createDto.IsValidated,
             TriggeredMaintenance = false
         };

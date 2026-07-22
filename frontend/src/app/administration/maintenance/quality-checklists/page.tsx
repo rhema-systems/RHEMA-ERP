@@ -41,6 +41,30 @@ interface QualityChecklistFormData extends Omit<CreateQualityChecklistDto, 'item
   items: QualityChecklistItem[];
 }
 
+const NONE_VALUE = 'none';
+
+const normalizeScopeValue = (value?: string | null) => {
+  if (!value || value === NONE_VALUE) {
+    return '';
+  }
+
+  return value.trim();
+};
+
+const getApiErrorMessage = (error: unknown, fallback: string) => {
+  const responseData = (error as any)?.response?.data;
+  if (typeof responseData === 'string' && responseData.trim()) {
+    return responseData;
+  }
+
+  if (typeof responseData?.message === 'string' && responseData.message.trim()) {
+    return responseData.message;
+  }
+
+  const message = (error as any)?.message;
+  return typeof message === 'string' && message.trim() ? message : fallback;
+};
+
 export default function QualityChecklistsPage() {
   const [mounted, setMounted] = useState(false);
   const [checklists, setChecklists] = useState<QualityChecklist[]>([]);
@@ -66,9 +90,9 @@ export default function QualityChecklistsPage() {
   const [formData, setFormData] = useState<QualityChecklistFormData>({
     name: '',
     description: '',
-    workOrderType: '',
-    assetCategory: '',
-    maintenanceType: 'none',
+    workOrderType: NONE_VALUE,
+    assetCategory: NONE_VALUE,
+    maintenanceType: NONE_VALUE,
     isMandatory: true,
     minimumPassingScore: 85,
     items: []
@@ -183,31 +207,50 @@ export default function QualityChecklistsPage() {
 
   // Helper to find ID by name from dropdown options
   const findWorkOrderTypeId = (name: string): string | undefined => {
-    return workOrderTypeOptions.find(o => o.name === name)?.id;
+    const normalizedName = normalizeScopeValue(name);
+    return normalizedName ? workOrderTypeOptions.find(o => o.name === normalizedName)?.id : undefined;
   };
   const findAssetCategoryId = (name: string): string | undefined => {
-    return assetCategoryOptions.find(o => o.name === name)?.id;
+    const normalizedName = normalizeScopeValue(name);
+    return normalizedName ? assetCategoryOptions.find(o => o.name === normalizedName)?.id : undefined;
   };
   const findMaintenanceTypeId = (name: string): string | undefined => {
-    return maintenanceTypeOptions.find(o => o.name === name)?.id;
+    const normalizedName = normalizeScopeValue(name);
+    return normalizedName ? maintenanceTypeOptions.find(o => o.name === normalizedName)?.id : undefined;
+  };
+
+  const hasChecklistScope = (data: QualityChecklistFormData = formData) => {
+    return Boolean(
+      normalizeScopeValue(data.maintenanceType) ||
+      normalizeScopeValue(data.workOrderType) ||
+      normalizeScopeValue(data.assetCategory)
+    );
   };
 
   const handleCreate = async () => {
     if (isSubmitting) return;
 
+    if (!hasChecklistScope()) {
+      setError('Select at least one scope: maintenance type, work order type, or asset category.');
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       setError(null);
+      const workOrderType = normalizeScopeValue(formData.workOrderType);
+      const assetCategory = normalizeScopeValue(formData.assetCategory);
+      const maintenanceType = normalizeScopeValue(formData.maintenanceType);
       const createData: CreateQualityChecklistDto = {
         ...formData,
-        maintenanceType: formData.maintenanceType === 'none' ? '' : formData.maintenanceType,
+        workOrderType,
+        assetCategory,
+        maintenanceType,
         items: formData.items.map(({ id, ...item }) => item),
         // Include IDs for proper foreign key matching
-        workOrderTypeId: findWorkOrderTypeId(formData.workOrderType),
-        assetCategoryId: findAssetCategoryId(formData.assetCategory),
-        maintenanceTypeId: formData.maintenanceType && formData.maintenanceType !== 'none'
-          ? findMaintenanceTypeId(formData.maintenanceType)
-          : undefined
+        workOrderTypeId: findWorkOrderTypeId(workOrderType),
+        assetCategoryId: findAssetCategoryId(assetCategory),
+        maintenanceTypeId: findMaintenanceTypeId(maintenanceType)
       };
       console.log('Creating quality checklist with data:', createData);
       const newChecklist = await qualityChecklistService.createChecklist(createData);
@@ -216,7 +259,7 @@ export default function QualityChecklistsPage() {
       resetForm();
     } catch (error) {
       console.error('Error creating checklist:', error);
-      setError('Failed to create checklist. Please try again.');
+      setError(getApiErrorMessage(error, 'Failed to create checklist. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -225,20 +268,28 @@ export default function QualityChecklistsPage() {
   const handleUpdate = async () => {
     if (!selectedChecklist || isSubmitting) return;
 
+    if (!hasChecklistScope()) {
+      setError('Select at least one scope: maintenance type, work order type, or asset category.');
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       setError(null);
+      const workOrderType = normalizeScopeValue(formData.workOrderType);
+      const assetCategory = normalizeScopeValue(formData.assetCategory);
+      const maintenanceType = normalizeScopeValue(formData.maintenanceType);
       const updateData: UpdateQualityChecklistDto = {
         ...formData,
-        maintenanceType: formData.maintenanceType === 'none' ? '' : formData.maintenanceType,
+        workOrderType,
+        assetCategory,
+        maintenanceType,
         isActive: selectedChecklist.isActive,
         items: formData.items.map(({ id, ...item }) => item),
         // Include IDs for proper foreign key matching
-        workOrderTypeId: findWorkOrderTypeId(formData.workOrderType),
-        assetCategoryId: findAssetCategoryId(formData.assetCategory),
-        maintenanceTypeId: formData.maintenanceType && formData.maintenanceType !== 'none'
-          ? findMaintenanceTypeId(formData.maintenanceType)
-          : undefined
+        workOrderTypeId: findWorkOrderTypeId(workOrderType),
+        assetCategoryId: findAssetCategoryId(assetCategory),
+        maintenanceTypeId: findMaintenanceTypeId(maintenanceType)
       };
       console.log('Updating quality checklist with data:', updateData);
 
@@ -248,7 +299,7 @@ export default function QualityChecklistsPage() {
       resetForm();
     } catch (error) {
       console.error('Error updating checklist:', error);
-      setError('Failed to update checklist. Please try again.');
+      setError(getApiErrorMessage(error, 'Failed to update checklist. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -288,9 +339,9 @@ export default function QualityChecklistsPage() {
       const updateData: UpdateQualityChecklistDto = {
         name: checklist.name,
         description: checklist.description,
-        workOrderType: checklist.workOrderType,
-        assetCategory: checklist.assetCategory,
-        maintenanceType: checklist.maintenanceType || '',
+        workOrderType: normalizeScopeValue(checklist.workOrderType),
+        assetCategory: normalizeScopeValue(checklist.assetCategory),
+        maintenanceType: normalizeScopeValue(checklist.maintenanceType),
         isMandatory: checklist.isMandatory,
         minimumPassingScore: checklist.minimumPassingScore,
         items: checklist.items.map(item => ({
@@ -319,9 +370,9 @@ export default function QualityChecklistsPage() {
     setFormData({
       name: checklist.name,
       description: checklist.description,
-      workOrderType: checklist.workOrderType,
-      assetCategory: checklist.assetCategory,
-      maintenanceType: checklist.maintenanceType || 'none',
+      workOrderType: normalizeScopeValue(checklist.workOrderType) || NONE_VALUE,
+      assetCategory: normalizeScopeValue(checklist.assetCategory) || NONE_VALUE,
+      maintenanceType: normalizeScopeValue(checklist.maintenanceType) || NONE_VALUE,
       isMandatory: checklist.isMandatory,
       minimumPassingScore: checklist.minimumPassingScore,
       items: checklist.items.map(item => ({
@@ -355,9 +406,9 @@ export default function QualityChecklistsPage() {
     setFormData({
       name: '',
       description: '',
-      workOrderType: '',
-      assetCategory: '',
-      maintenanceType: 'none',
+      workOrderType: NONE_VALUE,
+      assetCategory: NONE_VALUE,
+      maintenanceType: NONE_VALUE,
       isMandatory: true,
       minimumPassingScore: 85,
       items: []
@@ -437,6 +488,20 @@ export default function QualityChecklistsPage() {
       <Badge className={colors[type] || 'bg-gray-100 text-gray-800'}>
         {type}
       </Badge>
+    );
+  };
+
+  const getScopeBadges = (checklist: QualityChecklist) => {
+    const maintenanceType = normalizeScopeValue(checklist.maintenanceType);
+    const workOrderType = normalizeScopeValue(checklist.workOrderType);
+    const assetCategory = normalizeScopeValue(checklist.assetCategory);
+
+    return (
+      <>
+        {maintenanceType && <Badge className="bg-blue-100 text-blue-800">{maintenanceType}</Badge>}
+        {workOrderType && getTypeBadge(workOrderType)}
+        {assetCategory && <Badge variant="outline">{assetCategory}</Badge>}
+      </>
     );
   };
 
@@ -629,8 +694,7 @@ export default function QualityChecklistsPage() {
                     <div className="space-y-3 flex-1">
                       <div className="flex items-center space-x-3">
                         <h3 className="font-semibold">{checklist.name}</h3>
-                        {getTypeBadge(checklist.workOrderType)}
-                        <Badge variant="outline">{checklist.assetCategory}</Badge>
+                        {getScopeBadges(checklist)}
                         {getStatusBadge(checklist)}
                         {checklist.isMandatory && (
                           <Badge variant="secondary">
@@ -760,15 +824,34 @@ export default function QualityChecklistsPage() {
 
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="workOrderType">Work Order Type *</Label>
+                  <Label htmlFor="maintenanceType">Maintenance Type</Label>
                   <Select 
-                    value={formData.workOrderType} 
+                    value={formData.maintenanceType || NONE_VALUE} 
+                    onValueChange={(value) => setFormData({...formData, maintenanceType: value})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select maintenance type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE_VALUE}>None</SelectItem>
+                      {maintenanceTypes.map(type => (
+                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="workOrderType">Work Order Type</Label>
+                  <Select 
+                    value={formData.workOrderType || NONE_VALUE} 
                     onValueChange={(value) => setFormData({...formData, workOrderType: value})}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select type" />
+                      <SelectValue placeholder="Select work order type" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value={NONE_VALUE}>None</SelectItem>
                       {workOrderTypes.map(type => (
                         <SelectItem key={type} value={type}>{type}</SelectItem>
                       ))}
@@ -777,40 +860,28 @@ export default function QualityChecklistsPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="assetCategory">Asset Category *</Label>
+                  <Label htmlFor="assetCategory">Asset Category</Label>
                   <Select 
-                    value={formData.assetCategory} 
+                    value={formData.assetCategory || NONE_VALUE} 
                     onValueChange={(value) => setFormData({...formData, assetCategory: value})}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select category" />
+                      <SelectValue placeholder="Select asset category" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value={NONE_VALUE}>None</SelectItem>
                       {assetCategories.map(category => (
                         <SelectItem key={category} value={category}>{category}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="maintenanceType">Maintenance Type</Label>
-                  <Select 
-                    value={formData.maintenanceType} 
-                    onValueChange={(value) => setFormData({...formData, maintenanceType: value})}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type (optional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {maintenanceTypes.map(type => (
-                        <SelectItem key={type} value={type}>{type}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
+              {!hasChecklistScope() && (
+                <p className="text-sm text-red-600">
+                  Select at least one scope: maintenance type, work order type, or asset category.
+                </p>
+              )}
 
               <div className="flex items-center space-x-2">
                 <Switch
@@ -1003,7 +1074,7 @@ export default function QualityChecklistsPage() {
             </Button>
             <Button 
               onClick={isCreateDialogOpen ? handleCreate : handleUpdate}
-              disabled={!formData.name || !formData.workOrderType || !formData.assetCategory || isSubmitting}
+              disabled={!formData.name || !hasChecklistScope() || isSubmitting}
             >
               {isSubmitting 
                 ? (isCreateDialogOpen ? 'Creating...' : 'Updating...')
@@ -1031,8 +1102,15 @@ export default function QualityChecklistsPage() {
                 <p className="text-sm text-muted-foreground mt-1">{selectedChecklist.description}</p>
                 
                 <div className="flex items-center space-x-4 mt-3 text-sm">
-                  <span><strong>Type:</strong> {selectedChecklist.workOrderType}</span>
-                  <span><strong>Category:</strong> {selectedChecklist.assetCategory}</span>
+                  {normalizeScopeValue(selectedChecklist.maintenanceType) && (
+                    <span><strong>Maintenance Type:</strong> {normalizeScopeValue(selectedChecklist.maintenanceType)}</span>
+                  )}
+                  {normalizeScopeValue(selectedChecklist.workOrderType) && (
+                    <span><strong>Work Order Type:</strong> {normalizeScopeValue(selectedChecklist.workOrderType)}</span>
+                  )}
+                  {normalizeScopeValue(selectedChecklist.assetCategory) && (
+                    <span><strong>Asset Category:</strong> {normalizeScopeValue(selectedChecklist.assetCategory)}</span>
+                  )}
                   <span><strong>Pass Score:</strong> {selectedChecklist.minimumPassingScore}%</span>
                 </div>
               </div>

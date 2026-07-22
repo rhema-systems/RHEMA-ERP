@@ -115,6 +115,11 @@ public interface IJobCardRepository
     Task<List<JobCardDocumentDto>> GetDocumentsAsync(Guid jobCardId);
 
     /// <summary>
+    /// Gets a document entity for a job card
+    /// </summary>
+    Task<JobCardDocument?> GetDocumentAsync(Guid jobCardId, Guid documentId);
+
+    /// <summary>
     /// Gets available work order types for job card to work order conversion
     /// </summary>
     Task<List<WorkOrderTypeDto>> GetWorkOrderTypesAsync();

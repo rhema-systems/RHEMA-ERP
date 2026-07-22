@@ -1,14 +1,21 @@
 using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using InvoiceCreateDto = ErpSystem.Core.DTOs.AR.InvoiceCreateDto;
+using InvoiceLineItemCreateDto = ErpSystem.Core.DTOs.AR.InvoiceLineItemCreateDto;
 using WorkOrderTaskDtoFull = ErpSystem.Core.DTOs.Maintenance.WorkOrderTaskDto;
 
 namespace ErpSystem.Core.Services.Maintenance;
@@ -32,6 +39,7 @@ public class WorkOrderService : IWorkOrderService
     private readonly IMaintenanceStaffScheduleRepository _scheduleRepository;
     private readonly IMaintenanceExpenseRepository _expenseRepository;
     private readonly IUserService _userService;
+    private readonly IInvoiceService _invoiceService;
     private readonly ILogger<WorkOrderService> _logger;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAppEventBus _appEventBus;
@@ -51,6 +59,7 @@ public class WorkOrderService : IWorkOrderService
         IMaintenanceStaffScheduleRepository scheduleRepository,
         IMaintenanceExpenseRepository expenseRepository,
         IUserService userService,
+        IInvoiceService invoiceService,
         ILogger<WorkOrderService> logger,
         IUnitOfWork unitOfWork,
         IAppEventBus appEventBus)
@@ -69,6 +78,7 @@ public class WorkOrderService : IWorkOrderService
         _scheduleRepository = scheduleRepository;
         _expenseRepository = expenseRepository;
         _userService = userService;
+        _invoiceService = invoiceService;
         _logger = logger;
         _unitOfWork = unitOfWork;
         _appEventBus = appEventBus;
@@ -89,7 +99,7 @@ public class WorkOrderService : IWorkOrderService
             var workOrder = await _workOrderRepository.GetByIdAsync(workOrderId) ?? throw new ArgumentException($"Work order {workOrderId} not found");
 
             // Validate work order can be started
-            if (workOrder.Status != "Assigned" && workOrder.Status != "Approved")
+            if (workOrder.Status != "Draft" && workOrder.Status != "Open" && workOrder.Status != "Assigned" && workOrder.Status != "Approved")
             {
                 throw new InvalidOperationException($"Cannot start work order in {workOrder.Status} status");
             }
@@ -261,6 +271,9 @@ public class WorkOrderService : IWorkOrderService
                 return result;
             }
 
+            var linkedFleetDefects = await GetLinkedFleetDefectsAsync(workOrder);
+            EnsureLatestQualityCheckPassedForLinkedDefects(workOrder, linkedFleetDefects);
+
             // Complete all tasks if not already done
             await CompleteAllTasksAsync(completionDto.WorkOrderId, completedById);
 
@@ -377,6 +390,8 @@ public class WorkOrderService : IWorkOrderService
 
             // Post internal maintenance cost to fleet ledger when this work order involves exactly one vehicle asset (best-effort).
             await UpsertFleetInternalMaintenanceCostEntryAsync(workOrder, actualCost, result.CompletionDate, completedById);
+
+            await CloseLinkedFleetDefectsAsync(linkedFleetDefects, completedById, result.CompletionDate);
 
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
@@ -870,7 +885,7 @@ public class WorkOrderService : IWorkOrderService
                 AssignedTeamId = createDto.AssignedTeamId, // Assign team if provided
                 JobCardId = createDto.JobCardId, // Link to job card if generated from one
                 MaintenanceScheduleId = createDto.MaintenanceScheduleId, // Link to maintenance schedule if auto-generated
-                Status = "Draft",
+                Status = !string.IsNullOrWhiteSpace(createDto.Status) ? createDto.Status : "Open",
                 MaintenanceLocation = createDto.MaintenanceLocation ?? "Internal",
                 RequestedStartDate = createDto.RequestedStartDate,
                 RequestedCompletionDate = createDto.RequestedCompletionDate,
@@ -881,7 +896,10 @@ public class WorkOrderService : IWorkOrderService
                 RequiresLockout = createDto.RequiresLockout,
                 RequiresConfinedSpaceEntry = createDto.RequiresConfinedSpaceEntry,
                 BillingType = createDto.BillingType ?? "Repairs", // Set billing type from DTO
-                FixedAmount = createDto.FixedAmount // Set fixed amount for Maintenance billing type
+                FixedAmount = createDto.FixedAmount, // Set fixed amount for Maintenance billing type
+                CustomFieldValues = createDto.CustomFieldValues == null
+                    ? null
+                    : JsonSerializer.Serialize(createDto.CustomFieldValues)
             };
 
             _logger.LogDebug("Work Order entity created: Id={Id}, Number={Number}, RequestedById={RequestedById}, TenantId={TenantId}",
@@ -893,8 +911,10 @@ public class WorkOrderService : IWorkOrderService
             await _unitOfWork.SaveChangesAsync();
             _logger.LogInformation("Work order {WorkOrderNumber} (ID: {Id}) created successfully", workOrder.WorkOrderNumber, workOrder.Id);
 
-            // Generate default tasks based on maintenance type and asset
-            await CreateDefaultTasksAsync(workOrder);
+            if (createDto.GenerateDefaultTasks)
+            {
+                await CreateDefaultTasksAsync(workOrder);
+            }
 
             // Publish event for admin-configurable notification topics (best-effort).
             try
@@ -1052,12 +1072,17 @@ public class WorkOrderService : IWorkOrderService
     {
         try
         {
-            // Simplified implementation - in a real implementation, this would use proper paging
             var allWorkOrders = await _workOrderRepository.GetAllAsync();
-            var filteredWorkOrders = allWorkOrders.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize);
+            var filteredWorkOrders = ApplyWorkOrderFilters(allWorkOrders, filter).ToList();
+            var page = Math.Max(filter.Page, 1);
+            var pageSize = filter.PageSize <= 0 ? 25 : filter.PageSize;
+            var workOrdersPage = filteredWorkOrders
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
 
             var workOrderDtos = new List<WorkOrderListDto>();
-            foreach (var workOrder in filteredWorkOrders)
+            foreach (var workOrder in workOrdersPage)
             {
                 var dto = await MapToWorkOrderListDtoAsync(workOrder);
                 workOrderDtos.Add(dto);
@@ -1066,9 +1091,9 @@ public class WorkOrderService : IWorkOrderService
             return new PagedResult<WorkOrderListDto>
             {
                 Items = workOrderDtos,
-                TotalCount = allWorkOrders.Count(),
-                Page = filter.Page,
-                PageSize = filter.PageSize
+                TotalCount = filteredWorkOrders.Count,
+                Page = page,
+                PageSize = pageSize
             };
         }
         catch (Exception ex)
@@ -1134,6 +1159,8 @@ public class WorkOrderService : IWorkOrderService
                 {
                     throw new InvalidOperationException($"Employee {technician.FirstName} {technician.LastName} is not qualified for maintenance assignments");
                 }
+
+                EnsureTechnicianMatchesAssetLocation(technician, workOrder);
 
                 _logger.LogInformation("Assigning work order {WorkOrderId} to technician {TechnicianName} (ID: {TechnicianId})",
                     id, $"{technician.FirstName} {technician.LastName}", technicianId.Value);
@@ -1246,6 +1273,17 @@ public class WorkOrderService : IWorkOrderService
         {
             var workOrder = await _workOrderRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Work order {id} not found");
 
+            var qualityValidation = await _qualityControlService.ValidateWorkOrderCompletionAsync(id);
+            if (!qualityValidation.CanComplete)
+            {
+                throw new InvalidOperationException(
+                    qualityValidation.ValidationFailures.FirstOrDefault()
+                    ?? "Work order cannot be completed until quality control requirements are met.");
+            }
+
+            var linkedFleetDefects = await GetLinkedFleetDefectsAsync(workOrder);
+            EnsureLatestQualityCheckPassedForLinkedDefects(workOrder, linkedFleetDefects);
+
             // Release vehicles back to Active status
             await UpdateVehicleStatusOnWorkOrderCompleteAsync(id);
 
@@ -1289,6 +1327,11 @@ public class WorkOrderService : IWorkOrderService
             var completedByUserId = Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : (Guid?)null;
             await UpsertFleetInternalMaintenanceCostEntryAsync(workOrder, workOrder.ActualCost, workOrder.ActualCompletionDate ?? DateTime.UtcNow, completedByUserId);
 
+            await CloseLinkedFleetDefectsAsync(
+                linkedFleetDefects,
+                completedByUserId,
+                workOrder.ActualCompletionDate ?? DateTime.UtcNow);
+
             await _workOrderRepository.UpdateAsync(workOrder);
             await _unitOfWork.SaveChangesAsync();
             return await MapToWorkOrderDtoAsync(workOrder);
@@ -1298,6 +1341,347 @@ public class WorkOrderService : IWorkOrderService
             _logger.LogError(ex, "Error completing work order {WorkOrderId}", id);
             throw;
         }
+    }
+
+    private static IEnumerable<WorkOrder> ApplyWorkOrderFilters(IEnumerable<WorkOrder> workOrders, WorkOrderFilterDto filter)
+    {
+        var query = workOrders;
+
+        if (!string.IsNullOrWhiteSpace(filter.SearchTerm))
+        {
+            var searchTerm = filter.SearchTerm.Trim();
+            query = query.Where(wo =>
+                ContainsIgnoreCase(wo.WorkOrderNumber, searchTerm) ||
+                ContainsIgnoreCase(wo.Title, searchTerm) ||
+                ContainsIgnoreCase(wo.Description, searchTerm) ||
+                ContainsIgnoreCase(wo.Asset?.Name, searchTerm) ||
+                ContainsIgnoreCase(wo.Asset?.AssetNumber, searchTerm));
+        }
+
+        if (filter.AssetId.HasValue)
+        {
+            query = query.Where(wo => wo.AssetId == filter.AssetId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Status))
+        {
+            query = query.Where(wo => string.Equals(wo.Status, filter.Status, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (filter.WorkOrderTypeId.HasValue)
+        {
+            query = query.Where(wo => wo.WorkOrderTypeId == filter.WorkOrderTypeId.Value);
+        }
+
+        if (filter.MaintenanceTypeId.HasValue)
+        {
+            query = query.Where(wo => wo.MaintenanceTypeId == filter.MaintenanceTypeId.Value);
+        }
+
+        if (filter.PriorityLevelId.HasValue)
+        {
+            query = query.Where(wo => wo.PriorityLevelId == filter.PriorityLevelId.Value);
+        }
+
+        if (filter.AssignedTechnicianId.HasValue)
+        {
+            query = query.Where(wo => wo.AssignedTechnicianId == filter.AssignedTechnicianId.Value);
+        }
+
+        if (filter.AssignedTeamId.HasValue)
+        {
+            query = query.Where(wo => wo.AssignedTeamId == filter.AssignedTeamId.Value);
+        }
+
+        if (filter.StartDate.HasValue || filter.EndDate.HasValue)
+        {
+            query = query.Where(wo => IsWorkOrderInDateRange(wo, filter.StartDate, filter.EndDate));
+        }
+
+        if (filter.IsOverdue.HasValue)
+        {
+            query = query.Where(wo => IsWorkOrderOverdue(wo) == filter.IsOverdue.Value);
+        }
+
+        query = (filter.SortBy ?? "CreatedAt").ToLowerInvariant() switch
+        {
+            "workordernumber" => filter.SortDescending ? query.OrderByDescending(wo => wo.WorkOrderNumber) : query.OrderBy(wo => wo.WorkOrderNumber),
+            "title" => filter.SortDescending ? query.OrderByDescending(wo => wo.Title) : query.OrderBy(wo => wo.Title),
+            "status" => filter.SortDescending ? query.OrderByDescending(wo => wo.Status) : query.OrderBy(wo => wo.Status),
+            "priority" => filter.SortDescending ? query.OrderByDescending(wo => wo.PriorityLevel?.Level ?? 0) : query.OrderBy(wo => wo.PriorityLevel?.Level ?? 0),
+            "requestedstartdate" => filter.SortDescending ? query.OrderByDescending(wo => wo.RequestedStartDate ?? DateTime.MinValue) : query.OrderBy(wo => wo.RequestedStartDate ?? DateTime.MaxValue),
+            "requestedcompletiondate" => filter.SortDescending ? query.OrderByDescending(wo => wo.RequestedCompletionDate ?? DateTime.MinValue) : query.OrderBy(wo => wo.RequestedCompletionDate ?? DateTime.MaxValue),
+            _ => filter.SortDescending ? query.OrderByDescending(wo => wo.CreatedAt) : query.OrderBy(wo => wo.CreatedAt)
+        };
+
+        return query;
+    }
+
+    private static bool ContainsIgnoreCase(string? value, string searchTerm)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+            value.Contains(searchTerm, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsWorkOrderInDateRange(WorkOrder workOrder, DateTime? startDate, DateTime? endDate)
+    {
+        var start = startDate?.Date ?? DateTime.MinValue;
+        var end = endDate?.Date.AddDays(1).AddTicks(-1) ?? DateTime.MaxValue;
+        DateTime?[] candidateDates =
+        {
+            workOrder.CreatedAt,
+            workOrder.RequestedStartDate,
+            workOrder.RequestedCompletionDate,
+            workOrder.ActualStartDate,
+            workOrder.ActualCompletionDate
+        };
+
+        return candidateDates.Any(date => date.HasValue && date.Value >= start && date.Value <= end);
+    }
+
+    private static bool IsActiveWorkOrderStatus(string? status)
+    {
+        return !IsCompletedWorkOrderStatus(status) && !IsCancelledWorkOrderStatus(status);
+    }
+
+    private static bool IsCompletedWorkOrderStatus(string? status)
+    {
+        return string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "Closed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsCancelledWorkOrderStatus(string? status)
+    {
+        return string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "Canceled", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsWorkOrderOverdue(WorkOrder workOrder)
+    {
+        return workOrder.RequestedCompletionDate.HasValue &&
+            workOrder.RequestedCompletionDate.Value < DateTime.UtcNow &&
+            IsActiveWorkOrderStatus(workOrder.Status);
+    }
+
+    private static double CalculateAverageWorkOrderDuration(IEnumerable<WorkOrderListDto> completedWorkOrders)
+    {
+        var durations = completedWorkOrders
+            .Select(wo =>
+            {
+                var start = wo.ActualStartDate ?? wo.RequestedStartDate ?? wo.CreatedAt;
+                var end = wo.ActualEndDate ?? wo.ActualCompletionDate;
+                return end.HasValue && end.Value > start ? (double?)(end.Value - start).TotalHours : null;
+            })
+            .Where(duration => duration.HasValue)
+            .Select(duration => duration!.Value)
+            .ToList();
+
+        return durations.Any() ? durations.Average() : 0;
+    }
+
+    public async Task<InvoiceDto> PostWorkOrderBillingToArInvoiceAsync(Guid id)
+    {
+        try
+        {
+            var workOrder = await _workOrderRepository.GetByIdAsync(id)
+                ?? throw new ArgumentException($"Work order {id} not found");
+
+            if (workOrder.JobCard?.CustomerBusinessPartnerId == null)
+            {
+                throw new InvalidOperationException("Link a customer business partner to the job card before posting this work order to AR.");
+            }
+
+            var customerPartner = await _unitOfWork.Repository<BusinessPartner>()
+                .FirstOrDefaultAsync(bp => bp.Id == workOrder.JobCard.CustomerBusinessPartnerId.Value
+                    && bp.TenantId == workOrder.TenantId
+                    && !bp.IsDeleted);
+
+            if (customerPartner == null)
+            {
+                throw new InvalidOperationException("The customer business partner linked to this job card was not found.");
+            }
+
+            var currencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, workOrder.TenantId);
+            var customer = await GetOrCreateArCustomerAsync(customerPartner, currencyCode);
+            var lineItems = await BuildArInvoiceLineItemsAsync(workOrder);
+
+            if (lineItems.Count == 0 || lineItems.Sum(li => li.Quantity * li.UnitPrice) <= 0)
+            {
+                throw new InvalidOperationException("There are no billable work order lines to post to AR.");
+            }
+
+            return await _invoiceService.CreateAsync(new InvoiceCreateDto
+            {
+                CustomerId = customer.Id,
+                InvoiceDate = DateTime.UtcNow.Date,
+                Reference = workOrder.WorkOrderNumber,
+                Notes = $"Maintenance work order {workOrder.WorkOrderNumber} generated from job card {workOrder.JobCard.JobCardNumber}.",
+                CurrencyCode = currencyCode,
+                ExchangeRate = 1m,
+                DiscountAmount = 0m,
+                LineItems = lineItems
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error posting work order {WorkOrderId} billing to AR invoice", id);
+            throw;
+        }
+    }
+
+    private async Task<Customer> GetOrCreateArCustomerAsync(BusinessPartner customerPartner, string currencyCode)
+    {
+        var customerCode = !string.IsNullOrWhiteSpace(customerPartner.CustomerAccountNumber)
+            ? customerPartner.CustomerAccountNumber.Trim()
+            : customerPartner.PartnerCode.Trim();
+
+        var customer = await _unitOfWork.Repository<Customer>()
+            .FirstOrDefaultAsync(c => c.TenantId == customerPartner.TenantId
+                && !c.IsDeleted
+                && (c.CustomerCode == customerCode || c.CustomerCode == customerPartner.PartnerCode));
+
+        if (customer != null)
+        {
+            if (!string.Equals(customer.CurrencyCode, currencyCode, StringComparison.OrdinalIgnoreCase))
+            {
+                customer.CurrencyCode = currencyCode;
+                customer.UpdatedAt = DateTime.UtcNow;
+                customer.UpdatedBy = _currentUserService.UserName ?? "System";
+                await _unitOfWork.Repository<Customer>().UpdateAsync(customer);
+                await _unitOfWork.SaveChangesAsync();
+            }
+
+            return customer;
+        }
+
+        customer = new Customer
+        {
+            Id = Guid.NewGuid(),
+            TenantId = customerPartner.TenantId,
+            CustomerName = customerPartner.PartnerName,
+            CustomerCode = customerCode,
+            CustomerType = customerPartner.CustomerType ?? "Corporate",
+            ContactPerson = customerPartner.PrimaryContactName,
+            Email = customerPartner.PrimaryEmail,
+            Phone = customerPartner.PrimaryPhone,
+            Address = customerPartner.PhysicalAddress ?? customerPartner.MailingAddress,
+            City = customerPartner.PhysicalCity ?? customerPartner.MailingCity,
+            State = customerPartner.PhysicalState ?? customerPartner.MailingState,
+            PostalCode = customerPartner.PhysicalPostalCode ?? customerPartner.MailingPostalCode,
+            Country = customerPartner.PhysicalCountry ?? customerPartner.MailingCountry,
+            TaxId = customerPartner.TaxIdentificationNumber,
+            CreditLimit = customerPartner.CreditLimit ?? 0m,
+            OutstandingBalance = customerPartner.OutstandingBalance ?? 0m,
+            PaymentTermId = customerPartner.PaymentTermId,
+            DefaultArAccountId = customerPartner.DefaultArAccountId,
+            CurrencyCode = currencyCode,
+            Status = "Active",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName ?? "System"
+        };
+
+        customer.PaymentTermsDays = TryParsePaymentTermsDays(customerPartner.PaymentTerms) ?? customer.PaymentTermsDays;
+
+        await _unitOfWork.Repository<Customer>().AddAsync(customer);
+        await _unitOfWork.SaveChangesAsync();
+        return customer;
+    }
+
+    private async Task<List<InvoiceLineItemCreateDto>> BuildArInvoiceLineItemsAsync(WorkOrder workOrder)
+    {
+        var lineItems = new List<InvoiceLineItemCreateDto>();
+
+        if (string.Equals(workOrder.BillingType, "Maintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            AddInvoiceLine(lineItems, $"Fixed maintenance charge - {workOrder.Title}", 1m, workOrder.FixedAmount);
+            return lineItems;
+        }
+
+        foreach (var part in workOrder.Parts ?? Enumerable.Empty<WorkOrderPart>())
+        {
+            var quantity = part.QuantityUsed > 0 ? part.QuantityUsed : part.QuantityRequired;
+            var total = part.TotalCost > 0 ? part.TotalCost : quantity * part.UnitCost;
+            var unitPrice = quantity > 0 ? Math.Round(total / quantity, 4, MidpointRounding.AwayFromZero) : part.UnitCost;
+            AddInvoiceLine(lineItems, $"Part: {part.ItemCode} - {part.ItemName}", quantity, unitPrice, "each");
+        }
+
+        var laborRecords = (workOrder.Labor ?? Enumerable.Empty<WorkOrderLabor>()).ToList();
+        if (laborRecords.Count > 0)
+        {
+            var totalHours = Convert.ToDecimal(laborRecords.Sum(l => l.Hours));
+            var totalCost = laborRecords.Sum(l =>
+            {
+                var hours = Convert.ToDecimal(l.Hours);
+                return l.TotalCost > 0 ? l.TotalCost : hours * l.HourlyRate;
+            });
+            var blendedRate = totalHours > 0
+                ? Math.Round(totalCost / totalHours, 4, MidpointRounding.AwayFromZero)
+                : 0m;
+
+            AddInvoiceLine(lineItems, $"Labor ({laborRecords.Count} entries)", totalHours, blendedRate, "hr");
+        }
+
+        var workOrderTools = await _unitOfWork.Repository<WorkOrderTool>()
+            .GetQueryable(t => t.WorkOrderId == workOrder.Id && !t.IsDeleted && !t.IsExcludedFromBilling)
+            .Include(t => t.Tool)
+            .Include(t => t.Checkout)
+            .ToListAsync();
+
+        foreach (var tool in workOrderTools)
+        {
+            var rentalRate = tool.Tool?.DailyRentalRate ?? 0m;
+            if (rentalRate <= 0)
+            {
+                continue;
+            }
+
+            var checkoutDate = tool.Checkout?.CheckoutDate ?? workOrder.ActualStartDate ?? workOrder.CreatedAt;
+            var returnDate = tool.Checkout?.ActualReturnDate ?? workOrder.ActualCompletionDate ?? DateTime.UtcNow;
+            var days = Math.Max(1, (int)Math.Ceiling((returnDate - checkoutDate).TotalDays));
+            AddInvoiceLine(lineItems, $"Tool: {tool.Tool?.ItemCode} {tool.Tool?.Name}".Trim(), days, rentalRate, "day");
+        }
+
+        var expenses = await _expenseRepository.GetByWorkOrderIdAsync(workOrder.Id);
+        foreach (var expense in expenses.Where(e => !string.Equals(e.Status, "Rejected", StringComparison.OrdinalIgnoreCase)))
+        {
+            AddInvoiceLine(lineItems, $"Expense: {expense.ExpenseType} - {expense.Description}", 1m, expense.Amount);
+        }
+
+        return lineItems;
+    }
+
+    private static void AddInvoiceLine(
+        List<InvoiceLineItemCreateDto> lineItems,
+        string description,
+        decimal quantity,
+        decimal unitPrice,
+        string? unit = null)
+    {
+        if (quantity <= 0 || unitPrice <= 0)
+        {
+            return;
+        }
+
+        lineItems.Add(new InvoiceLineItemCreateDto
+        {
+            LineItemType = "Product",
+            Description = description,
+            Quantity = quantity,
+            UnitPrice = unitPrice,
+            Unit = unit,
+            DiscountPercentage = 0m
+        });
+    }
+
+    private static int? TryParsePaymentTermsDays(string? paymentTerms)
+    {
+        if (string.IsNullOrWhiteSpace(paymentTerms))
+        {
+            return null;
+        }
+
+        var digits = new string(paymentTerms.Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out var days) && days > 0 ? days : null;
     }
 
     /// <summary>
@@ -1433,17 +1817,45 @@ public class WorkOrderService : IWorkOrderService
         {
             _logger.LogInformation("Getting work order metrics from {StartDate} to {EndDate}", startDate, endDate);
 
-            // Mock implementation - would calculate actual metrics from database
+            var result = await GetWorkOrdersPagedAsync(new WorkOrderFilterDto
+            {
+                StartDate = startDate,
+                EndDate = endDate,
+                Page = 1,
+                PageSize = int.MaxValue
+            });
+
+            var workOrders = result.Items.ToList();
+            var completedWorkOrders = workOrders
+                .Where(wo => IsCompletedWorkOrderStatus(wo.Status))
+                .ToList();
+            var activeWorkOrders = workOrders
+                .Where(wo => IsActiveWorkOrderStatus(wo.Status))
+                .ToList();
+            var totalWorkOrders = workOrders.Count;
+            var totalCost = workOrders.Sum(wo => wo.ActualCost > 0 ? wo.ActualCost : wo.EstimatedCost);
+
             var metrics = new ErpSystem.Core.DTOs.Maintenance.WorkOrderMetricsDto
             {
-                TotalWorkOrders = 0,
-                CompletedWorkOrders = 0,
-                PendingWorkOrders = 0,
-                OverdueWorkOrders = 0,
-                CompletionRate = 0.0,
-                AverageCompletionTime = 0.0,
-                TotalCost = 0m,
-                TypeBreakdown = new List<ErpSystem.Core.DTOs.Maintenance.WorkOrderTypeMetricDto>()
+                TotalWorkOrders = totalWorkOrders,
+                CompletedWorkOrders = completedWorkOrders.Count,
+                PendingWorkOrders = activeWorkOrders.Count,
+                OverdueWorkOrders = workOrders.Count(wo => wo.IsOverdue),
+                CompletionRate = totalWorkOrders > 0 ? (double)completedWorkOrders.Count / totalWorkOrders * 100 : 0.0,
+                AverageCompletionTime = CalculateAverageWorkOrderDuration(completedWorkOrders),
+                TotalCost = totalCost,
+                TypeBreakdown = workOrders
+                    .GroupBy(wo => string.IsNullOrWhiteSpace(wo.MaintenanceTypeName) ? "Unspecified" : wo.MaintenanceTypeName)
+                    .Select(g => new ErpSystem.Core.DTOs.Maintenance.WorkOrderTypeMetricDto
+                    {
+                        WorkOrderType = g.Key,
+                        Count = g.Count(),
+                        Percentage = totalWorkOrders > 0 ? (double)g.Count() / totalWorkOrders * 100 : 0,
+                        AverageCost = g.Any() ? g.Average(wo => wo.ActualCost > 0 ? wo.ActualCost : wo.EstimatedCost) : 0,
+                        AverageCompletionTime = CalculateAverageWorkOrderDuration(g.Where(wo => IsCompletedWorkOrderStatus(wo.Status)).ToList())
+                    })
+                    .OrderByDescending(x => x.Count)
+                    .ToList()
             };
 
             return metrics;
@@ -1504,7 +1916,7 @@ public class WorkOrderService : IWorkOrderService
                 AssignedTechnicianId = createDto.AssignedTechnicianId, // Assign technician if provided
                 AssignedTeamId = createDto.AssignedTeamId, // Assign team if provided
                 ParentWorkOrderId = parentId,
-                Status = "Draft",
+                Status = !string.IsNullOrWhiteSpace(createDto.Status) ? createDto.Status : "Open",
                 RequestedStartDate = createDto.RequestedStartDate,
                 RequestedCompletionDate = createDto.RequestedCompletionDate,
                 EstimatedHours = createDto.EstimatedHours,
@@ -1584,6 +1996,60 @@ public class WorkOrderService : IWorkOrderService
     #endregion
 
     #region Helper Mapping Methods
+
+    private static bool IsMaintenanceBilling(string? billingType)
+        => string.Equals(billingType, "Maintenance", StringComparison.OrdinalIgnoreCase);
+
+    private static decimal ResolveFixedAmount(WorkOrder workOrder, decimal maintenanceTypeFixedAmount = 0)
+    {
+        if (!IsMaintenanceBilling(workOrder.BillingType))
+        {
+            return workOrder.FixedAmount;
+        }
+
+        return workOrder.FixedAmount > 0 ? workOrder.FixedAmount : maintenanceTypeFixedAmount;
+    }
+
+    private async Task<decimal> CalculateBillingTabTotalAsync(WorkOrder workOrder, decimal maintenanceTypeFixedAmount = 0)
+    {
+        if (IsMaintenanceBilling(workOrder.BillingType))
+        {
+            return ResolveFixedAmount(workOrder, maintenanceTypeFixedAmount);
+        }
+
+        var parts = await _unitOfWork.Repository<WorkOrderPart>()
+            .GetQueryable(part => part.WorkOrderId == workOrder.Id && !part.IsDeleted)
+            .ToListAsync();
+
+        var partsTotal = parts.Sum(part =>
+        {
+            var quantity = part.QuantityUsed > 0 ? part.QuantityUsed : part.QuantityRequired;
+            return part.TotalCost > 0 ? part.TotalCost : quantity * part.UnitCost;
+        });
+
+        var labor = await _unitOfWork.Repository<WorkOrderLabor>()
+            .GetQueryable(record => record.WorkOrderId == workOrder.Id && !record.IsDeleted)
+            .ToListAsync();
+
+        var laborTotal = labor.Sum(record =>
+        {
+            var hours = Convert.ToDecimal(record.Hours);
+            return record.TotalCost > 0 ? record.TotalCost : hours * record.HourlyRate;
+        });
+
+        // Keep this aligned with the Billing tab: each non-excluded tool contributes its daily rental rate.
+        var tools = await _unitOfWork.Repository<WorkOrderTool>()
+            .GetQueryable(tool => tool.WorkOrderId == workOrder.Id && !tool.IsDeleted && !tool.IsExcludedFromBilling)
+            .Include(tool => tool.Tool)
+            .ToListAsync();
+
+        var toolsTotal = tools.Sum(tool => tool.Tool?.DailyRentalRate ?? 0m);
+
+        var expenses = await _expenseRepository.GetByWorkOrderIdAsync(workOrder.Id);
+        var expensesTotal = expenses.Sum(expense => expense.Amount);
+
+        return Math.Round(partsTotal + laborTotal + toolsTotal + expensesTotal, 2, MidpointRounding.AwayFromZero);
+    }
 
     private async Task<WorkOrderDto> MapToWorkOrderDtoAsync(WorkOrder workOrder)
     {
@@ -1693,6 +2159,25 @@ public class WorkOrderService : IWorkOrderService
             }
         }
 
+        var detailMaintenanceTypeFixedAmount = workOrder.MaintenanceType?.FixedAmount ?? 0;
+        if (IsMaintenanceBilling(workOrder.BillingType) && detailMaintenanceTypeFixedAmount <= 0)
+        {
+            try
+            {
+                var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(workOrder.MaintenanceTypeId);
+                detailMaintenanceTypeFixedAmount = maintenanceType?.FixedAmount ?? 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not load maintenance type fixed amount {MaintenanceTypeId} for work order {WorkOrderId}",
+                    workOrder.MaintenanceTypeId, workOrder.Id);
+            }
+        }
+
+        var resolvedFixedAmount = ResolveFixedAmount(workOrder, detailMaintenanceTypeFixedAmount);
+
+        var detailBillingTotal = await CalculateBillingTabTotalAsync(workOrder, detailMaintenanceTypeFixedAmount);
+
         return new WorkOrderDto
         {
             Id = workOrder.Id,
@@ -1714,9 +2199,10 @@ public class WorkOrderService : IWorkOrderService
             EstimatedHours = workOrder.EstimatedHours,
             ActualHours = workOrder.ActualHours,
             EstimatedCost = workOrder.EstimatedCost,
-            ActualCost = workOrder.ActualCost,
+            ActualCost = detailBillingTotal,
             BillingType = workOrder.BillingType,
-            FixedAmount = workOrder.FixedAmount,
+            FixedAmount = resolvedFixedAmount,
+            Type = workOrder.WorkOrderType?.Name ?? string.Empty,
             CompletionNotes = workOrder.CompletionNotes,
             FailureCode = workOrder.FailureCode,
             CauseCode = workOrder.CauseCode,
@@ -1754,7 +2240,8 @@ public class WorkOrderService : IWorkOrderService
                 Description = workOrder.MaintenanceType.Description,
                 Color = workOrder.MaintenanceType.Color,
                 Icon = workOrder.MaintenanceType.Icon,
-                IsActive = workOrder.MaintenanceType.IsActive
+                IsActive = workOrder.MaintenanceType.IsActive,
+                FixedAmount = workOrder.MaintenanceType.FixedAmount
             } : null,
             PriorityLevel = workOrder.PriorityLevel != null ? new PriorityLevelDto
             {
@@ -1886,12 +2373,14 @@ public class WorkOrderService : IWorkOrderService
 
         // Get maintenance type information
         string maintenanceTypeName = "Unknown Type";
+        decimal maintenanceTypeFixedAmount = 0;
         try
         {
             var maintenanceType = await _maintenanceTypeRepository.GetByIdAsync(workOrder.MaintenanceTypeId);
             if (maintenanceType != null)
             {
                 maintenanceTypeName = maintenanceType.Name;
+                maintenanceTypeFixedAmount = maintenanceType.FixedAmount;
             }
         }
         catch (Exception ex)
@@ -1917,6 +2406,9 @@ public class WorkOrderService : IWorkOrderService
             _logger.LogWarning(ex, "Could not load priority level {PriorityLevelId} for work order {WorkOrderId}",
                 workOrder.PriorityLevelId, workOrder.Id);
         }
+
+        var resolvedFixedAmount = ResolveFixedAmount(workOrder, maintenanceTypeFixedAmount);
+        var actualCost = await CalculateBillingTabTotalAsync(workOrder, maintenanceTypeFixedAmount);
 
         return new WorkOrderListDto
         {
@@ -1945,22 +2437,95 @@ public class WorkOrderService : IWorkOrderService
             Type = workOrderTypeName, // Add this for frontend compatibility
             RequestedStartDate = workOrder.RequestedStartDate,
             RequestedCompletionDate = workOrder.RequestedCompletionDate,
+            ScheduledStartDate = workOrder.RequestedStartDate,
+            ScheduledEndDate = workOrder.RequestedCompletionDate,
+            ActualStartDate = workOrder.ActualStartDate,
+            ActualEndDate = workOrder.ActualCompletionDate,
             ActualCompletionDate = workOrder.ActualCompletionDate,
+            BillingType = workOrder.BillingType,
+            FixedAmount = resolvedFixedAmount,
             EstimatedCost = workOrder.EstimatedCost,
-            ActualCost = workOrder.ActualCost,
+            ActualCost = actualCost,
             EstimatedHours = workOrder.EstimatedHours,
             ActualHours = workOrder.ActualHours,
-            IsOverdue = workOrder.RequestedCompletionDate < DateTime.UtcNow && workOrder.Status != "Completed",
+            IsOverdue = IsWorkOrderOverdue(workOrder),
             TasksCount = workOrder.Tasks?.Count ?? 0,
             CompletedTasksCount = workOrder.Tasks?.Count(t => t.Status == "Completed") ?? 0,
             CompletionPercentage = workOrder.Tasks?.Count > 0 ? (double)(workOrder.Tasks?.Count(t => t.Status == "Completed") ?? 0) / workOrder.Tasks.Count * 100 : 0,
-            CreatedAt = workOrder.CreatedAt
+            CreatedAt = workOrder.CreatedAt,
+            CreatedDate = workOrder.CreatedAt,
+            UpdatedAt = workOrder.UpdatedAt,
+            DueDate = workOrder.RequestedCompletionDate,
+            WorkOrderSource = workOrder.MaintenanceScheduleId.HasValue || workOrder.IsRecurring ? "Scheduled" : "Manual"
         };
     }
 
     #endregion
 
     #region Additional Required Methods
+
+    private static void EnsureTechnicianMatchesAssetLocation(
+        ErpSystem.Core.Entities.HR.Employee technician,
+        WorkOrder workOrder)
+    {
+        var assetLocationId = workOrder.Asset?.CurrentSiteLocationId;
+        if (!assetLocationId.HasValue)
+        {
+            throw new InvalidOperationException(
+                $"Asset {workOrder.Asset?.AssetNumber ?? workOrder.AssetId.ToString()} must have a current site location before a technician can be assigned.");
+        }
+
+        if (technician.LocationId != assetLocationId)
+        {
+            throw new InvalidOperationException(
+                $"Technician {technician.FullName} is not assigned to the asset's current location.");
+        }
+    }
+
+    private async Task<List<FleetDefect>> GetLinkedFleetDefectsAsync(WorkOrder workOrder)
+    {
+        return await _unitOfWork.Repository<FleetDefect>()
+            .GetQueryable(defect =>
+                defect.TenantId == workOrder.TenantId &&
+                defect.WorkOrderId == workOrder.Id &&
+                !defect.IsDeleted &&
+                defect.Status != "Closed")
+            .ToListAsync();
+    }
+
+    private static void EnsureLatestQualityCheckPassedForLinkedDefects(
+        WorkOrder workOrder,
+        IReadOnlyCollection<FleetDefect> linkedFleetDefects)
+    {
+        if (linkedFleetDefects.Count == 0)
+            return;
+
+        var latestQualityCheck = workOrder.QualityChecks
+            .OrderByDescending(check => check.InspectionDate)
+            .FirstOrDefault();
+
+        if (latestQualityCheck == null ||
+            !string.Equals(latestQualityCheck.OverallResult, "Pass", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The work order is linked to an inspection defect and cannot be completed until its latest QC result is Pass.");
+        }
+    }
+
+    private async Task CloseLinkedFleetDefectsAsync(
+        IEnumerable<FleetDefect> linkedFleetDefects,
+        Guid? completedById,
+        DateTime completedAt)
+    {
+        var defectRepository = _unitOfWork.Repository<FleetDefect>();
+        foreach (var defect in linkedFleetDefects)
+        {
+            defect.Status = "Closed";
+            defect.UpdatedAt = completedAt;
+            defect.LastModifiedById = completedById;
+            await defectRepository.UpdateAsync(defect);
+        }
+    }
 
     /// <summary>
     /// Gets work orders due soon
@@ -2670,6 +3235,7 @@ public class WorkOrderService : IWorkOrderService
             var effectiveUserId = createdByUserId.HasValue && createdByUserId.Value != Guid.Empty
                 ? createdByUserId.Value
                 : (Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : Guid.Empty);
+            var currencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, tenantId);
 
             var vehicleAssetId = await TryResolveSingleVehicleAssetIdForWorkOrderAsync(workOrder);
             if (!vehicleAssetId.HasValue || vehicleAssetId.Value == Guid.Empty) return;
@@ -2710,7 +3276,7 @@ public class WorkOrderService : IWorkOrderService
                     CostType = "InternalMaintenance",
                     Source = "WorkOrderCompletion",
                     Amount = Math.Round(actualCost, 2, MidpointRounding.AwayFromZero),
-                    CurrencyCode = null,
+                    CurrencyCode = currencyCode,
                     Notes = $"Work Order {workOrder.WorkOrderNumber} completion cost",
                     CreatedAt = now,
                     CreatedById = effectiveUserId
@@ -2722,6 +3288,7 @@ public class WorkOrderService : IWorkOrderService
                 existing.FleetTripId = fleetTripId;
                 existing.CostDateUtc = completedAtUtc.ToUniversalTime();
                 existing.Amount = Math.Round(actualCost, 2, MidpointRounding.AwayFromZero);
+                existing.CurrencyCode = string.IsNullOrWhiteSpace(existing.CurrencyCode) ? currencyCode : existing.CurrencyCode;
                 existing.Notes = $"Work Order {workOrder.WorkOrderNumber} completion cost";
                 existing.Source = "WorkOrderCompletion";
                 existing.UpdatedAt = now;

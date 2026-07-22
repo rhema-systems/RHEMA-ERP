@@ -17,6 +17,25 @@ public static class Constants
         public const string HelpdeskAgent = "HelpdeskAgent";
         public const string HelpdeskSupervisor = "HelpdeskSupervisor";
         public const string HelpdeskManager = "HelpdeskManager";
+
+        public static bool IsProtectedSystemRole(string? roleName)
+        {
+            if (string.IsNullOrWhiteSpace(roleName))
+            {
+                return false;
+            }
+
+            var normalizedRoleName = roleName.Trim();
+            return string.Equals(normalizedRoleName, SuperAdmin, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, TenantAdmin, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, Manager, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, Employee, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, ReadOnly, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, ExternalUser, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, HelpdeskAgent, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, HelpdeskSupervisor, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedRoleName, HelpdeskManager, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     public static class Modules

@@ -31,6 +31,7 @@ public class EmployeeDto
     public string? OrganizationLevelName { get; set; }
     public string? OrganizationUnitName { get; set; }
     public string? LocationLevelName { get; set; }
+    public Guid? LocationId { get; set; }
     public string? LocationName { get; set; }
 
     public StaffStatus StaffStatus { get; set; }

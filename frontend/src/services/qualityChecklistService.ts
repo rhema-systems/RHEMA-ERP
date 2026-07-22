@@ -18,8 +18,11 @@ export interface QualityChecklist {
   name: string;
   description?: string;
   workOrderType: string;
+  workOrderTypeId?: string;
   assetCategory: string;
+  assetCategoryId?: string;
   maintenanceType?: string;
+  maintenanceTypeId?: string;
   isMandatory: boolean;
   isActive: boolean;
   minimumPassingScore: number;
@@ -327,7 +330,7 @@ class QualityChecklistService {
     try {
       console.log(`Updating quality checklist ${id}:`, data);
       console.log('PUT URL will be:', `/quality-checklists/${id}`);
-      console.log('Full URL will be:', `http://localhost:5000/api/quality-checklists/${id}`);
+      console.log('Full URL will be:', `/api/quality-checklists/${id}`);
       
       const response = await apiService.put(`/quality-checklists/${id}`, data);
       console.log('Quality checklist updated successfully:', response);

@@ -14,6 +14,8 @@ namespace ErpSystem.Core.Services.Sales;
 
 public class SalesOrderService : ISalesOrderService
 {
+    private const string WorkflowEntityType = "SalesOrder";
+
     private readonly IGenericRepository<SalesOrder> _salesOrderRepo;
     private readonly IGenericRepository<SalesOrderLine> _lineRepo;
     private readonly IGenericRepository<SalesOrderStatusHistory> _historyRepo;
@@ -21,6 +23,8 @@ public class SalesOrderService : ISalesOrderService
     private readonly IGenericRepository<Quote> _quoteRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ILogger<SalesOrderService> _logger;
 
     public SalesOrderService(
@@ -31,6 +35,8 @@ public class SalesOrderService : ISalesOrderService
         IGenericRepository<Quote> quoteRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ILogger<SalesOrderService> logger)
     {
         _salesOrderRepo = salesOrderRepo;
@@ -40,6 +46,8 @@ public class SalesOrderService : ISalesOrderService
         _quoteRepo = quoteRepo;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _logger = logger;
     }
 
@@ -368,13 +376,24 @@ public class SalesOrderService : ISalesOrderService
             if (so.OrderStatus != SalesOrderStatus.Draft)
                 throw new InvalidOperationException($"Cannot submit Sales Order in {so.OrderStatus} status");
 
-            so.OrderStatus = SalesOrderStatus.PendingApproval;
-            so.ApprovalStatus = "PendingApproval";
-            so.SubmittedById = _currentUserProvider.UserId;
-            so.SubmittedDate = DateTime.UtcNow;
+            var userId = _currentUserProvider.UserId;
+            if (userId == Guid.Empty)
+                throw new UnauthorizedAccessException("User is not authenticated");
+
+            var previousStatus = so.OrderStatus;
+            var workflowResult = await _workflowIntegrationService.SubmitAsync(WorkflowEntityType, id);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start workflow");
+
+            var adapter = _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType);
+            adapter.ApplySubmitOutcome(so, workflowResult.Outcome, userId);
 
             await _salesOrderRepo.UpdateAsync(so);
-            await RecordStatusChangeAsync(so.Id, SalesOrderStatus.Draft, SalesOrderStatus.PendingApproval, "Submitted for approval", so.TenantId);
+            if (previousStatus != so.OrderStatus)
+            {
+                await RecordStatusChangeAsync(so.Id, previousStatus, so.OrderStatus, "Submitted for approval", so.TenantId);
+            }
+
             await SyncLinkedProjectUnitsForSalesOrderAsync(so);
             await _unitOfWork.SaveChangesAsync();
 
@@ -398,23 +417,51 @@ public class SalesOrderService : ISalesOrderService
             if (so.OrderStatus != SalesOrderStatus.PendingApproval)
                 throw new InvalidOperationException($"Sales Order is not pending approval");
 
-            so.ApprovedById = _currentUserProvider.UserId;
-            so.ApprovedDate = DateTime.UtcNow;
-            so.ApprovalComments = dto.Comments;
+            var userId = _currentUserProvider.UserId;
+            if (userId == Guid.Empty)
+                throw new UnauthorizedAccessException("User is not authenticated");
 
-            if (dto.Approved)
+            var canApprove = await _workflowIntegrationService.CanUserApproveAsync(WorkflowEntityType, id, userId);
+            if (!canApprove)
+                throw new UnauthorizedAccessException("You are not assigned to approve the current workflow step");
+
+            var previousStatus = so.OrderStatus;
+            var comments = dto.Approved
+                ? dto.Comments
+                : dto.RejectionReason ?? dto.Comments;
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                WorkflowEntityType,
+                id,
+                userId,
+                dto.Approved ? "Approve" : "Reject",
+                comments);
+
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process approval");
+
+            var adapter = _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType);
+            adapter.ApplyApprovalOutcome(so, workflowResult.Outcome, userId, comments);
+
+            if (previousStatus != so.OrderStatus)
             {
-                so.OrderStatus = SalesOrderStatus.Confirmed;
-                so.ApprovalStatus = "Approved";
-                await RecordStatusChangeAsync(so.Id, SalesOrderStatus.PendingApproval, SalesOrderStatus.Confirmed, dto.Comments ?? "Approved", so.TenantId);
+                var historyNote = workflowResult.Outcome switch
+                {
+                    WorkflowOutcome.Approved => comments ?? "Approved",
+                    WorkflowOutcome.Rejected => comments ?? "Rejected",
+                    _ => comments ?? "Workflow step processed"
+                };
+
+                await RecordStatusChangeAsync(so.Id, previousStatus, so.OrderStatus, historyNote, so.TenantId);
+            }
+
+            if (workflowResult.Outcome == WorkflowOutcome.Approved)
+            {
                 _logger.LogInformation("Sales Order {OrderNumber} approved", so.DocumentNumber);
             }
-            else
+            else if (workflowResult.Outcome == WorkflowOutcome.Rejected)
             {
-                so.OrderStatus = SalesOrderStatus.Rejected;
-                so.ApprovalStatus = "Rejected";
-                await RecordStatusChangeAsync(so.Id, SalesOrderStatus.PendingApproval, SalesOrderStatus.Rejected, dto.RejectionReason ?? "Rejected", so.TenantId);
-                _logger.LogInformation("Sales Order {OrderNumber} rejected: {Reason}", so.DocumentNumber, dto.RejectionReason);
+                _logger.LogInformation("Sales Order {OrderNumber} rejected: {Reason}", so.DocumentNumber, comments);
             }
 
             await _salesOrderRepo.UpdateAsync(so);
@@ -588,11 +635,29 @@ public class SalesOrderService : ISalesOrderService
             if (quote.QuoteStatus != "Accepted")
                 throw new InvalidOperationException("Only accepted quotes can be converted to Sales Orders");
 
+            var existingOrder = (await _salesOrderRepo.FindAsync(o =>
+                    o.TenantId == quote.TenantId
+                    && o.QuoteId == quoteId))
+                .OrderByDescending(o => o.CreatedAt)
+                .FirstOrDefault();
+            if (existingOrder != null)
+            {
+                return await GetSalesOrderByIdAsync(existingOrder.Id)
+                    ?? throw new InvalidOperationException($"Sales Order {existingOrder.Id} could not be loaded");
+            }
+
             var createDto = new CreateSalesOrderDto
             {
                 BusinessPartnerId = quote.CustomerId ?? throw new InvalidOperationException("Quote has no customer"),
                 QuoteId = quoteId,
                 OpportunityId = quote.OpportunityId,
+                Currency = quote.Currency,
+                DiscountAmount = quote.DiscountAmount,
+                ShippingAmount = quote.ShippingAmount,
+                TaxAmount = quote.LineItems.Sum(li => li.TaxAmount),
+                ReferenceNumber = quote.DocumentNumber,
+                Terms = quote.Proposal,
+                ExternalNotes = $"Converted from CRM Quote {quote.DocumentNumber}",
                 Lines = quote.LineItems.Select(li => new CreateSalesOrderLineDto
                 {
                     ProductCode = li.ProductCode,

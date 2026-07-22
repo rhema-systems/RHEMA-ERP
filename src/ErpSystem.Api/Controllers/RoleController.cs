@@ -111,6 +111,11 @@ public class RoleController : ControllerBase
     {
         try
         {
+            if (Constants.Roles.IsProtectedSystemRole(request.Name))
+            {
+                return BadRequest($"'{request.Name}' is reserved for a protected system role and cannot be created from role management.");
+            }
+
             var role = new ApplicationRole(request.Name)
             {
                 Description = request.Description,
@@ -199,10 +204,14 @@ public class RoleController : ControllerBase
                 return NotFound($"Role with ID {id} not found");
             }
 
-            // Don't allow modification of system roles
-            if (role.IsSystemRole)
+            if (role.IsSystemRole || Constants.Roles.IsProtectedSystemRole(role.Name))
             {
-                return BadRequest("System roles cannot be modified");
+                return BadRequest($"'{role.Name}' is a protected system role and cannot be modified.");
+            }
+
+            if (Constants.Roles.IsProtectedSystemRole(request.Name))
+            {
+                return BadRequest($"'{request.Name}' is reserved for a protected system role and cannot be assigned to a custom role.");
             }
 
             // Capture old values for audit logging
@@ -297,10 +306,9 @@ public class RoleController : ControllerBase
                 return NotFound($"Role with ID {id} not found");
             }
 
-            // Don't allow deletion of system roles
-            if (role.IsSystemRole)
+            if (role.IsSystemRole || Constants.Roles.IsProtectedSystemRole(role.Name))
             {
-                return BadRequest("System roles cannot be deleted");
+                return BadRequest($"'{role.Name}' is a protected system role and cannot be deleted.");
             }
 
             var success = await _roleService.DeleteRoleAsync(id);

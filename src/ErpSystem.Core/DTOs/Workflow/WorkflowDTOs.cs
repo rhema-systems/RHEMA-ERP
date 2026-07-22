@@ -23,6 +23,7 @@ public class UpdateWorkflowDefinitionDto
 {
     public string? Name { get; set; }
     public string? Description { get; set; }
+    public string? EntityType { get; set; }
     public string? Configuration { get; set; }
     public Guid LastModifiedById { get; set; }
     public List<CreateWorkflowStepDto>? Steps { get; set; }
@@ -85,6 +86,11 @@ public class WorkflowStepConfigurationDto
     public WorkflowNotificationConfigDto? NotificationConfig { get; set; }
 
     /// <summary>
+    /// Manual task configuration for task/document steps
+    /// </summary>
+    public WorkflowTaskConfigDto? TaskConfig { get; set; }
+
+    /// <summary>
     /// Escalation rules
     /// </summary>
     public List<WorkflowEscalationRuleDto>? EscalationRules { get; set; }
@@ -137,6 +143,12 @@ public class WorkflowConditionDto
 public class WorkflowAssignmentRuleDto
 {
     /// <summary>
+    /// One-based approval group used when the approval step runs sequentially.
+    /// Rules in the same group are activated together.
+    /// </summary>
+    public int ApprovalGroup { get; set; } = 1;
+
+    /// <summary>
     /// Condition that must be met for this assignment rule
     /// </summary>
     public WorkflowConditionDto? Condition { get; set; }
@@ -178,6 +190,11 @@ public class WorkflowApprovalConfigDto
     public WorkflowApprovalType ApprovalType { get; set; }
 
     /// <summary>
+    /// Determines whether every group is available immediately or one group at a time.
+    /// </summary>
+    public WorkflowApprovalActivationMode ActivationMode { get; set; } = WorkflowApprovalActivationMode.Parallel;
+
+    /// <summary>
     /// Required approvers based on conditions
     /// </summary>
     public List<WorkflowAssignmentRuleDto> ApproverRules { get; set; } = new();
@@ -196,6 +213,51 @@ public class WorkflowApprovalConfigDto
     /// Rejection handling
     /// </summary>
     public WorkflowRejectionHandling RejectionHandling { get; set; } = WorkflowRejectionHandling.StopWorkflow;
+
+    /// <summary>
+    /// Prevents the user who initiated the workflow from approving this step.
+    /// </summary>
+    public bool PreventInitiatorApproval { get; set; }
+
+    /// <summary>
+    /// Prevents one user from satisfying more than one approval slot in this step.
+    /// </summary>
+    public bool RequireDistinctApprovers { get; set; }
+
+    /// <summary>
+    /// Cross-step segregation rules evaluated before approval.
+    /// </summary>
+    public List<WorkflowApprovalConflictRuleDto> ConflictRules { get; set; } = new();
+    public WorkflowSignaturePolicyDto? SignaturePolicy { get; set; }
+}
+
+public class WorkflowSignaturePolicyDto
+{
+    public bool IsRequired { get; set; }
+    public WorkflowSignatureMethod Method { get; set; } = WorkflowSignatureMethod.Attestation;
+    public string? RequiredSigningRole { get; set; }
+    public bool RequireValidCertificateChain { get; set; }
+    public string AttestationText { get; set; } = "I confirm that I reviewed and approve this transaction.";
+}
+
+public class WorkflowSignatureSubmissionDto
+{
+    public WorkflowSignatureMethod Method { get; set; }
+    public string Attestation { get; set; } = string.Empty;
+    public string? CertificateBase64 { get; set; }
+    public string? ExternalReference { get; set; }
+    public DateTime SignedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class WorkflowApprovalConflictRuleDto
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; } = true;
+    public WorkflowApprovalActorSource ActorSource { get; set; }
+    public string? SourceStepName { get; set; }
+    public string? ContextField { get; set; }
+    public string? Message { get; set; }
 }
 
 /// <summary>
@@ -224,12 +286,62 @@ public class WorkflowQualityConfigDto
 /// </summary>
 public class WorkflowQualityCheckDto
 {
+    public string? Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public bool IsRequired { get; set; } = true;
+    public bool RequiresDocument { get; set; }
+    public string? DocumentType { get; set; }
+    public string? DocumentName { get; set; }
     public WorkflowConditionDto? ApplicabilityCondition { get; set; }
     public object? ExpectedValue { get; set; }
     public string? ValidationExpression { get; set; }
+}
+
+public class WorkflowApprovalChecklistResponseDto
+{
+    public string? Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public bool IsSatisfied { get; set; }
+    public string? Notes { get; set; }
+    public List<string> AttachmentIds { get; set; } = new();
+    public Guid? CompletedById { get; set; }
+    public string? CompletedByName { get; set; }
+    public DateTime? CompletedAt { get; set; }
+}
+
+public class WorkflowTaskConfigDto
+{
+    public string TaskActionType { get; set; } = "general";
+    public string? DocumentName { get; set; }
+    public bool RequiresDocument { get; set; }
+    public string? DocumentRequirementKey { get; set; }
+    public string? Instructions { get; set; }
+}
+
+public class WorkflowTaskAttachmentDto
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string? RequirementKey { get; set; }
+    public string? ChecklistItemId { get; set; }
+    public string? DocumentType { get; set; }
+    public string? DocumentName { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public long FileSizeBytes { get; set; }
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+    public Guid UploadedById { get; set; }
+    public string? UploadedByName { get; set; }
+    public Guid? DocumentOwnerId { get; set; }
+    public DateTime? IssueDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public int Version { get; set; } = 1;
+    public string? ReplacesAttachmentId { get; set; }
+    public WorkflowEvidenceVerificationStatus VerificationStatus { get; set; }
+    public WorkflowMalwareScanStatus MalwareScanStatus { get; set; }
+    public bool IsLegalHold { get; set; }
+    public string? Sha256 { get; set; }
 }
 
 /// <summary>
@@ -333,6 +445,8 @@ public class WorkflowStatusDto
     public WorkflowInstanceStatus Status { get; set; }
     public DateTime StartedDate { get; set; }
     public DateTime? CompletedDate { get; set; }
+    public string? CurrentStepName { get; set; }
+    public Guid? CurrentStepInstanceId { get; set; }
     public WorkflowProgressDto Progress { get; set; } = null!;
     public List<WorkflowStepStatusDto> Steps { get; set; } = new();
     public List<WorkflowApprovalStatusDto> PendingApprovals { get; set; } = new();
@@ -371,13 +485,16 @@ public class WorkflowStepStatusDto
 public class WorkflowApprovalStatusDto
 {
     public Guid ApprovalId { get; set; }
+    public int ApprovalGroup { get; set; } = 1;
     public string StepName { get; set; } = string.Empty;
     public Guid ApproverId { get; set; }
     public string ApproverName { get; set; } = string.Empty;
+    public string? ApproverRole { get; set; }
     public WorkflowApprovalStatus Status { get; set; }
     public DateTime RequestedDate { get; set; }
     public DateTime? DueDate { get; set; }
     public bool IsOverdue { get; set; }
+    public bool IsAdHoc { get; set; }
 }
 
 /// <summary>
@@ -395,9 +512,20 @@ public class WorkflowEntitySummaryDto
 
     public string? CurrentStepName { get; set; }
     public Guid? CurrentStepInstanceId { get; set; }
+    public WorkflowStepType? CurrentStepType { get; set; }
 
     public bool CanCurrentUserApprove { get; set; }
+    public Guid? CurrentUserApprovalId { get; set; }
+    public Guid? CurrentUserCorrectionId { get; set; }
+    public bool CanCurrentUserResubmit { get; set; }
+    public string? CorrectionInstructions { get; set; }
+    public bool CanCurrentUserRecall { get; set; }
+    public bool CanCurrentUserComplete { get; set; }
     public List<WorkflowPendingApproverDto> PendingApprovers { get; set; } = new();
+    public List<WorkflowQualityCheckDto> CurrentStepChecklist { get; set; } = new();
+    public WorkflowTaskConfigDto? CurrentStepTaskConfig { get; set; }
+    public List<WorkflowTaskAttachmentDto> CurrentStepTaskAttachments { get; set; } = new();
+    public WorkflowSignaturePolicyDto? CurrentStepSignaturePolicy { get; set; }
 }
 
 /// <summary>
@@ -448,6 +576,10 @@ public class WorkflowStepAuditDto
     public Guid? AssignedToId { get; set; }
     public string? AssignedToName { get; set; }
     public string? Comments { get; set; }
+    public List<WorkflowQualityCheckDto> Checklist { get; set; } = new();
+    public List<WorkflowApprovalChecklistResponseDto> ChecklistResponses { get; set; } = new();
+    public WorkflowTaskConfigDto? TaskConfig { get; set; }
+    public List<WorkflowTaskAttachmentDto> TaskAttachments { get; set; } = new();
 
     public List<WorkflowApprovalAuditDto> Approvals { get; set; } = new();
 }
@@ -455,6 +587,8 @@ public class WorkflowStepAuditDto
 public class WorkflowApprovalAuditDto
 {
     public Guid ApprovalId { get; set; }
+    public int ApprovalGroup { get; set; } = 1;
+    public bool IsAdHoc { get; set; }
     public Guid? ApproverId { get; set; }
     public string? ApproverName { get; set; }
     public string? ApproverRole { get; set; }
@@ -505,12 +639,18 @@ public class WorkflowVariableInfo
 public class WorkflowDefinitionDto
 {
     public Guid Id { get; set; }
+    public Guid DefinitionKey { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string EntityType { get; set; } = string.Empty;
     public string? Configuration { get; set; }
     public bool IsActive { get; set; }
     public int Version { get; set; }
+    public WorkflowDefinitionLifecycleStatus LifecycleStatus { get; set; }
+    public string? ChangeSummary { get; set; }
+    public Guid? SupersedesDefinitionId { get; set; }
+    public DateTime? PublishedAt { get; set; }
+    public DateTime? RetiredAt { get; set; }
     public Guid CreatedById { get; set; }
     public string CreatedByName { get; set; } = string.Empty;
     public DateTime CreatedDate { get; set; }

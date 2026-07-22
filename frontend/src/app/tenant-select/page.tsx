@@ -17,6 +17,7 @@ import {
   getRedirectTargetFromCurrentLocation,
   resolveRedirectTarget,
 } from '../../lib/auth-redirect';
+import { getAuthenticatedHomePath } from '../../lib/auth-routing';
 
 export default function TenantSelectPage() {
   const router = useRouter();
@@ -49,13 +50,9 @@ export default function TenantSelectPage() {
     onSuccess: (response, tenant) => {
       setCurrentTenantCode(tenant.tenantCode);
 
-      const roles = userInfo?.roles || authService.getStoredUser()?.roles || [];
-      const isExternalUser = roles.includes('ExternalUser');
-      const isSupportHost = typeof window !== 'undefined' && window.location.hostname.toLowerCase().startsWith('support.');
+      const userForRouting = userInfo ?? authService.getStoredUser();
       const redirectTarget = getRedirectTargetFromCurrentLocation();
-      const fallbackPath = isExternalUser
-        ? (isSupportHost ? '/' : '/external-portal')
-        : '/dashboard';
+      const fallbackPath = getAuthenticatedHomePath(userForRouting);
 
       router.push(resolveRedirectTarget(redirectTarget, fallbackPath));
     },

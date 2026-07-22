@@ -90,13 +90,15 @@ export interface UserSessionUpdate {
 
 class SignalRService {
   private connection: HubConnection | null = null;
+  private connectPromise: Promise<void> | null = null;
   private readonly hubUrl: string;
   private reconnectInterval: NodeJS.Timeout | null = null;
   private isManualDisconnect = false;
+  private rateLimitBackoffUntil = 0;
   private readonly enableSignalRDebugLogging = process.env.NEXT_PUBLIC_DEBUG_SIGNALR === 'true';
 
   constructor() {
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5000';
+    const baseUrl = (process.env.NEXT_PUBLIC_API_URL || '/api').replace(/\/api\/?$/, '');
     this.hubUrl = `${baseUrl}/api/hubs/dashboard`;
     if (this.enableSignalRDebugLogging) {
       console.log('SignalR Service initialized:', {
@@ -118,6 +120,25 @@ class SignalRService {
       return;
     }
 
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
+
+    const now = Date.now();
+    if (this.rateLimitBackoffUntil > now) {
+      const secondsRemaining = Math.ceil((this.rateLimitBackoffUntil - now) / 1000);
+      throw new Error(`SignalR connection is paused after rate limiting. Retry in ${secondsRemaining} seconds.`);
+    }
+
+    this.connectPromise = this.startConnection();
+    try {
+      await this.connectPromise;
+    } finally {
+      this.connectPromise = null;
+    }
+  }
+
+  private async startConnection(): Promise<void> {
     if (!getStoredToken()) {
       console.warn('No authentication token available for SignalR connection');
       throw new Error('No authentication token available');
@@ -164,6 +185,7 @@ class SignalRService {
       }
       
       await this.connection.start();
+      this.rateLimitBackoffUntil = 0;
       
       if (this.enableSignalRDebugLogging) {
         console.log(`SignalR connection established successfully. ConnectionId: ${this.connection.connectionId}`);
@@ -178,6 +200,9 @@ class SignalRService {
       }
     } catch (error) {
       console.error('SignalR connection failed:', error);
+      if (this.isRateLimitError(error)) {
+        this.rateLimitBackoffUntil = Date.now() + 60000;
+      }
       
       // Log additional debugging information
       if (error instanceof Error) {
@@ -202,6 +227,11 @@ class SignalRService {
       
       throw error;
     }
+  }
+
+  private isRateLimitError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('429') || message.toLowerCase().includes('too many requests');
   }
 
   async disconnect(): Promise<void> {
@@ -351,6 +381,12 @@ class SignalRService {
 
   get isConnected(): boolean {
     return this.connection?.state === HubConnectionState.Connected;
+  }
+
+  get isConnecting(): boolean {
+    return this.connectPromise != null ||
+      this.connection?.state === HubConnectionState.Connecting ||
+      this.connection?.state === HubConnectionState.Reconnecting;
   }
 
   get connectionId(): string | null {

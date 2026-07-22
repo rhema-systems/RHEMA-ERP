@@ -18,9 +18,75 @@ public class FleetVehicleListDto
     public string? Model { get; set; }
     public double? Mileage { get; set; }
     public double? OperatingHours { get; set; }
+    public string? Location { get; set; }
+    public Guid? CurrentProjectId { get; set; }
+    public string? CurrentProjectName { get; set; }
+    public Guid? CurrentSiteLocationId { get; set; }
+    public string? CurrentSiteLocationName { get; set; }
+    public DateTime? LastUsedAtUtc { get; set; }
+    public DateTime? LastServiceDate { get; set; }
+    public DateTime? NextServiceDue { get; set; }
+    public DateTime? NextMaintenanceDate { get; set; }
+    public DateTime? NextMaintenanceScheduleDueAt { get; set; }
 
     public Guid? CurrentDriverEmployeeId { get; set; }
     public string? CurrentDriverEmployeeName { get; set; }
+}
+
+public class FleetDriverDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+    public string EmailAddress { get; set; } = string.Empty;
+    public string? PhoneNumber { get; set; }
+    public string PositionTitle { get; set; } = string.Empty;
+    public string DepartmentName { get; set; } = string.Empty;
+    public string StaffStatus { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+
+    public Guid? DriverLicenseId { get; set; }
+    public string? DriverLicenseNumber { get; set; }
+    public DateOnly? LicenseIssueDate { get; set; }
+    public DateOnly? LicenseExpiryDate { get; set; }
+    public string? LicenseIssuingAuthority { get; set; }
+    public bool IsLicenseVerified { get; set; }
+    public DateTime? LicenseVerifiedDate { get; set; }
+    public string LicenseStatus { get; set; } = "Missing";
+    public int? DaysUntilLicenseExpiry { get; set; }
+
+    public Guid? CurrentAssignmentId { get; set; }
+    public Guid? CurrentVehicleAssetId { get; set; }
+    public string? CurrentVehicleName { get; set; }
+    public string? CurrentVehicleAssetNumber { get; set; }
+    public DateTime? AssignedFromUtc { get; set; }
+    public bool IsAssigned { get; set; }
+
+    public int TotalTripCount { get; set; }
+    public int ActiveTripCount { get; set; }
+    public string AvailabilityStatus { get; set; } = "Available";
+    public Guid? ActiveTripId { get; set; }
+    public string? ActiveTripVehicleName { get; set; }
+    public string? ActiveTripVehicleAssetNumber { get; set; }
+    public DateTime? ActiveTripStartedAtUtc { get; set; }
+    public DateTime? LastTripAtUtc { get; set; }
+}
+
+public class FleetDriverSummaryDto
+{
+    public int TotalDrivers { get; set; }
+    public int ValidLicenses { get; set; }
+    public int ExpiringLicenses { get; set; }
+    public int ExpiredLicenses { get; set; }
+    public int MissingLicenses { get; set; }
+    public int UnverifiedLicenses { get; set; }
+    public int AssignedDrivers { get; set; }
+    public int EngagedDrivers { get; set; }
+}
+
+public class FleetDriverDirectoryDto : PagedResult<FleetDriverDto>
+{
+    public FleetDriverSummaryDto Summary { get; set; } = new();
 }
 
 public class CreateFleetVehicleDto
@@ -378,9 +444,13 @@ public class EndFleetDriverAssignmentDto
 public class FleetTripInspectionDto
 {
     public Guid Id { get; set; }
-    public Guid FleetTripId { get; set; }
+    public Guid? FleetTripId { get; set; }
+    public Guid VehicleAssetId { get; set; }
+    public string VehicleAssetName { get; set; } = string.Empty;
+    public string VehicleAssetNumber { get; set; } = string.Empty;
     public Guid InspectionTemplateId { get; set; }
     public string InspectionTemplateName { get; set; } = string.Empty;
+    public string SheetType { get; set; } = "InspectionSheet";
     public Guid? InspectorEmployeeId { get; set; }
     public string? InspectorEmployeeName { get; set; }
     public string InspectionKind { get; set; } = string.Empty;
@@ -390,6 +460,11 @@ public class FleetTripInspectionDto
     public string? OverallResult { get; set; }
     public string InspectionData { get; set; } = "{}";
     public string? Notes { get; set; }
+    public string? ClientSubmissionId { get; set; }
+    public DateTime? CapturedOfflineAtUtc { get; set; }
+    public DateTime? SyncedAtUtc { get; set; }
+    public Guid? DefectId { get; set; }
+    public Guid? WorkOrderId { get; set; }
 }
 
 public class StartFleetTripInspectionDto
@@ -409,6 +484,30 @@ public class StartFleetTripInspectionDto
 public class CompleteFleetTripInspectionDto
 {
     public DateTime? CompletedAtUtc { get; set; }
+
+    [Required]
+    public string OverallResult { get; set; } = "Pass";
+
+    public string InspectionData { get; set; } = "{}";
+    public string? Notes { get; set; }
+}
+
+public class SubmitFleetAssetInspectionDto
+{
+    [Required]
+    public Guid InspectionTemplateId { get; set; }
+
+    public Guid? InspectorEmployeeId { get; set; }
+
+    [Required, StringLength(100)]
+    public string ClientSubmissionId { get; set; } = string.Empty;
+
+    public DateTime? StartedAtUtc { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
+    public DateTime? CapturedOfflineAtUtc { get; set; }
+
+    [StringLength(30)]
+    public string InspectionKind { get; set; } = "PreTrip";
 
     [Required]
     public string OverallResult { get; set; } = "Pass";
@@ -774,6 +873,54 @@ public class FleetDashboardSummaryDto
     public decimal TotalCostThisMonth { get; set; }
     public decimal? AverageFuelCostPerKm { get; set; }
     public decimal? AverageKmPerLiter { get; set; }
+}
+
+public class FleetInspectionOperationsDashboardDto
+{
+    public DateTime StartDateUtc { get; set; }
+    public DateTime EndDateUtc { get; set; }
+    public DateTime LastUpdatedUtc { get; set; }
+    public int TotalInspections { get; set; }
+    public int SyncedInspections { get; set; }
+    public int OfflineCapturedInspections { get; set; }
+    public int PassedInspections { get; set; }
+    public int FailedInspections { get; set; }
+    public int FlaggedInspections { get; set; }
+    public int DefectsCreated { get; set; }
+    public int WorkOrdersCreated { get; set; }
+    public int OpenFollowUpWorkOrders { get; set; }
+    public int QrEnabledTemplates { get; set; }
+    public int StaleQrTemplates { get; set; }
+    public decimal SyncRate { get; set; }
+    public decimal FailureRate { get; set; }
+    public decimal WorkOrderFollowUpRate { get; set; }
+    public List<FleetInspectionSheetBreakdownDto> SheetBreakdown { get; set; } = new();
+    public List<FleetInspectionRecentIssueDto> RecentIssues { get; set; } = new();
+}
+
+public class FleetInspectionSheetBreakdownDto
+{
+    public string SheetType { get; set; } = string.Empty;
+    public int Total { get; set; }
+    public int Failed { get; set; }
+    public int Flagged { get; set; }
+    public int OfflineCaptured { get; set; }
+}
+
+public class FleetInspectionRecentIssueDto
+{
+    public Guid InspectionId { get; set; }
+    public Guid? DefectId { get; set; }
+    public Guid? WorkOrderId { get; set; }
+    public string AssetName { get; set; } = string.Empty;
+    public string AssetNumber { get; set; } = string.Empty;
+    public string TemplateName { get; set; } = string.Empty;
+    public string SheetType { get; set; } = string.Empty;
+    public string OverallResult { get; set; } = string.Empty;
+    public string Severity { get; set; } = string.Empty;
+    public string DefectStatus { get; set; } = string.Empty;
+    public string? WorkOrderStatus { get; set; }
+    public DateTime ReportedAtUtc { get; set; }
 }
 
 public class FleetCostEntryDto

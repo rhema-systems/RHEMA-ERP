@@ -34,6 +34,43 @@ public class FleetInspectionsController : ControllerBase
         }
     }
 
+    [HttpGet("assets/{assetId:guid}")]
+    public async Task<ActionResult<IEnumerable<FleetTripInspectionDto>>> GetForAsset(Guid assetId, [FromQuery] int take = 50)
+    {
+        try
+        {
+            return Ok(await _fleetInspectionService.GetAssetInspectionsAsync(assetId, take));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving fleet inspections for asset {AssetId}", assetId);
+            return StatusCode(500, "An error occurred while retrieving inspections");
+        }
+    }
+
+    [HttpPost("assets/{assetId:guid}/submit")]
+    [Authorize(Policy = "FleetInspectionWrite")]
+    public async Task<ActionResult<FleetTripInspectionDto>> SubmitForAsset(Guid assetId, [FromBody] SubmitFleetAssetInspectionDto dto)
+    {
+        try
+        {
+            return Ok(await _fleetInspectionService.SubmitAssetInspectionAsync(assetId, dto));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error submitting pre-start inspection for asset {AssetId}", assetId);
+            return StatusCode(500, "An error occurred while submitting the inspection");
+        }
+    }
+
     [HttpPost("start")]
     [Authorize(Policy = "FleetInspectionWrite")]
     public async Task<ActionResult<FleetTripInspectionDto>> Start([FromBody] StartFleetTripInspectionDto dto)
@@ -88,6 +125,49 @@ public class FleetInspectionsController : ControllerBase
             _logger.LogError(ex, "Error cancelling fleet inspection {InspectionId}", inspectionId);
             return StatusCode(500, "An error occurred while cancelling the inspection");
         }
+    }
+
+    [HttpPost("{inspectionId:guid}/submit-approval")]
+    [Authorize(Policy = "FleetInspectionWrite")]
+    public async Task<ActionResult<FleetTripInspectionDto>> SubmitApproval(Guid inspectionId)
+    {
+        try
+        {
+            return Ok(await _fleetInspectionService.SubmitForApprovalAsync(inspectionId));
+        }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+    }
+
+    [HttpPost("{inspectionId:guid}/approve")]
+    [Authorize(Policy = "FleetInspectionWrite")]
+    public async Task<ActionResult<FleetTripInspectionDto>> Approve(Guid inspectionId, [FromBody] WorkflowCommentDto? dto)
+    {
+        try
+        {
+            return Ok(await _fleetInspectionService.ApproveAsync(inspectionId, dto?.Comments));
+        }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, ex.Message); }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+    }
+
+    [HttpPost("{inspectionId:guid}/reject")]
+    [Authorize(Policy = "FleetInspectionWrite")]
+    public async Task<ActionResult<FleetTripInspectionDto>> Reject(Guid inspectionId, [FromBody] WorkflowCommentDto? dto)
+    {
+        try
+        {
+            return Ok(await _fleetInspectionService.RejectAsync(inspectionId, dto?.Comments));
+        }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, ex.Message); }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+    }
+
+    public sealed class WorkflowCommentDto
+    {
+        public string? Comments { get; set; }
     }
 }
 

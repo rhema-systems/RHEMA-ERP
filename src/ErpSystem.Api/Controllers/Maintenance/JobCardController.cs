@@ -630,6 +630,29 @@ public class JobCardController : ControllerBase
     }
 
     /// <summary>
+    /// Downloads a document from a job card
+    /// </summary>
+    [HttpGet("{id:guid}/documents/{documentId:guid}/download")]
+    public async Task<IActionResult> DownloadDocument(Guid id, Guid documentId)
+    {
+        try
+        {
+            var document = await _jobCardService.DownloadDocumentAsync(id, documentId);
+            return File(document.Content, document.ContentType, document.FileName);
+        }
+        catch (FileNotFoundException ex)
+        {
+            _logger.LogWarning(ex, "Document {DocumentId} not found for job card {JobCardId}", documentId, id);
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error downloading document {DocumentId} from job card {JobCardId}", documentId, id);
+            return StatusCode(500, "An error occurred while downloading the document");
+        }
+    }
+
+    /// <summary>
     /// Marks a job card as completed with completion details
     /// </summary>
     [HttpPost("{id:guid}/complete")]

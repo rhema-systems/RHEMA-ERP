@@ -97,6 +97,14 @@ public class ReturnOrderController : ControllerBase
     [HttpPost("~/api/sales/credit-notes/{id:guid}/approve")]
     public async Task<IActionResult> ApproveCreditNote(Guid id) => Ok(await _service.ApproveCreditNoteAsync(id));
 
+    [HttpPost("~/api/sales/credit-notes/{id:guid}/submit")]
+    public async Task<IActionResult> SubmitCreditNote(Guid id)
+        => Ok(await _service.SubmitCreditNoteForApprovalAsync(id));
+
+    [HttpPost("~/api/sales/credit-notes/{id:guid}/workflow-approval")]
+    public async Task<IActionResult> ProcessCreditNoteApproval(Guid id, [FromBody] CreditNoteApprovalDto dto)
+        => Ok(await _service.ProcessCreditNoteApprovalAsync(id, dto));
+
     [HttpPost("~/api/sales/credit-notes/{id:guid}/apply")]
     public async Task<IActionResult> ApplyCreditNote(Guid id, [FromQuery] Guid? invoiceId = null)
         => Ok(await _service.ApplyCreditNoteAsync(id, invoiceId));
@@ -134,6 +142,14 @@ public class ReturnOrderController : ControllerBase
 
     [HttpPost("~/api/sales/refunds/{id:guid}/approve")]
     public async Task<IActionResult> ApproveRefund(Guid id) => Ok(await _service.ApproveRefundAsync(id));
+
+    [HttpPost("~/api/sales/refunds/{id:guid}/submit")]
+    public async Task<IActionResult> SubmitRefund(Guid id)
+        => Ok(await _service.SubmitRefundForApprovalAsync(id));
+
+    [HttpPost("~/api/sales/refunds/{id:guid}/workflow-approval")]
+    public async Task<IActionResult> ProcessRefundApproval(Guid id, [FromBody] RefundApprovalDto dto)
+        => Ok(await _service.ProcessRefundApprovalAsync(id, dto));
 
     [HttpPost("~/api/sales/refunds/{id:guid}/process")]
     public async Task<IActionResult> ProcessRefund(Guid id, [FromQuery] string? paymentReference = null)

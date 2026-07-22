@@ -10,6 +10,7 @@ publish/
 *.pidb
 *.sdf
 *.cachefile
+*.lscache
 *.VC.db
 *.VC.VC.opendb
 *.VC.db-shm
@@ -151,6 +152,13 @@ typings/
 # gatsby files
 .cache/
 public
+!frontend/public/
+frontend/public/*
+!frontend/public/icon-192.png
+!frontend/public/icon-512.png
+!frontend/public/login.svg
+!frontend/public/manifest.json
+!frontend/public/sw.js
 
 # vuepress build output
 .vuepress/dist

@@ -1,0 +1,58 @@
+{
+  "id": "/mobile",
+  "name": "Rhema ERP Mobile",
+  "short_name": "Rhema Mobile",
+  "description": "Mobile fleet and maintenance inspections for Rhema ERP",
+  "start_url": "/mobile",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#f8fafc",
+  "orientation": "portrait-primary",
+  "categories": ["business", "productivity", "utilities"],
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Asset Inspection",
+      "short_name": "Inspection",
+      "description": "Open the mobile asset inspection scanner",
+      "url": "/mobile/fleet/inspection?scan=1",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Pending Uploads",
+      "short_name": "Pending",
+      "description": "Sync saved offline inspections",
+      "url": "/mobile/fleet/inspection?pending=1",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "prefer_related_applications": false,
+  "related_applications": [],
+  "lang": "en"
+}

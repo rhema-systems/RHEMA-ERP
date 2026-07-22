@@ -261,7 +261,12 @@ export default function ProcurementPlansPage() {
                         </div>
                       </TableCell>
                       <TableCell>{plan.departmentName || 'N/A'}</TableCell>
-                      <TableCell>{plan.fiscalYear}</TableCell>
+                      <TableCell>
+                        <div>{plan.fiscalYear}</div>
+                        <div className="text-xs text-gray-500">
+                          {plan.planningCycle || 'Annual'}{plan.planningQuarter ? ` - ${plan.planningQuarter}` : ''}
+                        </div>
+                      </TableCell>
                       <TableCell>{getStatusBadge(plan.status)}</TableCell>
                       <TableCell>{formatCurrency(plan.totalEstimatedBudget, plan.currency)}</TableCell>
                       <TableCell>
@@ -337,4 +342,3 @@ export default function ProcurementPlansPage() {
     </div>
   );
 }
-

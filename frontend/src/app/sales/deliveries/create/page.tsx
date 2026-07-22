@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Truck, ArrowLeft, Save, Search, Package } from 'lucide-react';
+import { Truck, ArrowLeft, Save, Search, Package, PackageCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   salesOrderService,

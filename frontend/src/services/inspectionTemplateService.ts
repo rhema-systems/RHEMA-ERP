@@ -3,7 +3,7 @@ import { compatibleApiService as apiService } from './compatibleApiService';
 export interface InspectionTemplateChecklistItem {
   id: string;
   item: string;
-  type: 'checklist' | 'text' | 'number' | 'measurement';
+  type: 'checklist' | 'yesno' | 'text' | 'number' | 'measurement';
   required: boolean;
   order: number;
 }
@@ -14,6 +14,19 @@ export interface InspectionTemplate {
   code: string;
   description: string;
   category: string;
+  sheetType: 'InspectionSheet' | 'ServiceSheet' | 'WeeklyChecklist' | 'PreventiveMaintenanceForm' | string;
+  templateScope: 'General' | 'Fleet' | string;
+  fleetInspectionKind: 'Any' | 'PreTrip' | 'PostTrip' | string;
+  assignedAssetCategoryId?: string | null;
+  assignedAssetId?: string | null;
+  isQrEnabled: boolean;
+  mobileOfflineEnabled: boolean;
+  qrPayloadVersion: number;
+  autoCreateWorkOrderOnFailure: boolean;
+  failureWorkOrderTypeId?: string | null;
+  failureMaintenanceTypeId?: string | null;
+  failurePriorityLevelId?: string | null;
+  failureBillingType: 'Default' | 'Repairs' | 'Maintenance' | string;
   frequency: string;
   estimatedDuration: number;
   isActive: boolean;
@@ -33,6 +46,19 @@ export interface CreateInspectionTemplateDto {
   code: string;
   description: string;
   category: string;
+  sheetType: 'InspectionSheet' | 'ServiceSheet' | 'WeeklyChecklist' | 'PreventiveMaintenanceForm' | string;
+  templateScope: 'General' | 'Fleet' | string;
+  fleetInspectionKind: 'Any' | 'PreTrip' | 'PostTrip' | string;
+  assignedAssetCategoryId?: string | null;
+  assignedAssetId?: string | null;
+  isQrEnabled: boolean;
+  mobileOfflineEnabled: boolean;
+  qrPayloadVersion: number;
+  autoCreateWorkOrderOnFailure: boolean;
+  failureWorkOrderTypeId?: string | null;
+  failureMaintenanceTypeId?: string | null;
+  failurePriorityLevelId?: string | null;
+  failureBillingType: 'Default' | 'Repairs' | 'Maintenance' | string;
   frequency: string;
   estimatedDuration: number;
   isActive: boolean;
@@ -47,6 +73,64 @@ export interface CreateInspectionTemplateDto {
 
 export interface UpdateInspectionTemplateDto extends CreateInspectionTemplateDto {}
 
+export interface InspectionTemplateQuery {
+  activeOnly?: boolean;
+  category?: string;
+  sheetType?: string;
+  frequency?: string;
+  searchTerm?: string;
+  templateScope?: string;
+  fleetInspectionKind?: string;
+  assignedAssetCategoryId?: string;
+  assignedAssetId?: string;
+  isQrEnabled?: boolean;
+  mobileOfflineEnabled?: boolean;
+}
+
+export interface InspectionTemplateQrPackage {
+  schema: string;
+  packageId: string;
+  templateId: string;
+  templateName: string;
+  templateCode: string;
+  templateVersion: string;
+  sheetType: string;
+  templateScope: string;
+  fleetInspectionKind: string;
+  inspectionKind: string;
+  assetId?: string | null;
+  assetName?: string | null;
+  assetNumber?: string | null;
+  assetCategoryId?: string | null;
+  assetCategoryName?: string | null;
+  fleetTripId?: string | null;
+  isQrEnabled: boolean;
+  mobileOfflineEnabled: boolean;
+  allowPhotos: boolean;
+  qrPayloadVersion: number;
+  generatedAtUtc: string;
+  mobileUrl: string;
+  payloadHash: string;
+  signature: string;
+  compactPayloadJson: string;
+  compactPayloadBase64Url: string;
+  qrValue: string;
+  qrPayloadMode: 'Reference' | 'Embedded' | 'UrlOnly' | string;
+  canEmbedFullPayload: boolean;
+  payloadSizeBytes: number;
+  maxQrPayloadBytes: number;
+  checklistItems: InspectionTemplateChecklistItem[];
+}
+
+export interface InspectionTemplateQrPackageQuery {
+  assetId?: string | null;
+  assetCategoryId?: string | null;
+  fleetTripId?: string | null;
+  inspectionKind?: string | null;
+  includeEmbeddedPayload?: boolean;
+  maxQrPayloadBytes?: number;
+}
+
 // Mock data for fallback
 const mockTemplates: InspectionTemplate[] = [
   {
@@ -55,6 +139,19 @@ const mockTemplates: InspectionTemplate[] = [
     code: 'MESI-001',
     description: 'Comprehensive monthly safety check for all production equipment',
     category: 'Safety',
+    sheetType: 'InspectionSheet',
+    templateScope: 'General',
+    fleetInspectionKind: 'Any',
+    assignedAssetCategoryId: null,
+    assignedAssetId: null,
+    isQrEnabled: false,
+    mobileOfflineEnabled: false,
+    qrPayloadVersion: 1,
+    autoCreateWorkOrderOnFailure: true,
+    failureWorkOrderTypeId: null,
+    failureMaintenanceTypeId: null,
+    failurePriorityLevelId: null,
+    failureBillingType: 'Repairs',
     frequency: 'Monthly',
     estimatedDuration: 120,
     isActive: true,
@@ -79,11 +176,24 @@ const mockTemplates: InspectionTemplate[] = [
 class InspectionTemplateService {
   private useBackend = true;
 
-  async getAllTemplates(): Promise<InspectionTemplate[]> {
+  async getAllTemplates(query?: InspectionTemplateQuery): Promise<InspectionTemplate[]> {
     try {
       if (this.useBackend) {
         console.log('Fetching inspection templates from backend API...');
-        const response = await apiService.get('/inspection-templates');
+        const params = new URLSearchParams();
+        if (query?.activeOnly !== undefined) params.set('activeOnly', String(query.activeOnly));
+        if (query?.category) params.set('category', query.category);
+        if (query?.sheetType) params.set('sheetType', query.sheetType);
+        if (query?.frequency) params.set('frequency', query.frequency);
+        if (query?.searchTerm) params.set('searchTerm', query.searchTerm);
+        if (query?.templateScope) params.set('templateScope', query.templateScope);
+        if (query?.fleetInspectionKind) params.set('fleetInspectionKind', query.fleetInspectionKind);
+        if (query?.assignedAssetCategoryId) params.set('assignedAssetCategoryId', query.assignedAssetCategoryId);
+        if (query?.assignedAssetId) params.set('assignedAssetId', query.assignedAssetId);
+        if (query?.isQrEnabled !== undefined) params.set('isQrEnabled', String(query.isQrEnabled));
+        if (query?.mobileOfflineEnabled !== undefined) params.set('mobileOfflineEnabled', String(query.mobileOfflineEnabled));
+        const suffix = params.toString() ? `?${params.toString()}` : '';
+        const response = await apiService.get(`/inspection-templates${suffix}`);
         console.log('Inspection templates fetched successfully:', response);
         return response;
       }
@@ -92,6 +202,19 @@ class InspectionTemplateService {
     }
 
     return mockTemplates;
+  }
+
+  async getOfflineCatalog(): Promise<InspectionTemplate[]> {
+    const params = new URLSearchParams({
+      activeOnly: 'true',
+      isQrEnabled: 'true',
+      mobileOfflineEnabled: 'true',
+    });
+    return apiService.get(`/inspection-templates?${params.toString()}`);
+  }
+
+  async getFleetOfflineCatalog(): Promise<InspectionTemplate[]> {
+    return this.getOfflineCatalog();
   }
 
   async getTemplateById(id: string): Promise<InspectionTemplate | null> {
@@ -107,6 +230,19 @@ class InspectionTemplateService {
     }
 
     return mockTemplates.find(template => template.id === id) || null;
+  }
+
+  async getQrPackage(id: string, query?: InspectionTemplateQrPackageQuery): Promise<InspectionTemplateQrPackage> {
+    const params = new URLSearchParams();
+    if (query?.assetId) params.set('assetId', query.assetId);
+    if (query?.assetCategoryId) params.set('assetCategoryId', query.assetCategoryId);
+    if (query?.fleetTripId) params.set('fleetTripId', query.fleetTripId);
+    if (query?.inspectionKind) params.set('inspectionKind', query.inspectionKind);
+    if (query?.includeEmbeddedPayload !== undefined) params.set('includeEmbeddedPayload', String(query.includeEmbeddedPayload));
+    if (query?.maxQrPayloadBytes) params.set('maxQrPayloadBytes', String(query.maxQrPayloadBytes));
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+
+    return apiService.get(`/inspection-templates/${id}/qr-package${suffix}`);
   }
 
   async createTemplate(data: CreateInspectionTemplateDto): Promise<InspectionTemplate> {
@@ -200,6 +336,19 @@ class InspectionTemplateService {
       code: newCode,
       description: `Copy of ${original.description}`,
       category: original.category,
+      templateScope: original.templateScope || 'General',
+      sheetType: original.sheetType || 'InspectionSheet',
+      fleetInspectionKind: original.fleetInspectionKind || 'Any',
+      assignedAssetCategoryId: original.assignedAssetCategoryId || null,
+      assignedAssetId: original.assignedAssetId || null,
+      isQrEnabled: original.isQrEnabled,
+      mobileOfflineEnabled: original.mobileOfflineEnabled,
+      qrPayloadVersion: original.qrPayloadVersion || 1,
+      autoCreateWorkOrderOnFailure: original.autoCreateWorkOrderOnFailure !== false,
+      failureWorkOrderTypeId: original.failureWorkOrderTypeId || null,
+      failureMaintenanceTypeId: original.failureMaintenanceTypeId || null,
+      failurePriorityLevelId: original.failurePriorityLevelId || null,
+      failureBillingType: original.failureBillingType || 'Repairs',
       frequency: original.frequency,
       estimatedDuration: original.estimatedDuration,
       isActive: original.isActive,

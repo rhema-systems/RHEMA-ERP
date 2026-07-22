@@ -3,6 +3,8 @@ using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 
@@ -50,6 +52,9 @@ public class MaintenanceAsset : TenantEntity
 
     [MaxLength(500)]
     public string? Location { get; set; }
+
+    public Guid? CurrentProjectId { get; set; }
+    public Guid? CurrentSiteLocationId { get; set; }
 
     // Building-specific location details
     [MaxLength(100)]
@@ -129,12 +134,63 @@ public class MaintenanceAsset : TenantEntity
     // Navigation properties
     public virtual MaintenanceAssetCategory AssetCategory { get; set; } = null!;
     public virtual Employee? Employee { get; set; } // Asset custodian/responsible employee
+    public virtual Project? CurrentProject { get; set; }
+    public virtual Location? CurrentSiteLocation { get; set; }
     public virtual MaintenanceAsset? ParentAsset { get; set; }
     public virtual ICollection<MaintenanceAsset> ChildAssets { get; set; } = new List<MaintenanceAsset>();
     public virtual ICollection<WorkOrder> WorkOrders { get; set; } = new List<WorkOrder>();
     public virtual ICollection<MaintenanceSchedule> MaintenanceSchedules { get; set; } = new List<MaintenanceSchedule>();
     public virtual ICollection<AssetInspection> Inspections { get; set; } = new List<AssetInspection>();
     public virtual ICollection<AssetDowntime> Downtimes { get; set; } = new List<AssetDowntime>();
+    public virtual ICollection<MaintenanceAssetMovement> Movements { get; set; } = new List<MaintenanceAssetMovement>();
+}
+
+public class MaintenanceAssetMovement : TenantEntity
+{
+    [Required]
+    public Guid AssetId { get; set; }
+
+    public Guid? FromProjectId { get; set; }
+    public Guid? ToProjectId { get; set; }
+
+    [MaxLength(250)]
+    public string? FromProjectName { get; set; }
+
+    [MaxLength(250)]
+    public string? ToProjectName { get; set; }
+
+    public Guid? FromSiteLocationId { get; set; }
+    public Guid? ToSiteLocationId { get; set; }
+
+    [MaxLength(250)]
+    public string? FromSiteLocationName { get; set; }
+
+    [MaxLength(250)]
+    public string? ToSiteLocationName { get; set; }
+
+    [MaxLength(500)]
+    public string? FromLocation { get; set; }
+
+    [MaxLength(500)]
+    public string? ToLocation { get; set; }
+
+    [Required]
+    [MaxLength(30)]
+    public string MovementType { get; set; } = "Transfer";
+
+    [Required]
+    public DateTime EffectiveDate { get; set; } = DateTime.UtcNow;
+
+    [Required]
+    [MaxLength(500)]
+    public string Reason { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    public Guid? MovedByUserId { get; set; }
+
+    public virtual MaintenanceAsset Asset { get; set; } = null!;
 }
 
 public class MaintenanceAssetCategory : TenantEntity
@@ -620,7 +676,7 @@ public class WorkOrder : TenantEntity
     public string MaintenanceLocation { get; set; } = "Internal"; // Internal, External, Onsite, Offsite
 
     /// <summary>
-    /// ID of the user (ApplicationUser) assigned as technician for this work order
+    /// ID of the HR employee assigned as technician for this work order
     /// </summary>
     public Guid? AssignedTechnicianId { get; set; }
     public Guid? AssignedTeamId { get; set; }
@@ -938,6 +994,7 @@ public class JobCard : TenantEntity
 
     // Request details
     public Guid RequestedById { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
     public DateTime RequestedDate { get; set; } = DateTime.UtcNow;
     public DateTime? RequiredCompletionDate { get; set; }
 
@@ -1098,6 +1155,7 @@ public class JobCard : TenantEntity
     public virtual MaintenanceAsset Asset { get; set; } = null!;
     public virtual MaintenanceType MaintenanceType { get; set; } = null!;
     public virtual PriorityLevel PriorityLevel { get; set; } = null!;
+    public virtual BusinessPartner? CustomerBusinessPartner { get; set; }
     public virtual Employee RequestedBy { get; set; } = null!;
     public virtual Employee? PreferredTechnician { get; set; }
     public virtual TechnicianTeam? PreferredTeam { get; set; }
@@ -1633,6 +1691,32 @@ public class InspectionTemplate : TenantEntity
 
     [Required]
     [MaxLength(50)]
+    public string SheetType { get; set; } = "InspectionSheet"; // InspectionSheet, ServiceSheet, WeeklyChecklist, PreventiveMaintenanceForm
+
+    [Required]
+    [MaxLength(50)]
+    public string TemplateScope { get; set; } = "General"; // General, Fleet
+
+    [Required]
+    [MaxLength(30)]
+    public string FleetInspectionKind { get; set; } = "Any"; // Any, PreTrip, PostTrip
+
+    public Guid? AssignedAssetCategoryId { get; set; }
+    public Guid? AssignedAssetId { get; set; }
+
+    public bool IsQrEnabled { get; set; } = false;
+    public bool MobileOfflineEnabled { get; set; } = false;
+    public int QrPayloadVersion { get; set; } = 1;
+    public bool AutoCreateWorkOrderOnFailure { get; set; } = true;
+    public Guid? FailureWorkOrderTypeId { get; set; }
+    public Guid? FailureMaintenanceTypeId { get; set; }
+    public Guid? FailurePriorityLevelId { get; set; }
+
+    [MaxLength(20)]
+    public string FailureBillingType { get; set; } = "Repairs"; // Repairs, Maintenance
+
+    [Required]
+    [MaxLength(50)]
     public string Frequency { get; set; } = "AdHoc"; // Daily, Weekly, Monthly, Quarterly, Yearly, AdHoc
 
     [MaxLength(50)]
@@ -1776,7 +1860,7 @@ public class TechnicianTeamMember : TenantEntity
 
     // Navigation properties
     public virtual TechnicianTeam Team { get; set; } = null!;
-    // TechnicianId now references ApplicationUser (Users table) instead of Employee
+    public virtual Employee Technician { get; set; } = null!;
 }
 
 public class TechnicianSkill : TenantEntity

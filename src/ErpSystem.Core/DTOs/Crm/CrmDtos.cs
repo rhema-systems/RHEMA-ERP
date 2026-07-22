@@ -763,6 +763,9 @@ public class CrmActivitySummaryDto
     public string? LeadName { get; set; }
     public Guid? OpportunityId { get; set; }
     public string? OpportunityName { get; set; }
+    public string? RelatedEntityType { get; set; }
+    public Guid? RelatedEntityId { get; set; }
+    public string? RelatedEntityHref { get; set; }
 }
 
 public class CrmActivityListItemDto : CrmActivitySummaryDto
