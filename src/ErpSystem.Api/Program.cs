@@ -118,6 +118,37 @@ if (args.Length > 0 && args[0] == "seed-db")
     return;
 }
 
+// Check for HR module seeding command.
+// Seeds HR reference data plus the TDC organisation structure and locations into the DEFAULT tenant.
+// Idempotent: every step is skipped when its data is already present, so re-running is always safe.
+// Prerequisites: 'rebuild-db' (schema) and 'seed' (DEFAULT tenant + admin user).
+if (args.Length > 0 && args[0] == "seed-hr-all")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+        var orchestrator = new ErpSystem.Data.Seeders.HrSeedOrchestrator(context, loggerFactory);
+
+        if (!await orchestrator.SeedAsync())
+        {
+            Console.WriteLine("❌ HR seeding did not complete — see the log above.");
+            Environment.ExitCode = 1;
+            return;
+        }
+    }
+
+    Console.WriteLine("✅ HR seeding completed!");
+    return;
+}
+
 // Check for development database rebuild command.
 // This bypasses the current migration chain and recreates the schema directly from the EF model.
 if (args.Length > 0 && args[0] == "rebuild-db")
