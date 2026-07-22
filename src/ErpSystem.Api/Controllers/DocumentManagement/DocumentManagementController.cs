@@ -340,6 +340,13 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "Generated DMS document was not found." });
         }
 
+        var normalizedAction = NormalizeMetadataField(action);
+        // PR review: generated document workflow transitions must honor DMS permissions and configured approval/signature roles.
+        if (!await CanRunGeneratedDocumentWorkflowActionAsync(tenantId, record, normalizedAction, cancellationToken))
+        {
+            return Forbid();
+        }
+
         var version = await _db.CentralDocumentVersions
             .Where(item => item.TenantId == tenantId
                 && item.DocumentRecordId == record.Id
@@ -348,7 +355,6 @@ public sealed class DocumentManagementController : ControllerBase
             .FirstOrDefaultAsync(cancellationToken);
         var metadata = new List<UpsertDocumentMetadataValueRequest>();
         var actor = _currentUserService.UserName ?? "System";
-        var normalizedAction = NormalizeMetadataField(action);
 
         switch (normalizedAction)
         {
@@ -865,6 +871,7 @@ public sealed class DocumentManagementController : ControllerBase
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
             .Take(take)
             .ToListAsync(cancellationToken);
+        records = await FilterViewableRecordsAsync(tenantId, records, cancellationToken);
         var templatesByCode = await GetTemplatesByCodeAsync(tenantId, cancellationToken);
         var metadataValuesByRecord = await GetMetadataValuesByRecordAsync(tenantId, records.Select(item => item.Id), cancellationToken);
 
@@ -913,6 +920,7 @@ public sealed class DocumentManagementController : ControllerBase
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
             .Take(take)
             .ToListAsync(cancellationToken);
+        versions = await FilterViewableVersionsAsync(tenantId, versions, cancellationToken);
 
         var queueItems = versions.Select(version => new
         {
@@ -1230,6 +1238,11 @@ public sealed class DocumentManagementController : ControllerBase
         if (record is null)
         {
             return NotFound(new { success = false, message = "DMS document record was not found." });
+        }
+
+        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanArchive, cancellationToken))
+        {
+            return Forbid();
         }
 
         record.IsDeleted = true;
@@ -2009,6 +2022,11 @@ public sealed class DocumentManagementController : ControllerBase
     [HttpPost("access-rules")]
     public async Task<IActionResult> CreateAccessRule([FromBody] UpsertAccessRuleRequest request, CancellationToken cancellationToken)
     {
+        if (!IsDmsAccessAdministrator())
+        {
+            return Forbid();
+        }
+
         var tenantId = GetTenantId();
         var rule = new CentralDocumentAccessRule
         {
@@ -2706,6 +2724,23 @@ public sealed class DocumentManagementController : ControllerBase
         return viewableRecords;
     }
 
+    private async Task<List<CentralDocumentVersion>> FilterViewableVersionsAsync(
+        Guid tenantId,
+        IEnumerable<CentralDocumentVersion> versions,
+        CancellationToken cancellationToken)
+    {
+        var viewableVersions = new List<CentralDocumentVersion>();
+        foreach (var version in versions)
+        {
+            if (await CanUseRecordActionAsync(tenantId, version.DocumentRecord, rule => rule.CanView, cancellationToken))
+            {
+                viewableVersions.Add(version);
+            }
+        }
+
+        return viewableVersions;
+    }
+
     private static IReadOnlyList<CentralDocumentMetadataValue> MetadataValuesFor(
         Guid recordId,
         IReadOnlyDictionary<Guid, IReadOnlyList<CentralDocumentMetadataValue>> valuesByRecord)
@@ -3305,11 +3340,104 @@ public sealed class DocumentManagementController : ControllerBase
                     || _currentUserService.IsInRole(rule.RoleName)));
     }
 
+    private async Task<bool> CanRunGeneratedDocumentWorkflowActionAsync(
+        Guid tenantId,
+        CentralDocumentRecord record,
+        string normalizedAction,
+        CancellationToken cancellationToken)
+    {
+        if (IsDmsAccessAdministrator())
+        {
+            return true;
+        }
+
+        var hasDocumentPermission = normalizedAction switch
+        {
+            "submitapproval" or "submitforapproval" => await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken),
+            "approve" or "return" or "returnforaction" => await CanUseRecordActionAsync(tenantId, record, rule => rule.CanApprove, cancellationToken),
+            "sign" => await CanUseRecordActionAsync(tenantId, record, rule => rule.CanApprove, cancellationToken),
+            "dispatch" => await CanUseRecordActionAsync(tenantId, record, rule => rule.CanArchive, cancellationToken),
+            _ => false
+        };
+        if (!hasDocumentPermission)
+        {
+            return false;
+        }
+
+        var template = await ResolveGeneratedTemplateForRecordAsync(tenantId, record, cancellationToken);
+        return normalizedAction switch
+        {
+            "approve" or "return" or "returnforaction" => HasConfiguredOrSourceRole(template?.ApprovalRole, record, "Authorised Signatory", "Records Officer"),
+            "sign" => HasConfiguredOrSourceRole(template?.SignatureRole, record, "Authorised Signatory", "Records Officer"),
+            "dispatch" => HasAnyRole("Records Officer", "Estate Officer"),
+            _ => true
+        };
+    }
+
+    private async Task<GeneratedDocumentTemplateDefinition?> ResolveGeneratedTemplateForRecordAsync(
+        Guid tenantId,
+        CentralDocumentRecord record,
+        CancellationToken cancellationToken)
+    {
+        await EnsureDefaultGenerationTemplatesAsync(tenantId, cancellationToken);
+        var templateCode = await _db.CentralDocumentMetadataValues
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && item.DocumentRecordId == record.Id
+                && !item.IsDeleted
+                && item.FieldKey == "templatecode")
+            .Select(item => item.FieldValue)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        templateCode = TrimToNull(templateCode) ?? TemplateCodeFromSourceReference(record.SourceRecordReference);
+        var query = _db.CentralDocumentGenerationTemplates
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.IsActive && !item.IsDeleted);
+
+        CentralDocumentGenerationTemplate? template = null;
+        if (!string.IsNullOrWhiteSpace(templateCode))
+        {
+            template = await query.FirstOrDefaultAsync(item => item.TemplateCode == templateCode, cancellationToken);
+        }
+
+        template ??= await query.FirstOrDefaultAsync(item =>
+            item.Module == record.SourceModule
+            && item.MetadataTemplateCode == record.MetadataTemplateCode
+            && item.DocumentType == record.SourceEntityType,
+            cancellationToken);
+
+        return template is null ? null : ToGeneratedTemplateDefinition(template);
+    }
+
+    private bool HasConfiguredOrSourceRole(string? configuredRole, CentralDocumentRecord record, params string[] fallbackRoles)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredRole))
+        {
+            return _currentUserService.IsInRole(configuredRole);
+        }
+
+        return HasAnyRole(DmsSourceRoles(record).Concat(fallbackRoles).ToArray());
+    }
+
+    private bool HasAnyRole(params string[] roles)
+        => roles.Any(role => !string.IsNullOrWhiteSpace(role) && _currentUserService.IsInRole(role));
+
     private bool IsDmsAccessAdministrator()
         => _currentUserService.IsInRole("SuperAdmin")
             || _currentUserService.IsInRole("TenantAdmin")
             || _currentUserService.IsInRole("Document Control Officer")
             || _currentUserService.IsInRole("Records Officer");
+
+    private static string? TemplateCodeFromSourceReference(string? sourceRecordReference)
+    {
+        if (string.IsNullOrWhiteSpace(sourceRecordReference))
+        {
+            return null;
+        }
+
+        var markerIndex = sourceRecordReference.LastIndexOf(" / ", StringComparison.Ordinal);
+        return markerIndex < 0 ? null : TrimToNull(sourceRecordReference[(markerIndex + 3)..]);
+    }
 
     private sealed record VersionDownloadFile(
         bool Success,

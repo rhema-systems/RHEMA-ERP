@@ -558,6 +558,30 @@ public class LandAcquisitionsController : ControllerBase
             return NotFound("Land acquisition was not found.");
         }
 
+        var userId = GetUserId();
+        var isAdministrator = IsWorkflowAdministrator();
+        var assetCreationStage = StageDefinitions[^1];
+        if (acquisition.StageOrder < assetCreationStage.Order)
+        {
+            return BadRequest("Complete the acquisition workflow through asset creation before handing it to project management.");
+        }
+
+        // PR review: project-management handoff must stay behind the same workflow authority as the active acquisition stage.
+        if (!await CanAccessStageAsync(acquisition, acquisition.StageOrder, userId, isAdministrator))
+        {
+            return Forbid();
+        }
+
+        var missingInputs = GetMissingStageInputs(acquisition, assetCreationStage.Order);
+        if (missingInputs.Count > 0)
+        {
+            return BadRequest(new
+            {
+                message = "Complete every required asset creation input before handing this acquisition to project management.",
+                missingInputs
+            });
+        }
+
         var survey = acquisition.CadastralSurveys.FirstOrDefault();
         if (survey == null || string.IsNullOrWhiteSpace(survey.BoundaryCoordinates))
         {
@@ -590,7 +614,7 @@ public class LandAcquisitionsController : ControllerBase
 
         acquisition.InternalApproved = true;
         acquisition.UpdatedAt = DateTime.UtcNow;
-        acquisition.LastModifiedById = GetUserId();
+        acquisition.LastModifiedById = userId;
         await _context.SaveChangesAsync(cancellationToken);
 
         return Ok(new
