@@ -226,6 +226,92 @@ public sealed class ArReceiptPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
     [Trait("Category", "AccountsReceivable")]
+    public async Task MissingInvoiceRequestedForAllocation_ShouldBeRejectedInsteadOfBecomingAdvance()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        db.Remove(fixture.Allocation);
+        fixture.Payment.AllocatedAmount = 0m;
+        fixture.Invoice.PaidAmount = 0m;
+        fixture.Invoice.Status = InvoiceStatus.Sent;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+        var missingInvoiceId = Guid.NewGuid();
+
+        var act = () => service.AllocatePaymentAsync(new PaymentAllocation_CreateDto
+        {
+            CustomerPaymentId = fixture.Payment.Id,
+            Allocations = new List<InvoiceAllocationDto>
+            {
+                new() { InvoiceId = missingInvoiceId, AllocatedAmount = 100m }
+            }
+        });
+
+        await act.Should().ThrowAsync<KeyNotFoundException>()
+            .WithMessage($"Customer receipt allocation invoice(s) were not found for this tenant: {missingInvoiceId}.");
+        (await db.Set<PaymentAllocation>().CountAsync(a => a.CustomerPaymentId == fixture.Payment.Id)).Should().Be(0);
+        (await db.Set<CustomerPayment>().SingleAsync(p => p.Id == fixture.Payment.Id)).AllocatedAmount.Should().Be(0m);
+        (await db.Invoices.SingleAsync(i => i.Id == fixture.Invoice.Id)).PaidAmount.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task DifferentCustomerInvoiceRequestedForAllocation_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        db.Remove(fixture.Allocation);
+        fixture.Payment.AllocatedAmount = 0m;
+        fixture.Invoice.PaidAmount = 0m;
+        fixture.Invoice.Status = InvoiceStatus.Sent;
+
+        var otherCustomer = new BusinessPartner
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            PartnerCode = $"CUS-OTHER-{tenantId.ToString("N")[..6]}",
+            PartnerName = "Other Customer",
+            PartnerType = "Customer",
+            RegistrationStatus = "Approved",
+            IsActive = true,
+            DefaultArAccountId = fixture.ArAccount.Id,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.Set<BusinessPartner>().Add(otherCustomer);
+        var otherInvoice = SeedPostedInvoice(
+            db,
+            tenantId,
+            otherCustomer,
+            fixture.ArAccount,
+            "INV-OTHER-CUSTOMER",
+            fixture.Payment.PaymentDate,
+            100m);
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.AllocatePaymentAsync(new PaymentAllocation_CreateDto
+        {
+            CustomerPaymentId = fixture.Payment.Id,
+            Allocations = new List<InvoiceAllocationDto>
+            {
+                new() { InvoiceId = otherInvoice.Id, AllocatedAmount = 100m }
+            }
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"Invoice '{otherInvoice.InvoiceNumber}' does not belong to the customer selected for this receipt.");
+        (await db.Set<PaymentAllocation>().CountAsync(a => a.CustomerPaymentId == fixture.Payment.Id)).Should().Be(0);
+        (await db.Set<CustomerPayment>().SingleAsync(p => p.Id == fixture.Payment.Id)).AllocatedAmount.Should().Be(0m);
+        (await db.Invoices.SingleAsync(i => i.Id == otherInvoice.Id)).PaidAmount.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
+    [Trait("Category", "AccountsReceivable")]
     public async Task CrossTenantArControlAccount_ShouldBeRejected()
     {
         var tenantId = Guid.NewGuid();

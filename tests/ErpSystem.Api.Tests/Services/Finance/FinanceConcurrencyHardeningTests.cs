@@ -504,6 +504,60 @@ public sealed class FinanceConcurrencyHardeningTests
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
+    public void ArReceiptCreation_ShouldCommitSourceAllocationAndPostingAtomically()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "AR",
+            "PaymentService.cs"));
+        var createMethod = ExtractMember(
+            source,
+            "public async Task<CustomerPaymentDto> CreateAsync",
+            "public async Task<CustomerPaymentDto> UpdateAsync");
+        var allocationMethod = ExtractMember(
+            source,
+            "private async Task<PaymentAllocationResultDto> AllocatePaymentCoreAsync",
+            "private async Task<IReadOnlyDictionary<Guid, Invoice>> ResolveRequestedAllocationInvoicesAsync");
+        var resolverMethod = ExtractMember(
+            source,
+            "private async Task<IReadOnlyDictionary<Guid, Invoice>> ResolveRequestedAllocationInvoicesAsync",
+            "private async Task<PaymentAllocationResultDto> AllocatePostedCustomerAdvanceAsync");
+
+        var transactionIndex = createMethod.IndexOf("BeginTransactionAsync(IsolationLevel.Serializable", StringComparison.Ordinal);
+        var sourceSaveIndex = createMethod.IndexOf("_unitOfWork.SaveChangesAsync", StringComparison.Ordinal);
+        var allocationIndex = createMethod.IndexOf("AllocatePaymentCoreAsync", StringComparison.Ordinal);
+        var postingIndex = createMethod.IndexOf("PostArReceiptCoreAsync", StringComparison.Ordinal);
+        var commitIndex = createMethod.IndexOf("_unitOfWork.CommitAsync", StringComparison.Ordinal);
+
+        transactionIndex.Should().BeGreaterThan(-1, "receipt creation must establish the accounting transaction before mutation");
+        transactionIndex.Should().BeLessThan(sourceSaveIndex, "the new payment row must be part of the transaction");
+        sourceSaveIndex.Should().BeLessThan(allocationIndex, "allocation must use the persisted source row in the same transaction");
+        allocationIndex.Should().BeLessThan(postingIndex, "validated allocation must precede GL posting");
+        postingIndex.Should().BeLessThan(commitIndex, "posting and source snapshots must commit together");
+        createMethod.Should().Contain("_unitOfWork.RollbackAsync", "any create/allocation/posting failure must roll back the receipt command");
+        createMethod.Should().NotContain("await PostAsync(payment.Id", "create must use the shared posting core instead of starting a nested transaction");
+        createMethod.Should().Contain("allocationResult.Allocations.Count != dto.Allocations.Count",
+            "a partially applied allocation request must not be posted as an advance");
+
+        allocationMethod.Should().Contain("ResolveRequestedAllocationInvoicesAsync",
+            "allocation references must be validated before invoice or customer snapshots are changed");
+        allocationMethod.Should().NotContain("skipping allocation",
+            "missing or mismatched invoice references must fail rather than silently becoming unapplied cash");
+        resolverMethod.Should().Contain("i.TenantId == TenantId", "allocation invoice lookup must remain tenant-scoped");
+        resolverMethod.Should().Contain("i.BusinessPartnerId != payment.CustomerId",
+            "every allocated invoice must belong to the receipt customer");
+        resolverMethod.Should().Contain("throw new KeyNotFoundException",
+            "missing invoice IDs must produce an explicit client-visible failure");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
     public void YearEndClose_ShouldPostThroughFinancePostingEngine()
     {
         var root = FindRepositoryRoot();
