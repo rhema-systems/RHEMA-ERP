@@ -37,6 +37,12 @@ export default function TenderDetailPage() {
   const [publishData, setPublishData] = useState({
     submissionDeadline: '',
     openingDate: '',
+    advertisementReference: '',
+    publicationChannel: '',
+    tenderDocumentReference: '',
+    tenderDocumentVersion: '',
+    documentFee: 0,
+    advertisementEvidenceReference: '',
   });
   const [externalEmailInput, setExternalEmailInput] = useState('');
   const [externalRecipientEmails, setExternalRecipientEmails] = useState<string[]>([]);
@@ -115,8 +121,8 @@ export default function TenderDetailPage() {
     if (submissionDeadline) {
       setPublishData(prev => ({
         ...prev,
-        submissionDeadline: new Date(submissionDeadline).toISOString().split('T')[0],
-        openingDate: openingDate ? new Date(openingDate).toISOString().split('T')[0] : '',
+        submissionDeadline: new Date(submissionDeadline).toISOString().slice(0, 16),
+        openingDate: openingDate ? new Date(openingDate).toISOString().slice(0, 16) : '',
       }));
     }
     setShowPublishDialog(true);
@@ -174,6 +180,12 @@ export default function TenderDetailPage() {
         invitedBusinessPartnerIds,
         externalRecipientEmails,
         sendNotifications: true,
+        advertisementReference: publishData.advertisementReference || undefined,
+        publicationChannel: publishData.publicationChannel || undefined,
+        tenderDocumentReference: publishData.tenderDocumentReference || undefined,
+        tenderDocumentVersion: publishData.tenderDocumentVersion || undefined,
+        documentFee: publishData.documentFee,
+        advertisementEvidenceReference: publishData.advertisementEvidenceReference || undefined,
       });
 
       toast.success('Tender published successfully! Notifications sent to invited suppliers.');
@@ -276,6 +288,18 @@ export default function TenderDetailPage() {
             <Button onClick={handlePublishClick}>
               <Send className="h-4 w-4 mr-2" />
               Publish Tender
+            </Button>
+          )}
+          {['Approved', 'Published', 'Awarded'].includes(tender.status) && tender.sourcingCaseId && tender.tenderType !== 'RFQ' && (
+            <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${tenderId}/controls`)}>
+              <Shield className="h-4 w-4 mr-2" />
+              NCT / ICT Controls
+            </Button>
+          )}
+          {['Approved', 'Published', 'Awarded'].includes(tender.status) && tender.sourcingCaseId && tender.tenderType !== 'RFQ' && (
+            <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${tenderId}/exception-controls`)}>
+              <Shield className="h-4 w-4 mr-2" />
+              Restricted / Single Source
             </Button>
           )}
         </div>
@@ -1236,6 +1260,29 @@ export default function TenderDetailPage() {
                 </div>
               </div>
             </div>
+
+            <div className="rounded-lg border bg-white p-4 space-y-3">
+              <h4 className="font-semibold text-sm">Publication dates</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2"><Label>Submission deadline</Label><Input type="datetime-local" value={publishData.submissionDeadline} onChange={(e) => setPublishData({ ...publishData, submissionDeadline: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Public opening</Label><Input type="datetime-local" value={publishData.openingDate} onChange={(e) => setPublishData({ ...publishData, openingDate: e.target.value })} /></div>
+              </div>
+            </div>
+
+            {tender?.tenderType !== 'RFQ' && (
+              <div className="rounded-lg border bg-white p-4 space-y-3">
+                <h4 className="font-semibold text-sm">NCT / ICT statutory advertisement</h4>
+                <p className="text-xs text-muted-foreground">Required when the immutable sourcing case selected NCT or ICT. The server validates the exact method and authority lineage.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2"><Label>Advertisement reference</Label><Input value={publishData.advertisementReference} onChange={(e) => setPublishData({ ...publishData, advertisementReference: e.target.value })} /></div>
+                  <div className="space-y-2"><Label>Publication channel</Label><Input value={publishData.publicationChannel} onChange={(e) => setPublishData({ ...publishData, publicationChannel: e.target.value })} /></div>
+                  <div className="space-y-2"><Label>Approved document reference</Label><Input value={publishData.tenderDocumentReference} onChange={(e) => setPublishData({ ...publishData, tenderDocumentReference: e.target.value })} /></div>
+                  <div className="space-y-2"><Label>Document version</Label><Input value={publishData.tenderDocumentVersion} onChange={(e) => setPublishData({ ...publishData, tenderDocumentVersion: e.target.value })} /></div>
+                  <div className="space-y-2"><Label>Document fee (0 = free)</Label><Input type="number" min="0" value={publishData.documentFee} onChange={(e) => setPublishData({ ...publishData, documentFee: Number(e.target.value) })} /></div>
+                  <div className="space-y-2"><Label>Advertisement evidence</Label><Input value={publishData.advertisementEvidenceReference} onChange={(e) => setPublishData({ ...publishData, advertisementEvidenceReference: e.target.value })} /></div>
+                </div>
+              </div>
+            )}
 
             {/* External/Public Recipients (RFQ) */}
             {tender?.tenderType === 'RFQ' && (

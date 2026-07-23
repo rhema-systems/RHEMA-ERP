@@ -675,6 +675,12 @@ const navigationItems: NavItem[] = [
         children: [
           { title: 'Tenders', href: '/procurement/tenders', icon: Gavel },
           {
+            title: 'Prequalification',
+            href: '/procurement/prequalification',
+            icon: ShieldCheck,
+            permissions: ['procurement.records.read'],
+          },
+          {
             title: 'My Assigned Tenders',
             href: '/procurement/my-assigned-tenders',
             icon: FileText,

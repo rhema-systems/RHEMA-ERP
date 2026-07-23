@@ -46,6 +46,9 @@
     <Compile Include="Controllers\Procurement\ProcurementCalendarControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementSourcingCasesControllerTests.cs" />
     <Compile Include="Controllers\Procurement\RfqsControllerStatutoryControlsTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderControlsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ExceptionalSourcingControlsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\PrequalificationControllerTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />

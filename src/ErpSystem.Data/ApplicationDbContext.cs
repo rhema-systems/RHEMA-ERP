@@ -577,6 +577,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<TenderClarification> TenderClarifications { get; set; }
     public DbSet<TenderRevision> TenderRevisions { get; set; }
     public DbSet<TenderAward> TenderAwards { get; set; }
+    public DbSet<ProcurementTenderControl> ProcurementTenderControls { get; set; }
+    public DbSet<ProcurementTenderDocumentIssue> ProcurementTenderDocumentIssues { get; set; }
+    public DbSet<ProcurementTenderSubmissionReceipt> ProcurementTenderSubmissionReceipts { get; set; }
+    public DbSet<ProcurementExceptionalSourcingControl> ProcurementExceptionalSourcingControls { get; set; }
+    public DbSet<ProcurementPrequalificationExercise> ProcurementPrequalificationExercises { get; set; }
+    public DbSet<ProcurementPrequalificationCriterion> ProcurementPrequalificationCriteria { get; set; }
+    public DbSet<ProcurementPrequalificationApplication> ProcurementPrequalificationApplications { get; set; }
+    public DbSet<ProcurementPrequalificationScore> ProcurementPrequalificationScores { get; set; }
+    public DbSet<ProcurementQualifiedListEntry> ProcurementQualifiedListEntries { get; set; }
     public DbSet<TenderTemplate> TenderTemplates { get; set; }
     public DbSet<TenderViewLog> TenderViewLogs { get; set; }
     public DbSet<EvaluationCriterion> EvaluationCriteria { get; set; }
@@ -918,6 +927,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new TenderAwardConfiguration());
         builder.ApplyConfiguration(new EvaluationTemplateConfiguration());
         builder.ApplyConfiguration(new EvaluationTemplateCriterionConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderControlConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentIssueConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderSubmissionReceiptConfiguration());
+        builder.ApplyConfiguration(new ProcurementExceptionalSourcingControlConfiguration());
+        builder.ApplyConfiguration(new ProcurementPrequalificationExerciseConfiguration());
+        builder.ApplyConfiguration(new ProcurementPrequalificationCriterionConfiguration());
+        builder.ApplyConfiguration(new ProcurementPrequalificationApplicationConfiguration());
+        builder.ApplyConfiguration(new ProcurementPrequalificationScoreConfiguration());
+        builder.ApplyConfiguration(new ProcurementQualifiedListEntryConfiguration());
 
         // RFQ configurations (separate from formal tenders)
         builder.ApplyConfiguration(new RequestForQuotationConfiguration());

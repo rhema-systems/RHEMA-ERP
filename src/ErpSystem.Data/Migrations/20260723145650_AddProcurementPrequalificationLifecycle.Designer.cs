@@ -4,6 +4,7 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260723145650_AddProcurementPrequalificationLifecycle")]
+    partial class AddProcurementPrequalificationLifecycle
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -44780,17 +44783,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("PassingScore")
                         .HasColumnType("decimal(18,4)");
 
-                    b.Property<string>("PolicySetCode")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<Guid>("PolicySetId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("PolicySetVersion")
-                        .HasColumnType("int");
-
                     b.Property<string>("Reference")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -44801,9 +44793,6 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
-
-                    b.Property<Guid>("SourceConfigurationProfileId")
-                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -44839,13 +44828,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PolicySetId");
-
                     b.HasIndex("WorkflowDefinitionId");
 
                     b.HasIndex("WorkflowInstanceId");
-
-                    b.HasIndex("TenantId", "PolicySetId");
 
                     b.HasIndex("TenantId", "Reference")
                         .IsUnique();
@@ -78956,12 +78941,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementPrequalificationExercise", b =>
                 {
-                    b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementPolicySet", "PolicySet")
-                        .WithMany()
-                        .HasForeignKey("PolicySetId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -78978,8 +78957,6 @@ namespace ErpSystem.Data.Migrations
                         .WithMany()
                         .HasForeignKey("WorkflowInstanceId")
                         .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("PolicySet");
 
                     b.Navigation("Tenant");
 

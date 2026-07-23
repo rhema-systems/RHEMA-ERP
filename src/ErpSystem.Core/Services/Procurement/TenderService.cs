@@ -33,6 +33,8 @@ public class TenderService : ITenderService
     private readonly ILogger<TenderService> _logger;
     private readonly IAppEventBus _appEventBus;
     private readonly IProcurementSourcingCaseService _sourcingCaseService;
+    private readonly IProcurementTenderControlService _tenderControlService;
+    private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
 
     public TenderService(
         ITenderRepository tenderRepository,
@@ -54,6 +56,8 @@ public class TenderService : ITenderService
         ICurrentUserProvider currentUserProvider,
         IAppEventBus appEventBus,
         IProcurementSourcingCaseService sourcingCaseService,
+        IProcurementTenderControlService tenderControlService,
+        IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
         ILogger<TenderService> logger)
     {
         _tenderRepository = tenderRepository;
@@ -75,6 +79,8 @@ public class TenderService : ITenderService
         _currentUserProvider = currentUserProvider;
         _appEventBus = appEventBus;
         _sourcingCaseService = sourcingCaseService;
+        _tenderControlService = tenderControlService;
+        _exceptionalSourcingControlService = exceptionalSourcingControlService;
         _logger = logger;
     }
 
@@ -514,6 +520,29 @@ public class TenderService : ITenderService
             if (tender.EstimatedValue != gate.EstimatedValue || !string.Equals(tender.Currency, gate.CurrencyCode, StringComparison.OrdinalIgnoreCase))
                 throw new ProcurementRequisitionSourcingValidationException("TENDER_CASE_VALUE_MISMATCH", "Tender value and currency no longer match the locked sourcing case.");
 
+            if (gate.SelectedMethod is ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering)
+            {
+                if (!dto.OpeningDate.HasValue)
+                    throw new ProcurementTenderControlValidationException("TENDER_OPENING_REQUIRED", "NCT/ICT advertisement requires a public opening date.");
+                await _tenderControlService.PublishAsync(id, new PublishProcurementTenderRequest
+                {
+                    AdvertisementReference = dto.AdvertisementReference ?? string.Empty,
+                    PublicationChannel = dto.PublicationChannel ?? string.Empty,
+                    TenderDocumentReference = dto.TenderDocumentReference ?? string.Empty,
+                    TenderDocumentVersion = dto.TenderDocumentVersion ?? string.Empty,
+                    DocumentFee = dto.DocumentFee,
+                    AdvertisementEvidenceReference = dto.AdvertisementEvidenceReference ?? string.Empty,
+                    SubmissionDeadlineUtc = dto.SubmissionDeadline,
+                    OpeningScheduledAtUtc = dto.OpeningDate.Value
+                }, Guid.NewGuid().ToString("N"));
+            }
+            else if (gate.SelectedMethod is ProcurementMethodType.RestrictedTendering or ProcurementMethodType.SingleSource)
+            {
+                throw new ProcurementExceptionalSourcingConflictException(
+                    "EXCEPTIONAL_CONTROL_REQUIRED",
+                    "Restricted Tendering and Single Source tenders must be prepared, approved, and released through the dedicated exceptional-sourcing control.");
+            }
+
             tender.Status = "Published";
             tender.PublishDate = DateTime.UtcNow; // Always publish immediately
             tender.SubmissionDeadline = dto.SubmissionDeadline;
@@ -658,6 +687,7 @@ public class TenderService : ITenderService
         {
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
 
             var item = new TenderItem
             {
@@ -696,6 +726,9 @@ public class TenderService : ITenderService
         {
             var item = await _itemRepository.GetByIdAsync(itemId)
                 ?? throw new InvalidOperationException($"Item with ID {itemId} not found");
+            var tender = await _tenderRepository.GetByIdAsync(item.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {item.TenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
 
             item.LineNumber = dto.LineNumber;
             item.ItemCode = dto.ItemCode;
@@ -725,6 +758,11 @@ public class TenderService : ITenderService
     {
         try
         {
+            var item = await _itemRepository.GetByIdAsync(itemId)
+                ?? throw new InvalidOperationException($"Item with ID {itemId} not found");
+            var tender = await _tenderRepository.GetByIdAsync(item.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {item.TenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
             await _itemRepository.DeleteAsync(itemId);
             await _unitOfWork.SaveChangesAsync();
 
@@ -744,6 +782,7 @@ public class TenderService : ITenderService
         {
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
 
             var document = new TenderDocument
             {
@@ -790,6 +829,11 @@ public class TenderService : ITenderService
     {
         try
         {
+            var document = await _documentRepository.GetByIdAsync(documentId)
+                ?? throw new InvalidOperationException($"Document with ID {documentId} not found");
+            var tender = await _tenderRepository.GetByIdAsync(document.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {document.TenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
             await _documentRepository.DeleteAsync(documentId);
             await _unitOfWork.SaveChangesAsync();
 
@@ -829,6 +873,10 @@ public class TenderService : ITenderService
         {
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            if (await _exceptionalSourcingControlService.IsExceptionalAsync(tenderId))
+                throw new ProcurementExceptionalSourcingConflictException(
+                    "EXCEPTIONAL_INVITATION_CONTROL_REQUIRED",
+                    "Restricted and single-source suppliers are invited only after the dedicated Board/MD/PPA approval completes.");
 
             foreach (var businessPartnerId in dto.BusinessPartnerIds)
             {
@@ -897,6 +945,7 @@ public class TenderService : ITenderService
         {
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
 
             var fee = new TenderFee
             {
@@ -934,6 +983,9 @@ public class TenderService : ITenderService
         {
             var fee = await _feeRepository.GetByIdAsync(feeId)
                 ?? throw new InvalidOperationException($"Fee with ID {feeId} not found");
+            var tender = await _tenderRepository.GetByIdAsync(fee.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {fee.TenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
 
             fee.FeeType = dto.FeeType;
             fee.Amount = dto.Amount;
@@ -963,6 +1015,11 @@ public class TenderService : ITenderService
     {
         try
         {
+            var fee = await _feeRepository.GetByIdAsync(feeId)
+                ?? throw new InvalidOperationException($"Fee with ID {feeId} not found");
+            var tender = await _tenderRepository.GetByIdAsync(fee.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {fee.TenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
             await _feeRepository.DeleteAsync(feeId);
             await _unitOfWork.SaveChangesAsync();
 
@@ -1213,6 +1270,7 @@ public class TenderService : ITenderService
         {
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
 
             // Get current revision number
             var revisions = await _revisionRepository.GetByTenderIdAsync(tenderId);
@@ -1574,6 +1632,7 @@ public class TenderService : ITenderService
             var tender = await _tenderRepository.GetByIdAsync(tenderId);
             if (tender == null)
                 throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
 
             var lotCode = await _lotRepository.GenerateLotCodeAsync(tenderId);
 
@@ -1617,6 +1676,9 @@ public class TenderService : ITenderService
             var lot = await _lotRepository.GetByIdAsync(lotId);
             if (lot == null)
                 throw new InvalidOperationException($"Tender lot with ID {lotId} not found");
+            var tender = await _tenderRepository.GetByIdAsync(lot.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {lot.TenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
 
             lot.LotCode = dto.LotCode ?? lot.LotCode;
             lot.Title = dto.Title ?? lot.Title;
@@ -1650,6 +1712,9 @@ public class TenderService : ITenderService
             var lot = await _lotRepository.GetByIdWithItemsAsync(lotId);
             if (lot == null)
                 throw new InvalidOperationException($"Tender lot with ID {lotId} not found");
+            var tender = await _tenderRepository.GetByIdAsync(lot.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {lot.TenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
 
             // Remove lot assignment from items
             if (lot.Items != null)
@@ -1715,6 +1780,9 @@ public class TenderService : ITenderService
 
             if (item.TenderId != lot.TenderId)
                 throw new InvalidOperationException("Item and lot must belong to the same tender");
+            var tender = await _tenderRepository.GetByIdAsync(item.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {item.TenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
 
             item.LotId = lotId;
             await _itemRepository.UpdateAsync(item);
@@ -1736,6 +1804,9 @@ public class TenderService : ITenderService
             var item = await _itemRepository.GetByIdAsync(itemId);
             if (item == null)
                 throw new InvalidOperationException($"Tender item with ID {itemId} not found");
+            var tender = await _tenderRepository.GetByIdAsync(item.TenderId)
+                ?? throw new InvalidOperationException($"Tender with ID {item.TenderId} not found");
+            await EnsureStatutoryStructureMutableAsync(tender);
 
             item.LotId = null;
             await _itemRepository.UpdateAsync(item);
@@ -1748,6 +1819,20 @@ public class TenderService : ITenderService
             _logger.LogError(ex, "Error removing item {ItemId} from lot", itemId);
             throw;
         }
+    }
+
+    private async Task EnsureStatutoryStructureMutableAsync(Tender tender)
+    {
+        if (string.Equals(tender.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (await _tenderControlService.IsNctOrIctAsync(tender.Id))
+            throw new ProcurementTenderControlConflictException(
+                "TENDER_STATUTORY_TERMS_LOCKED",
+                "NCT/ICT tender lots, items, documents, fees, and revisions are locked after document approval. Use the applicable statutory control.");
+        if (await _exceptionalSourcingControlService.IsExceptionalAsync(tender.Id))
+            throw new ProcurementExceptionalSourcingConflictException(
+                "EXCEPTIONAL_TENDER_TERMS_LOCKED",
+                "Restricted and single-source tender terms are locked after approval. Use the dedicated exceptional-sourcing control.");
     }
 
     private static TenderLotDto MapToLotDto(TenderLot lot)

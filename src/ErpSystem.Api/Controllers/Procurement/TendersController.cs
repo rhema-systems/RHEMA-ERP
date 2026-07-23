@@ -173,6 +173,10 @@ public class TendersController : ControllerBase
         {
             return StatusCode(403, SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
         }
+        catch (ProcurementExceptionalSourcingConflictException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating tender");
@@ -589,6 +593,10 @@ public class TendersController : ControllerBase
         {
             await _tenderService.InviteTenderersAsync(id, dto);
             return Ok(new { message = "Invitations sent successfully" });
+        }
+        catch (ProcurementExceptionalSourcingConflictException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

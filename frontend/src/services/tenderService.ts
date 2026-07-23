@@ -151,6 +151,12 @@ export interface PublishTenderDto {
   invitedBusinessPartnerIds?: string[];
   externalRecipientEmails?: string[];
   sendNotifications?: boolean;
+  advertisementReference?: string;
+  publicationChannel?: string;
+  tenderDocumentReference?: string;
+  tenderDocumentVersion?: string;
+  documentFee?: number;
+  advertisementEvidenceReference?: string;
 }
 
 // ============================================================================

@@ -823,6 +823,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRequisitionSourcingReleaseService, ErpSystem.Core.Services.Procurement.ProcurementRequisitionSourcingReleaseService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSourcingCaseService, ErpSystem.Core.Services.Procurement.ProcurementSourcingCaseService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRfqControlService, ErpSystem.Core.Services.Procurement.ProcurementRfqControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementTenderControlService, ErpSystem.Core.Services.Procurement.ProcurementTenderControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementExceptionalSourcingControlService, ErpSystem.Core.Services.Procurement.ProcurementExceptionalSourcingControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPrequalificationService, ErpSystem.Core.Services.Procurement.ProcurementPrequalificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementMasterDataChangeService, ErpSystem.Core.Services.Procurement.ProcurementMasterDataChangeService>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementConfigurationProfileSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementAccessControlSeeder>();

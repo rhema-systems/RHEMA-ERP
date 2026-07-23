@@ -286,6 +286,20 @@ public class PublishTenderDto
     public List<string> ExternalRecipientEmails { get; set; } = new();
 
     public bool SendNotifications { get; set; } = true;
+
+    // Required statutory advertisement controls for NCT/ICT sourcing cases.
+    [MaxLength(200)]
+    public string? AdvertisementReference { get; set; }
+    [MaxLength(200)]
+    public string? PublicationChannel { get; set; }
+    [MaxLength(200)]
+    public string? TenderDocumentReference { get; set; }
+    [MaxLength(100)]
+    public string? TenderDocumentVersion { get; set; }
+    [Range(0, double.MaxValue)]
+    public decimal DocumentFee { get; set; }
+    [MaxLength(500)]
+    public string? AdvertisementEvidenceReference { get; set; }
 }
 
 /// <summary>
