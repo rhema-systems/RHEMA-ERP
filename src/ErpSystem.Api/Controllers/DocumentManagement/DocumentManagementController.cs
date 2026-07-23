@@ -3382,7 +3382,8 @@ public sealed class DocumentManagementController : ControllerBase
 
         if (rules.Count == 0)
         {
-            return true;
+            // Absence of an active access rule is not an implicit grant; only DMS access administrators bypass rules.
+            return false;
         }
 
         return rules.Any(rule => actionPredicate(rule)

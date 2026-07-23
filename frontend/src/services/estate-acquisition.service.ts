@@ -653,6 +653,23 @@ export class EstateAcquisitionService {
     };
   }
 
+  async completeWorkflowTask(
+    acquisitionId: string,
+    stepInstanceId: string,
+    comments?: string
+  ): Promise<{ success: boolean; message?: string; item?: LandAcquisitionItem }> {
+    const response = await apiService.post<MaybeApiResponse<{ success: boolean; message?: string; item?: LandAcquisitionItem }>>(
+      `/estate/land-acquisitions/${acquisitionId}/workflow-task-completion`,
+      { stepInstanceId, comments }
+    );
+    const source = response.data ?? response;
+    return {
+      success: response.success !== false,
+      message: response.message || 'Workflow task completed.',
+      item: source.item,
+    };
+  }
+
   async saveWorkspace(payload: WorkspaceSavePayload): Promise<{ success: boolean; message?: string; acquisitionId: string; stageInputsComplete: boolean; missingInputs: string[] }> {
     const response = await apiService.post<MaybeApiResponse<WorkspaceData>>(
       '/estate/land-acquisitions/workspace',

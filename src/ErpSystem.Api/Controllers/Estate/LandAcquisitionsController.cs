@@ -5,10 +5,12 @@ using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
+using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -22,6 +24,7 @@ namespace ErpSystem.Api.Controllers.Estate;
 public class LandAcquisitionsController : ControllerBase
 {
     private const string WorkflowEntityType = "LandAcquisition";
+    private const double OwnershipCoordinateToleranceFeet = 5d;
     private static readonly IReadOnlyDictionary<int, string[]> RequiredStageInputs = new Dictionary<int, string[]>
     {
         [0] = ["projectReference", "parcelLocation", "estimatedSize", "coordinates", "vendorId", "vendorName", "acquisitionType", "intendedUse", "openingNotes"],
@@ -45,6 +48,7 @@ public class LandAcquisitionsController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowEngine _workflowEngine;
     private readonly IWorkflowService _workflowService;
     private readonly IEstateManagedAssetService _managedAssetService;
     private readonly IFileStorageService _fileStorageService;
@@ -55,6 +59,7 @@ public class LandAcquisitionsController : ControllerBase
         ApplicationDbContext context,
         ICurrentUserService currentUserService,
         IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowEngine workflowEngine,
         IWorkflowService workflowService,
         IEstateManagedAssetService managedAssetService,
         IFileStorageService fileStorageService,
@@ -64,6 +69,7 @@ public class LandAcquisitionsController : ControllerBase
         _context = context;
         _currentUserService = currentUserService;
         _workflowIntegrationService = workflowIntegrationService;
+        _workflowEngine = workflowEngine;
         _workflowService = workflowService;
         _managedAssetService = managedAssetService;
         _fileStorageService = fileStorageService;
@@ -78,6 +84,13 @@ public class LandAcquisitionsController : ControllerBase
         var acquisitions = await BaseQuery(tenantId)
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
             .ToListAsync(cancellationToken);
+
+        foreach (var acquisition in acquisitions)
+        {
+            await SyncStageFromCurrentWorkflowStepAsync(acquisition, cancellationToken);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
 
         var isAdministrator = IsWorkflowAdministrator();
         var userId = GetUserId();
@@ -138,14 +151,18 @@ public class LandAcquisitionsController : ControllerBase
 
         if (acquisition == null && !IsWorkflowAdministrator() && !HasRole(StageDefinitions[0].RequiredRole))
         {
-            return Forbid();
+            return ForbiddenStageAccess(StageDefinitions[0], "create a land acquisition workspace");
+        }
+
+        if (acquisition != null && request.ProcedureId != acquisition.StageOrder)
+        {
+            return ForbiddenStageAccess(request.ProcedureId, "save this workspace");
         }
 
         if (acquisition != null &&
-            (request.ProcedureId != acquisition.StageOrder ||
-             !await CanAccessStageAsync(acquisition, request.ProcedureId, userId, IsWorkflowAdministrator())))
+            !await CanAccessStageAsync(acquisition, request.ProcedureId, userId, IsWorkflowAdministrator()))
         {
-            return Forbid();
+            return ForbiddenStageAccess(request.ProcedureId, "save this workspace");
         }
 
         if (acquisition == null)
@@ -219,6 +236,11 @@ public class LandAcquisitionsController : ControllerBase
         {
             CopySnapshotValue(identification, responseValues, "vendorId");
             CopySnapshotValue(identification, responseValues, "vendorName");
+        }
+
+        if (procedureId == (int)AcquisitionProcedure.AgreementApproval)
+        {
+            await PopulateAgreementSellerDefaultsAsync(acquisition, snapshots, responseValues, cancellationToken);
         }
 
         var missingInputs = GetMissingStageInputs(acquisition, procedureId);
@@ -332,9 +354,14 @@ public class LandAcquisitionsController : ControllerBase
         // Completed-stage uploads let the estate originator recover stage evidence after workflow handoff without granting access to future stages.
         var canUploadCompletedStage = procedureId < acquisition.StageOrder &&
             await CanViewStageAsync(acquisition, procedureId, userId, isAdministrator);
-        if (procedureId > acquisition.StageOrder || (!canUploadCurrentStage && !canUploadCompletedStage))
+        if (procedureId > acquisition.StageOrder)
         {
-            return Forbid();
+            return ForbiddenStageAccess(procedureId, "upload documents for this workspace");
+        }
+
+        if (!canUploadCurrentStage && !canUploadCompletedStage)
+        {
+            return ForbiddenStageAccess(procedureId, "upload documents for this workspace");
         }
 
         var folder = $"estate/land-acquisitions/{id:N}/{procedureId}";
@@ -474,6 +501,31 @@ public class LandAcquisitionsController : ControllerBase
                     missingInputs
                 });
             }
+
+            if (acquisition.StageOrder == (int)AcquisitionProcedure.OwnershipVerification)
+            {
+                var comparison = GetOwnershipCoordinateComparison(acquisition);
+                if (!comparison.CanCompare)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Complete the cadastral and ownership coordinate comparison before approving ownership verification.",
+                        requiresCoordinateComparison = true
+                    });
+                }
+
+                // Ownership Verification can still approve a cadastral mismatch, but the approver must record the reason.
+                if (comparison.HasMismatch && string.IsNullOrWhiteSpace(request.Comments))
+                {
+                    return BadRequest(new
+                    {
+                        message = $"Ownership cadastral coordinates differ from the cadastral survey by up to {comparison.MaxDeviationFeet:N2} ft. Provide an approval reason before approving.",
+                        requiresMismatchReason = true,
+                        maxDeviationFeet = comparison.MaxDeviationFeet,
+                        toleranceFeet = OwnershipCoordinateToleranceFeet
+                    });
+                }
+            }
         }
 
         try
@@ -517,10 +569,17 @@ public class LandAcquisitionsController : ControllerBase
                 }
             }
 
-            ApplyWorkflowOutcome(acquisition, result.Outcome, request, userId);
+            var workflowOutcome = result.Outcome;
+            if (!advancedInitialSubmission && workflowOutcome != WorkflowOutcome.Rejected)
+            {
+                workflowOutcome = await CompleteSatisfiedDocumentTaskAsync(acquisition, userId, request.Comments, cancellationToken)
+                    ?? workflowOutcome;
+            }
+
+            ApplyWorkflowOutcome(acquisition, workflowOutcome, request, userId);
             if (!advancedInitialSubmission)
             {
-                await SyncStageFromWorkflowAsync(acquisition, result.Outcome, cancellationToken);
+                await SyncStageFromWorkflowAsync(acquisition, workflowOutcome, cancellationToken);
             }
 
             acquisition.LastModifiedById = userId;
@@ -530,10 +589,10 @@ public class LandAcquisitionsController : ControllerBase
             return Ok(new LandAcquisitionWorkflowActionResponse
             {
                 Success = true,
-                Message = result.Outcome == WorkflowOutcome.Rejected
+                Message = workflowOutcome == WorkflowOutcome.Rejected
                     ? "Land acquisition was rejected by workflow."
                     : "Land acquisition workflow action completed.",
-                WorkflowOutcome = result.Outcome.ToString(),
+                WorkflowOutcome = workflowOutcome.ToString(),
                 Item = ToItemDto(acquisition)
             });
         }
@@ -541,6 +600,83 @@ public class LandAcquisitionsController : ControllerBase
         {
             _logger.LogError(ex, "Failed to run land acquisition workflow action for {AcquisitionId}", request.AcquisitionId);
             return StatusCode(500, "Unable to complete land acquisition workflow action.");
+        }
+    }
+
+    [HttpPost("{id:guid}/workflow-task-completion")]
+    public async Task<ActionResult<LandAcquisitionWorkflowActionResponse>> CompleteWorkflowTask(
+        Guid id,
+        [FromBody] LandAcquisitionWorkflowTaskCompletionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var userId = GetUserId();
+        var acquisition = await BaseQuery(tenantId)
+            .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+        if (acquisition == null)
+        {
+            return NotFound("Land acquisition was not found.");
+        }
+
+        if (!acquisition.WorkflowInstanceId.HasValue)
+        {
+            return BadRequest("This acquisition does not have an active workflow instance.");
+        }
+
+        var stepInstance = await GetActiveStepInstanceAsync(acquisition, request.StepInstanceId, cancellationToken);
+        if (stepInstance == null)
+        {
+            return BadRequest("The current workflow task was not found for this acquisition.");
+        }
+
+        if (!IsWorkflowAdministrator() &&
+            stepInstance.AssignedToId.HasValue &&
+            stepInstance.AssignedToId.Value != userId)
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            await StoreWorkflowStepEvidenceAsync(acquisition, userId, cancellationToken);
+            var result = await _workflowEngine.ProcessStepAsync(
+                stepInstance.Id,
+                userId,
+                WorkflowStepAction.Complete,
+                comments: request.Comments);
+
+            if (!result.Success)
+            {
+                return BadRequest(result.Message ?? "Workflow task completion failed.");
+            }
+
+            var outcome = ToWorkflowOutcome(result);
+            ApplyWorkflowOutcome(acquisition, outcome, new LandAcquisitionWorkflowActionRequest
+            {
+                AcquisitionId = acquisition.Id,
+                Procedure = acquisition.StageOrder,
+                ActionType = "primary",
+                Comments = request.Comments
+            }, userId);
+            await SyncStageFromWorkflowAsync(acquisition, outcome, cancellationToken);
+
+            acquisition.LastModifiedById = userId;
+            acquisition.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync(cancellationToken);
+
+            return Ok(new LandAcquisitionWorkflowActionResponse
+            {
+                Success = true,
+                Message = "Land acquisition workflow task completed.",
+                WorkflowOutcome = outcome.ToString(),
+                Item = ToItemDto(acquisition)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to complete land acquisition workflow task for {AcquisitionId}", id);
+            return StatusCode(500, "Unable to complete land acquisition workflow task.");
         }
     }
 
@@ -913,6 +1049,66 @@ public class LandAcquisitionsController : ControllerBase
         acquisition.WorkspaceDataJson = JsonSerializer.Serialize(snapshots);
     }
 
+    private async Task PopulateAgreementSellerDefaultsAsync(
+        LandAcquisition acquisition,
+        IReadOnlyDictionary<int, Dictionary<string, JsonElement>> snapshots,
+        IDictionary<string, object?> responseValues,
+        CancellationToken cancellationToken)
+    {
+        snapshots.TryGetValue((int)AcquisitionProcedure.OwnershipClassification, out var ownershipClassification);
+        snapshots.TryGetValue((int)AcquisitionProcedure.LandIdentification, out var landIdentification);
+
+        var owner = acquisition.OwnershipHistories
+            .Where(item => !item.IsDeleted)
+            .OrderByDescending(item => item.IsCurrentOwner)
+            .ThenByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefault();
+
+        var partnerId =
+            owner?.BusinessPartnerId ??
+            SnapshotGuid(ownershipClassification, "vendorId") ??
+            SnapshotGuid(landIdentification, "vendorId");
+
+        BusinessPartner? partner = null;
+        if (partnerId.HasValue)
+        {
+            partner = await _context.BusinessPartners
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item =>
+                    item.Id == partnerId.Value &&
+                    item.TenantId == acquisition.TenantId &&
+                    !item.IsDeleted,
+                    cancellationToken);
+        }
+
+        // Agreement approval should reuse the verified seller captured earlier in the acquisition flow,
+        // while leaving any already-edited agreement values untouched.
+        SetMissingResponseValue(
+            responseValues,
+            "grantorName",
+            SnapshotText(ownershipClassification, "ownerName") ??
+            SnapshotText(ownershipClassification, "vendorName") ??
+            owner?.OwnerName ??
+            SnapshotText(landIdentification, "vendorName") ??
+            partner?.LegalName ??
+            partner?.PartnerName);
+
+        SetMissingResponseValue(
+            responseValues,
+            "grantorAddress",
+            SnapshotText(ownershipClassification, "address") ??
+            owner?.Address ??
+            BusinessPartnerAddress(partner));
+
+        SetMissingResponseValue(
+            responseValues,
+            "grantorPhone",
+            SnapshotText(ownershipClassification, "contactNumber") ??
+            owner?.ContactNumber ??
+            partner?.PrimaryPhone ??
+            partner?.SecondaryPhone);
+    }
+
     private static IReadOnlyList<string> GetMissingStageInputs(LandAcquisition acquisition, int procedureId)
     {
         if (!RequiredStageInputs.TryGetValue(procedureId, out var requiredInputs))
@@ -924,6 +1120,15 @@ public class LandAcquisitionsController : ControllerBase
         if (!snapshots.TryGetValue(procedureId, out var values))
         {
             return requiredInputs;
+        }
+
+        if (procedureId == (int)AcquisitionProcedure.OwnershipClassification &&
+            snapshots.TryGetValue((int)AcquisitionProcedure.LandIdentification, out var identification))
+        {
+            values = values.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+            // Current-owner details live in Business Partner from Parcel Identification; keep ownership classification focused on classification evidence.
+            CopySnapshotValue(identification, values, "vendorId");
+            CopySnapshotValue(identification, values, "vendorName");
         }
 
         var missing = requiredInputs
@@ -942,14 +1147,27 @@ public class LandAcquisitionsController : ControllerBase
         {
             if (currentOwnerValue.GetBoolean())
             {
-                if (!values.TryGetValue("vendorId", out var vendorId) || !HasInputValue(vendorId))
+                missing.RemoveAll(key =>
+                    key.Equals("ownerName", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("contactNumber", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("address", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("identificationType", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("identificationNumber", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("ownershipEndDate", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("dateGapReason", StringComparison.OrdinalIgnoreCase));
+
+                if ((!values.TryGetValue("vendorId", out var vendorId) || !HasInputValue(vendorId)) &&
+                    (!values.TryGetValue("vendorName", out var vendorName) || !HasInputValue(vendorName)))
                 {
-                    missing.Add("vendorId");
+                    missing.Add("vendorName");
                 }
             }
-            else if (!values.TryGetValue("ownershipEndDate", out var endDate) || !HasInputValue(endDate))
+            else
             {
-                missing.Add("ownershipEndDate");
+                if (!values.TryGetValue("ownershipEndDate", out var endDate) || !HasInputValue(endDate))
+                {
+                    missing.Add("ownershipEndDate");
+                }
             }
         }
 
@@ -965,6 +1183,94 @@ public class LandAcquisitionsController : ControllerBase
         {
             destination[key] = value;
         }
+    }
+
+    private static void CopySnapshotValue(
+        IReadOnlyDictionary<string, JsonElement> source,
+        IDictionary<string, JsonElement> destination,
+        string key)
+    {
+        if (!destination.ContainsKey(key) && source.TryGetValue(key, out var value))
+        {
+            destination[key] = value.Clone();
+        }
+    }
+
+    private static void SetMissingResponseValue(
+        IDictionary<string, object?> values,
+        string key,
+        string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || HasResponseValue(values, key))
+        {
+            return;
+        }
+
+        values[key] = value.Trim();
+    }
+
+    private static bool HasResponseValue(IDictionary<string, object?> values, string key)
+    {
+        if (!values.TryGetValue(key, out var value) || value == null)
+        {
+            return false;
+        }
+
+        if (value is JsonElement json)
+        {
+            return HasInputValue(json);
+        }
+
+        return !string.IsNullOrWhiteSpace(value.ToString());
+    }
+
+    private static string? SnapshotText(
+        IReadOnlyDictionary<string, JsonElement>? values,
+        string key)
+    {
+        if (values == null || !values.TryGetValue(key, out var value) || !HasInputValue(value))
+        {
+            return null;
+        }
+
+        var text = value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
+    private static Guid? SnapshotGuid(
+        IReadOnlyDictionary<string, JsonElement>? values,
+        string key)
+        => Guid.TryParse(SnapshotText(values, key), out var id) ? id : null;
+
+    private static string? BusinessPartnerAddress(BusinessPartner? partner)
+    {
+        if (partner == null)
+        {
+            return null;
+        }
+
+        var physicalAddress = JoinAddressParts(
+            partner.PhysicalAddress,
+            partner.PhysicalCity,
+            partner.PhysicalState,
+            partner.PhysicalCountry);
+
+        return physicalAddress ?? JoinAddressParts(
+            partner.MailingAddress,
+            partner.MailingCity,
+            partner.MailingState,
+            partner.MailingCountry);
+    }
+
+    private static string? JoinAddressParts(params string?[] parts)
+    {
+        var cleanParts = parts
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .Select(part => part!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return cleanParts.Length == 0 ? null : string.Join(", ", cleanParts);
     }
 
     private static bool HasInputValue(JsonElement value)
@@ -988,6 +1294,29 @@ public class LandAcquisitionsController : ControllerBase
     private bool HasRole(string role)
         => (_currentUserService.Roles ?? Array.Empty<string>()).Any(current =>
             current.Equals(role, StringComparison.OrdinalIgnoreCase));
+
+    private ObjectResult ForbiddenStageAccess(int stageOrder, string action)
+    {
+        var stage = StageDefinitions.FirstOrDefault(candidate => candidate.Order == stageOrder);
+        return ForbiddenStageAccess(stage, action);
+    }
+
+    private ObjectResult ForbiddenStageAccess(StageDefinition? stage, string action)
+    {
+        var stageName = stage?.Title ?? "this stage";
+        var requiredRole = stage?.RequiredRole ?? "the assigned workflow role";
+        Response.StatusCode = StatusCodes.Status403Forbidden;
+        return new ObjectResult(new
+        {
+            success = false,
+            message = $"You cannot {action} because you are not assigned to {stageName}. Required role: {requiredRole}.",
+            requiredRole,
+            stage = stageName
+        })
+        {
+            StatusCode = StatusCodes.Status403Forbidden
+        };
+    }
 
     private async Task<bool> CanAccessStageAsync(
         LandAcquisition acquisition,
@@ -1036,13 +1365,7 @@ public class LandAcquisitionsController : ControllerBase
             return;
         }
 
-        var stepInstance = await _context.WorkflowStepInstances
-            .Include(step => step.WorkflowStep)
-            .Where(step => step.WorkflowInstanceId == acquisition.WorkflowInstanceId.Value &&
-                step.WorkflowStepId == step.WorkflowInstance!.CurrentStepId &&
-                (step.Status == WorkflowStepInstanceStatus.Pending || step.Status == WorkflowStepInstanceStatus.InProgress))
-            .OrderByDescending(step => step.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken);
+        var stepInstance = await GetActiveStepInstanceAsync(acquisition, null, cancellationToken);
 
         var stepConfig = ReadWorkflowStepConfiguration(stepInstance?.WorkflowStep?.Configuration);
         if (stepInstance == null || stepConfig == null)
@@ -1065,42 +1388,7 @@ public class LandAcquisitionsController : ControllerBase
             })
             .ToList() ?? [];
 
-        var stageDocuments = acquisition.Documents
-            .Where(document => !document.IsDeleted && (int)document.Procedure == acquisition.StageOrder)
-            .OrderByDescending(document => document.CreatedAt)
-            .ToList();
-        var documentRequirements = ReadWorkflowDocumentRequirements(stepConfig.TaskConfig);
-        var taskAttachments = documentRequirements
-            .Select((requirement, index) =>
-            {
-                var document = stageDocuments.FirstOrDefault(candidate =>
-                        !string.IsNullOrWhiteSpace(requirement.DocumentType) &&
-                        string.Equals(candidate.DocumentType, requirement.DocumentType, StringComparison.OrdinalIgnoreCase)) ??
-                    stageDocuments.ElementAtOrDefault(Math.Min(index, Math.Max(stageDocuments.Count - 1, 0)));
-
-                if (document == null)
-                {
-                    return null;
-                }
-
-                return new WorkflowTaskAttachmentDto
-                {
-                    Id = document.Id.ToString("N"),
-                    RequirementKey = requirement.RequirementKey,
-                    DocumentType = string.IsNullOrWhiteSpace(requirement.DocumentType) ? document.DocumentType : requirement.DocumentType,
-                    DocumentName = requirement.DocumentName,
-                    FileName = document.FileName,
-                    FilePath = document.FilePath,
-                    ContentType = "application/octet-stream",
-                    FileSizeBytes = 0,
-                    UploadedAt = document.CreatedAt,
-                    UploadedById = document.CreatedById ?? userId,
-                    UploadedByName = document.CreatedBy ?? _currentUserService.UserName
-                };
-            })
-            .Where(attachment => attachment != null)
-            .Cast<WorkflowTaskAttachmentDto>()
-            .ToList();
+        var taskAttachments = BuildStageTaskAttachments(acquisition, stepConfig.TaskConfig, userId);
 
         if (qualityResponses.Count == 0 && taskAttachments.Count == 0)
         {
@@ -1114,6 +1402,97 @@ public class LandAcquisitionsController : ControllerBase
             workflowTaskAttachments = taskAttachments
         });
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<WorkflowOutcome?> CompleteSatisfiedDocumentTaskAsync(
+        LandAcquisition acquisition,
+        Guid userId,
+        string? comments,
+        CancellationToken cancellationToken)
+    {
+        var stepInstance = await GetActiveStepInstanceAsync(acquisition, null, cancellationToken);
+        var stepConfig = ReadWorkflowStepConfiguration(stepInstance?.WorkflowStep?.Configuration);
+        if (stepInstance == null || stepConfig?.TaskConfig == null || !IsDocumentTask(stepConfig.TaskConfig))
+        {
+            return null;
+        }
+
+        await StoreWorkflowStepEvidenceAsync(acquisition, userId, cancellationToken);
+
+        stepInstance = await GetActiveStepInstanceAsync(acquisition, stepInstance.Id, cancellationToken);
+        if (stepInstance == null || !HasRequiredWorkflowTaskAttachments(stepConfig.TaskConfig, stepInstance.ResultData))
+        {
+            return null;
+        }
+
+        // Estate stage workspaces are the document source of truth; document-only workflow tasks should not ask users to reattach the same files.
+        var result = await _workflowEngine.ProcessStepAsync(
+            stepInstance.Id,
+            userId,
+            WorkflowStepAction.Complete,
+            comments: comments);
+
+        if (!result.Success)
+        {
+            return null;
+        }
+
+        return ToWorkflowOutcome(result);
+    }
+
+    private async Task<WorkflowStepInstance?> GetActiveStepInstanceAsync(
+        LandAcquisition acquisition,
+        Guid? stepInstanceId,
+        CancellationToken cancellationToken)
+    {
+        if (!acquisition.WorkflowInstanceId.HasValue)
+        {
+            return null;
+        }
+
+        return await _context.WorkflowStepInstances
+            .Include(step => step.WorkflowStep)
+            .Include(step => step.WorkflowInstance)
+            .Where(step =>
+                step.WorkflowInstanceId == acquisition.WorkflowInstanceId.Value &&
+                step.WorkflowInstance.EntityId == acquisition.Id &&
+                step.TenantId == acquisition.TenantId &&
+                !step.IsDeleted &&
+                (stepInstanceId == null || step.Id == stepInstanceId.Value) &&
+                step.WorkflowStepId == step.WorkflowInstance.CurrentStepId &&
+                (step.Status == WorkflowStepInstanceStatus.Pending || step.Status == WorkflowStepInstanceStatus.InProgress))
+            .OrderByDescending(step => step.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task SyncStageFromCurrentWorkflowStepAsync(
+        LandAcquisition acquisition,
+        CancellationToken cancellationToken)
+    {
+        if (!acquisition.WorkflowInstanceId.HasValue)
+        {
+            return;
+        }
+
+        var current = await _workflowService.GetCurrentWorkflowStepAsync(WorkflowEntityType, acquisition.Id);
+        var matched = current == null
+            ? null
+            : StageDefinitions.FirstOrDefault(stage =>
+                string.Equals(stage.Title, current.StepName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(stage.WorkflowStepName, current.StepName, StringComparison.OrdinalIgnoreCase));
+
+        if (matched == null || acquisition.StageOrder == matched.Order)
+        {
+            return;
+        }
+
+        // Land Acquisition board ownership follows the live workflow step so approver-role users see their actions immediately after a handoff.
+        acquisition.StageOrder = matched.Order;
+        acquisition.CurrentStage = (AcquisitionProcedure)matched.Order;
+        acquisition.Status = LandAcquisitionStatus.PendingApproval;
+        acquisition.UpdatedAt = DateTime.UtcNow;
+
+        await Task.CompletedTask;
     }
 
     private static WorkflowStepConfigurationDto? ReadWorkflowStepConfiguration(string? configurationJson)
@@ -1132,6 +1511,50 @@ public class LandAcquisitionsController : ControllerBase
         {
             return null;
         }
+    }
+
+    private List<WorkflowTaskAttachmentDto> BuildStageTaskAttachments(
+        LandAcquisition acquisition,
+        WorkflowTaskConfigDto? taskConfig,
+        Guid userId)
+    {
+        var stageDocuments = acquisition.Documents
+            .Where(document => !document.IsDeleted && (int)document.Procedure == acquisition.StageOrder)
+            .OrderByDescending(document => document.CreatedAt)
+            .ToList();
+        var documentRequirements = ReadWorkflowDocumentRequirements(taskConfig);
+
+        return documentRequirements
+            .Select((requirement, index) =>
+            {
+                var document = stageDocuments.FirstOrDefault(candidate =>
+                        !string.IsNullOrWhiteSpace(requirement.DocumentType) &&
+                        string.Equals(candidate.DocumentType, requirement.DocumentType, StringComparison.OrdinalIgnoreCase)) ??
+                    stageDocuments.ElementAtOrDefault(Math.Min(index, Math.Max(stageDocuments.Count - 1, 0)));
+
+                if (document == null)
+                {
+                    return null;
+                }
+
+                return new WorkflowTaskAttachmentDto
+                {
+                    Id = $"{document.Id:N}-{requirement.RequirementKey}",
+                    RequirementKey = requirement.RequirementKey,
+                    DocumentType = string.IsNullOrWhiteSpace(requirement.DocumentType) ? document.DocumentType : requirement.DocumentType,
+                    DocumentName = requirement.DocumentName,
+                    FileName = document.FileName,
+                    FilePath = document.FilePath,
+                    ContentType = "application/octet-stream",
+                    FileSizeBytes = 0,
+                    UploadedAt = document.CreatedAt,
+                    UploadedById = document.CreatedById ?? userId,
+                    UploadedByName = document.CreatedBy ?? _currentUserService.UserName
+                };
+            })
+            .Where(attachment => attachment != null)
+            .Cast<WorkflowTaskAttachmentDto>()
+            .ToList();
     }
 
     private static IReadOnlyList<WorkflowDocumentRequirementDto> ReadWorkflowDocumentRequirements(WorkflowTaskConfigDto? taskConfig)
@@ -1187,6 +1610,54 @@ public class LandAcquisitionsController : ControllerBase
 
         return [];
     }
+
+    private static bool IsDocumentTask(WorkflowTaskConfigDto taskConfig)
+        => taskConfig.RequiresDocument ||
+           string.Equals(taskConfig.TaskActionType, "document", StringComparison.OrdinalIgnoreCase) ||
+           !string.IsNullOrWhiteSpace(taskConfig.DocumentName) ||
+           (taskConfig.DocumentRequirements?.Any(requirement => requirement.IsRequired) ?? false);
+
+    private static bool HasRequiredWorkflowTaskAttachments(WorkflowTaskConfigDto taskConfig, string? resultData)
+    {
+        var attachments = ReadWorkflowTaskAttachments(resultData);
+        return ReadWorkflowDocumentRequirements(taskConfig)
+            .Where(requirement => requirement.IsRequired)
+            .All(requirement => attachments.Any(attachment =>
+                string.Equals(attachment.RequirementKey, requirement.RequirementKey, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static List<WorkflowTaskAttachmentDto> ReadWorkflowTaskAttachments(string? resultData)
+    {
+        if (string.IsNullOrWhiteSpace(resultData))
+        {
+            return [];
+        }
+
+        try
+        {
+            var payload = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(resultData);
+            if (payload == null ||
+                !payload.TryGetValue("workflowTaskAttachments", out var attachmentsElement) ||
+                attachmentsElement.ValueKind != JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            return JsonSerializer.Deserialize<List<WorkflowTaskAttachmentDto>>(attachmentsElement.GetRawText()) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static WorkflowOutcome ToWorkflowOutcome(WorkflowExecutionResult result)
+        => result.Status switch
+        {
+            WorkflowInstanceStatus.Completed => WorkflowOutcome.Approved,
+            WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed => WorkflowOutcome.Rejected,
+            _ => WorkflowOutcome.Pending
+        };
 
     private static string BuildWorkflowRequirementKey(string? value, int index)
     {
@@ -1324,6 +1795,172 @@ public class LandAcquisitionsController : ControllerBase
 
     private static bool IsReject(string? actionType)
         => string.Equals(actionType, "reject", StringComparison.OrdinalIgnoreCase);
+
+    private static CoordinateComparisonResult GetOwnershipCoordinateComparison(LandAcquisition acquisition)
+    {
+        var snapshots = ReadWorkspaceSnapshots(acquisition);
+        if (!snapshots.TryGetValue((int)AcquisitionProcedure.CadastralSurvey, out var cadastralValues) ||
+            !snapshots.TryGetValue((int)AcquisitionProcedure.OwnershipClassification, out var ownershipValues))
+        {
+            return new CoordinateComparisonResult(false, false, 0);
+        }
+
+        var cadastralPoints = ReadCadastralPoints(cadastralValues);
+        var ownershipPoints = ReadOwnershipPoints(ownershipValues);
+        var comparablePoints = Math.Min(cadastralPoints.Count, ownershipPoints.Count);
+        if (comparablePoints < 3)
+        {
+            return new CoordinateComparisonResult(false, false, 0);
+        }
+
+        var maxDeviationFeet = Enumerable.Range(0, comparablePoints)
+            .Select(index =>
+            {
+                var cadastral = cadastralPoints[index];
+                var ownership = ownershipPoints[index];
+                return Math.Sqrt(
+                    Math.Pow(cadastral.Northing - ownership.Northing, 2) +
+                    Math.Pow(cadastral.Easting - ownership.Easting, 2));
+            })
+            .DefaultIfEmpty(0)
+            .Max();
+
+        var hasMismatch =
+            cadastralPoints.Count != ownershipPoints.Count ||
+            maxDeviationFeet > OwnershipCoordinateToleranceFeet;
+
+        return new CoordinateComparisonResult(true, hasMismatch, maxDeviationFeet);
+    }
+
+    private static IReadOnlyList<CoordinatePoint> ReadCadastralPoints(IReadOnlyDictionary<string, JsonElement> values)
+    {
+        if (TryReadText(values, "boundaryCoordinates", out var boundaryCoordinates))
+        {
+            var boundaryPoints = ReadBoundaryCoordinatePoints(boundaryCoordinates);
+            if (boundaryPoints.Count > 0)
+            {
+                return boundaryPoints;
+            }
+        }
+
+        return Enumerable.Range(1, 4)
+            .Select(index =>
+            {
+                var northing = ReadDouble(values, $"beacon{index}NorthingFeet");
+                var easting = ReadDouble(values, $"beacon{index}EastingFeet");
+                return northing.HasValue && easting.HasValue
+                    ? new CoordinatePoint(northing.Value, easting.Value)
+                    : (CoordinatePoint?)null;
+            })
+            .Where(point => point.HasValue)
+            .Select(point => point!.Value)
+            .ToList();
+    }
+
+    private static IReadOnlyList<CoordinatePoint> ReadOwnershipPoints(IReadOnlyDictionary<string, JsonElement> values)
+        => Enumerable.Range(1, 4)
+            .Select(index =>
+            {
+                var northing = ReadDouble(values, $"ownerBeacon{index}NorthingFeet");
+                var easting = ReadDouble(values, $"ownerBeacon{index}EastingFeet");
+                return northing.HasValue && easting.HasValue
+                    ? new CoordinatePoint(northing.Value, easting.Value)
+                    : (CoordinatePoint?)null;
+            })
+            .Where(point => point.HasValue)
+            .Select(point => point!.Value)
+            .ToList();
+
+    private static IReadOnlyList<CoordinatePoint> ReadBoundaryCoordinatePoints(string boundaryCoordinates)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(boundaryCoordinates);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            return document.RootElement.EnumerateArray()
+                .Select(item =>
+                {
+                    if (item.ValueKind == JsonValueKind.Array && item.GetArrayLength() >= 2)
+                    {
+                        var northing = ReadDouble(item[0]);
+                        var easting = ReadDouble(item[1]);
+                        return northing.HasValue && easting.HasValue
+                            ? new CoordinatePoint(northing.Value, easting.Value)
+                            : (CoordinatePoint?)null;
+                    }
+
+                    if (item.ValueKind != JsonValueKind.Object)
+                    {
+                        return null;
+                    }
+
+                    var objectNorthing =
+                        ReadObjectDouble(item, "northing") ??
+                        ReadObjectDouble(item, "Northing") ??
+                        ReadObjectDouble(item, "northingFeet") ??
+                        ReadObjectDouble(item, "NorthingFeet");
+                    var objectEasting =
+                        ReadObjectDouble(item, "easting") ??
+                        ReadObjectDouble(item, "Easting") ??
+                        ReadObjectDouble(item, "eastingFeet") ??
+                        ReadObjectDouble(item, "EastingFeet");
+
+                    return objectNorthing.HasValue && objectEasting.HasValue
+                        ? new CoordinatePoint(objectNorthing.Value, objectEasting.Value)
+                        : (CoordinatePoint?)null;
+                })
+                .Where(point => point.HasValue)
+                .Select(point => point!.Value)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static bool TryReadText(
+        IReadOnlyDictionary<string, JsonElement> values,
+        string key,
+        out string text)
+    {
+        text = string.Empty;
+        if (!values.TryGetValue(key, out var value))
+        {
+            return false;
+        }
+
+        text = value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : value.ToString();
+        return !string.IsNullOrWhiteSpace(text);
+    }
+
+    private static double? ReadDouble(IReadOnlyDictionary<string, JsonElement> values, string key)
+        => values.TryGetValue(key, out var value) ? ReadDouble(value) : null;
+
+    private static double? ReadObjectDouble(JsonElement item, string propertyName)
+        => item.TryGetProperty(propertyName, out var value) ? ReadDouble(value) : null;
+
+    private static double? ReadDouble(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number))
+        {
+            return number;
+        }
+
+        if (value.ValueKind == JsonValueKind.String &&
+            double.TryParse(value.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
 
     private async Task<bool> AdvanceInitialSubmissionToSuitabilityAsync(
         LandAcquisition acquisition,
@@ -1766,6 +2403,13 @@ public class LandAcquisitionsController : ControllerBase
         string RequiredRole,
         string PrimaryAction,
         string? RejectAction);
+
+    private readonly record struct CoordinatePoint(double Northing, double Easting);
+
+    private readonly record struct CoordinateComparisonResult(
+        bool CanCompare,
+        bool HasMismatch,
+        double MaxDeviationFeet);
 
     private static readonly IReadOnlyList<StageDefinition> StageDefinitions = new List<StageDefinition>
     {

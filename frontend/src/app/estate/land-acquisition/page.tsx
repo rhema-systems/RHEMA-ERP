@@ -30,6 +30,7 @@ import {
   Save,
   Scale,
   Search,
+  Send,
   ShieldCheck,
   Stamp,
   Upload,
@@ -68,6 +69,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
 import { useAuth } from '@/hooks/use-auth';
+import type { WorkflowTaskAttachmentDto } from '@/types/workflow';
 import {
   businessPartnerService,
   type BusinessPartnerDto,
@@ -115,6 +117,17 @@ type PendingAcquisitionDocument = {
   documentType: string;
   documentName: string;
   requirementId?: string;
+};
+
+type WorkspaceValues = Record<string, string | boolean>;
+
+type BeaconComparisonRow = {
+  label: string;
+  cadastralNorthing?: number;
+  cadastralEasting?: number;
+  classificationNorthing?: number;
+  classificationEasting?: number;
+  deviationFeet?: number;
 };
 
 const stageIcons: Record<
@@ -1097,10 +1110,7 @@ function defaultsFor(
   return values;
 }
 
-function missingWorkspaceInputs(
-  kind: AcquisitionWorkspaceKind,
-  values: Record<string, string | boolean>
-) {
+function missingWorkspaceInputs(kind: AcquisitionWorkspaceKind, values: WorkspaceValues) {
   const missing = WORKSPACE_FIELDS[kind].filter((config) => {
     const value = values[config.key];
     return typeof value === 'boolean' ? false : !`${value ?? ''}`.trim();
@@ -1114,9 +1124,27 @@ function missingWorkspaceInputs(
   }
 
   if (kind === 'ownership-classification') {
-    const conditional = [...missing];
-    if (values.isCurrentOwner === true && !`${values.vendorId ?? ''}`.trim()) {
-      conditional.push(field('vendorId', 'Linked Vendor / Owner'));
+    let conditional = [...missing];
+    if (values.isCurrentOwner === true) {
+      conditional = conditional.filter(
+        (config) =>
+          ![
+            'ownerName',
+            'contactNumber',
+            'address',
+            'identificationType',
+            'identificationNumber',
+            'ownershipEndDate',
+            'dateGapReason',
+          ].includes(config.key)
+      );
+
+      if (
+        !`${values.vendorId ?? ''}`.trim() &&
+        !`${values.vendorName ?? ''}`.trim()
+      ) {
+        conditional.push(field('vendorName', 'Linked Current Owner'));
+      }
     }
     if (
       values.isCurrentOwner === false &&
@@ -1139,6 +1167,29 @@ function inputLabels(kind: AcquisitionWorkspaceKind, keys: string[]) {
   return keys.map((key) => labels.get(key) || key);
 }
 
+const normalizeDocumentValue = (value?: string) =>
+  (value || '').trim().toLowerCase();
+
+const matchesRequirement = (
+  document: Pick<LandAcquisitionDocument, 'documentName' | 'documentType'>,
+  requirement: LandAcquisitionStageDocumentRequirement
+) =>
+  normalizeDocumentValue(document.documentName) ===
+    normalizeDocumentValue(requirement.documentName) ||
+  (!!document.documentType &&
+    !!requirement.documentType &&
+    normalizeDocumentValue(document.documentType) ===
+      normalizeDocumentValue(requirement.documentType));
+
+const BUSINESS_PARTNER_CURRENT_OWNER_FIELDS = new Set([
+  'contactNumber',
+  'address',
+  'identificationType',
+  'identificationNumber',
+  'ownershipEndDate',
+  'dateGapReason',
+]);
+
 function completedWorkflowActionLabel(action: string) {
   if (action.startsWith('Submit for ')) {
     return action.replace('Submit for ', 'Submitted for ');
@@ -1147,6 +1198,110 @@ function completedWorkflowActionLabel(action: string) {
     return action.replace('Submit ', 'Submitted ');
   }
   return action;
+}
+
+function numberFromWorkspace(value: string | boolean | undefined): number | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseBoundaryWorkspacePoints(value: string | boolean | undefined) {
+  if (typeof value !== 'string' || value.trim() === '') return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((item, index) => {
+        const northing = Number(
+          Array.isArray(item)
+            ? item[0]
+            : item?.northing ?? item?.Northing ?? item?.northingFeet ?? item?.NorthingFeet
+        );
+        const easting = Number(
+          Array.isArray(item)
+            ? item[1]
+            : item?.easting ?? item?.Easting ?? item?.eastingFeet ?? item?.EastingFeet
+        );
+        if (!Number.isFinite(northing) || !Number.isFinite(easting)) return null;
+
+        return {
+          label: `${item?.beacon ?? item?.Beacon ?? item?.beaconIndex ?? item?.BeaconIndex ?? `Beacon ${index + 1}`}`,
+          northing,
+          easting,
+        };
+      })
+      .filter((item): item is { label: string; northing: number; easting: number } => Boolean(item));
+  } catch {
+    return [];
+  }
+}
+
+function cadastralPointsFromValues(values: WorkspaceValues) {
+  const boundaryPoints = parseBoundaryWorkspacePoints(values.boundaryCoordinates);
+  if (boundaryPoints.length > 0) return boundaryPoints;
+
+  return [1, 2, 3, 4]
+    .map((index) => {
+      const northing = numberFromWorkspace(values[`beacon${index}NorthingFeet`]);
+      const easting = numberFromWorkspace(values[`beacon${index}EastingFeet`]);
+      if (northing == null || easting == null) return null;
+
+      return {
+        label: `${values[`beacon${index}Index`] || `Beacon ${index}`}`,
+        northing,
+        easting,
+      };
+    })
+    .filter((item): item is { label: string; northing: number; easting: number } => Boolean(item));
+}
+
+function ownerPointsFromValues(values: WorkspaceValues) {
+  return [1, 2, 3, 4]
+    .map((index) => {
+      const northing = numberFromWorkspace(values[`ownerBeacon${index}NorthingFeet`]);
+      const easting = numberFromWorkspace(values[`ownerBeacon${index}EastingFeet`]);
+      if (northing == null || easting == null) return null;
+
+      return { label: `Beacon ${index}`, northing, easting };
+    })
+    .filter((item): item is { label: string; northing: number; easting: number } => Boolean(item));
+}
+
+function coordinateComparisonRows(
+  cadastralValues: WorkspaceValues,
+  classificationValues: WorkspaceValues
+): BeaconComparisonRow[] {
+  const cadastral = cadastralPointsFromValues(cadastralValues);
+  const classification = ownerPointsFromValues(classificationValues);
+  const maxRows = Math.max(cadastral.length, classification.length, 4);
+
+  return Array.from({ length: maxRows }, (_, index) => {
+    const surveyPoint = cadastral[index];
+    const ownerPoint = classification[index];
+    const deviationFeet =
+      surveyPoint && ownerPoint
+        ? Math.hypot(
+            surveyPoint.northing - ownerPoint.northing,
+            surveyPoint.easting - ownerPoint.easting
+          )
+        : undefined;
+
+    return {
+      label: ownerPoint?.label || surveyPoint?.label || `Beacon ${index + 1}`,
+      cadastralNorthing: surveyPoint?.northing,
+      cadastralEasting: surveyPoint?.easting,
+      classificationNorthing: ownerPoint?.northing,
+      classificationEasting: ownerPoint?.easting,
+      deviationFeet,
+    };
+  });
+}
+
+function formatFeet(value?: number) {
+  return value == null ? '-' : value.toFixed(2);
 }
 
 function useAcquisitionBoard() {
@@ -1191,9 +1346,6 @@ export default function LandAcquisitionPage() {
     Record<string, string | boolean>
   >({});
   const [savingWorkspace, setSavingWorkspace] = React.useState(false);
-  const [publishingReady, setPublishingReady] = React.useState<string | null>(
-    null
-  );
   const [query, setQuery] = React.useState('');
   const [stageDocumentRequirements, setStageDocumentRequirements] =
     React.useState<Record<number, LandAcquisitionStageDocumentRequirement[]>>(
@@ -1252,6 +1404,9 @@ export default function LandAcquisitionPage() {
     'TenantAdmin',
     'WorkflowAdmin',
   ]);
+  const canEditSelectedStage =
+    canManageWorkflows ||
+    (selectedStage ? hasAnyRole([selectedStage.requiredRole]) : false);
   const canCreateAcquisition = stages.some((stage) => stage.order === 0);
   const requestedAcquisitionId = searchParams.get('acquisitionId');
   const requestedStage = searchParams.get('stage');
@@ -1388,6 +1543,32 @@ export default function LandAcquisitionPage() {
     }
   };
 
+  const completeWorkflowTask = async (
+    item: LandAcquisitionItem,
+    stepInstanceId: string,
+    comments?: string
+  ) => {
+    const result = await estateAcquisitionService.completeWorkflowTask(
+      item.id,
+      stepInstanceId,
+      comments
+    );
+    if (!result.success)
+      throw new Error(result.message || 'Workflow task failed.');
+
+    const returnedItem = result.item;
+    const nextStage =
+      returnedItem &&
+      stages.find((candidate) => candidate.order === returnedItem.stageOrder);
+    if (nextStage && returnedItem) {
+      // Keep the selected card aligned with the Estate workflow stage returned by the acquisition API.
+      setSelectedStageId(nextStage.id);
+      setSelectedItemId(returnedItem.id);
+    }
+
+    return { success: result.success, message: result.message };
+  };
+
   const saveWorkspace = async (
     pendingDocuments: PendingAcquisitionDocument[] = []
   ) => {
@@ -1428,34 +1609,11 @@ export default function LandAcquisitionPage() {
       setWorkspaceOpen(false);
       setDraftItem(null);
       await reload();
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      toast.error('Unable to save workspace.');
+      toast.error(error?.message || 'Unable to save workspace.');
     } finally {
       setSavingWorkspace(false);
-    }
-  };
-
-  const markReadyForProjectManagement = async (item: LandAcquisitionItem) => {
-    if (!item.id) return;
-
-    try {
-      setPublishingReady(item.id);
-      const result =
-        await estateAcquisitionService.markReadyForProjectManagement(item.id);
-      if (result.success) {
-        toast.success(result.message || 'Land is ready for project management.');
-      } else {
-        toast.error(result.message || 'Unable to publish land.');
-      }
-      await reload();
-    } catch (error) {
-      console.error(error);
-      toast.error(
-        'Demarcate the land boundary before marking it ready for project management.'
-      );
-    } finally {
-      setPublishingReady(null);
     }
   };
 
@@ -1607,15 +1765,21 @@ export default function LandAcquisitionPage() {
               item={selectedItem}
               stage={selectedStage}
               onOpenWorkspace={() => openWorkspace(selectedItem)}
-              onPrimary={() =>
-                runAction(selectedItem, selectedStage, 'primary')
+              onPrimary={(comments) =>
+                runAction(selectedItem, selectedStage, 'primary', comments)
               }
               onReject={(comments) =>
                 runAction(selectedItem, selectedStage, 'reject', comments)
               }
+              onCompleteTask={(stepInstanceId, comments) =>
+                completeWorkflowTask(selectedItem, stepInstanceId, comments)
+              }
               onReload={reload}
-              onMarkReady={() => markReadyForProjectManagement(selectedItem)}
-              markingReady={publishingReady === selectedItem.id}
+              documentRequirements={
+                stageDocumentRequirements[selectedStage.id] ||
+                stageDocumentRequirements[selectedStage.order] ||
+                []
+              }
               onOpenWorkflows={() =>
                 router.push(
                   '/administration/workflow?entityType=LandAcquisition'
@@ -1649,6 +1813,7 @@ export default function LandAcquisitionPage() {
           onChange={setWorkspaceValues}
           onSave={saveWorkspace}
           saving={savingWorkspace}
+          canEdit={canEditSelectedStage}
         />
       )}
     </div>
@@ -1783,20 +1948,23 @@ function AcquisitionDetail({
   onOpenWorkspace,
   onPrimary,
   onReject,
+  onCompleteTask,
   onReload,
-  onMarkReady,
-  markingReady,
+  documentRequirements,
   onOpenWorkflows,
   canManageWorkflows,
 }: {
   item: LandAcquisitionItem;
   stage: LandAcquisitionStage;
   onOpenWorkspace: () => void;
-  onPrimary: () => Promise<void>;
+  onPrimary: (comments?: string) => Promise<void>;
   onReject: (comments?: string) => Promise<void>;
+  onCompleteTask: (
+    stepInstanceId: string,
+    comments?: string
+  ) => Promise<{ success?: boolean; message?: string }>;
   onReload: () => Promise<void>;
-  onMarkReady: () => Promise<void>;
-  markingReady: boolean;
+  documentRequirements: LandAcquisitionStageDocumentRequirement[];
   onOpenWorkflows: () => void;
   canManageWorkflows: boolean;
 }) {
@@ -1806,6 +1974,10 @@ function AcquisitionDetail({
     null
   );
   const [summaryLoading, setSummaryLoading] = React.useState(false);
+  const [stageDocuments, setStageDocuments] = React.useState<
+    LandAcquisitionDocument[]
+  >([]);
+  const [stageSubmitting, setStageSubmitting] = React.useState(false);
   const missingLabels = inputLabels(
     stage.workspaceKind,
     item.missingInputs || []
@@ -1817,6 +1989,11 @@ function AcquisitionDetail({
     item.stageOrder > stage.order
       ? completedWorkflowActionLabel(stage.primaryAction)
       : stage.primaryAction;
+  const showCaptureStageSubmit =
+    item.stageOrder === stage.order &&
+    stage.order > 0 &&
+    !ACQUISITION_APPROVAL_STAGE_IDS.has(stage.id) &&
+    ['Pending Approval', 'Submitted', 'Rejected'].includes(item.status);
 
   const openSummary = async () => {
     setSummaryOpen(true);
@@ -1838,6 +2015,105 @@ function AcquisitionDetail({
     setSummary(null);
     setSummaryOpen(false);
   }, [item.id]);
+
+  React.useEffect(() => {
+    let mounted = true;
+    setStageDocuments([]);
+
+    (async () => {
+      try {
+        const documents = await estateAcquisitionService.getDocuments(item.id);
+        if (!mounted) return;
+        setStageDocuments(
+          documents.filter((document) => document.procedureId === stage.id)
+        );
+      } catch {
+        if (mounted) setStageDocuments([]);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [item.id, item.documents, stage.id]);
+
+  const workflowStageAttachments =
+    React.useMemo<WorkflowTaskAttachmentDto[]>(() => {
+      const stageRequirementKey = `${stage.workspaceKind}-documents`;
+
+      return stageDocuments.flatMap((document) => {
+        const matchingRequirements = documentRequirements.filter(
+          (requirement) => matchesRequirement(document, requirement)
+        );
+        const targets =
+          matchingRequirements.length > 0
+            ? matchingRequirements
+            : [
+                {
+                  id: stageRequirementKey,
+                  requirementKey: stageRequirementKey,
+                  documentName: `${stage.title} Documents`,
+                  documentType: document.documentType,
+                  isRequired: true,
+                },
+              ];
+
+        return [
+          {
+            id: `estate-stage-${document.id}-${stageRequirementKey}`,
+            requirementKey: stageRequirementKey,
+            documentName: `${stage.title} Documents`,
+            documentType: document.documentType,
+            fileName: document.fileName,
+            filePath: document.id,
+            contentType: 'application/octet-stream',
+            fileSizeBytes: 0,
+            uploadedAt: document.uploadedAt,
+            uploadedById: document.landAcquisitionId,
+            uploadedByName: document.uploadedBy || 'Estate/Facility',
+          },
+          ...targets.map((requirement) => ({
+            id: `estate-stage-${document.id}-${requirement.requirementKey}`,
+            requirementKey: requirement.requirementKey,
+            checklistItemId: requirement.id,
+            documentName: requirement.documentName,
+            documentType: requirement.documentType || document.documentType,
+            fileName: document.fileName,
+            filePath: document.id,
+            contentType: 'application/octet-stream',
+            fileSizeBytes: 0,
+            uploadedAt: document.uploadedAt,
+            uploadedById: document.landAcquisitionId,
+            uploadedByName: document.uploadedBy || 'Estate/Facility',
+          })),
+        ];
+      });
+    }, [documentRequirements, stage.title, stage.workspaceKind, stageDocuments]);
+
+  const submitCaptureStage = async () => {
+    if (!item.stageInputsComplete) {
+      toast.error(
+        forwardActionReason ||
+          'Complete all required stage inputs before submitting this stage.'
+      );
+      return;
+    }
+
+    try {
+      setStageSubmitting(true);
+      await onPrimary();
+      toast.success(completedWorkflowActionLabel(stage.primaryAction), {
+        description: item.projectReference,
+      });
+      await onReload();
+    } catch (error: any) {
+      toast.error('Unable to submit workflow stage.', {
+        description: error?.message || undefined,
+      });
+    } finally {
+      setStageSubmitting(false);
+    }
+  };
 
   return (
     <div className="flex min-h-[720px] flex-col">
@@ -1871,18 +2147,6 @@ function AcquisitionDetail({
             <Button variant="outline" onClick={onOpenWorkspace}>
               <FolderOpen className="mr-2 h-4 w-4" />
               Workspace
-            </Button>
-            <Button
-              variant="outline"
-              onClick={onMarkReady}
-              disabled={markingReady || stage.order < 2}
-            >
-              {markingReady ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Building2 className="mr-2 h-4 w-4" />
-              )}
-              Ready for Projects
             </Button>
             {canManageWorkflows && (
               <Button variant="outline" onClick={onOpenWorkflows}>
@@ -1976,6 +2240,23 @@ function AcquisitionDetail({
                   <p className="mt-1 text-xs">{forwardActionReason}</p>
                 </div>
               )}
+              {showCaptureStageSubmit && (
+                <Button
+                  className="w-full justify-start"
+                  disabled={!item.stageInputsComplete || stageSubmitting}
+                  onClick={() => void submitCaptureStage()}
+                  title={
+                    !item.stageInputsComplete ? forwardActionReason : undefined
+                  }
+                >
+                  {stageSubmitting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="mr-2 h-4 w-4" />
+                  )}
+                  {stage.primaryAction}
+                </Button>
+              )}
               <WorkflowApprovalActions
                 entityType="LandAcquisition"
                 entityId={item.id}
@@ -1996,10 +2277,16 @@ function AcquisitionDetail({
                 }
                 forwardActionsDisabled={!item.stageInputsComplete}
                 forwardActionsDisabledReason={forwardActionReason}
-                onSubmit={onPrimary}
-                onApprove={() => onPrimary()}
+                onSubmit={() => onPrimary()}
+                onApprove={(comments) => onPrimary(comments)}
                 onReject={(comments) => onReject(comments)}
+                onCompleteTask={({ stepInstanceId, comments }) =>
+                  onCompleteTask(stepInstanceId, comments)
+                }
                 onAfterAction={onReload}
+                externalTaskAttachments={workflowStageAttachments}
+                hideSatisfiedTaskDocumentUploads
+                hideSatisfiedTaskDocumentSection
                 onOpenWorkflows={
                   canManageWorkflows ? onOpenWorkflows : undefined
                 }
@@ -2130,6 +2417,104 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
+function CoordinateComparisonPanel({
+  cadastralValues,
+  classificationValues,
+}: {
+  cadastralValues: WorkspaceValues;
+  classificationValues: WorkspaceValues;
+}) {
+  const rows = React.useMemo(
+    () => coordinateComparisonRows(cadastralValues, classificationValues),
+    [cadastralValues, classificationValues]
+  );
+  const toleranceFeet = 5;
+  const capturedRows = rows.filter(
+    (row) =>
+      row.cadastralNorthing != null ||
+      row.cadastralEasting != null ||
+      row.classificationNorthing != null ||
+      row.classificationEasting != null
+  );
+  const comparedRows = rows.filter((row) => row.deviationFeet != null);
+  const maxDeviation = comparedRows.reduce(
+    (current, row) => Math.max(current, row.deviationFeet ?? 0),
+    0
+  );
+  const matched = comparedRows.length > 0 && maxDeviation <= toleranceFeet;
+
+  return (
+    <section className="rounded-lg border bg-card p-4">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">
+            Coordinate comparison
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Compare survey-plan beacons against the ownership classification beacons.
+          </p>
+        </div>
+        <Badge variant={matched ? 'secondary' : 'outline'}>
+          {comparedRows.length === 0
+            ? 'Awaiting coordinates'
+            : matched
+              ? `Within ${toleranceFeet} ft`
+              : `Max deviation ${maxDeviation.toFixed(2)} ft`}
+        </Badge>
+      </div>
+
+      {capturedRows.length === 0 ? (
+        <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+          No saved cadastral or ownership classification coordinates are available yet.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="text-xs uppercase text-muted-foreground">
+              <tr className="border-b">
+                <th className="px-3 py-2 text-left">Beacon</th>
+                <th className="px-3 py-2 text-left">Cadastral N / E</th>
+                <th className="px-3 py-2 text-left">Classification N / E</th>
+                <th className="px-3 py-2 text-left">Deviation</th>
+                <th className="px-3 py-2 text-left">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const hasDeviation = row.deviationFeet != null;
+                const rowMatched =
+                  hasDeviation && (row.deviationFeet ?? 0) <= toleranceFeet;
+
+                return (
+                  <tr key={row.label} className="border-b last:border-0">
+                    <td className="px-3 py-2 font-medium">{row.label}</td>
+                    <td className="px-3 py-2">
+                      N {formatFeet(row.cadastralNorthing)} / E{' '}
+                      {formatFeet(row.cadastralEasting)}
+                    </td>
+                    <td className="px-3 py-2">
+                      N {formatFeet(row.classificationNorthing)} / E{' '}
+                      {formatFeet(row.classificationEasting)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {hasDeviation ? `${row.deviationFeet?.toFixed(2)} ft` : '-'}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge variant={rowMatched ? 'secondary' : 'outline'}>
+                        {hasDeviation ? (rowMatched ? 'Match' : 'Review') : 'Incomplete'}
+                      </Badge>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function WorkspaceDialog({
   open,
   onOpenChange,
@@ -2140,16 +2525,18 @@ function WorkspaceDialog({
   onChange,
   onSave,
   saving,
+  canEdit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   item: LandAcquisitionItem;
   stage: LandAcquisitionStage;
   documentRequirements: LandAcquisitionStageDocumentRequirement[];
-  values: Record<string, string | boolean>;
-  onChange: (values: Record<string, string | boolean>) => void;
+  values: WorkspaceValues;
+  onChange: (values: WorkspaceValues) => void;
   onSave: (pendingDocuments?: PendingAcquisitionDocument[]) => Promise<void>;
   saving: boolean;
+  canEdit: boolean;
 }) {
   const setValue = (key: string, value: string | boolean) =>
     onChange({ ...values, [key]: value });
@@ -2170,6 +2557,11 @@ function WorkspaceDialog({
     url: string;
     name: string;
   } | null>(null);
+  const [cadastralComparisonValues, setCadastralComparisonValues] =
+    React.useState<WorkspaceValues>({});
+  const [classificationComparisonValues, setClassificationComparisonValues] =
+    React.useState<WorkspaceValues>({});
+  const assignmentMessage = `You are not assigned to ${stage.title}. Required role: ${stage.requiredRole}.`;
 
   React.useEffect(() => {
     if (!open || stage.workspaceKind !== 'parcel-identification') return;
@@ -2246,6 +2638,46 @@ function WorkspaceDialog({
     };
   }, [item.id, open, stage.id]);
 
+  React.useEffect(() => {
+    setCadastralComparisonValues({});
+    setClassificationComparisonValues({});
+
+    if (
+      !open ||
+      !item.id ||
+      !['ownership-classification', 'ownership-verification'].includes(
+        stage.workspaceKind
+      )
+    ) {
+      return;
+    }
+
+    let mounted = true;
+    (async () => {
+      try {
+        const [cadastral, classification] = await Promise.all([
+          estateAcquisitionService.getWorkspace(item.id, 2),
+          stage.workspaceKind === 'ownership-verification'
+            ? estateAcquisitionService.getWorkspace(item.id, 4)
+            : Promise.resolve(null),
+        ]);
+
+        if (!mounted) return;
+        setCadastralComparisonValues(cadastral.values);
+        if (classification) setClassificationComparisonValues(classification.values);
+      } catch (error) {
+        console.error(error);
+        if (mounted) {
+          toast.error('Unable to load coordinate comparison data.');
+        }
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [item.id, open, stage.workspaceKind]);
+
   React.useEffect(
     () => () => {
       if (preview?.url) URL.revokeObjectURL(preview.url);
@@ -2289,6 +2721,11 @@ function WorkspaceDialog({
   };
 
   const attachDocument = async (pendingDocument: PendingAcquisitionDocument) => {
+    if (!canEdit) {
+      toast.error(assignmentMessage);
+      return;
+    }
+
     if (!item.id) {
       setPendingDocuments((current) => [
         ...current.filter(
@@ -2325,26 +2762,14 @@ function WorkspaceDialog({
         ),
       ]);
       toast.success('Document uploaded.');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      toast.error('Unable to upload document.');
+      toast.error(error?.message || 'Unable to upload document.');
     } finally {
       setUploadingDocuments(false);
     }
   };
 
-  const normalizeDocumentValue = (value?: string) =>
-    (value || '').trim().toLowerCase();
-  const matchesRequirement = (
-    document: Pick<LandAcquisitionDocument, 'documentName' | 'documentType'>,
-    requirement: LandAcquisitionStageDocumentRequirement
-  ) =>
-    normalizeDocumentValue(document.documentName) ===
-      normalizeDocumentValue(requirement.documentName) ||
-    (!!document.documentType &&
-      !!requirement.documentType &&
-      normalizeDocumentValue(document.documentType) ===
-        normalizeDocumentValue(requirement.documentType));
   const hasRequirements = documentRequirements.length > 0;
   const unclassifiedDocuments = hasRequirements
     ? documents.filter(
@@ -2366,6 +2791,12 @@ function WorkspaceDialog({
         </DialogHeader>
         <ScrollArea className="max-h-[68vh] px-6 py-5">
           <div className="space-y-5">
+            {!canEdit && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                <p className="font-medium">Workspace locked</p>
+                <p className="mt-1 text-xs">{assignmentMessage}</p>
+              </div>
+            )}
             {missingInputs.length > 0 && (
               <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-200">
                 <p className="font-medium">
@@ -2382,6 +2813,28 @@ function WorkspaceDialog({
               stage.workspaceKind === 'cadastral-verification') && (
               <CadastralMapPanel values={values} onChange={onChange} />
             )}
+            {stage.workspaceKind === 'ownership-classification' && (
+              <CoordinateComparisonPanel
+                cadastralValues={cadastralComparisonValues}
+                classificationValues={values}
+              />
+            )}
+            {stage.workspaceKind === 'ownership-verification' && (
+              <>
+                <CadastralMapPanel
+                  values={cadastralComparisonValues}
+                  comparisonValues={classificationComparisonValues}
+                  comparisonLabel="Ownership classification"
+                  readOnly
+                  title="Ownership Cadastral Verification Map"
+                  description="View the saved cadastral survey boundary against the ownership classification boundary before approval."
+                />
+                <CoordinateComparisonPanel
+                  cadastralValues={cadastralComparisonValues}
+                  classificationValues={classificationComparisonValues}
+                />
+              </>
+            )}
             <section className="rounded-lg border bg-card p-4">
               <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
@@ -2392,7 +2845,8 @@ function WorkspaceDialog({
                     Attach the configured documents required for this procedure stage.
                   </p>
                 </div>
-                {!hasRequirements && (
+                {!hasRequirements &&
+                  (canEdit ? (
                   <Button variant="outline" size="sm" asChild>
                     <label>
                       <Upload className="mr-2 h-4 w-4" />
@@ -2418,7 +2872,12 @@ function WorkspaceDialog({
                       />
                     </label>
                   </Button>
-                )}
+                ) : (
+                  <Button variant="outline" size="sm" disabled title={assignmentMessage}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Add Files
+                  </Button>
+                ))}
               </div>
               <div className="space-y-2">
                 {loadingDocuments && (
@@ -2472,32 +2931,40 @@ function WorkspaceDialog({
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={uploadingDocuments}
-                              asChild
+                              disabled={uploadingDocuments || !canEdit}
+                              title={!canEdit ? assignmentMessage : undefined}
+                              asChild={canEdit}
                             >
-                              <label>
-                                <Upload className="mr-2 h-4 w-4" />
-                                Upload
-                                <input
-                                  className="sr-only"
-                                  type="file"
-                                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.txt"
-                                  onChange={(event) => {
-                                    const file = event.target.files?.[0];
-                                    if (!file) return;
-                                    void attachDocument({
-                                        file,
-                                        requirementId: requirement.id,
-                                        documentType:
-                                          requirement.documentType ||
-                                          stage.title,
-                                        documentName:
-                                          requirement.documentName,
-                                    });
-                                    event.currentTarget.value = '';
-                                  }}
-                                />
-                              </label>
+                              {canEdit ? (
+                                <label>
+                                  <Upload className="mr-2 h-4 w-4" />
+                                  Upload
+                                  <input
+                                    className="sr-only"
+                                    type="file"
+                                    accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.txt"
+                                    onChange={(event) => {
+                                      const file = event.target.files?.[0];
+                                      if (!file) return;
+                                      void attachDocument({
+                                          file,
+                                          requirementId: requirement.id,
+                                          documentType:
+                                            requirement.documentType ||
+                                            stage.title,
+                                          documentName:
+                                            requirement.documentName,
+                                      });
+                                      event.currentTarget.value = '';
+                                    }}
+                                  />
+                                </label>
+                              ) : (
+                                <>
+                                  <Upload className="mr-2 h-4 w-4" />
+                                  Upload
+                                </>
+                              )}
                             </Button>
                           </div>
                         </div>
@@ -2687,7 +3154,7 @@ function WorkspaceDialog({
                         </Label>
                         <Select
                           value={`${values.vendorId || ''}`}
-                          disabled={vendorsLoading}
+                          disabled={vendorsLoading || !canEdit}
                           onValueChange={(vendorId) => {
                             const vendor = vendors.find(
                               (candidate) => candidate.id === vendorId
@@ -2748,6 +3215,7 @@ function WorkspaceDialog({
                           <Input
                             value={`${values.ownerName || ''}`}
                             placeholder="Enter the past owner's full name"
+                            disabled={!canEdit}
                             onChange={(event) =>
                               setValue('ownerName', event.target.value)
                             }
@@ -2758,12 +3226,32 @@ function WorkspaceDialog({
                           </p>
                         )}
                       </div>
+                    ) : stage.workspaceKind === 'ownership-classification' &&
+                      values.isCurrentOwner === true &&
+                      BUSINESS_PARTNER_CURRENT_OWNER_FIELDS.has(config.key) ? (
+                      <div
+                        key={config.key}
+                        className={
+                          config.span === 2
+                            ? 'space-y-2 md:col-span-2'
+                            : 'space-y-2'
+                        }
+                      >
+                        <Label>{config.label}</Label>
+                        <div className="rounded-md border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                          {config.key === 'ownershipEndDate'
+                            ? 'Not applicable for current owner'
+                            : 'Sourced from Business Partner record'}
+                        </div>
+                      </div>
                     ) : (
                       <WorkspaceControl
                         key={config.key}
                         config={config}
                         value={values[config.key]}
+                        disabled={!canEdit}
                         onChange={(value) => {
+                          if (!canEdit) return;
                           if (config.key === 'isCurrentOwner') {
                             const currentOwner = value === true;
                             onChange({
@@ -2811,7 +3299,11 @@ function WorkspaceDialog({
             <Ban className="mr-2 h-4 w-4" />
             Close
           </Button>
-          <Button onClick={() => onSave(pendingDocuments)} disabled={saving}>
+          <Button
+            onClick={() => onSave(pendingDocuments)}
+            disabled={saving || !canEdit}
+            title={!canEdit ? assignmentMessage : undefined}
+          >
             {saving ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
@@ -2828,10 +3320,12 @@ function WorkspaceDialog({
 function WorkspaceControl({
   config,
   value,
+  disabled = false,
   onChange,
 }: {
   config: WorkspaceField;
   value: string | boolean | undefined;
+  disabled?: boolean;
   onChange: (value: string | boolean) => void;
 }) {
   const className = config.span === 2 ? 'space-y-2 md:col-span-2' : 'space-y-2';
@@ -2845,6 +3339,7 @@ function WorkspaceControl({
           </Label>
         </div>
         <Select
+          disabled={disabled}
           value={typeof value === 'boolean' ? `${value}` : ''}
           onValueChange={(next) => onChange(next === 'true')}
         >
@@ -2868,6 +3363,7 @@ function WorkspaceControl({
         </Label>
         <Textarea
           value={`${value || ''}`}
+          disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
           rows={4}
         />
@@ -2881,7 +3377,11 @@ function WorkspaceControl({
         <Label>
           {config.label} <span className="text-destructive">*</span>
         </Label>
-        <Select value={`${value || ''}`} onValueChange={onChange}>
+        <Select
+          value={`${value || ''}`}
+          disabled={disabled}
+          onValueChange={onChange}
+        >
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
@@ -2905,6 +3405,7 @@ function WorkspaceControl({
       <Input
         type={config.type === 'date' ? 'date' : 'text'}
         value={`${value || ''}`}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
       />
     </div>

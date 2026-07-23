@@ -103,3 +103,9 @@ public class LandAcquisitionWorkflowActionResponse
     public string? WorkflowOutcome { get; set; }
     public LandAcquisitionItemDto? Item { get; set; }
 }
+
+public class LandAcquisitionWorkflowTaskCompletionRequest
+{
+    public Guid StepInstanceId { get; set; }
+    public string? Comments { get; set; }
+}
