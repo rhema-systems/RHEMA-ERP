@@ -20,7 +20,7 @@ public interface IJobVacancyService
     Task<PagedResult<JobVacancySummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobVacancySummaryDto>> GetByStatusAsync(JobVacancyStatus status, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobVacancySummaryDto>> GetActiveVacanciesAsync(CancellationToken cancellationToken = default);
-    Task<IEnumerable<JobVacancyDto>> GetPublishedForJobBoardAsync(CancellationToken cancellationToken = default);
+    Task<IEnumerable<JobVacancyDto>> GetPublishedForJobBoardAsync(Guid tenantId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobVacancySummaryDto>> GetByPositionAsync(Guid positionId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobVacancySummaryDto>> GetByHiringManagerAsync(Guid hiringManagerId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobVacancySummaryDto>> GetByRecruiterAsync(Guid recruiterId, CancellationToken cancellationToken = default);
@@ -66,13 +66,15 @@ public interface IJobVacancyService
     /// are excluded from the <see cref="PublicVacancyDto"/> shape.
     /// </summary>
     Task<IEnumerable<PublicVacancyDto>> GetPublishedForExternalPortalAsync(
+        Guid tenantId,
         string? searchTerm        = null,
         EmploymentType? empType   = null,
         WorkMode? workMode        = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Returns a single published vacancy for the public career portal detail view.</summary>
+    /// <summary>Returns a single published vacancy for the public career portal detail view, scoped to the tenant.</summary>
     Task<PublicVacancyDto?> GetPublicVacancyByIdAsync(
+        Guid tenantId,
         Guid id,
         CancellationToken cancellationToken = default);
 

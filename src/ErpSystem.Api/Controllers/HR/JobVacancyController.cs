@@ -58,7 +58,11 @@ public class JobVacancyController : ControllerBase
 
     [HttpGet("published")]
     public async Task<ActionResult<IEnumerable<JobVacancyDto>>> GetPublished(CancellationToken ct)
-        => Ok(await _service.GetPublishedForJobBoardAsync(ct));
+    {
+        var tenantId = _currentUser.TenantId;
+        if (tenantId == null) return BadRequest("Tenant context could not be resolved.");
+        return Ok(await _service.GetPublishedForJobBoardAsync(tenantId.Value, ct));
+    }
 
     [HttpGet("position/{positionId:guid}")]
     public async Task<ActionResult<IEnumerable<JobVacancySummaryDto>>> GetByPosition(Guid positionId)

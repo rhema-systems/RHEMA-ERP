@@ -116,12 +116,12 @@ public class JobVacancyService : IJobVacancyService
         return entities.ToSummaryDtoList();
     }
 
-    public async Task<IEnumerable<JobVacancyDto>> GetPublishedForJobBoardAsync(CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<JobVacancyDto>> GetPublishedForJobBoardAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
         // Same query as the public portal (deadline filter applied in SQL, requisition/job-description
-        // eagerly loaded so job titles actually render).
+        // eagerly loaded so job titles actually render), scoped to the caller's tenant.
         var entities = await _vacancyRepository.GetPublishedForPublicPortalAsync(
-            DateTime.UtcNow.Date, cancellationToken: cancellationToken);
+            tenantId, DateTime.UtcNow.Date, cancellationToken: cancellationToken);
 
         return entities.Select(e => e.ToDto()).ToList();
     }
@@ -644,14 +644,15 @@ public class JobVacancyService : IJobVacancyService
     // ── Public career portal ──────────────────────────────────────────────────
 
     public async Task<IEnumerable<PublicVacancyDto>> GetPublishedForExternalPortalAsync(
+        Guid tenantId,
         string? searchTerm      = null,
         EmploymentType? empType = null,
         WorkMode? workMode      = null,
         CancellationToken cancellationToken = default)
     {
-        // Status / deadline / employment-type / work-mode are all applied in SQL.
+        // Status / deadline / employment-type / work-mode are all applied in SQL, scoped to the tenant.
         var entities = await _vacancyRepository.GetPublishedForPublicPortalAsync(
-            DateTime.UtcNow.Date, empType, workMode, cancellationToken);
+            tenantId, DateTime.UtcNow.Date, empType, workMode, cancellationToken);
 
         // JobTitle is [NotMapped] — it resolves through Requisition → JobDescription — so a title search
         // cannot be translated to SQL and is applied here, after the database has already narrowed the set.
@@ -669,11 +670,13 @@ public class JobVacancyService : IJobVacancyService
     }
 
     public async Task<PublicVacancyDto?> GetPublicVacancyByIdAsync(
+        Guid tenantId,
         Guid id,
         CancellationToken cancellationToken = default)
     {
         var vacancy = await _vacancyRepository.GetWithFullDetailsAsync(id);
-        if (vacancy == null || vacancy.VacancyStatus != JobVacancyStatus.Published)
+        // Scope to the requesting tenant so a known cross-tenant vacancy id cannot be fetched anonymously.
+        if (vacancy == null || vacancy.TenantId != tenantId || vacancy.VacancyStatus != JobVacancyStatus.Published)
             return null;
         return vacancy.ToPublicDto();
     }

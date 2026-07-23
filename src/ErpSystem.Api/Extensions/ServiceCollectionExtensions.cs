@@ -136,10 +136,32 @@ namespace ErpSystem.Api.Extensions
                         return Task.CompletedTask;
                     }
                 };
+            })
+            // Named bearer handler for the external portals (candidate careers + consultant-client).
+            // Portal tokens are signed with JwtSettings:PortalSecretKey and carry JwtSettings:PortalAudience,
+            // both distinct from the internal token settings above, so they only validate on this scheme.
+            // The validation parameters are the single source of truth in PortalAuth, shared with the
+            // portals' own ValidateToken methods so the two can never drift.
+            .AddJwtBearer(ErpSystem.Api.Security.PortalAuth.Scheme, x =>
+            {
+                x.RequireHttpsMetadata = false; // Set to true in production
+                x.SaveToken = true;
+                x.TokenValidationParameters = ErpSystem.Api.Security.PortalAuth.TokenValidationParameters(configuration);
             });
 
             // Register JWT service
             services.AddScoped<IJwtTokenService, JwtTokenService>();
+
+            // Bind the external-portal URL options. Without this, IOptions<CandidatePortalOptions>.Value
+            // .PortalUrl is empty and the candidate/consultant portal auth services build relative
+            // verification / password-reset links (e.g. "/careers/portal/verify-email?...") that recipients
+            // cannot follow. ValidateOnStart makes a missing/empty PortalUrl fail fast at boot rather than
+            // shipping broken emails.
+            services.AddOptions<ErpSystem.Core.Models.CandidatePortalOptions>()
+                .Bind(configuration.GetSection(ErpSystem.Core.Models.CandidatePortalOptions.SectionName))
+                .Validate(o => !string.IsNullOrWhiteSpace(o.PortalUrl),
+                    "CandidatePortal:PortalUrl must be configured with an absolute portal base URL.")
+                .ValidateOnStart();
 
             return services;
         }
@@ -727,6 +749,22 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // therefore win for those interfaces. See HR_MODULE_PORT_PLAN.md.
             services.AddHrModuleServices();
 
+            // [HR-MODULE-PORT] Public-recruitment catalogue services + their repository.
+            // These concrete implementations were ported but never registered (the generated
+            // HrModuleServiceRegistration only emits registrations it detected), so
+            // PublicRecruitmentController could not be constructed. Registered here (after the
+            // generated call) so they survive HR re-syncs.
+            services.AddScoped<ErpSystem.Core.Interfaces.HR.ICountryRepository, ErpSystem.Data.Repositories.HR.CountryRepository>();
+            services.AddScoped<ICountryService, CountryService>();
+            services.AddScoped<ISkillService, SkillService>();
+            services.AddScoped<IQualificationCatalogueService, QualificationCatalogueService>();
+
+            // [HR-MODULE-PORT] Nominee availability service — ported from HRApi into
+            // Core/Services/HR/Training (see NomineeAvailabilityService). The concrete class was
+            // left behind during the port (it lived in HRApi's ErpSystem.Data/Services), so
+            // TrainingNominationsController could not be activated.
+            services.AddScoped<INomineeAvailabilityService, NomineeAvailabilityService>();
+
             // HR Services - NOW ENABLED
             services.AddScoped<IEmployeeService, EmployeeService>();
 
@@ -942,7 +980,18 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 // Fleet inspections are typically performed by drivers/employees, so allow Employee role to write inspections
                 // without granting broader MaintenanceWrite permissions.
                 .AddPolicy("FleetInspectionWrite", policy =>
-                    policy.RequireRole("Employee", "Manager", "MaintenanceManager", "Maintenance Manager", "TenantAdmin", "SuperAdmin"));
+                    policy.RequireRole("Employee", "Manager", "MaintenanceManager", "Maintenance Manager", "TenantAdmin", "SuperAdmin"))
+                // External portal policies. These run ONLY on the dedicated PortalBearer scheme (portal
+                // tokens use a distinct signing key + audience, see PortalAuth) and require the matching
+                // user_type claim, so an internal staff token can never satisfy them and vice-versa.
+                .AddPolicy("CandidatePortal", policy =>
+                    policy.AddAuthenticationSchemes(ErpSystem.Api.Security.PortalAuth.Scheme)
+                          .RequireAuthenticatedUser()
+                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.CandidateUserType))
+                .AddPolicy("ConsultantClientPortal", policy =>
+                    policy.AddAuthenticationSchemes(ErpSystem.Api.Security.PortalAuth.Scheme)
+                          .RequireAuthenticatedUser()
+                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.ClientUserType));
 
             return services;
         }

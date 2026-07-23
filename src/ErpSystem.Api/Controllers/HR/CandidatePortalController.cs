@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Api.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -14,7 +15,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/portal")]
-[Authorize(Policy = "CandidatePortal")]
+[Authorize(Policy = "CandidatePortal", AuthenticationSchemes = PortalAuth.Scheme)]
 public class CandidatePortalController : ControllerBase
 {
     private readonly ICandidatePortalService _portalService;

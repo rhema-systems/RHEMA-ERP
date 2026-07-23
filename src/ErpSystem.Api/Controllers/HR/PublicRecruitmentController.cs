@@ -61,10 +61,11 @@ public class PublicRecruitmentController : ControllerBase
         [FromQuery] WorkMode?       workMode  = null,
         CancellationToken ct = default)
     {
-        if (!HasValidTenantHeader())
+        if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
 
         var vacancies = await _vacancyService.GetPublishedForExternalPortalAsync(
+            tenantId:   tenantId,
             searchTerm: search,
             empType:    empType,
             workMode:   workMode,
@@ -84,10 +85,10 @@ public class PublicRecruitmentController : ControllerBase
         Guid id,
         CancellationToken ct = default)
     {
-        if (!HasValidTenantHeader())
+        if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
 
-        var vacancy = await _vacancyService.GetPublicVacancyByIdAsync(id, ct);
+        var vacancy = await _vacancyService.GetPublicVacancyByIdAsync(tenantId, id, ct);
         if (vacancy == null)
             return NotFound(new { message = "Vacancy not found or no longer available." });
 
@@ -95,14 +96,18 @@ public class PublicRecruitmentController : ControllerBase
     }
 
     /// <summary>
-    /// Whether the request carries a usable <c>X-Tenant-Id</c> header. Public vacancy queries are tenant
-    /// scoped by the DbContext filter, which resolves the tenant from this header; without it, no tenant
-    /// is applied and the listing would span every tenant's published adverts.
+    /// Extracts a usable tenant id from the <c>X-Tenant-Id</c> header. The value is passed explicitly into
+    /// the vacancy service/repository query — public vacancy queries are NOT covered by a DbContext global
+    /// tenant filter (it is inactive for the DI-created context), so without threading this id through, the
+    /// listing would span every tenant's published adverts.
     /// </summary>
-    private bool HasValidTenantHeader() =>
-        Request.Headers.TryGetValue("X-Tenant-Id", out var value)
-        && Guid.TryParse(value.ToString(), out var tenantId)
-        && tenantId != Guid.Empty;
+    private bool TryGetTenantId(out Guid tenantId)
+    {
+        tenantId = Guid.Empty;
+        return Request.Headers.TryGetValue("X-Tenant-Id", out var value)
+            && Guid.TryParse(value.ToString(), out tenantId)
+            && tenantId != Guid.Empty;
+    }
 
     // =========================================================================
     // APPLICATION SUBMISSION

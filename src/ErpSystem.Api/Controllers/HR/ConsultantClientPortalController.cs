@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Api.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -8,7 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/client-portal")]
-[Authorize(Policy = "ConsultantClientPortal")]
+[Authorize(Policy = "ConsultantClientPortal", AuthenticationSchemes = PortalAuth.Scheme)]
 public class ConsultantClientPortalController : ControllerBase
 {
     private readonly IConsultantClientPortalService _portalService;

@@ -177,17 +177,22 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
     }
 
     public async Task<IEnumerable<JobVacancy>> GetPublishedForPublicPortalAsync(
+        Guid tenantId,
         DateTime asOfUtc,
         EmploymentType? employmentType = null,
         WorkMode? workMode = null,
         CancellationToken cancellationToken = default)
     {
+        // Explicit tenant predicate: the anonymous public portal supplies the tenant via the X-Tenant-Id
+        // header, and the DI-created ApplicationDbContext has no active global tenant filter (its
+        // tenant-aware constructor is disabled), so without this every tenant's vacancies would be returned.
         var query = _dbSet
             .AsNoTracking()
             .Include(v => v.Position)
             .Include(v => v.Requisition).ThenInclude(r => r.JobDescription)
             .Include(v => v.Requisition).ThenInclude(r => r.OrganizationUnit)
             .Include(v => v.Requisition).ThenInclude(r => r.Location)
+            .Where(v => v.TenantId == tenantId)
             .Where(v => v.VacancyStatus == JobVacancyStatus.Published && !v.IsDeleted)
             .Where(v => v.ApplicationDeadline == null || v.ApplicationDeadline >= asOfUtc);
 

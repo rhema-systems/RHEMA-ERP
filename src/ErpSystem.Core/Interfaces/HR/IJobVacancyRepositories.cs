@@ -58,6 +58,7 @@ public interface IJobVacancyRepository : IGenericRepository<JobVacancy>
     /// and locations.</para>
     /// </summary>
     Task<IEnumerable<JobVacancy>> GetPublishedForPublicPortalAsync(
+        Guid tenantId,
         DateTime asOfUtc,
         EmploymentType? employmentType = null,
         WorkMode? workMode = null,

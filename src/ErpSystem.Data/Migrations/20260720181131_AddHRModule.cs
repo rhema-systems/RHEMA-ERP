@@ -89,9 +89,28 @@ namespace ErpSystem.Data.Migrations
                 name: "FK_WorkStations_Departments_DepartmentId",
                 table: "WorkStations");
 
+            // [HR-MODULE-PORT] Preserve legacy attendance history across the AttendanceRecords ->
+            // StaffAttendanceRecords replacement. Stage the existing rows into a backup table BEFORE the
+            // legacy table is dropped; they are transformed and re-inserted after the replacement table is
+            // created later in this migration. Guarded by OBJECT_ID so it is a harmless no-op on a database
+            // where the legacy table is absent, and empty-safe on a fresh deploy. Without this, a normal
+            // MigrateAsync upgrade of an already-populated database would permanently lose attendance data.
+            migrationBuilder.Sql(@"
+IF OBJECT_ID(N'AttendanceRecords', N'U') IS NOT NULL
+BEGIN
+    IF OBJECT_ID(N'__AttendanceRecordsBackup', N'U') IS NOT NULL
+        DROP TABLE __AttendanceRecordsBackup;
+    SELECT * INTO __AttendanceRecordsBackup FROM AttendanceRecords;
+END;
+");
+
             migrationBuilder.DropTable(
                 name: "AttendanceRecords");
 
+            // NOTE: EmployeeShiftPreferences has no replacement entity (the concept was dropped in the HR
+            // module) and Shifts is superseded by the ShiftDefinition model with a different shape. Their
+            // rows are intentionally not migrated. Revisit here if historical shift data ever needs to be
+            // preserved.
             migrationBuilder.DropTable(
                 name: "EmployeeShiftPreferences");
 
@@ -4361,6 +4380,49 @@ namespace ErpSystem.Data.Migrations
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                 });
+
+            // [HR-MODULE-PORT] Re-insert the staged legacy attendance rows into StaffAttendanceRecords now
+            // that it exists, transforming the old nvarchar(50) Status into the StaffAttendanceStatus int
+            // value. Rows referencing an employee/tenant that no longer exists are skipped (EXISTS guards)
+            // so the new FKs cannot fail the migration. The staging table is dropped afterwards. Whole block
+            // is a no-op when the staging table is absent (legacy table never existed).
+            migrationBuilder.Sql(@"
+IF OBJECT_ID(N'__AttendanceRecordsBackup', N'U') IS NOT NULL
+BEGIN
+    INSERT INTO StaffAttendanceRecords
+        (Id, EmployeeId, Date, CheckInTime, CheckOutTime, WorkedHours, OvertimeHours, Status, Notes,
+         CreatedAt, UpdatedAt, CreatedBy, UpdatedBy, CreatedById, LastModifiedById, IsDeleted, DeletedAt, DeletedBy, TenantId)
+    SELECT
+        b.Id, b.EmployeeId, b.Date, b.CheckInTime, b.CheckOutTime, b.WorkedHours, b.OvertimeHours,
+        CASE b.Status
+            WHEN 'Present'         THEN 1
+            WHEN 'Absent'          THEN 2
+            WHEN 'Late'            THEN 3
+            WHEN 'HalfDay'         THEN 4
+            WHEN 'Half Day'        THEN 4
+            WHEN 'OnLeave'         THEN 5
+            WHEN 'On Leave'        THEN 5
+            WHEN 'PublicHoliday'   THEN 6
+            WHEN 'Public Holiday'  THEN 6
+            WHEN 'Holiday'         THEN 6
+            WHEN 'Weekend'         THEN 7
+            WHEN 'OffDay'          THEN 8
+            WHEN 'Off Day'         THEN 8
+            WHEN 'RemoteWork'      THEN 9
+            WHEN 'Remote Work'     THEN 9
+            WHEN 'OnDuty'          THEN 10
+            WHEN 'On Duty'         THEN 10
+            ELSE ISNULL(TRY_CAST(b.Status AS int), 1)
+        END,
+        b.Notes, b.CreatedAt, b.UpdatedAt, b.CreatedBy, b.UpdatedBy, b.CreatedById, b.LastModifiedById,
+        b.IsDeleted, b.DeletedAt, b.DeletedBy, b.TenantId
+    FROM __AttendanceRecordsBackup b
+    WHERE EXISTS (SELECT 1 FROM Employees e WHERE e.Id = b.EmployeeId)
+      AND EXISTS (SELECT 1 FROM Tenants   t WHERE t.Id = b.TenantId);
+
+    DROP TABLE __AttendanceRecordsBackup;
+END;
+");
 
             migrationBuilder.CreateTable(
                 name: "StaffBulkAttendanceImports",
