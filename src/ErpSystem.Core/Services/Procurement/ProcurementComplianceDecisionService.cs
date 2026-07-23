@@ -1,8 +1,13 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Workflow;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -32,6 +37,7 @@ public sealed class ProcurementComplianceDecisionService : IProcurementComplianc
     private IGenericRepository<ProcurementPolicyEvidenceRule> Evidence => _unitOfWork.Repository<ProcurementPolicyEvidenceRule>();
     private IGenericRepository<ProcurementPolicyExceptionRule> Exceptions => _unitOfWork.Repository<ProcurementPolicyExceptionRule>();
     private IGenericRepository<ProcurementPolicySodRule> SodRules => _unitOfWork.Repository<ProcurementPolicySodRule>();
+    private IGenericRepository<WorkflowDefinition> WorkflowDefinitions => _unitOfWork.Repository<WorkflowDefinition>();
 
     public async Task<IReadOnlyList<ProcurementCompliancePolicyOptionDto>> GetEffectivePolicyOptionsAsync(
         DateTime atUtc,
@@ -56,6 +62,279 @@ public sealed class ProcurementComplianceDecisionService : IProcurementComplianc
                 IsDefault = item.IsDefault
             })
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<ProcurementAuthorityRouteDecisionDto> EvaluateAuthorityRouteAsync(
+        ProcurementAuthorityRouteDecisionRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
+        ValidateAuthorityRequest(request);
+        var moment = EnsureUtc(request.AtUtc ?? DateTime.UtcNow);
+        var currency = request.CurrencyCode.Trim().ToUpperInvariant();
+        var normalizedCorrelation = string.IsNullOrWhiteSpace(correlationId)
+            ? Guid.NewGuid().ToString("N")
+            : correlationId.Trim();
+        var evaluationId = Guid.NewGuid();
+        PolicySelection selectedPolicy;
+        try
+        {
+            selectedPolicy = await ResolvePolicyAsync(new ProcurementComplianceDecisionRequest
+            {
+                PolicySetId = request.PolicySetId,
+                PolicyCode = request.PolicyCode,
+                Category = request.Category,
+                Amount = request.Amount,
+                CurrencyCode = currency,
+                AtUtc = moment,
+                SourceType = request.SourceType,
+                SourceReference = request.SourceReference,
+                EntityType = "PurchaseRequisition",
+                Action = "Submit"
+            }, moment, cancellationToken);
+        }
+        catch (ProcurementCompliancePolicyNotFoundException exception)
+        {
+            return AuthorityBlocked(evaluationId, moment, normalizedCorrelation, request, currency,
+                "PR_AUTHORITY_POLICY_NOT_EFFECTIVE", exception.Message,
+                "Publish one approved, effective procurement policy for this tenant and submission date.");
+        }
+        catch (ProcurementCompliancePolicyConflictException exception)
+        {
+            return AuthorityBlocked(evaluationId, moment, normalizedCorrelation, request, currency,
+                "PR_AUTHORITY_POLICY_AMBIGUOUS", exception.Message,
+                "Resolve overlapping/default policy publication so exactly one effective policy is selected.");
+        }
+
+        var policyDto = MapPolicy(selectedPolicy.Policy, selectedPolicy.Reason);
+        ResolvedRuleBundle rules;
+        try
+        {
+            rules = await LoadResolvedRulesAsync(selectedPolicy.Policy, moment, cancellationToken);
+        }
+        catch (ProcurementCompliancePolicyConflictException exception)
+        {
+            return AuthorityBlocked(evaluationId, moment, normalizedCorrelation, request, currency,
+                "PR_AUTHORITY_POLICY_LINEAGE_INVALID", exception.Message,
+                "Correct the immutable tenant-override/base-policy lineage and publish a valid replacement.", policyDto);
+        }
+
+        var categoryRules = rules.Authorities
+            .Where(item => !item.Rule.Category.HasValue || item.Rule.Category == request.Category)
+            .ToList();
+        var currencyRules = categoryRules
+            .Where(item => CurrencyMatches(item.Rule.CurrencyCode, currency))
+            .ToList();
+        var matches = currencyRules
+            .Where(item => AmountMatches(request.Amount, item.Rule.LowerBound, item.Rule.UpperBound,
+                item.Rule.LowerInclusive, item.Rule.UpperInclusive))
+            .OrderBy(item => item.Rule.Sequence)
+            .ThenByDescending(item => item.Rule.Priority)
+            .ThenBy(item => item.Rule.RuleCode)
+            .ToList();
+
+        if (matches.Count == 0)
+        {
+            if (categoryRules.Any(item => AmountMatches(request.Amount, item.Rule.LowerBound, item.Rule.UpperBound,
+                    item.Rule.LowerInclusive, item.Rule.UpperInclusive)))
+            {
+                return AuthorityBlocked(evaluationId, moment, normalizedCorrelation, request, currency,
+                    "PR_AUTHORITY_CURRENCY_MISMATCH",
+                    $"Authority coverage exists for {request.Category} and {request.Amount:N2}, but not in {currency}.",
+                    $"Configure and publish a {currency} authority band for this category and amount.", policyDto);
+            }
+
+            var code = currencyRules.Count > 0 ? "PR_AUTHORITY_COVERAGE_GAP" : "PR_AUTHORITY_NOT_CONFIGURED";
+            var message = currencyRules.Count > 0
+                ? $"The effective authority matrix has no band covering {request.Amount:N2} {currency} for {request.Category}."
+                : $"The effective policy has no authority rules for {request.Category} in {currency}.";
+            return AuthorityBlocked(evaluationId, moment, normalizedCorrelation, request, currency, code, message,
+                "Add a non-overlapping effective authority band with an approved shared-workflow reference.", policyDto);
+        }
+
+        var overlappingSequences = matches.GroupBy(item => item.Rule.Sequence)
+            .Where(group => group.Count() > 1)
+            .OrderBy(group => group.Key)
+            .ToList();
+        if (overlappingSequences.Count > 0)
+        {
+            var details = string.Join(", ", overlappingSequences.Select(group =>
+                $"sequence {group.Key}: {string.Join("/", group.Select(item => item.Rule.RuleCode))}"));
+            return AuthorityBlocked(evaluationId, moment, normalizedCorrelation, request, currency,
+                "PR_AUTHORITY_ROUTE_AMBIGUOUS",
+                $"Multiple effective authority rules match the same route sequence ({details}).",
+                "Retire or replace overlapping authority rules so each route sequence resolves once.", policyDto);
+        }
+
+        if (matches.Any(item => !item.Rule.WorkflowDefinitionId.HasValue))
+        {
+            return AuthorityBlocked(evaluationId, moment, normalizedCorrelation, request, currency,
+                "PR_AUTHORITY_WORKFLOW_REQUIRED",
+                "Every matched authority stage must reference the shared workflow definition selected for this route.",
+                "Assign one Published Purchase Requisition workflow definition to every matched authority stage.", policyDto);
+        }
+
+        var workflowIds = matches.Select(item => item.Rule.WorkflowDefinitionId!.Value).Distinct().ToList();
+        if (workflowIds.Count != 1)
+        {
+            return AuthorityBlocked(evaluationId, moment, normalizedCorrelation, request, currency,
+                "PR_AUTHORITY_WORKFLOW_AMBIGUOUS",
+                $"The matched authority route references {workflowIds.Count} different workflow definitions.",
+                "Configure every authority stage in the route to use one immutable Published workflow version.", policyDto);
+        }
+
+        var workflow = await WorkflowDefinitions.GetQueryable(item =>
+                item.Id == workflowIds[0] && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Include(item => item.EntityType)
+            .Include(item => item.Steps)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+        if (workflow is null || !WorkflowDefinitionLifecyclePolicy.IsRuntimeEligible(workflow) ||
+            workflow.EntityType is null || !IsPurchaseRequisitionEntityType(workflow.EntityType))
+        {
+            return AuthorityBlocked(evaluationId, moment, normalizedCorrelation, request, currency,
+                "PR_AUTHORITY_WORKFLOW_INVALID",
+                "The configured workflow is missing, foreign, inactive, unpublished, or not a Purchase Requisition workflow.",
+                "Publish an active Purchase Requisition workflow and reference that exact version from the authority rules.", policyDto);
+        }
+
+        var findings = new List<ProcurementComplianceFindingDto>();
+        var resolvedSteps = new List<ProcurementAuthorityRouteStepDecisionDto>();
+        foreach (var match in matches)
+        {
+            var roleSteps = workflow.Steps
+                .Where(step => !step.IsDeleted && StepContainsRole(step, match.Rule.AuthorityRole))
+                .OrderBy(step => step.Order)
+                .ThenBy(step => step.Id)
+                .ToList();
+            if (roleSteps.Count == 0)
+            {
+                findings.Add(Finding("PR_AUTHORITY_WORKFLOW_STAGE_MISSING",
+                    $"Workflow '{workflow.Name}' has no stage assigned to authority role '{match.Rule.AuthorityRole}'.",
+                    ProcurementComplianceFindingSeverity.HardStop, match.Rule.Id, match.Rule.RuleCode,
+                    ProcurementPolicyRuleKind.Authority, match.Rule.SourceDecisionKey));
+                continue;
+            }
+            if (roleSteps.Count > 1)
+            {
+                findings.Add(Finding("PR_AUTHORITY_WORKFLOW_STAGE_AMBIGUOUS",
+                    $"Workflow '{workflow.Name}' assigns authority role '{match.Rule.AuthorityRole}' to multiple stages.",
+                    ProcurementComplianceFindingSeverity.HardStop, match.Rule.Id, match.Rule.RuleCode,
+                    ProcurementPolicyRuleKind.Authority, match.Rule.SourceDecisionKey));
+                continue;
+            }
+
+            var workflowStep = roleSteps[0];
+            if (!match.Rule.IsObserver && workflowStep.StepType != WorkflowStepType.Approval)
+            {
+                findings.Add(Finding("PR_AUTHORITY_WORKFLOW_STAGE_INVALID",
+                    $"Authority role '{match.Rule.AuthorityRole}' must map to an Approval workflow stage.",
+                    ProcurementComplianceFindingSeverity.HardStop, match.Rule.Id, match.Rule.RuleCode,
+                    ProcurementPolicyRuleKind.Authority, match.Rule.SourceDecisionKey));
+                continue;
+            }
+
+            if (!match.Rule.IsObserver)
+            {
+                var approval = ReadApprovalConfiguration(workflowStep);
+                if (approval is null || approval.MinApprovalsRequired < match.Rule.Quorum)
+                {
+                    findings.Add(Finding("PR_AUTHORITY_WORKFLOW_QUORUM_MISMATCH",
+                        $"Workflow stage '{workflowStep.Name}' requires fewer than the configured quorum of {match.Rule.Quorum}.",
+                        ProcurementComplianceFindingSeverity.HardStop, match.Rule.Id, match.Rule.RuleCode,
+                        ProcurementPolicyRuleKind.Authority, match.Rule.SourceDecisionKey));
+                    continue;
+                }
+                if (!approval.PreventInitiatorApproval)
+                {
+                    findings.Add(Finding("PR_AUTHORITY_WORKFLOW_SOD_INCOMPLETE",
+                        $"Workflow stage '{workflowStep.Name}' does not prevent the requisition initiator from approving.",
+                        ProcurementComplianceFindingSeverity.HardStop, match.Rule.Id, match.Rule.RuleCode,
+                        ProcurementPolicyRuleKind.Authority, "DEC-004"));
+                    continue;
+                }
+            }
+
+            resolvedSteps.Add(new ProcurementAuthorityRouteStepDecisionDto
+            {
+                Sequence = match.Rule.Sequence,
+                RuleId = match.Rule.Id,
+                RulePolicySetId = match.Owner.Id,
+                RulePolicyCode = match.Owner.Code,
+                RulePolicyVersion = match.Owner.Version,
+                RuleCode = match.Rule.RuleCode,
+                SourceRuleId = match.Rule.SourceRuleId,
+                SourceDecisionKey = match.Rule.SourceDecisionKey,
+                AuthorityName = match.Rule.AuthorityName,
+                AuthorityRole = match.Rule.AuthorityRole,
+                CurrencyCode = match.Rule.CurrencyCode,
+                LowerBound = match.Rule.LowerBound,
+                UpperBound = match.Rule.UpperBound,
+                LowerInclusive = match.Rule.LowerInclusive,
+                UpperInclusive = match.Rule.UpperInclusive,
+                Quorum = match.Rule.Quorum,
+                IsObserver = match.Rule.IsObserver,
+                EscalationAuthority = match.Rule.EscalationAuthority,
+                WorkflowDefinitionId = workflow.Id,
+                WorkflowStepId = workflowStep.Id,
+                WorkflowStepName = workflowStep.Name,
+                WorkflowStepOrder = workflowStep.Order
+            });
+        }
+
+        if (findings.Count == 0 && resolvedSteps.Select(item => item.WorkflowStepId).Distinct().Count() != resolvedSteps.Count)
+            findings.Add(Finding("PR_AUTHORITY_WORKFLOW_SEQUENCE_MISMATCH",
+                "Multiple ordered authority stages resolve to the same workflow stage."));
+        if (findings.Count == 0)
+        {
+            var workflowOrders = resolvedSteps.OrderBy(item => item.Sequence).Select(item => item.WorkflowStepOrder).ToArray();
+            if (!workflowOrders.SequenceEqual(workflowOrders.OrderBy(item => item)))
+                findings.Add(Finding("PR_AUTHORITY_WORKFLOW_SEQUENCE_MISMATCH",
+                    "Authority sequence order does not match the configured shared-workflow stage order."));
+        }
+
+        if (findings.Count > 0)
+        {
+            var first = findings[0];
+            return new ProcurementAuthorityRouteDecisionDto
+            {
+                EvaluationId = evaluationId,
+                EvaluatedAtUtc = DateTime.UtcNow,
+                PolicyDateUtc = moment,
+                CorrelationId = normalizedCorrelation,
+                IsReady = false,
+                DecisionCode = first.Code,
+                Message = first.Message,
+                Policy = policyDto,
+                Category = request.Category,
+                Amount = request.Amount,
+                CurrencyCode = currency,
+                Workflow = MapWorkflow(workflow),
+                Steps = resolvedSteps,
+                Findings = findings,
+                RequiredActions = ["Align workflow roles, order, quorum, and initiator/approver separation with the effective authority route, then publish a replacement workflow/policy version."]
+            };
+        }
+
+        return new ProcurementAuthorityRouteDecisionDto
+        {
+            EvaluationId = evaluationId,
+            EvaluatedAtUtc = DateTime.UtcNow,
+            PolicyDateUtc = moment,
+            CorrelationId = normalizedCorrelation,
+            IsReady = true,
+            DecisionCode = "PR_AUTHORITY_ROUTE_READY",
+            Message = $"Resolved {resolvedSteps.Count} authority stage(s) through workflow '{workflow.Name}' v{workflow.Version}.",
+            Policy = policyDto,
+            Category = request.Category,
+            Amount = request.Amount,
+            CurrencyCode = currency,
+            Workflow = MapWorkflow(workflow),
+            Steps = resolvedSteps,
+            Findings = Array.Empty<ProcurementComplianceFindingDto>(),
+            RequiredActions = Array.Empty<string>()
+        };
     }
 
     public async Task<ProcurementComplianceDecisionDto> EvaluateAsync(
@@ -797,6 +1076,105 @@ public sealed class ProcurementComplianceDecisionService : IProcurementComplianc
 
     private static string? NullIfWhiteSpace(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    private static ProcurementAuthorityRouteDecisionDto AuthorityBlocked(
+        Guid evaluationId,
+        DateTime moment,
+        string correlationId,
+        ProcurementAuthorityRouteDecisionRequest request,
+        string currency,
+        string code,
+        string message,
+        string requiredAction,
+        ProcurementCompliancePolicySelectionDto? policy = null) => new()
+    {
+        EvaluationId = evaluationId,
+        EvaluatedAtUtc = DateTime.UtcNow,
+        PolicyDateUtc = moment,
+        CorrelationId = correlationId,
+        IsReady = false,
+        DecisionCode = code,
+        Message = message,
+        Policy = policy,
+        Category = request.Category,
+        Amount = request.Amount,
+        CurrencyCode = currency,
+        Findings = [Finding(code, message)],
+        RequiredActions = [requiredAction]
+    };
+
+    private static ProcurementAuthorityWorkflowSelectionDto MapWorkflow(WorkflowDefinition workflow) => new()
+    {
+        WorkflowDefinitionId = workflow.Id,
+        DefinitionKey = workflow.DefinitionKey,
+        Name = workflow.Name,
+        Version = workflow.Version,
+        EntityTypeCode = workflow.EntityType.Code,
+        EntityTypeName = workflow.EntityType.Name,
+        PublishedAt = workflow.PublishedAt
+    };
+
+    private static bool IsPurchaseRequisitionEntityType(WorkflowEntityType entityType) =>
+        EqualsNormalized(entityType.Code, "PURCHASE_REQUISITION") ||
+        EqualsNormalized(entityType.Code, "PurchaseRequisition") ||
+        EqualsNormalized(entityType.Name, "Purchase Requisition") ||
+        EqualsNormalized(entityType.Name, "PurchaseRequisition");
+
+    private static bool StepContainsRole(WorkflowStep step, string authorityRole)
+    {
+        if (EqualsNormalized(step.RequiredRole, authorityRole)) return true;
+        var config = ReadStepConfiguration(step);
+        if (config?.ApprovalConfig?.ApproverRules.Any(rule => EqualsNormalized(rule.Role, authorityRole)) == true)
+            return true;
+        return JsonContainsRole(step.AssignmentConfiguration, authorityRole);
+    }
+
+    private static WorkflowApprovalConfigDto? ReadApprovalConfiguration(WorkflowStep step) =>
+        ReadStepConfiguration(step)?.ApprovalConfig;
+
+    private static WorkflowStepConfigurationDto? ReadStepConfiguration(WorkflowStep step)
+    {
+        if (string.IsNullOrWhiteSpace(step.Configuration)) return null;
+        try
+        {
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            options.Converters.Add(new JsonStringEnumConverter());
+            return JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(step.Configuration, options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static bool JsonContainsRole(string? json, string role)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return ContainsRole(document.RootElement, role);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool ContainsRole(JsonElement element, string role)
+    {
+        if (element.ValueKind == JsonValueKind.String)
+            return EqualsNormalized(element.GetString(), role);
+        if (element.ValueKind == JsonValueKind.Array)
+            return element.EnumerateArray().Any(item => ContainsRole(item, role));
+        if (element.ValueKind == JsonValueKind.Object)
+            return element.EnumerateObject().Any(property => ContainsRole(property.Value, role));
+        return false;
+    }
+
+    private static bool EqualsNormalized(string? left, string? right) =>
+        !string.IsNullOrWhiteSpace(left) && !string.IsNullOrWhiteSpace(right) &&
+        string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
+
     private static DateTime EnsureUtc(DateTime value) => value.Kind switch
     {
         DateTimeKind.Utc => value,
@@ -831,6 +1209,19 @@ public sealed class ProcurementComplianceDecisionService : IProcurementComplianc
             throw new ProcurementComplianceRequestValidationException("ENTITY_TYPE_REQUIRED", "EntityType is required.");
         if (string.IsNullOrWhiteSpace(request.Action))
             throw new ProcurementComplianceRequestValidationException("ACTION_REQUIRED", "Action is required.");
+    }
+
+    private static void ValidateAuthorityRequest(ProcurementAuthorityRouteDecisionRequest request)
+    {
+        if (request.Amount < 0)
+            throw new ProcurementComplianceRequestValidationException("AMOUNT_INVALID", "Amount cannot be negative.");
+        if (string.IsNullOrWhiteSpace(request.CurrencyCode) || request.CurrencyCode.Trim().Length != 3 ||
+            !request.CurrencyCode.Trim().All(char.IsLetter))
+            throw new ProcurementComplianceRequestValidationException("CURRENCY_INVALID", "CurrencyCode must contain exactly three letters.");
+        if (string.IsNullOrWhiteSpace(request.SourceType))
+            throw new ProcurementComplianceRequestValidationException("SOURCE_TYPE_REQUIRED", "SourceType is required.");
+        if (string.IsNullOrWhiteSpace(request.SourceReference))
+            throw new ProcurementComplianceRequestValidationException("SOURCE_REFERENCE_REQUIRED", "SourceReference is required.");
     }
 
     private sealed record PolicySelection(ProcurementPolicySet Policy, string Reason);

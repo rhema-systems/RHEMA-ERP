@@ -20,6 +20,9 @@ public class TenderDto
     public int InvitationCount { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedByName { get; set; }
+    public Guid? SourcePurchaseRequisitionId { get; set; }
+    public Guid? SourcingReleaseId { get; set; }
+    public Guid? SourcingCaseId { get; set; }
 
     // Workflow display helpers (optional)
     public string? CurrentWorkflowStepName { get; set; }
@@ -56,6 +59,9 @@ public class TenderDetailDto
     public DateTime? AwardDate { get; set; }
     public decimal? EstimatedValue { get; set; }
     public string? Currency { get; set; }
+    public Guid? SourcePurchaseRequisitionId { get; set; }
+    public Guid? SourcingReleaseId { get; set; }
+    public Guid? SourcingCaseId { get; set; }
 
     // Eligibility
     public decimal? MinimumPerformanceRating { get; set; }
@@ -121,6 +127,11 @@ public class TenderDetailDto
 /// </summary>
 public class CreateTenderDto
 {
+    [Required]
+    public Guid SourcePurchaseRequisitionId { get; set; }
+
+    public Guid? SourceProcurementPlanItemId { get; set; }
+
     [Required]
     [MaxLength(200)]
     public string Title { get; set; } = string.Empty;

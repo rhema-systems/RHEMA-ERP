@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -31,6 +32,7 @@ public class TenderService : ITenderService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TenderService> _logger;
     private readonly IAppEventBus _appEventBus;
+    private readonly IProcurementSourcingCaseService _sourcingCaseService;
 
     public TenderService(
         ITenderRepository tenderRepository,
@@ -51,6 +53,7 @@ public class TenderService : ITenderService
         UserManager<ApplicationUser> userManager,
         ICurrentUserProvider currentUserProvider,
         IAppEventBus appEventBus,
+        IProcurementSourcingCaseService sourcingCaseService,
         ILogger<TenderService> logger)
     {
         _tenderRepository = tenderRepository;
@@ -71,6 +74,7 @@ public class TenderService : ITenderService
         _userManager = userManager;
         _currentUserProvider = currentUserProvider;
         _appEventBus = appEventBus;
+        _sourcingCaseService = sourcingCaseService;
         _logger = logger;
     }
 
@@ -179,6 +183,23 @@ public class TenderService : ITenderService
     {
         try
         {
+            if (dto.SourcePurchaseRequisitionId == Guid.Empty)
+                throw new ProcurementRequisitionSourcingValidationException(
+                    "TENDER_SOURCE_REQUISITION_REQUIRED", "A tender must be created from a released purchase requisition.");
+            var requestForQuotation = IsRequestForQuotation(dto.TenderType);
+            var sourceType = requestForQuotation ? "RequestForQuotation" : "Tender";
+            var gate = await _sourcingCaseService.EnforceSourceEntryAsync(
+                dto.SourcePurchaseRequisitionId,
+                requestForQuotation ? ProcurementMethodType.RequestForQuotation : null,
+                sourceType, $"new-tender:{dto.Title}", Guid.NewGuid().ToString("N"));
+            if (dto.SourceProcurementPlanItemId.HasValue &&
+                gate.SourcePlanItemId != dto.SourceProcurementPlanItemId.Value)
+                throw new ProcurementRequisitionSourcingValidationException(
+                    "TENDER_PLAN_ITEM_LINEAGE_MISMATCH", "The selected requisition was not released for this procurement-plan item.");
+            if (dto.EstimatedValue.HasValue && dto.EstimatedValue.Value != gate.EstimatedValue)
+                throw new ProcurementRequisitionSourcingValidationException("TENDER_CASE_VALUE_MISMATCH", "Tender value must equal the locked sourcing-case value.");
+            if (!string.IsNullOrWhiteSpace(dto.Currency) && !string.Equals(dto.Currency.Trim(), gate.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                throw new ProcurementRequisitionSourcingValidationException("TENDER_CASE_CURRENCY_MISMATCH", "Tender currency must equal the locked sourcing-case currency.");
             // Generate tender number
             var tenderNumber = await _tenderRepository.GenerateTenderNumberAsync();
 
@@ -193,8 +214,11 @@ public class TenderService : ITenderService
                 Status = "Draft",
                 SubmissionDeadline = dto.SubmissionDeadline,
                 OpeningDate = dto.OpeningDate,
-                EstimatedValue = dto.EstimatedValue,
-                Currency = dto.Currency,
+                EstimatedValue = gate.EstimatedValue,
+                Currency = gate.CurrencyCode,
+                SourcePurchaseRequisitionId = dto.SourcePurchaseRequisitionId,
+                SourcingReleaseId = gate.SourcingReleaseId,
+                SourcingCaseId = gate.SourcingCaseId,
                 MinimumPerformanceRating = dto.MinimumPerformanceRating,
                 RequiresPrequalification = dto.RequiresPrequalification,
                 AllowPartialBids = dto.AllowPartialBids,
@@ -244,6 +268,9 @@ public class TenderService : ITenderService
                     items.Add(item);
                 }
             }
+
+            await _sourcingCaseService.RegisterSourceRequestAsync(gate.SourcingCaseId, sourceType,
+                tender.Id, tender.TenderNumber, Guid.NewGuid().ToString("N"));
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -296,6 +323,18 @@ public class TenderService : ITenderService
             if (tender.Status != "Draft")
             {
                 throw new InvalidOperationException("Only draft tenders can be updated");
+            }
+            if (tender.SourcePurchaseRequisitionId.HasValue)
+            {
+                var requestForQuotation = IsRequestForQuotation(tender.TenderType);
+                var gate = await _sourcingCaseService.EnforceSourceEntryAsync(tender.SourcePurchaseRequisitionId.Value,
+                    requestForQuotation ? ProcurementMethodType.RequestForQuotation : null,
+                    requestForQuotation ? "RequestForQuotation" : "Tender", tender.TenderNumber, Guid.NewGuid().ToString("N"));
+                EnsureSourceLineage(tender.SourcingReleaseId, tender.SourcingCaseId, gate);
+                if (dto.EstimatedValue.HasValue && dto.EstimatedValue.Value != gate.EstimatedValue)
+                    throw new ProcurementRequisitionSourcingValidationException("TENDER_CASE_VALUE_MISMATCH", "Tender value must remain equal to the locked sourcing-case value.");
+                if (!string.IsNullOrWhiteSpace(dto.Currency) && !string.Equals(dto.Currency.Trim(), gate.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                    throw new ProcurementRequisitionSourcingValidationException("TENDER_CASE_CURRENCY_MISMATCH", "Tender currency must remain equal to the locked sourcing-case currency.");
             }
 
             tender.Title = dto.Title;
@@ -462,6 +501,18 @@ public class TenderService : ITenderService
             {
                 throw new InvalidOperationException($"Tender cannot be published in current status: {tender.Status}");
             }
+            if (!tender.SourcePurchaseRequisitionId.HasValue)
+                throw new ProcurementRequisitionSourcingValidationException(
+                    "TENDER_SOURCE_REQUISITION_REQUIRED", "A tender cannot be published without a source purchase requisition and current sourcing release.");
+            var requestForQuotation = IsRequestForQuotation(tender.TenderType);
+            var gate = await _sourcingCaseService.EnforceSourceEntryAsync(tender.SourcePurchaseRequisitionId.Value,
+                requestForQuotation ? ProcurementMethodType.RequestForQuotation : null,
+                requestForQuotation ? "RequestForQuotation" : "Tender", tender.TenderNumber, Guid.NewGuid().ToString("N"));
+            EnsureSourceLineage(tender.SourcingReleaseId, tender.SourcingCaseId, gate);
+            tender.SourcingReleaseId = gate.SourcingReleaseId;
+            tender.SourcingCaseId = gate.SourcingCaseId;
+            if (tender.EstimatedValue != gate.EstimatedValue || !string.Equals(tender.Currency, gate.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                throw new ProcurementRequisitionSourcingValidationException("TENDER_CASE_VALUE_MISMATCH", "Tender value and currency no longer match the locked sourcing case.");
 
             tender.Status = "Published";
             tender.PublishDate = DateTime.UtcNow; // Always publish immediately
@@ -1303,6 +1354,9 @@ public class TenderService : ITenderService
             SubmissionDeadline = tender.SubmissionDeadline,
             EstimatedValue = tender.EstimatedValue,
             Currency = tender.Currency,
+            SourcePurchaseRequisitionId = tender.SourcePurchaseRequisitionId,
+            SourcingReleaseId = tender.SourcingReleaseId,
+            SourcingCaseId = tender.SourcingCaseId,
             BidCount = tender.Bids?.Count(b => !b.IsDeleted && b.Status != "Draft") ?? 0,
             InvitationCount = tender.Invitations?.Count(i => !i.IsDeleted) ?? 0,
             CreatedAt = tender.CreatedAt,
@@ -1326,6 +1380,9 @@ public class TenderService : ITenderService
             AwardDate = tender.AwardDate,
             EstimatedValue = tender.EstimatedValue,
             Currency = tender.Currency,
+            SourcePurchaseRequisitionId = tender.SourcePurchaseRequisitionId,
+            SourcingReleaseId = tender.SourcingReleaseId,
+            SourcingCaseId = tender.SourcingCaseId,
             MinimumPerformanceRating = tender.MinimumPerformanceRating,
             RequiresPrequalification = tender.RequiresPrequalification,
             AllowPartialBids = tender.AllowPartialBids,
@@ -1374,6 +1431,17 @@ public class TenderService : ITenderService
             RequiredDeliveryDate = item.RequiredDeliveryDate,
             DeliveryLocation = item.DeliveryLocation
         };
+    }
+
+    private static bool IsRequestForQuotation(string? tenderType) =>
+        string.Equals(tenderType?.Trim(), "RFQ", StringComparison.OrdinalIgnoreCase);
+
+    private static void EnsureSourceLineage(Guid? releaseId, Guid? caseId, ProcurementSourcingCaseEntryGateDto gate)
+    {
+        if (releaseId.HasValue && releaseId.Value != gate.SourcingReleaseId)
+            throw new ProcurementRequisitionSourcingValidationException("TENDER_RELEASE_LINEAGE_MISMATCH", "Tender sourcing-release lineage cannot be replaced.");
+        if (caseId.HasValue && caseId.Value != gate.SourcingCaseId)
+            throw new ProcurementRequisitionSourcingValidationException("TENDER_CASE_LINEAGE_MISMATCH", "Tender sourcing-case lineage cannot be replaced.");
     }
 
     private static TenderDocumentDto MapDocumentToDto(TenderDocument document)

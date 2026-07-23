@@ -8,7 +8,8 @@ public class TenderConfiguration : IEntityTypeConfiguration<Tender>
 {
     public void Configure(EntityTypeBuilder<Tender> builder)
     {
-        builder.ToTable("Tenders");
+        builder.ToTable("Tenders", table =>
+            table.HasTrigger("TR_Tenders_SourcingReleaseGuard"));
 
         builder.HasKey(t => t.Id);
 
@@ -24,11 +25,29 @@ public class TenderConfiguration : IEntityTypeConfiguration<Tender>
         builder.HasIndex(t => t.Status);
         builder.HasIndex(t => t.PublishDate);
         builder.HasIndex(t => t.SubmissionDeadline);
+        builder.HasIndex(t => t.SourcePurchaseRequisitionId);
+        builder.HasIndex(t => t.SourcingReleaseId);
+        builder.HasIndex(t => t.SourcingCaseId);
 
         // Relationships
         builder.HasOne(t => t.Tenant)
             .WithMany()
             .HasForeignKey(t => t.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(t => t.SourcePurchaseRequisition)
+            .WithMany()
+            .HasForeignKey(t => t.SourcePurchaseRequisitionId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(t => t.SourcingRelease)
+            .WithMany()
+            .HasForeignKey(t => t.SourcingReleaseId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(t => t.SourcingCase)
+            .WithMany()
+            .HasForeignKey(t => t.SourcingCaseId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasMany(t => t.Lots)
@@ -367,6 +386,7 @@ public class TenderBidLotConfiguration : IEntityTypeConfiguration<TenderBidLot>
             .WithOne(i => i.BidLot)
             .HasForeignKey(i => i.BidLotId)
             .OnDelete(DeleteBehavior.Restrict);
+
     }
 }
 

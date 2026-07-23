@@ -33,6 +33,8 @@ public class RequestForQuotation : TenantEntity
     public decimal EstimatedValue { get; set; } = 0m;
 
     public Guid? SourcePurchaseRequisitionId { get; set; }
+    public Guid? SourcingReleaseId { get; set; }
+    public Guid? SourcingCaseId { get; set; }
 
     /// <summary>
     /// Optional email recipients who are not system business partners (semicolon/comma/newline separated).
@@ -51,6 +53,8 @@ public class RequestForQuotation : TenantEntity
 
     // Navigation
     public virtual PurchaseRequisition? SourcePurchaseRequisition { get; set; }
+    public virtual ProcurementRequisitionSourcingRelease? SourcingRelease { get; set; }
+    public virtual ProcurementSourcingCase? SourcingCase { get; set; }
     public virtual BusinessPartner? AwardedBusinessPartner { get; set; }
     public virtual ICollection<RequestForQuotationItem> Items { get; set; } = new List<RequestForQuotationItem>();
     public virtual ICollection<RequestForQuotationInvitation> Invitations { get; set; } = new List<RequestForQuotationInvitation>();
@@ -58,6 +62,9 @@ public class RequestForQuotation : TenantEntity
 
     // Awarding (internal)
     public virtual ICollection<RequestForQuotationAwardLine> AwardLines { get; set; } = new List<RequestForQuotationAwardLine>();
+    public virtual ICollection<ProcurementRfqReceipt> Receipts { get; set; } = new List<ProcurementRfqReceipt>();
+    public virtual ProcurementRfqOpeningRegister? OpeningRegister { get; set; }
+    public virtual ProcurementRfqEvaluation? Evaluation { get; set; }
 }
 
 public class RequestForQuotationItem : TenantEntity

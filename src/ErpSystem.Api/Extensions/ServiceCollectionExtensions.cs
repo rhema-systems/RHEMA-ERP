@@ -807,6 +807,22 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSodGuardService, ErpSystem.Core.Services.Procurement.ProcurementSodGuardService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAccessControlService, ErpSystem.Core.Services.Procurement.ProcurementAccessControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementControlEventService, ErpSystem.Core.Services.Procurement.ProcurementControlEventService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAppSubmissionService, ErpSystem.Core.Services.Procurement.ProcurementAppSubmissionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSpecificationTemplateService, ErpSystem.Core.Services.Procurement.ProcurementSpecificationTemplateService>();
+            services.AddScoped<ErpSystem.Core.Services.Procurement.ProcurementCalendarService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementCalendarService>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Procurement.ProcurementCalendarService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementCalendarProcessor>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Procurement.ProcurementCalendarService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRequisitionLinkageService, ErpSystem.Core.Services.Procurement.ProcurementRequisitionLinkageService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRequisitionSubmissionControlService, ErpSystem.Core.Services.Procurement.ProcurementRequisitionSubmissionControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementBudgetReservationStore, ErpSystem.Data.Repositories.Procurement.ProcurementBudgetReservationStore>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRequisitionBudgetControlService, ErpSystem.Core.Services.Procurement.ProcurementRequisitionBudgetControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRequisitionAuthorityRouteService, ErpSystem.Core.Services.Procurement.ProcurementRequisitionAuthorityRouteService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRequisitionSourcingReleaseStore, ErpSystem.Data.Repositories.Procurement.ProcurementRequisitionSourcingReleaseStore>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRequisitionSourcingReleaseService, ErpSystem.Core.Services.Procurement.ProcurementRequisitionSourcingReleaseService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSourcingCaseService, ErpSystem.Core.Services.Procurement.ProcurementSourcingCaseService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRfqControlService, ErpSystem.Core.Services.Procurement.ProcurementRfqControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementMasterDataChangeService, ErpSystem.Core.Services.Procurement.ProcurementMasterDataChangeService>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementConfigurationProfileSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementAccessControlSeeder>();
@@ -874,6 +890,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Notification dispatcher background service - sends pending notifications on schedule with dead-letter support
             services.AddHostedService<ErpSystem.Api.Services.NotificationDispatcherBackgroundService>();
+            services.AddHostedService<ErpSystem.Api.Services.ProcurementCalendarBackgroundService>();
 
             // Blacklist expiry background service
             services.AddHostedService<ErpSystem.Core.Services.Procurement.BlacklistExpiryBackgroundService>();

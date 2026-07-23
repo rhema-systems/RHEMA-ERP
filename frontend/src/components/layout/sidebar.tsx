@@ -644,6 +644,12 @@ const navigationItems: NavItem[] = [
             href: '/procurement/purchase-requisitions',
             icon: FileText,
           },
+          {
+            title: 'Sourcing Cases',
+            href: '/procurement/sourcing-cases',
+            icon: FileCheck,
+            permissions: ['procurement.records.read'],
+          },
           { title: 'RFQs', href: '/procurement/rfqs', icon: FileText },
           {
             title: 'Purchase Orders',
@@ -703,6 +709,16 @@ const navigationItems: NavItem[] = [
             icon: Target,
           },
           {
+            title: 'APP Submissions',
+            href: '/procurement/planning/app-submissions',
+            icon: FileCheck,
+          },
+          {
+            title: 'Specification Templates',
+            href: '/procurement/planning/specification-templates',
+            icon: BookTemplate,
+          },
+          {
             title: 'Budgets',
             href: '/procurement/planning/budgets',
             icon: DollarSign,
@@ -711,6 +727,11 @@ const navigationItems: NavItem[] = [
             title: 'Schedules',
             href: '/procurement/planning/schedules',
             icon: Calendar,
+          },
+          {
+            title: 'Annual Calendar',
+            href: '/procurement/planning/calendar',
+            icon: CalendarClock,
           },
           {
             title: 'Market Analysis',

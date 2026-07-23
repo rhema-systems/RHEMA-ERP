@@ -159,7 +159,7 @@ export default function ProcurementAccessControlsPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Metric label="Roles" value={`${summary?.configuredRoleCount ?? 0}/${summary?.requiredRoleCount ?? 19}`} detail="least-privilege grants" ok={summary?.configuredRoleCount === summary?.requiredRoleCount} />
-        <Metric label="Permissions" value={`${summary?.configuredPermissionCount ?? 0}/${summary?.requiredPermissionCount ?? 33}`} detail="Identity permission registry" ok={summary?.configuredPermissionCount === summary?.requiredPermissionCount} />
+        <Metric label="Permissions" value={`${summary?.configuredPermissionCount ?? 0}/${summary?.requiredPermissionCount ?? 36}`} detail="Identity permission registry" ok={summary?.configuredPermissionCount === summary?.requiredPermissionCount} />
         <Metric label="Assignments" value={String(summary?.activeAssignmentCount ?? 0)} detail="active tenant duties" ok={(summary?.activeAssignmentCount ?? 0) > 0} />
         <Metric label="Committees" value={`${summary?.readyCommitteeCount ?? 0}/${summary?.requiredCommitteeCount ?? 4}`} detail="active and at quorum" ok={summary?.readyCommitteeCount === summary?.requiredCommitteeCount} />
         <Metric label="Internal Audit" value={summary?.internalAuditIsReadOnly ? 'Read only' : 'Review'} detail="no mutation grant" ok={summary?.internalAuditIsReadOnly} />

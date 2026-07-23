@@ -27,6 +27,16 @@ public class WorkflowIntegrationService : IWorkflowIntegrationService
         return CreateResult(entityType, entityId, executionResult, "submit");
     }
 
+    public async Task<WorkflowIntegrationResult> SubmitAsync(
+        string entityType,
+        Guid entityId,
+        Guid workflowDefinitionId)
+    {
+        var executionResult = await _workflowService.StartApprovalWorkflowAsync(
+            entityType, entityId, workflowDefinitionId);
+        return CreateResult(entityType, entityId, executionResult, "submit selected definition");
+    }
+
     public async Task<WorkflowIntegrationResult> ProcessApprovalAsync(
         string entityType,
         Guid entityId,

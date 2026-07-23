@@ -12,4 +12,9 @@ public interface IProcurementComplianceDecisionService
         ProcurementComplianceDecisionRequest request,
         string correlationId,
         CancellationToken cancellationToken = default);
+
+    Task<ProcurementAuthorityRouteDecisionDto> EvaluateAuthorityRouteAsync(
+        ProcurementAuthorityRouteDecisionRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default);
 }

@@ -5,6 +5,8 @@ namespace ErpSystem.Core.Interfaces.Procurement;
 public interface IProcurementControlEventService
 {
     Task<ProcurementControlEventDto> RecordAsync(ProcurementControlEventWriteRequest request, CancellationToken cancellationToken = default);
+    Task<ProcurementControlEventDto> RecordSystemAsync(Guid tenantId, string actorName,
+        ProcurementControlEventWriteRequest request, CancellationToken cancellationToken = default);
     Task<ProcurementControlEventSummaryDto> GetSummaryAsync(CancellationToken cancellationToken = default);
     Task<ProcurementControlEventPageDto> SearchAsync(ProcurementControlEventSearchRequest request, CancellationToken cancellationToken = default);
     Task<ProcurementControlEventDto> GetAsync(Guid id, CancellationToken cancellationToken = default);

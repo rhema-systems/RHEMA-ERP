@@ -18,7 +18,11 @@ export default function RfqsPage() {
   const filtered = useMemo(() => {
     if (!search.trim()) return rfqs;
     const s = search.toLowerCase();
-    return rfqs.filter((r) => r.rfqNumber.toLowerCase().includes(s) || r.title.toLowerCase().includes(s));
+    return rfqs.filter(
+      (r) =>
+        r.rfqNumber.toLowerCase().includes(s) ||
+        r.title.toLowerCase().includes(s)
+    );
   }, [rfqs, search]);
 
   useEffect(() => {
@@ -42,7 +46,9 @@ export default function RfqsPage() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">RFQs</h1>
-          <p className="text-sm text-muted-foreground">Private requests for quotation sent to selected suppliers.</p>
+          <p className="text-sm text-muted-foreground">
+            Private requests for quotation sent to selected suppliers.
+          </p>
         </div>
       </div>
 
@@ -53,7 +59,11 @@ export default function RfqsPage() {
         <CardContent className="space-y-4">
           <div className="flex items-center gap-2">
             <Search className="h-4 w-4 text-muted-foreground" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search RFQ number or title..." />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search RFQ number or title..."
+            />
           </div>
 
           {loading ? (
@@ -61,11 +71,16 @@ export default function RfqsPage() {
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : filtered.length === 0 ? (
-            <div className="py-10 text-center text-sm text-muted-foreground">No RFQs found.</div>
+            <div className="py-10 text-center text-sm text-muted-foreground">
+              No RFQs found.
+            </div>
           ) : (
             <div className="divide-y">
               {filtered.map((r) => (
-                <div key={r.id} className="flex items-center justify-between gap-4 py-4">
+                <div
+                  key={r.id}
+                  className="flex items-center justify-between gap-4 py-4"
+                >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4 text-muted-foreground" />
@@ -75,12 +90,21 @@ export default function RfqsPage() {
                         Suppliers: {r.supplierCount} · Quotes: {r.quoteCount}
                       </Badge>
                     </div>
-                    <div className="text-sm text-muted-foreground truncate">{r.title}</div>
+                    <div className="text-sm text-muted-foreground truncate">
+                      {r.title}
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <Button asChild size="sm">
+                      <Link href={`/procurement/rfqs/${r.id}/controls`}>
+                        Controls
+                      </Link>
+                    </Button>
                     <Button asChild variant="outline" size="sm">
-                      <Link href={`/procurement/rfqs/${r.id}/edit`}>Open</Link>
+                      <Link href={`/procurement/rfqs/${r.id}/edit`}>
+                        Draft / issue
+                      </Link>
                     </Button>
                   </div>
                 </div>
@@ -92,4 +116,3 @@ export default function RfqsPage() {
     </div>
   );
 }
-

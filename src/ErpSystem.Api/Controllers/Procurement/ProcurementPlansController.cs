@@ -404,6 +404,18 @@ public class ProcurementPlansController : ControllerBase
             var result = await _planService.ConvertItemToTenderAsync(dto);
             return Ok(result);
         }
+        catch (ProcurementRequisitionSourcingBlockedException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Readiness.DecisionCode, ex.Message, ex.Readiness));
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(403, SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
+        }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
         catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
         catch (Exception ex)
@@ -437,6 +449,18 @@ public class ProcurementPlansController : ControllerBase
         {
             var result = await _planService.ConvertItemToRfqAsync(dto);
             return Ok(result);
+        }
+        catch (ProcurementRequisitionSourcingBlockedException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Readiness.DecisionCode, ex.Message, ex.Readiness));
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(403, SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
         }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
         catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
@@ -478,5 +502,18 @@ public class ProcurementPlansController : ControllerBase
             _logger.LogError(ex, "Error validating budget for plan item {ItemId}", itemId);
             return StatusCode(500, "An error occurred while validating the budget");
         }
+    }
+
+    private ProblemDetails SourcingProblem(
+        string code,
+        string detail,
+        PurchaseRequisitionSourcingReadinessDto? readiness = null,
+        int status = 422)
+    {
+        var problem = new ProblemDetails { Status = status, Title = code, Detail = detail, Instance = HttpContext.Request.Path };
+        problem.Extensions["code"] = code;
+        problem.Extensions["correlationId"] = HttpContext.TraceIdentifier;
+        if (readiness is not null) problem.Extensions["readiness"] = readiness;
+        return problem;
     }
 }

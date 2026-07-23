@@ -8,7 +8,11 @@ public class RequestForQuotationConfiguration : IEntityTypeConfiguration<Request
 {
     public void Configure(EntityTypeBuilder<RequestForQuotation> builder)
     {
-        builder.ToTable("RequestForQuotations");
+        builder.ToTable("RequestForQuotations", table =>
+        {
+            table.HasTrigger("TR_RequestForQuotations_SourcingReleaseGuard");
+            table.HasTrigger("TR_RequestForQuotations_StatutoryLifecycleGuard");
+        });
 
         builder.HasKey(r => r.Id);
 
@@ -20,6 +24,23 @@ public class RequestForQuotationConfiguration : IEntityTypeConfiguration<Request
         builder.HasIndex(r => r.Status);
         builder.HasIndex(r => r.SubmissionDeadline);
         builder.HasIndex(r => r.SourcePurchaseRequisitionId);
+        builder.HasIndex(r => r.SourcingReleaseId);
+        builder.HasIndex(r => r.SourcingCaseId);
+
+        builder.HasOne(r => r.SourcePurchaseRequisition)
+            .WithMany()
+            .HasForeignKey(r => r.SourcePurchaseRequisitionId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(r => r.SourcingRelease)
+            .WithMany()
+            .HasForeignKey(r => r.SourcingReleaseId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(r => r.SourcingCase)
+            .WithMany()
+            .HasForeignKey(r => r.SourcingCaseId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasMany(r => r.Items)
             .WithOne(i => i.Rfq)

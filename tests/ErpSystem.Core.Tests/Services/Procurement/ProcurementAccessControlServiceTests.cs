@@ -23,7 +23,7 @@ public sealed class ProcurementAccessControlServiceTests
     public void RegistryContainsTheCompleteTdcLeastPrivilegeBaseline()
     {
         ProcurementAccessControlRegistry.Roles.Should().HaveCount(19).And.OnlyHaveUniqueItems(item => item.Code);
-        ProcurementAccessControlRegistry.Permissions.Should().HaveCount(33).And.OnlyHaveUniqueItems(item => item.Code);
+        ProcurementAccessControlRegistry.Permissions.Should().HaveCount(36).And.OnlyHaveUniqueItems(item => item.Code);
         ProcurementAccessControlRegistry.Committees.Should().HaveCount(4).And.OnlyHaveUniqueItems(item => item.Code);
         ProcurementAccessControlRegistry.Workflows.Should().HaveCount(13).And.OnlyHaveUniqueItems(item => item.Code);
 
@@ -42,7 +42,7 @@ public sealed class ProcurementAccessControlServiceTests
         await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
 
         (await fixture.Context.Roles.CountAsync(item => item.Name!.StartsWith("TDC_"))).Should().Be(19);
-        (await fixture.Context.Permissions.CountAsync(item => item.Category == ProcurementAccessControlRegistry.Category)).Should().Be(33);
+        (await fixture.Context.Permissions.CountAsync(item => item.Category == ProcurementAccessControlRegistry.Category)).Should().Be(36);
         (await fixture.Context.ProcurementCommittees.CountAsync(item => item.TenantId == fixture.TenantId)).Should().Be(4);
         var workflows = await fixture.Context.WorkflowDefinitions.Where(item => item.TenantId == fixture.TenantId).ToListAsync();
         workflows.Should().HaveCount(13).And.OnlyContain(item =>

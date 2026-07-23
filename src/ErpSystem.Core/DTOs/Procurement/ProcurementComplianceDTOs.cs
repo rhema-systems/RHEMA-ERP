@@ -27,6 +27,74 @@ public sealed class ProcurementComplianceDecisionRequest
     public List<string> EvidenceReferenceKeys { get; set; } = new();
 }
 
+public sealed class ProcurementAuthorityRouteDecisionRequest
+{
+    public Guid? PolicySetId { get; set; }
+    [StringLength(50)] public string? PolicyCode { get; set; }
+    public ProcurementCategoryClass Category { get; set; }
+    [Range(typeof(decimal), "0", "9999999999999999")] public decimal Amount { get; set; }
+    [Required, StringLength(3), RegularExpression("^[A-Za-z]{3}$")] public string CurrencyCode { get; set; } = "GHS";
+    public DateTime? AtUtc { get; set; }
+    [Required, StringLength(100)] public string SourceType { get; set; } = string.Empty;
+    [Required, StringLength(200)] public string SourceReference { get; set; } = string.Empty;
+}
+
+public sealed class ProcurementAuthorityRouteDecisionDto
+{
+    public Guid EvaluationId { get; init; } = Guid.NewGuid();
+    public DateTime EvaluatedAtUtc { get; init; }
+    public DateTime PolicyDateUtc { get; init; }
+    public string CorrelationId { get; init; } = string.Empty;
+    public bool IsReady { get; init; }
+    public string DecisionCode { get; init; } = string.Empty;
+    public string Message { get; init; } = string.Empty;
+    public ProcurementCompliancePolicySelectionDto? Policy { get; init; }
+    public ProcurementCategoryClass Category { get; init; }
+    public decimal Amount { get; init; }
+    public string CurrencyCode { get; init; } = string.Empty;
+    public ProcurementAuthorityWorkflowSelectionDto? Workflow { get; init; }
+    public IReadOnlyList<ProcurementAuthorityRouteStepDecisionDto> Steps { get; init; } = Array.Empty<ProcurementAuthorityRouteStepDecisionDto>();
+    public IReadOnlyList<ProcurementComplianceFindingDto> Findings { get; init; } = Array.Empty<ProcurementComplianceFindingDto>();
+    public IReadOnlyList<string> RequiredActions { get; init; } = Array.Empty<string>();
+}
+
+public sealed class ProcurementAuthorityWorkflowSelectionDto
+{
+    public Guid WorkflowDefinitionId { get; init; }
+    public Guid DefinitionKey { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public int Version { get; init; }
+    public string EntityTypeCode { get; init; } = string.Empty;
+    public string EntityTypeName { get; init; } = string.Empty;
+    public DateTime? PublishedAt { get; init; }
+}
+
+public sealed class ProcurementAuthorityRouteStepDecisionDto
+{
+    public int Sequence { get; init; }
+    public Guid RuleId { get; init; }
+    public Guid RulePolicySetId { get; init; }
+    public string RulePolicyCode { get; init; } = string.Empty;
+    public int RulePolicyVersion { get; init; }
+    public string RuleCode { get; init; } = string.Empty;
+    public Guid? SourceRuleId { get; init; }
+    public string SourceDecisionKey { get; init; } = string.Empty;
+    public string AuthorityName { get; init; } = string.Empty;
+    public string AuthorityRole { get; init; } = string.Empty;
+    public string CurrencyCode { get; init; } = string.Empty;
+    public decimal LowerBound { get; init; }
+    public decimal? UpperBound { get; init; }
+    public bool LowerInclusive { get; init; }
+    public bool UpperInclusive { get; init; }
+    public int Quorum { get; init; }
+    public bool IsObserver { get; init; }
+    public string? EscalationAuthority { get; init; }
+    public Guid WorkflowDefinitionId { get; init; }
+    public Guid WorkflowStepId { get; init; }
+    public string WorkflowStepName { get; init; } = string.Empty;
+    public int WorkflowStepOrder { get; init; }
+}
+
 public class ProcurementCompliancePolicyOptionDto
 {
     public Guid PolicySetId { get; init; }

@@ -30,6 +30,9 @@ export interface TenderDto {
   closingDate?: string;
   estimatedValue?: number;
   currency?: string;
+  sourcePurchaseRequisitionId?: string;
+  sourcingReleaseId?: string;
+  sourcingCaseId?: string;
   bidCount: number;
   invitationCount: number;
   createdAt: string;
@@ -86,6 +89,7 @@ export interface TenderDocumentRequirement {
 }
 
 export interface CreateTenderDto {
+  sourcePurchaseRequisitionId: string;
   title: string;
   description?: string;
   tenderType: string;

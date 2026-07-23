@@ -113,6 +113,88 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
         return Map(saved);
     }
 
+    public async Task<ProcurementControlEventDto> RecordSystemAsync(
+        Guid tenantId,
+        string actorName,
+        ProcurementControlEventWriteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ProcurementControlEventValidationException("TENANT_REQUIRED", "A tenant is required for a system control event.");
+        if (string.IsNullOrWhiteSpace(actorName))
+            throw new ProcurementControlEventValidationException("ACTOR_REQUIRED", "A system actor name is required.");
+        ValidateWrite(request);
+        if (request.Evidence.Count != 0)
+            throw new ProcurementControlEventValidationException("SYSTEM_EVIDENCE_UNSUPPORTED",
+                "System-generated control events must reference evidence through a user-authorized action.");
+
+        var systemActorId = await _unitOfWork.Repository<UserTenant>()
+            .GetQueryable(item => item.TenantId == tenantId && !item.IsDeleted &&
+                item.Status == UserTenantStatus.Active &&
+                (item.ExpiresAt == null || item.ExpiresAt > DateTime.UtcNow) && item.User.IsActive)
+            .OrderByDescending(item => item.User.UserRoles.Any(role => role.Role.Name == "SuperAdmin"))
+            .ThenByDescending(item => item.User.UserRoles.Any(role => role.Role.Name == "TenantAdmin"))
+            .ThenBy(item => item.User.UserName)
+            .Select(item => item.UserId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (systemActorId == Guid.Empty)
+            throw new ProcurementControlEventValidationException("SYSTEM_ACTOR_UNAVAILABLE",
+                "A system control event requires at least one active user in the tenant for referential audit lineage.");
+
+        var now = DateTime.UtcNow;
+        var decisionKeys = request.DecisionKeys.Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim().ToUpperInvariant()).Distinct().OrderBy(item => item).ToList();
+        var entity = new ProcurementControlEvent
+        {
+            TenantId = tenantId,
+            EventKey = request.EventKey.Trim(),
+            SchemaVersion = SchemaVersion,
+            EventType = request.EventType.Trim(),
+            Action = request.Action.Trim(),
+            Result = request.Result,
+            RuleCode = TrimOrNull(request.RuleCode),
+            RuleId = request.RuleId,
+            RuleVersion = TrimOrNull(request.RuleVersion),
+            DecisionKeysJson = JsonSerializer.Serialize(decisionKeys, JsonOptions),
+            SourceType = request.SourceType.Trim(),
+            SourceId = request.SourceId,
+            SourceReference = request.SourceReference.Trim(),
+            ActorUserId = systemActorId,
+            ActorName = Truncate(actorName.Trim(), 300),
+            ActorRolesJson = JsonSerializer.Serialize(new[] { "System" }, JsonOptions),
+            Reason = TruncateNullable(request.Reason, 1000),
+            InputValuesJson = SerializeOrNull(request.InputValues),
+            ResultValuesJson = SerializeOrNull(request.ResultValues),
+            BeforeJson = SerializeOrNull(request.Before),
+            AfterJson = SerializeOrNull(request.After),
+            CorrelationId = request.CorrelationId.Trim(),
+            CausationId = TrimOrNull(request.CausationId),
+            OccurredAtUtc = EnsureUtc(request.OccurredAtUtc),
+            CreatedAt = now,
+            CreatedBy = Truncate(actorName.Trim(), 300)
+        };
+        entity.IntegrityHash = ComputeHash(entity);
+
+        var existing = await Events.GetQueryable(item => item.TenantId == tenantId &&
+                item.EventKey == entity.EventKey && !item.IsDeleted)
+            .Include(item => item.EvidenceLinks).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        if (existing is not null)
+        {
+            if (string.Equals(existing.IntegrityHash, entity.IntegrityHash, StringComparison.OrdinalIgnoreCase))
+                return Map(existing);
+            throw new ProcurementControlEventConflictException("EventKey already identifies a different immutable control event.");
+        }
+
+        await Events.AddAsync(entity);
+        try { await _unitOfWork.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateException)
+        {
+            throw new ProcurementControlEventConflictException(
+                "The system control event could not be appended because its immutable key already exists.");
+        }
+        return Map(entity);
+    }
+
     public async Task<ProcurementControlEventSummaryDto> GetSummaryAsync(CancellationToken cancellationToken = default)
     {
         EnsureReader();
