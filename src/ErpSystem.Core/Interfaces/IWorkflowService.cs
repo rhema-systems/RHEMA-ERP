@@ -11,6 +11,12 @@ public interface IWorkflowService
     Task<ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId);
 
     /// <summary>
+    /// Starts approval using one exact Published workflow-definition version.
+    /// </summary>
+    Task<ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult> StartApprovalWorkflowAsync(
+        string entityType, Guid entityId, Guid workflowDefinitionId);
+
+    /// <summary>
     /// Checks if a user can approve a specific workflow step.
     /// userId must be the ApplicationUser.Id from the authenticated user, not an Employee.Id.
     /// </summary>

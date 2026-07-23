@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -23,6 +24,8 @@ public class RfqService : IRfqService
     private readonly IAppEventBus _appEventBus;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IProcurementSourcingCaseService _sourcingCaseService;
+    private readonly IProcurementRfqControlService _rfqControlService;
     private readonly ILogger<RfqService> _logger;
 
     public RfqService(
@@ -38,6 +41,8 @@ public class RfqService : IRfqService
         IAppEventBus appEventBus,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IProcurementSourcingCaseService sourcingCaseService,
+        IProcurementRfqControlService rfqControlService,
         ILogger<RfqService> logger)
     {
         _rfqRepository = rfqRepository;
@@ -52,6 +57,8 @@ public class RfqService : IRfqService
         _appEventBus = appEventBus;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _sourcingCaseService = sourcingCaseService;
+        _rfqControlService = rfqControlService;
         _logger = logger;
     }
 
@@ -73,7 +80,17 @@ public class RfqService : IRfqService
         var rfq = await _rfqRepository.GetWithDetailsAsync(id);
         if (rfq == null) return null;
 
-        return MapToDetailDto(rfq);
+        var detail = MapToDetailDto(rfq);
+        if (!await _rfqControlService.AreQuotesOpenAsync(id))
+        {
+            foreach (var quote in detail.Quotes)
+            {
+                quote.Notes = null;
+                quote.Items.Clear();
+                quote.TotalAmount = 0;
+            }
+        }
+        return detail;
     }
 
     public async Task<RfqDetailDto> CreateRfqFromPurchaseRequisitionAsync(Guid purchaseRequisitionId, CreateRfqFromPurchaseRequisitionDto? dto = null)
@@ -85,6 +102,10 @@ public class RfqService : IRfqService
 
         if (!string.Equals(pr.Status, "Approved", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"Purchase requisition must be approved to create an RFQ. Current status: {pr.Status}");
+
+        var gate = await _sourcingCaseService.EnforceSourceEntryAsync(
+            pr.Id, ProcurementMethodType.RequestForQuotation, "RequestForQuotation",
+            $"new-rfq:{pr.RequisitionNumber}", Guid.NewGuid().ToString("N"));
 
         var prItems = (await _purchaseRequisitionItemRepository.GetItemsByRequisitionIdAsync(purchaseRequisitionId)).ToList();
         if (prItems.Count == 0)
@@ -99,17 +120,17 @@ public class RfqService : IRfqService
             Title = $"RFQ for {pr.RequisitionNumber}",
             Description = pr.Justification,
             Status = "Draft",
-            Currency = "USD",
-            EstimatedValue = pr.TotalAmount,
+            Currency = gate.CurrencyCode,
+            EstimatedValue = gate.EstimatedValue,
             SourcePurchaseRequisitionId = pr.Id,
+            SourcingReleaseId = gate.SourcingReleaseId,
+            SourcingCaseId = gate.SourcingCaseId,
             ExternalRecipientEmails = string.IsNullOrWhiteSpace(dto.ExternalRecipientEmails) ? null : dto.ExternalRecipientEmails.Trim(),
             CreatedById = _currentUserProvider.UserId,
             CreatedAt = DateTime.UtcNow
         };
 
         await _rfqRepository.AddAsync(rfq);
-        await _unitOfWork.SaveChangesAsync(); // persist RFQ Id
-
         var line = 1;
         foreach (var item in prItems)
         {
@@ -134,6 +155,8 @@ public class RfqService : IRfqService
         }
 
         await SyncInvitationsAsync(rfq.Id, dto.SupplierIds, isDraftSelection: true);
+        await _sourcingCaseService.RegisterSourceRequestAsync(gate.SourcingCaseId, "RequestForQuotation",
+            rfq.Id, rfq.RfqNumber, Guid.NewGuid().ToString("N"));
 
         await _unitOfWork.SaveChangesAsync();
 
@@ -148,8 +171,18 @@ public class RfqService : IRfqService
         var rfq = await _rfqRepository.GetWithDetailsAsync(id)
             ?? throw new InvalidOperationException($"RFQ with ID {id} not found");
 
-        if (rfq.Status is "Closed" or "Awarded" or "Cancelled")
-            throw new InvalidOperationException($"RFQ cannot be edited in current status: {rfq.Status}");
+        if (!string.Equals(rfq.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"RFQ issue terms are immutable after dispatch. Current status: {rfq.Status}");
+        if (rfq.SourcePurchaseRequisitionId.HasValue)
+        {
+            var gate = await _sourcingCaseService.EnforceSourceEntryAsync(rfq.SourcePurchaseRequisitionId.Value,
+                ProcurementMethodType.RequestForQuotation, "RequestForQuotation", rfq.RfqNumber, Guid.NewGuid().ToString("N"));
+            EnsureSourceLineage(rfq.SourcingReleaseId, rfq.SourcingCaseId, gate);
+            if (dto.EstimatedValue.HasValue && dto.EstimatedValue.Value != gate.EstimatedValue)
+                throw new ProcurementRequisitionSourcingValidationException("RFQ_CASE_VALUE_MISMATCH", "RFQ value must remain equal to the locked sourcing-case value.");
+            if (!string.IsNullOrWhiteSpace(dto.Currency) && !string.Equals(dto.Currency.Trim(), gate.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                throw new ProcurementRequisitionSourcingValidationException("RFQ_CASE_CURRENCY_MISMATCH", "RFQ currency must remain equal to the locked sourcing-case currency.");
+        }
 
         if (!string.IsNullOrWhiteSpace(dto.Title))
             rfq.Title = dto.Title.Trim();
@@ -189,8 +222,19 @@ public class RfqService : IRfqService
         var rfq = await _rfqRepository.GetWithDetailsAsync(id)
             ?? throw new InvalidOperationException($"RFQ with ID {id} not found");
 
-        if (rfq.Status is "Closed" or "Awarded" or "Cancelled")
-            throw new InvalidOperationException($"RFQ cannot be sent in current status: {rfq.Status}");
+        if (!string.Equals(rfq.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Only a Draft RFQ can be dispatched. Current status: {rfq.Status}");
+        if (!rfq.SourcePurchaseRequisitionId.HasValue)
+            throw new ProcurementRequisitionSourcingValidationException(
+                "RFQ_SOURCE_REQUISITION_REQUIRED", "An RFQ cannot be dispatched without a source purchase requisition and current sourcing release.");
+        var gate = await _sourcingCaseService.EnforceSourceEntryAsync(
+            rfq.SourcePurchaseRequisitionId.Value, ProcurementMethodType.RequestForQuotation,
+            "RequestForQuotation", rfq.RfqNumber, Guid.NewGuid().ToString("N"));
+        EnsureSourceLineage(rfq.SourcingReleaseId, rfq.SourcingCaseId, gate);
+        rfq.SourcingReleaseId = gate.SourcingReleaseId;
+        rfq.SourcingCaseId = gate.SourcingCaseId;
+        if (rfq.EstimatedValue != gate.EstimatedValue || !string.Equals(rfq.Currency, gate.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+            throw new ProcurementRequisitionSourcingValidationException("RFQ_CASE_VALUE_MISMATCH", "RFQ value and currency no longer match the locked sourcing case.");
 
         var supplierIds = (dto.SupplierIds ?? new List<Guid>())
             .Where(x => x != Guid.Empty)
@@ -203,6 +247,9 @@ public class RfqService : IRfqService
 
         if (supplierIds.Count == 0 && string.IsNullOrWhiteSpace(externalEmails))
             throw new InvalidOperationException("Please select at least one supplier and/or provide external recipient email(s).");
+
+        var correlationId = Guid.NewGuid().ToString("N");
+        await _rfqControlService.EnsureDispatchReadyAsync(rfq.Id, supplierIds, correlationId);
 
         rfq.ExternalRecipientEmails = externalEmails;
         rfq.Status = "Sent";
@@ -290,6 +337,10 @@ public class RfqService : IRfqService
             {
                 quote = await _quoteRepository.GetByRfqAndSupplierAsync(rfqId, businessPartnerId, tenantId);
 
+                if (quote != null && (string.Equals(quote.Status, "Submitted", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(quote.Status, "LateRejected", StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException("This supplier has already submitted a sealed quotation. Resubmission is not permitted.");
+
                 if (quote == null)
                 {
                     quote = new RequestForQuotationQuote
@@ -304,8 +355,7 @@ public class RfqService : IRfqService
                     await _unitOfWork.SaveChangesAsync(); // persist Quote Id
                 }
 
-                // Replace quote items (soft delete existing to keep audit-friendly history).
-                // Save the soft-deletes first (within the transaction) to avoid unique-index conflicts on re-insert.
+                // A supplier may build a Draft, but once sealed the quote is immutable and cannot be replaced.
                 var quoteItemRepo = _unitOfWork.Repository<RequestForQuotationQuoteItem>();
                 var existingItems = quote.Items?.Where(i => !i.IsDeleted).ToList() ?? new List<RequestForQuotationQuoteItem>();
                 foreach (var existing in existingItems)
@@ -334,17 +384,20 @@ public class RfqService : IRfqService
                 }
 
                 quote.Notes = dto.Notes;
-                quote.Status = "Submitted";
-                quote.SubmittedAt = DateTime.UtcNow;
+                var receivedAtUtc = DateTime.UtcNow;
+                var isLate = rfq.SubmissionDeadline.HasValue && receivedAtUtc > rfq.SubmissionDeadline.Value.ToUniversalTime();
+                quote.Status = isLate ? "LateRejected" : "Submitted";
+                quote.SubmittedAt = receivedAtUtc;
                 quote.SubmittedByUserId = submittedByUserId;
 
                 await _quoteRepository.UpdateAsync(quote);
 
-                invitation.Status = "Responded";
-                invitation.RespondedAt = DateTime.UtcNow;
+                invitation.Status = isLate ? "LateRejected" : "Responded";
+                invitation.RespondedAt = receivedAtUtc;
                 await _invitationRepository.UpdateAsync(invitation);
 
                 await _unitOfWork.SaveChangesAsync();
+                await _rfqControlService.RecordReceiptAsync(rfq.Id, quote.Id, receivedAtUtc, Guid.NewGuid().ToString("N"));
                 await _unitOfWork.CommitAsync();
             }
             catch
@@ -377,14 +430,16 @@ public class RfqService : IRfqService
         // Publish generic entity activity events to drive admin-configurable notification topics (best-effort).
         try
         {
-            var bp = await _businessPartnerRepository.GetByIdAsync(businessPartnerId);
-            var data = new Dictionary<string, object>
+            var internalData = new Dictionary<string, object>
             {
                 ["RfqId"] = rfqId,
                 ["RfqNumber"] = rfq.RfqNumber,
                 ["QuoteId"] = quote.Id,
+                ["Sealed"] = true,
+            };
+            var supplierData = new Dictionary<string, object>(internalData)
+            {
                 ["BusinessPartnerId"] = businessPartnerId,
-                ["SupplierName"] = bp?.PartnerName ?? string.Empty,
             };
 
             await _appEventBus.PublishAsync(new EntityActivityEvent
@@ -395,7 +450,7 @@ public class RfqService : IRfqService
                 Audience = "Internal",
                 EntityId = rfqId,
                 TriggeredByUserId = submittedByUserId,
-                Data = data
+                Data = internalData
             });
 
             await _appEventBus.PublishAsync(new EntityActivityEvent
@@ -406,7 +461,7 @@ public class RfqService : IRfqService
                 Audience = "Supplier",
                 EntityId = rfqId,
                 TriggeredByUserId = submittedByUserId,
-                Data = data
+                Data = supplierData
             });
 
             await _appEventBus.PublishAsync(new EntityActivityEvent
@@ -417,7 +472,7 @@ public class RfqService : IRfqService
                 Audience = "Internal",
                 EntityId = quote.Id,
                 TriggeredByUserId = submittedByUserId,
-                Data = data
+                Data = internalData
             });
 
             await _appEventBus.PublishAsync(new EntityActivityEvent
@@ -428,7 +483,7 @@ public class RfqService : IRfqService
                 Audience = "Supplier",
                 EntityId = quote.Id,
                 TriggeredByUserId = submittedByUserId,
-                Data = data
+                Data = supplierData
             });
         }
         catch (Exception ex)
@@ -446,7 +501,8 @@ public class RfqService : IRfqService
 
     public async Task<CreatePurchaseOrdersFromRfqResponseDto> CreatePurchaseOrdersFromAwardAsync(Guid rfqId, CreatePurchaseOrdersFromRfqDto dto)
     {
-        dto ??= new CreatePurchaseOrdersFromRfqDto();
+        var awardCorrelationId = Guid.NewGuid().ToString("N");
+        dto = await _rfqControlService.GetApprovedAwardAsync(rfqId, awardCorrelationId);
 
         CreatePurchaseOrdersFromRfqResponseDto? response = null;
 
@@ -458,11 +514,11 @@ public class RfqService : IRfqService
                 var rfq = await _rfqRepository.GetWithDetailsAsync(rfqId)
                     ?? throw new InvalidOperationException($"RFQ with ID {rfqId} not found");
 
-                if (rfq.Status is "Closed" or "Awarded" or "Cancelled")
+                if (rfq.Status is "Closed" or "Awarded" or "Cancelled" or "Rejected")
                     throw new InvalidOperationException($"RFQ cannot be awarded in current status: {rfq.Status}");
 
-                if (!string.Equals(rfq.Status, "Sent", StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"RFQ must be Sent before awarding. Current status: {rfq.Status}");
+                if (!string.Equals(rfq.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"RFQ evaluation must be approved before awarding. Current status: {rfq.Status}");
 
                 // Prevent accidental double-awards (creates duplicate POs).
                 var hasExistingPo = await _unitOfWork.Repository<PurchaseOrder>()
@@ -719,6 +775,9 @@ public class RfqService : IRfqService
             _logger.LogError(ex, "Failed to send RFQ awarded notifications for RFQ {RfqId}", rfqId);
         }
 
+        if (response != null)
+            await _rfqControlService.RecordAwardHandoffAsync(rfqId, response.PurchaseOrders, awardCorrelationId);
+
         return response ?? new CreatePurchaseOrdersFromRfqResponseDto();
     }
 
@@ -829,6 +888,14 @@ public class RfqService : IRfqService
             .ToList();
     }
 
+    private static void EnsureSourceLineage(Guid? releaseId, Guid? caseId, ProcurementSourcingCaseEntryGateDto gate)
+    {
+        if (releaseId.HasValue && releaseId.Value != gate.SourcingReleaseId)
+            throw new ProcurementRequisitionSourcingValidationException("RFQ_RELEASE_LINEAGE_MISMATCH", "RFQ sourcing-release lineage cannot be replaced.");
+        if (caseId.HasValue && caseId.Value != gate.SourcingCaseId)
+            throw new ProcurementRequisitionSourcingValidationException("RFQ_CASE_LINEAGE_MISMATCH", "RFQ sourcing-case lineage cannot be replaced.");
+    }
+
     private static RfqDto MapToDto(RequestForQuotation rfq)
     {
         return new RfqDto
@@ -841,6 +908,8 @@ public class RfqService : IRfqService
             Currency = rfq.Currency,
             EstimatedValue = rfq.EstimatedValue,
             SourcePurchaseRequisitionId = rfq.SourcePurchaseRequisitionId,
+            SourcingReleaseId = rfq.SourcingReleaseId,
+            SourcingCaseId = rfq.SourcingCaseId,
             CreatedAt = rfq.CreatedAt,
             SentAt = rfq.SentAt,
             SupplierCount = rfq.Invitations?.Count(i => !i.IsDeleted) ?? 0,
@@ -866,6 +935,8 @@ public class RfqService : IRfqService
             Currency = rfq.Currency,
             EstimatedValue = rfq.EstimatedValue,
             SourcePurchaseRequisitionId = rfq.SourcePurchaseRequisitionId,
+            SourcingReleaseId = rfq.SourcingReleaseId,
+            SourcingCaseId = rfq.SourcingCaseId,
             CreatedAt = rfq.CreatedAt,
             SentAt = rfq.SentAt,
             ExternalRecipientEmails = rfq.ExternalRecipientEmails,
@@ -904,8 +975,8 @@ public class RfqService : IRfqService
                 })
                 .ToList(),
             Quotes = (rfq.Quotes ?? new List<RequestForQuotationQuote>())
-                // Internal RFQ details should list only submitted quotes.
-                .Where(q => !q.IsDeleted && string.Equals(q.Status, "Submitted", StringComparison.OrdinalIgnoreCase))
+                .Where(q => !q.IsDeleted && (string.Equals(q.Status, "Submitted", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(q.Status, "LateRejected", StringComparison.OrdinalIgnoreCase)))
                 .OrderByDescending(q => q.SubmittedAt ?? q.CreatedAt)
                 .Select(q => MapToQuoteDto(q, awardedQuoteIdByItemId))
                 .ToList()

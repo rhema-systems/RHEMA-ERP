@@ -46,8 +46,16 @@ import { toast } from 'sonner';
 import {
   purchasingService,
   CreatePurchaseRequisitionDto,
-  CreatePurchaseRequisitionItemDto
+  CreatePurchaseRequisitionItemDto,
+  PurchaseRequisitionLinkageOptionsDto,
+  SavePurchaseRequisitionLinkageRequest
 } from '@/services/purchasingService';
+import { PurchaseRequisitionLinkageFields } from '@/components/procurement/PurchaseRequisitionLinkageFields';
+import {
+  EMPTY_REQUISITION_LINKAGE,
+  normalizeRequisitionLinkage,
+  validateExceptionLinkage,
+} from '@/lib/procurement-requisition-linkage';
 import { inventoryManagementService, InventoryItemDto, ItemUnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { businessPartnerService, BusinessPartnerDto } from '@/services/businessPartnerService';
 import { format } from 'date-fns';
@@ -75,14 +83,15 @@ export default function NewPurchaseRequisitionPage() {
   const [requiredDate, setRequiredDate] = useState('');
   const [priority, setPriority] = useState('Normal');
   const [department, setDepartment] = useState('');
-  const [costCenter, setCostCenter] = useState('');
   const [justification, setJustification] = useState('');
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<PRItemFormData[]>([]);
+  const [linkage, setLinkage] = useState<SavePurchaseRequisitionLinkageRequest>({ ...EMPTY_REQUISITION_LINKAGE });
   
   // Reference data
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
   const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
+  const [linkageOptions, setLinkageOptions] = useState<PurchaseRequisitionLinkageOptionsDto>();
   const [loadingData, setLoadingData] = useState(true);
   
   // Item dialog
@@ -110,9 +119,10 @@ export default function NewPurchaseRequisitionPage() {
     const loadData = async () => {
       try {
         setLoadingData(true);
-        const [itemsData, suppliersData] = await Promise.all([
+        const [itemsData, suppliersData, linkageData] = await Promise.all([
           inventoryManagementService.getInventoryItems({ isActive: true }),
-          businessPartnerService.getActivePartners()
+          businessPartnerService.getActivePartners(),
+          purchasingService.getPurchaseRequisitionLinkageOptions()
         ]);
         
         setInventoryItems(itemsData || []);
@@ -120,6 +130,7 @@ export default function NewPurchaseRequisitionPage() {
         setSuppliers((suppliersData || []).filter(bp => 
           bp.partnerType === 'Supplier' || bp.partnerType === 'Both'
         ));
+        setLinkageOptions(linkageData);
       } catch (error) {
         console.error('Error loading reference data:', error);
         toast.error('Failed to load reference data');
@@ -263,6 +274,11 @@ export default function NewPurchaseRequisitionPage() {
       toast.error('Please add at least one item');
       return;
     }
+    const linkageError = validateExceptionLinkage(linkage);
+    if (linkageError) {
+      toast.error(linkageError);
+      return;
+    }
 
     try {
       setSaving(true);
@@ -282,9 +298,10 @@ export default function NewPurchaseRequisitionPage() {
         requiredDate: requiredDate || undefined,
         priority,
         department: department || undefined,
-        costCenter: costCenter || undefined,
+        costCenter: linkage.costCenter || undefined,
         justification: justification || undefined,
         notes: notes || undefined,
+        linkage: normalizeRequisitionLinkage(linkage),
         items: items.map(item => ({
           inventoryItemId: item.inventoryItemId || undefined,
           itemDescription: item.itemDescription,
@@ -320,6 +337,11 @@ export default function NewPurchaseRequisitionPage() {
       toast.error('Please provide justification for this requisition');
       return;
     }
+    const linkageError = validateExceptionLinkage(linkage);
+    if (linkageError) {
+      toast.error(linkageError);
+      return;
+    }
 
     try {
       setSubmitting(true);
@@ -339,9 +361,10 @@ export default function NewPurchaseRequisitionPage() {
         requiredDate: requiredDate || undefined,
         priority,
         department: department || undefined,
-        costCenter: costCenter || undefined,
+        costCenter: linkage.costCenter || undefined,
         justification: justification || undefined,
         notes: notes || undefined,
+        linkage: normalizeRequisitionLinkage(linkage),
         items: items.map(item => ({
           inventoryItemId: item.inventoryItemId || undefined,
           itemDescription: item.itemDescription,
@@ -474,15 +497,6 @@ export default function NewPurchaseRequisitionPage() {
               />
             </div>
             
-            <div className="space-y-2">
-              <Label htmlFor="costCenter">Cost Center</Label>
-              <Input
-                id="costCenter"
-                value={costCenter}
-                onChange={(e) => setCostCenter(e.target.value)}
-                placeholder="e.g., CC-001"
-              />
-            </div>
           </div>
           
           <Separator />
@@ -513,6 +527,13 @@ export default function NewPurchaseRequisitionPage() {
           </div>
         </CardContent>
       </Card>
+
+      <PurchaseRequisitionLinkageFields
+        value={linkage}
+        onChange={setLinkage}
+        options={linkageOptions}
+        loading={loadingData}
+      />
 
       {/* Items Section */}
       <Card>

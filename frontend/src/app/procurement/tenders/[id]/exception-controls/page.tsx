@@ -1,0 +1,258 @@
+'use client';
+
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { ArrowLeft, CheckCircle2, FileCheck2, Loader2, RefreshCw, ShieldAlert } from 'lucide-react';
+import { toast } from 'sonner';
+import NegotiationInviteDialog from '@/components/procurement/awards/NegotiationInviteDialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  exceptionalMethodLabel,
+  exceptionalSourcingStatusLabel,
+  getExceptionalSourcingActions,
+  validateExceptionalPreparation,
+} from '@/lib/procurement-exceptional-sourcing-control';
+import { getNegotiationByTenderAndBid } from '@/services/negotiationService';
+import { procurementExceptionalSourcingControlService as service } from '@/services/procurement-exceptional-sourcing-control.service';
+import {
+  ProcurementExceptionalSourcingControlStatus as Status,
+  type PrepareExceptionalSourcingRequest,
+  type ProcurementExceptionalSourcingControl,
+  type ProcurementExceptionalSourcingReadiness,
+} from '@/types/procurement-exceptional-sourcing-control';
+
+const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '—';
+
+export default function ExceptionalSourcingControlsPage() {
+  const { id: tenderId } = useParams<{ id: string }>();
+  const [control, setControl] = useState<ProcurementExceptionalSourcingControl | null>(null);
+  const [readiness, setReadiness] = useState<ProcurementExceptionalSourcingReadiness | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
+  const [justification, setJustification] = useState('');
+  const [justificationEvidence, setJustificationEvidence] = useState('');
+  const [supplierEvidence, setSupplierEvidence] = useState('');
+  const [evidence, setEvidence] = useState<Record<string, { evidenceReference: string; verificationReference: string }>>({});
+  const [boardReference, setBoardReference] = useState('');
+  const [mdReference, setMdReference] = useState('');
+  const [ppaReference, setPpaReference] = useState('');
+  const [approvalComments, setApprovalComments] = useState('');
+  const [selectedBidId, setSelectedBidId] = useState('');
+  const [negotiationOpen, setNegotiationOpen] = useState(false);
+  const [negotiationId, setNegotiationId] = useState('');
+  const [negotiationPlan, setNegotiationPlan] = useState('');
+  const [negotiationMinutes, setNegotiationMinutes] = useState('');
+  const [negotiationOutcome, setNegotiationOutcome] = useState('');
+  const [recommendationReason, setRecommendationReason] = useState('');
+  const [recommendationEvidence, setRecommendationEvidence] = useState('');
+  const [awardReference, setAwardReference] = useState('');
+  const [awardEvidence, setAwardEvidence] = useState('');
+  const [contractReference, setContractReference] = useState('');
+  const [contractEvidence, setContractEvidence] = useState('');
+  const [acceptanceReference, setAcceptanceReference] = useState('');
+  const [acceptanceEvidence, setAcceptanceEvidence] = useState('');
+  const [filingReference, setFilingReference] = useState('');
+  const [filingEvidence, setFilingEvidence] = useState('');
+  const [exceptionReport, setExceptionReport] = useState('');
+  const [exceptionReportEvidence, setExceptionReportEvidence] = useState('');
+
+  const load = useCallback(async () => {
+    if (!tenderId) return;
+    setLoading(true);
+    setLoadError('');
+    const [controlResult, readinessResult] = await Promise.allSettled([
+      service.get(tenderId), service.readiness(tenderId),
+    ]);
+    const nextControl = controlResult.status === 'fulfilled' ? controlResult.value : null;
+    const nextReadiness = readinessResult.status === 'fulfilled' ? readinessResult.value : null;
+    setControl(nextControl);
+    setReadiness(nextReadiness);
+    if (nextControl) {
+      setBoardReference(nextControl.boardApprovalReference ?? '');
+      setMdReference(nextControl.managingDirectorApprovalReference ?? '');
+      setPpaReference(nextControl.ppaApprovalReference ?? '');
+      setNegotiationId(nextControl.negotiationId ?? '');
+      setSelectedBidId(nextControl.recommendedBidId ?? nextControl.bids[0]?.bidId ?? '');
+    }
+    if (nextReadiness) {
+      setEvidence((current) => Object.fromEntries(nextReadiness.evidenceRequirements.map((item) => [
+        item.requirementKey,
+        current[item.requirementKey] ?? { evidenceReference: '', verificationReference: '' },
+      ])));
+    }
+    if (!nextControl && !nextReadiness) {
+      const reason = controlResult.status === 'rejected' ? controlResult.reason : readinessResult.status === 'rejected' ? readinessResult.reason : null;
+      setLoadError(reason instanceof Error ? reason.message : 'This tender is not ready for restricted or single-source controls.');
+    }
+    setLoading(false);
+  }, [tenderId]);
+
+  useEffect(() => { void load(); }, [load]);
+  const actions = useMemo(() => control ? getExceptionalSourcingActions(control) : null, [control]);
+  const selectedBid = control?.bids.find((item) => item.bidId === selectedBidId);
+
+  const run = async (key: string, action: () => Promise<unknown>, success: string) => {
+    try {
+      setBusy(key);
+      await action();
+      toast.success(success);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Exceptional-sourcing action failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const prepare = () => {
+    if (!readiness) return;
+    const request: PrepareExceptionalSourcingRequest = {
+      justification, justificationEvidenceReference: justificationEvidence,
+      supplierSelectionEvidenceReference: supplierEvidence, businessPartnerIds: selectedSuppliers,
+      evidenceChecklist: readiness.evidenceRequirements.map((item) => ({
+        requirementKey: item.requirementKey,
+        evidenceReference: evidence[item.requirementKey]?.evidenceReference ?? '',
+        verificationReference: evidence[item.requirementKey]?.verificationReference ?? '',
+      })),
+    };
+    const error = validateExceptionalPreparation(readiness, request);
+    if (error) { toast.error(error); return; }
+    void run('prepare', () => service.prepare(tenderId, request), 'Exceptional-sourcing record prepared');
+  };
+
+  const onNegotiationComplete = async () => {
+    if (!selectedBidId) return;
+    const completed = await getNegotiationByTenderAndBid(tenderId, selectedBidId);
+    if (completed) setNegotiationId(completed.id);
+    toast.success('Negotiation completed. Record its signed plan, minutes, and outcome below.');
+  };
+
+  if (loading) return <div className="flex min-h-[50vh] items-center justify-center"><Loader2 className="h-7 w-7 animate-spin" /></div>;
+  if (loadError) return <div className="space-y-4 p-6"><Button variant="ghost" asChild><Link href={`/procurement/tenders/${tenderId}`}><ArrowLeft className="mr-2 h-4 w-4" />Tender</Link></Button><Card><CardContent className="p-6 text-sm text-destructive">{loadError}</CardContent></Card></div>;
+
+  return (
+    <div className="space-y-6 p-6" data-testid="exceptional-sourcing-control-page">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <Button variant="ghost" asChild className="mb-2 px-0"><Link href={`/procurement/tenders/${tenderId}`}><ArrowLeft className="mr-2 h-4 w-4" />Tender</Link></Button>
+          <h1 className="text-2xl font-semibold">{exceptionalMethodLabel(control?.method ?? readiness?.method ?? -1)} controls</h1>
+          <p className="text-sm text-muted-foreground">{control?.tenderNumber ?? readiness?.tenderNumber} · {control?.tenderTitle ?? readiness?.tenderTitle}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {control && <Badge variant={control.status === Status.Rejected ? 'destructive' : 'secondary'}>{exceptionalSourcingStatusLabel[control.status]}</Badge>}
+          {!control && <Badge variant="outline">Preparation required</Badge>}
+          <Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
+        </div>
+      </div>
+
+      {!control && readiness && (
+        <Card data-testid="exceptional-preparation">
+          <CardHeader><CardTitle className="flex items-center gap-2"><ShieldAlert className="h-5 w-5" />Justification, suppliers, and DEC-006 evidence</CardTitle></CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid gap-3 md:grid-cols-3">
+              <Summary label="Method rule" value={readiness.methodRuleCode} />
+              <Summary label="Exception rule" value={readiness.exceptionRuleCode} />
+              <Summary label="Authority route" value={readiness.authorityRouteReference} />
+            </div>
+            {readiness.tenderStatus !== 'Approved' && <p className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Complete the tender-document approval first. Current status: {readiness.tenderStatus}.</p>}
+            <Field label="Statutory justification"><Textarea value={justification} onChange={(event) => setJustification(event.target.value)} rows={4} /></Field>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Justification evidence"><Input value={justificationEvidence} onChange={(event) => setJustificationEvidence(event.target.value)} /></Field>
+              <Field label="Supplier-selection evidence"><Input value={supplierEvidence} onChange={(event) => setSupplierEvidence(event.target.value)} /></Field>
+            </div>
+            <div>
+              <Label>Eligible supplier identity · select at least {readiness.minimumSupplierCount}</Label>
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                {readiness.supplierOptions.map((supplier) => (
+                  <label key={supplier.businessPartnerId} className="flex items-center gap-3 rounded border p-3 text-sm">
+                    <input type="checkbox" checked={selectedSuppliers.includes(supplier.businessPartnerId)} onChange={(event) => setSelectedSuppliers((current) => event.target.checked ? [...current, supplier.businessPartnerId] : current.filter((id) => id !== supplier.businessPartnerId))} />
+                    <span><strong>{supplier.supplierName}</strong><br /><span className="text-xs text-muted-foreground">{supplier.partnerCode} · {supplier.registrationStatus}</span></span>
+                  </label>
+                ))}
+                {readiness.supplierOptions.length === 0 && <p className="text-sm text-muted-foreground">No active supplier candidates are available.</p>}
+              </div>
+            </div>
+            <div className="space-y-3">
+              <Label>Mandatory verified evidence checklist</Label>
+              {readiness.evidenceRequirements.map((item) => (
+                <div key={item.requirementKey} className="grid gap-3 rounded border p-3 md:grid-cols-2" data-testid={`evidence-${item.requirementKey}`}>
+                  <Field label={`${item.evidenceName} · ${item.requirementKey}`}><Input value={evidence[item.requirementKey]?.evidenceReference ?? ''} onChange={(event) => setEvidence((current) => ({ ...current, [item.requirementKey]: { ...current[item.requirementKey], evidenceReference: event.target.value } }))} /></Field>
+                  <Field label="Shared verification reference"><Input value={evidence[item.requirementKey]?.verificationReference ?? ''} onChange={(event) => setEvidence((current) => ({ ...current, [item.requirementKey]: { ...current[item.requirementKey], verificationReference: event.target.value } }))} /></Field>
+                </div>
+              ))}
+            </div>
+            <Button onClick={prepare} disabled={busy !== null || readiness.tenderStatus !== 'Approved'}>{busy === 'prepare' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Prepare immutable record</Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {control && actions && (
+        <>
+          <div className="grid gap-3 md:grid-cols-4">
+            <Summary label="Method / exception" value={`${exceptionalMethodLabel(control.method)} · ${control.exceptionRuleCode}`} />
+            <Summary label="Authority route" value={control.authorityRouteReference} />
+            <Summary label="Suppliers / evidence" value={`${control.suppliers.length} / ${control.evidenceChecklist.length}`} />
+            <Summary label="Integrity" value={`${control.integrityHash.slice(0, 16)}…`} />
+          </div>
+
+          <Card>
+            <CardHeader><CardTitle className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5" />Immutable statutory history</CardTitle></CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-2">
+              {control.milestones.map((item) => <div key={item.code} className="rounded border p-3" data-testid={`milestone-${item.code}`}><div className="flex justify-between gap-2"><span className="font-medium">{item.label}</span><Badge variant={item.completedAtUtc ? 'default' : 'outline'}>{item.completedAtUtc ? 'Complete' : 'Pending'}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{formatDate(item.completedAtUtc)}{item.reference ? ` · ${item.reference}` : ''}</p></div>)}
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card><CardHeader><CardTitle>Justification and supplier identity</CardTitle></CardHeader><CardContent className="space-y-3 text-sm"><Line label="Justification" value={control.justification} /><Line label="Justification evidence" value={control.justificationEvidenceReference} /><Line label="Selection evidence" value={control.supplierSelectionEvidenceReference} />{control.suppliers.map((supplier) => <div key={supplier.businessPartnerId} className="rounded border p-2"><strong>{supplier.supplierName}</strong><p className="text-xs text-muted-foreground">{supplier.businessPartnerId}</p></div>)}</CardContent></Card>
+            <Card><CardHeader><CardTitle>Verified evidence checklist</CardTitle></CardHeader><CardContent className="space-y-2">{control.evidenceChecklist.map((item) => <div key={item.evidenceRuleId} className="rounded border p-2 text-sm"><strong>{item.evidenceName}</strong><p className="text-xs text-muted-foreground">{item.requirementKey} · {item.evidenceReference} · verified {item.verificationReference}</p></div>)}</CardContent></Card>
+          </div>
+
+          {actions.canSubmitApproval && <ActionCard title="Submit exact exceptional-sourcing workflow"><p className="text-sm text-muted-foreground">This locks the preparation and starts the configured Board/MD/PPA route.</p><Button onClick={() => void run('submit', () => service.submitApproval(tenderId, control.rowVersion), 'Approval workflow submitted')} disabled={busy !== null}>Submit approval</Button></ActionCard>}
+
+          {actions.canDecideApproval && <ActionCard title="Record authority decision"><div className="grid gap-3 md:grid-cols-3">{control.boardApprovalRequired && <Field label="Board approval reference"><Input value={boardReference} onChange={(event) => setBoardReference(event.target.value)} /></Field>}{control.managingDirectorApprovalRequired && <Field label="Managing Director reference"><Input value={mdReference} onChange={(event) => setMdReference(event.target.value)} /></Field>}<Field label="PPA approval reference"><Input value={ppaReference} onChange={(event) => setPpaReference(event.target.value)} /></Field></div><Field label="Comments"><Textarea value={approvalComments} onChange={(event) => setApprovalComments(event.target.value)} /></Field><div className="flex gap-2"><Button onClick={() => void run('approve', () => service.decideApproval(tenderId, { action: 'Approve', boardApprovalReference: boardReference || undefined, managingDirectorApprovalReference: mdReference || undefined, ppaApprovalReference: ppaReference, comments: approvalComments, rowVersion: control.rowVersion }), 'Authority decision recorded')} disabled={busy !== null}>Approve step</Button><Button variant="destructive" onClick={() => void run('reject', () => service.decideApproval(tenderId, { action: 'Reject', comments: approvalComments, rowVersion: control.rowVersion }), 'Rejection recorded')} disabled={busy !== null}>Reject</Button></div></ActionCard>}
+
+          {actions.canNegotiate && <ActionCard title="Complete and record negotiation"><BidSelect control={control} value={selectedBidId} onChange={setSelectedBidId} /><Button variant="outline" onClick={() => setNegotiationOpen(true)} disabled={!selectedBidId}>Open shared negotiation</Button><div className="grid gap-3 md:grid-cols-2"><Field label="Completed negotiation ID"><Input value={negotiationId} onChange={(event) => setNegotiationId(event.target.value)} /></Field><Field label="Approved plan reference"><Input value={negotiationPlan} onChange={(event) => setNegotiationPlan(event.target.value)} /></Field><Field label="Signed minutes evidence"><Input value={negotiationMinutes} onChange={(event) => setNegotiationMinutes(event.target.value)} /></Field><Field label="Outcome reference"><Input value={negotiationOutcome} onChange={(event) => setNegotiationOutcome(event.target.value)} /></Field></div><Button onClick={() => void run('negotiation', () => service.negotiation(tenderId, { negotiationId, planReference: negotiationPlan, minutesEvidenceReference: negotiationMinutes, outcomeReference: negotiationOutcome, rowVersion: control.rowVersion }), 'Negotiation evidence recorded')} disabled={busy !== null}>Record negotiation</Button></ActionCard>}
+
+          {actions.canRecommend && <ActionCard title="Record negotiated recommendation"><BidSelect control={control} value={selectedBidId} onChange={setSelectedBidId} /><Field label="Recommendation reason"><Textarea value={recommendationReason} onChange={(event) => setRecommendationReason(event.target.value)} /></Field><Field label="Signed recommendation evidence"><Input value={recommendationEvidence} onChange={(event) => setRecommendationEvidence(event.target.value)} /></Field><Button onClick={() => void run('recommend', () => service.recommendation(tenderId, { bidId: selectedBidId, reason: recommendationReason, evidenceReference: recommendationEvidence, rowVersion: control.rowVersion }), 'Recommendation recorded')} disabled={busy !== null || !selectedBidId}>Record recommendation</Button></ActionCard>}
+
+          {actions.canAward && <ActionCard title="Record controlled award"><Field label="Award reference"><Input value={awardReference} onChange={(event) => setAwardReference(event.target.value)} /></Field><Field label="Award evidence"><Input value={awardEvidence} onChange={(event) => setAwardEvidence(event.target.value)} /></Field><Button onClick={() => void run('award', () => service.award(tenderId, { bidId: control.recommendedBidId, awardReference, evidenceReference: awardEvidence, rowVersion: control.rowVersion }), 'Award recorded')} disabled={busy !== null}>Record award</Button></ActionCard>}
+
+          {actions.canContract && <ActionCard title="Link executed contract"><Field label="Contract reference"><Input value={contractReference} onChange={(event) => setContractReference(event.target.value)} /></Field><Field label="Executed contract evidence"><Input value={contractEvidence} onChange={(event) => setContractEvidence(event.target.value)} /></Field><Button onClick={() => void run('contract', () => service.contract(tenderId, { contractReference, evidenceReference: contractEvidence, rowVersion: control.rowVersion }), 'Contract linked')} disabled={busy !== null}>Record contract</Button></ActionCard>}
+
+          {actions.canAccept && <ActionCard title="Record successful supplier acceptance"><Field label="Acceptance reference"><Input value={acceptanceReference} onChange={(event) => setAcceptanceReference(event.target.value)} /></Field><Field label="Acceptance evidence"><Input value={acceptanceEvidence} onChange={(event) => setAcceptanceEvidence(event.target.value)} /></Field><Button onClick={() => void run('acceptance', () => service.acceptance(tenderId, { acceptanceReference, evidenceReference: acceptanceEvidence, rowVersion: control.rowVersion }), 'Supplier acceptance recorded')} disabled={busy !== null}>Record acceptance</Button></ActionCard>}
+
+          {actions.canFile && <ActionCard title="Complete mandatory post-award filing"><div className="grid gap-3 md:grid-cols-2"><Field label="PPA filing reference"><Input value={filingReference} onChange={(event) => setFilingReference(event.target.value)} /></Field><Field label="PPA filing evidence"><Input value={filingEvidence} onChange={(event) => setFilingEvidence(event.target.value)} /></Field><Field label="Exception report reference"><Input value={exceptionReport} onChange={(event) => setExceptionReport(event.target.value)} /></Field><Field label="Exception report evidence"><Input value={exceptionReportEvidence} onChange={(event) => setExceptionReportEvidence(event.target.value)} /></Field></div><Button onClick={() => void run('filing', () => service.filing(tenderId, { filingReference, filingEvidenceReference: filingEvidence, exceptionReportReference: exceptionReport, exceptionReportEvidenceReference: exceptionReportEvidence, rowVersion: control.rowVersion }), 'Post-award filing completed')} disabled={busy !== null}>Complete filing</Button></ActionCard>}
+
+          {actions.immutable && <Card><CardContent className="flex items-center gap-3 p-5 text-sm"><FileCheck2 className="h-5 w-5 text-emerald-600" />This final statutory record is read-only. Its evidence, actors, references, and integrity hash remain available for audit.</CardContent></Card>}
+        </>
+      )}
+
+      {control && selectedBid && <NegotiationInviteDialog open={negotiationOpen} onOpenChange={setNegotiationOpen} tenderId={tenderId} tenderBidId={selectedBid.bidId} businessPartnerName={selectedBid.supplierName} onNegotiationComplete={() => void onNegotiationComplete()} />}
+    </div>
+  );
+}
+
+function ActionCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return <Card><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent className="space-y-4">{children}</CardContent></Card>;
+}
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="space-y-2"><Label>{label}</Label>{children}</div>;
+}
+function Summary({ label, value }: { label: string; value: string }) {
+  return <Card><CardContent className="p-4"><p className="text-xs uppercase text-muted-foreground">{label}</p><p className="mt-1 break-words font-medium">{value || '—'}</p></CardContent></Card>;
+}
+function Line({ label, value }: { label: string; value: string }) {
+  return <div><span className="text-muted-foreground">{label}: </span><span>{value || '—'}</span></div>;
+}
+function BidSelect({ control, value, onChange }: { control: ProcurementExceptionalSourcingControl; value: string; onChange: (value: string) => void }) {
+  return <Field label="Supplier bid"><Select value={value} onValueChange={onChange}><SelectTrigger><SelectValue placeholder="Select bid" /></SelectTrigger><SelectContent>{control.bids.map((bid) => <SelectItem key={bid.bidId} value={bid.bidId}>{bid.bidNumber} · {bid.supplierName} · {bid.currency} {bid.bidAmount.toLocaleString()}</SelectItem>)}</SelectContent></Select></Field>;
+}

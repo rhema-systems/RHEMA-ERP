@@ -260,6 +260,11 @@ namespace ErpSystem.Data.Repositories
             return _dbSet.Where(predicate).Where(e => !e.IsDeleted);
         }
 
+        public virtual IQueryable<T> GetQueryableIncludingDeleted(Expression<Func<T, bool>> predicate)
+        {
+            return _dbSet.IgnoreQueryFilters().Where(predicate);
+        }
+
         public virtual async Task<IEnumerable<TResult>> GetProjectedAsync<TResult>(Expression<Func<T, TResult>> projection)
         {
             return await _dbSet.Where(e => !e.IsDeleted).Select(projection).ToListAsync();

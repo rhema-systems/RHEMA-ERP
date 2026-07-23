@@ -143,6 +143,7 @@ export default function ProcurementPlanDetailPage() {
   } | null>(null);
   const [validatingBudget, setValidatingBudget] = useState(false);
   const [tenderForm, setTenderForm] = useState({
+    purchaseRequisitionId: '',
     tenderTitle: '',
     tenderDescription: '',
     tenderType: 'ITB',
@@ -606,6 +607,7 @@ export default function ProcurementPlanDetailPage() {
 
     if (type === 'tender') {
       setTenderForm({
+        purchaseRequisitionId: '',
         tenderTitle: `Tender for ${item.itemDescription}`,
         tenderDescription: item.specifications || '',
         tenderType: 'ITB',
@@ -616,6 +618,7 @@ export default function ProcurementPlanDetailPage() {
       });
     } else if (type === 'rfq') {
       setTenderForm({
+        purchaseRequisitionId: '',
         tenderTitle: `RFQ for ${item.itemDescription}`,
         tenderDescription: item.specifications || '',
         tenderType: 'RFQ',
@@ -653,6 +656,7 @@ export default function ProcurementPlanDetailPage() {
       setConversionLoading(true);
       const result = await procurementPlanService.convertItemToTender({
         planItemId: selectedItemForConversion.id,
+        purchaseRequisitionId: tenderForm.purchaseRequisitionId,
         tenderTitle: tenderForm.tenderTitle,
         tenderDescription: tenderForm.tenderDescription || undefined,
         tenderType: tenderForm.tenderType,
@@ -685,6 +689,7 @@ export default function ProcurementPlanDetailPage() {
       setConversionLoading(true);
       const result = await procurementPlanService.convertItemToRfq({
         planItemId: selectedItemForConversion.id,
+        purchaseRequisitionId: tenderForm.purchaseRequisitionId,
         tenderTitle: tenderForm.tenderTitle,
         tenderDescription: tenderForm.tenderDescription || undefined,
         tenderType: 'RFQ',
@@ -1937,7 +1942,19 @@ export default function ProcurementPlanDetailPage() {
 
           {(conversionType === 'tender' || conversionType === 'rfq') ? (
             <div className="space-y-4">
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                Select the Approved purchase requisition released for this exact plan item. The API revalidates its immutable sourcing release before conversion.
+              </div>
               <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <Label htmlFor="purchaseRequisitionId">Released purchase requisition ID *</Label>
+                  <Input
+                    id="purchaseRequisitionId"
+                    value={tenderForm.purchaseRequisitionId}
+                    onChange={(e) => setTenderForm({ ...tenderForm, purchaseRequisitionId: e.target.value.trim() })}
+                    placeholder="Paste the Approved requisition ID from its detail page"
+                  />
+                </div>
                 <div className="col-span-2">
                   <Label htmlFor="tenderTitle">Tender Title *</Label>
                   <Input
@@ -2116,6 +2133,7 @@ export default function ProcurementPlanDetailPage() {
               }
               disabled={
                 conversionLoading ||
+                ((conversionType === 'tender' || conversionType === 'rfq') && !tenderForm.purchaseRequisitionId) ||
                 (conversionType === 'purchaseOrder' && !poForm.supplierId) ||
                 Boolean(budgetValidation && !budgetValidation.isValid && budgetValidation.controlLevel === 'Strict')
               }

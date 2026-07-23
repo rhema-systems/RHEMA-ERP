@@ -35,6 +35,10 @@ public class Tender : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal? EstimatedValue { get; set; }
 
+    public Guid? SourcePurchaseRequisitionId { get; set; }
+    public Guid? SourcingReleaseId { get; set; }
+    public Guid? SourcingCaseId { get; set; }
+
     [MaxLength(3)]
     public string? Currency { get; set; } = "USD";
 
@@ -116,6 +120,9 @@ public class Tender : TenantEntity
     public virtual ApplicationUser? PublishedBy { get; set; }
     public virtual ApplicationUser? AwardedBy { get; set; }
     public virtual EvaluationTemplate? EvaluationTemplate { get; set; }
+    public virtual PurchaseRequisition? SourcePurchaseRequisition { get; set; }
+    public virtual ProcurementRequisitionSourcingRelease? SourcingRelease { get; set; }
+    public virtual ProcurementSourcingCase? SourcingCase { get; set; }
     public virtual ICollection<TenderLot> Lots { get; set; } = new List<TenderLot>();
     public virtual ICollection<TenderItem> Items { get; set; } = new List<TenderItem>();
     public virtual ICollection<TenderInvitation> Invitations { get; set; } = new List<TenderInvitation>();

@@ -94,13 +94,27 @@ public class SimpleWorkflowService : IWorkflowService
         _logger = logger;
     }
 
-    public async Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId)
+    public Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId) =>
+        StartApprovalWorkflowAsync(entityType, entityId, null);
+
+    public Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(
+        string entityType,
+        Guid entityId,
+        Guid workflowDefinitionId) =>
+        StartApprovalWorkflowAsync(entityType, entityId, (Guid?)workflowDefinitionId);
+
+    private async Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(
+        string entityType,
+        Guid entityId,
+        Guid? workflowDefinitionId)
     {
         var initiatedById = GetCurrentUserId();
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
 
         var entityTypeRecord = await ResolveEntityTypeAsync(entityType, tenantId);
-        var definition = await ResolveActiveDefinitionAsync(entityTypeRecord, tenantId);
+        var definition = workflowDefinitionId.HasValue
+            ? await ResolveSelectedDefinitionAsync(entityTypeRecord, tenantId, workflowDefinitionId.Value)
+            : await ResolveActiveDefinitionAsync(entityTypeRecord, tenantId);
 
         // Idempotency/consistency: prevent multiple active workflow instances for the same entity.
         // If an instance is already running, return it instead of starting a duplicate.
@@ -127,6 +141,18 @@ public class SimpleWorkflowService : IWorkflowService
 
         if (existingActiveInstance != null)
         {
+            if (existingActiveInstance.WorkflowDefinitionId != definition.Id)
+            {
+                return new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Message = "The active workflow instance uses a different definition from the selected authority route.",
+                    Status = existingActiveInstance.Status,
+                    WorkflowInstanceId = existingActiveInstance.Id,
+                    CurrentStepId = existingActiveInstance.CurrentStepId ?? currentStepInstance?.WorkflowStepId
+                };
+            }
+
             // Self-heal: if the active step is an approval step and approvals are missing, materialize them.
             currentStepInstance ??= await EnsureCurrentStepInstanceAsync(existingActiveInstance, entityTypeRecord, entityId);
             if (currentStepInstance?.WorkflowStep?.StepType == WorkflowStepType.Approval)
@@ -155,7 +181,7 @@ public class SimpleWorkflowService : IWorkflowService
         var dataContext = await BuildEntityContextAsync(entityTypeRecord, entityId);
 
         var workflowInstance = await _workflowEngine.StartWorkflowAsync(
-            definition.Name,
+            definition.Id,
             entityId,
             initiatedById,
             dataContext);
@@ -661,6 +687,20 @@ public class SimpleWorkflowService : IWorkflowService
             throw new InvalidOperationException($"No active workflow definition found for entity type '{entityTypeRecord.Name}'");
         }
 
+        return definition;
+    }
+
+    private async Task<WorkflowDefinition> ResolveSelectedDefinitionAsync(
+        WorkflowEntityType entityTypeRecord,
+        Guid tenantId,
+        Guid workflowDefinitionId)
+    {
+        var definition = await _definitionRepository.GetWithDetailsAsync(workflowDefinitionId);
+        if (definition is null || definition.TenantId != tenantId || definition.EntityTypeId != entityTypeRecord.Id)
+            throw new InvalidOperationException(
+                "The selected workflow definition is missing, belongs to another tenant, or targets another entity type.");
+        if (!WorkflowDefinitionLifecyclePolicy.IsRuntimeEligible(definition))
+            throw new InvalidOperationException("The selected workflow definition is not Published and active.");
         return definition;
     }
 
