@@ -153,6 +153,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<FinancePurchaseOrderReceipt> FinancePurchaseOrderReceipts { get; set; }
     public DbSet<FinancePurchaseOrderReceiptItem> FinancePurchaseOrderReceiptItems { get; set; }
 
+    // Finance unit-accounting/statistical ledger entities
+    public DbSet<UnitType> UnitTypes { get; set; }
+    public DbSet<UnitAccount> UnitAccounts { get; set; }
+    public DbSet<UnitJournalEntry> UnitJournalEntries { get; set; }
+    public DbSet<UnitJournalEntryLine> UnitJournalEntryLines { get; set; }
+    public DbSet<UnitAccountBalance> UnitAccountBalances { get; set; }
+    public DbSet<UnitAccountBudget> UnitAccountBudgets { get; set; }
+    public DbSet<RatioDefinition> RatioDefinitions { get; set; }
+    public DbSet<AllocationRule> AllocationRules { get; set; }
+    public DbSet<AllocationTarget> AllocationTargets { get; set; }
+
     // Sales Order Management entities
     public DbSet<SalesOrder> SalesOrders { get; set; }
     public DbSet<SalesOrderLine> SalesOrderLines { get; set; }
@@ -906,6 +917,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new DistributedLockConfiguration());
         builder.ApplyConfiguration(new NotificationTopicConfiguration());
         builder.ApplyConfiguration(new NotificationTopicRecipientConfiguration());
+
+        // Finance unit-accounting/statistical ledger configurations.
+        builder.ApplyConfiguration(new UnitTypeConfiguration());
+        builder.ApplyConfiguration(new UnitAccountConfiguration());
+        builder.ApplyConfiguration(new UnitJournalEntryConfiguration());
+        builder.ApplyConfiguration(new UnitJournalEntryLineConfiguration());
+        builder.ApplyConfiguration(new UnitAccountBalanceConfiguration());
+        builder.ApplyConfiguration(new UnitAccountBudgetConfiguration());
+        builder.ApplyConfiguration(new RatioDefinitionConfiguration());
+        builder.ApplyConfiguration(new AllocationRuleConfiguration());
+        builder.ApplyConfiguration(new AllocationTargetConfiguration());
 
         builder.Entity<DocumentSequenceDefinition>(entity =>
         {

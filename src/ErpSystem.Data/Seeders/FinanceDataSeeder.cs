@@ -67,6 +67,10 @@ public class FinanceDataSeeder
             await SeedAccountsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
+            // 6.25 Seed unit-accounting demo drivers used by statistical ledger screens
+            await SeedUnitAccountingDemoDataAsync(tenantId, baseDate);
+            await _context.SaveChangesAsync();
+
             // 6.5 Seed Payroll GL accounts used by HR payroll posting
             await SeedPayrollAccountsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
@@ -868,6 +872,153 @@ public class FinanceDataSeeder
         await _context.SaveChangesAsync(); // Explicitly save changes here
         
         _logger.LogInformation($"Seeded {newAccounts.Count} new accounts with segmentation");
+    }
+
+    private async Task SeedUnitAccountingDemoDataAsync(Guid tenantId, DateTime baseDate)
+    {
+        var unitTypeDefinitions = new (Guid Id, string Code, string Name, string Description, int DecimalPlaces)[]
+        {
+            (Guid.Parse("10000000-0000-0000-0000-000000000101"), "EMP", "Employees", "Headcount used for workforce ratios and cost allocations.", 0),
+            (Guid.Parse("10000000-0000-0000-0000-000000000102"), "SQM", "Square Meters", "Area measurements used for occupancy and facilities allocations.", 2),
+            (Guid.Parse("10000000-0000-0000-0000-000000000103"), "HRS", "Hours", "Hours used for labour, machine-time, and utilization metrics.", 2),
+            (Guid.Parse("10000000-0000-0000-0000-000000000104"), "UNIT", "Production Units", "Operational output count used for production KPIs.", 0)
+        };
+
+        var unitTypesByCode = await _context.UnitTypes
+            .Where(ut => ut.TenantId == tenantId && !ut.IsDeleted)
+            .ToDictionaryAsync(ut => ut.Code);
+
+        foreach (var definition in unitTypeDefinitions)
+        {
+            if (unitTypesByCode.ContainsKey(definition.Code))
+            {
+                continue;
+            }
+
+            var unitType = new UnitType
+            {
+                Id = definition.Id,
+                TenantId = tenantId,
+                Code = definition.Code,
+                Name = definition.Name,
+                Description = definition.Description,
+                DecimalPlaces = definition.DecimalPlaces,
+                IsActive = true,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            };
+
+            _context.UnitTypes.Add(unitType);
+            unitTypesByCode[unitType.Code] = unitType;
+        }
+
+        var accountDefinitions = new (Guid Id, string AccountNumber, string Name, string Description, string UnitTypeCode, string? ParentAccountNumber, int AccountLevel, bool IsPostingAccount, decimal CurrentBalance)[]
+        {
+            (Guid.Parse("10000000-0000-0000-0000-000000001000"), "U-1000", "Total Employees", "Summary headcount across all departments.", "EMP", null, 1, false, 45m),
+            (Guid.Parse("10000000-0000-0000-0000-000000001100"), "U-1100", "Operations Employees", "Operations department headcount.", "EMP", "U-1000", 2, true, 18m),
+            (Guid.Parse("10000000-0000-0000-0000-000000001200"), "U-1200", "Sales Employees", "Sales department headcount.", "EMP", "U-1000", 2, true, 12m),
+            (Guid.Parse("10000000-0000-0000-0000-000000001300"), "U-1300", "Administration Employees", "Administration department headcount.", "EMP", "U-1000", 2, true, 15m),
+            (Guid.Parse("10000000-0000-0000-0000-000000002000"), "U-2000", "Total Office Space", "Summary office space occupied by the business.", "SQM", null, 1, false, 2500m),
+            (Guid.Parse("10000000-0000-0000-0000-000000002100"), "U-2100", "Head Office Space", "Head office floor area.", "SQM", "U-2000", 2, true, 1600m),
+            (Guid.Parse("10000000-0000-0000-0000-000000002200"), "U-2200", "Branch Office Space", "Branch office floor area.", "SQM", "U-2000", 2, true, 900m),
+            (Guid.Parse("10000000-0000-0000-0000-000000003000"), "U-3000", "Machine Hours", "Machine hours available for production analysis.", "HRS", null, 1, true, 1240m),
+            (Guid.Parse("10000000-0000-0000-0000-000000004000"), "U-4000", "Production Units", "Completed production units for operational KPIs.", "UNIT", null, 1, true, 8600m)
+        };
+
+        var unitAccountsByNumber = await _context.UnitAccounts
+            .Where(ua => ua.TenantId == tenantId && !ua.IsDeleted)
+            .ToDictionaryAsync(ua => ua.AccountNumber);
+
+        foreach (var definition in accountDefinitions)
+        {
+            if (unitAccountsByNumber.ContainsKey(definition.AccountNumber))
+            {
+                continue;
+            }
+
+            if (!unitTypesByCode.TryGetValue(definition.UnitTypeCode, out var unitType))
+            {
+                _logger.LogWarning("Skipping unit account {AccountNumber}; unit type {UnitTypeCode} is missing.", definition.AccountNumber, definition.UnitTypeCode);
+                continue;
+            }
+
+            Guid? parentAccountId = null;
+            if (!string.IsNullOrWhiteSpace(definition.ParentAccountNumber))
+            {
+                if (!unitAccountsByNumber.TryGetValue(definition.ParentAccountNumber, out var parentAccount))
+                {
+                    _logger.LogWarning("Skipping unit account {AccountNumber}; parent account {ParentAccountNumber} is missing.", definition.AccountNumber, definition.ParentAccountNumber);
+                    continue;
+                }
+
+                parentAccountId = parentAccount.Id;
+            }
+
+            var unitAccount = new UnitAccount
+            {
+                Id = definition.Id,
+                TenantId = tenantId,
+                AccountNumber = definition.AccountNumber,
+                Name = definition.Name,
+                Description = definition.Description,
+                UnitTypeId = unitType.Id,
+                ParentAccountId = parentAccountId,
+                AccountLevel = definition.AccountLevel,
+                IsPostingAccount = definition.IsPostingAccount,
+                IsActive = true,
+                CurrentBalance = definition.CurrentBalance,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            };
+
+            _context.UnitAccounts.Add(unitAccount);
+            unitAccountsByNumber[unitAccount.AccountNumber] = unitAccount;
+        }
+
+        var openPeriod = await _context.FiscalPeriods
+            .Where(fp => fp.TenantId == tenantId && fp.IsOpen && !fp.IsDeleted)
+            .OrderBy(fp => fp.StartDate)
+            .FirstOrDefaultAsync();
+
+        if (openPeriod == null)
+        {
+            _logger.LogInformation("No open fiscal period found for unit-account demo balances. Seeded unit types/accounts only.");
+            return;
+        }
+
+        var postingAccountIds = accountDefinitions
+            .Where(a => a.IsPostingAccount && unitAccountsByNumber.ContainsKey(a.AccountNumber))
+            .Select(a => unitAccountsByNumber[a.AccountNumber].Id)
+            .ToList();
+
+        var existingBalanceAccountIds = await _context.UnitAccountBalances
+            .Where(b => b.TenantId == tenantId && b.FiscalPeriodId == openPeriod.Id && postingAccountIds.Contains(b.UnitAccountId))
+            .Select(b => b.UnitAccountId)
+            .ToListAsync();
+
+        foreach (var definition in accountDefinitions.Where(a => a.IsPostingAccount))
+        {
+            if (!unitAccountsByNumber.TryGetValue(definition.AccountNumber, out var unitAccount) ||
+                existingBalanceAccountIds.Contains(unitAccount.Id))
+            {
+                continue;
+            }
+
+            // Demo statistical balances only; production movements should come from posted UnitJournalEntry lines.
+            _context.UnitAccountBalances.Add(new UnitAccountBalance
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                UnitAccountId = unitAccount.Id,
+                FiscalYearId = openPeriod.FiscalYearId,
+                FiscalPeriodId = openPeriod.Id,
+                OpeningBalance = definition.CurrentBalance,
+                PeriodActivity = 0,
+                ClosingBalance = definition.CurrentBalance,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            });
+        }
     }
 
     private async Task SeedPayrollAccountsAsync(Guid tenantId, DateTime baseDate)
