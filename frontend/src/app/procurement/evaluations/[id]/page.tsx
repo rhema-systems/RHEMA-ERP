@@ -10,13 +10,22 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
-import { ArrowLeft, Save, Send, Clock, XCircle, AlertCircle } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowLeft,
+  Clock,
+  Save,
+  Send,
+  ShieldCheck,
+  XCircle,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderEvaluationService from '@/services/tenderEvaluationService';
 import * as tenderBidService from '@/services/tenderBidService';
 import { evaluationTemplateService, type EvaluationTemplate } from '@/services/evaluationTemplateService';
 import { type TenderEvaluationDto, type UpdateEvaluationDto } from '@/services/tenderEvaluationService';
 import { type TenderBidDetailDto } from '@/services/tenderBidService';
+import { createEvaluationIdempotencyKey } from '@/lib/procurement-evaluation-committee';
 
 // Interface for storing criteria scores
 interface CriteriaScore {
@@ -49,6 +58,8 @@ export default function EvaluationFormPage() {
   const [overallComments, setOverallComments] = useState('');
   const [isRecommended, setIsRecommended] = useState(false);
   const [recommendation, setRecommendation] = useState('');
+  const [submissionSignature, setSubmissionSignature] = useState('');
+  const [submissionEvidence, setSubmissionEvidence] = useState('');
 
   useEffect(() => {
     if (evaluationId) {
@@ -233,7 +244,12 @@ export default function EvaluationFormPage() {
       await tenderEvaluationService.updateEvaluation(evaluationId, data);
 
       // Then submit it
-      await tenderEvaluationService.submitEvaluation(evaluationId, { confirmSubmission: true });
+      await tenderEvaluationService.submitEvaluation(evaluationId, {
+        confirmSubmission: true,
+        signatureReference: submissionSignature,
+        evidenceReference: submissionEvidence,
+        idempotencyKey: createEvaluationIdempotencyKey('legacy-score-submit'),
+      });
 
       toast.success('Evaluation submitted successfully');
       router.push('/procurement/evaluations');
@@ -276,7 +292,7 @@ export default function EvaluationFormPage() {
     <div className="container mx-auto py-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <Button variant="ghost" onClick={() => router.push('/procurement/evaluations')}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
@@ -286,9 +302,33 @@ export default function EvaluationFormPage() {
             <p className="text-gray-500">Evaluate and score the bid</p>
           </div>
         </div>
-        <Badge variant={evaluation.status === 'Draft' ? 'secondary' : 'default'}>
-          {evaluation.status}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() =>
+              router.push(
+                `/procurement/tenders/${bid.tenderId}/committee-controls`
+              )
+            }
+          >
+            <ShieldCheck className="mr-2 h-4 w-4" />
+            Committee controls
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() =>
+              router.push(
+                `/procurement/tenders/${bid.tenderId}/award-readiness`
+              )
+            }
+          >
+            <ShieldCheck className="mr-2 h-4 w-4" />
+            Award readiness
+          </Button>
+          <Badge variant={evaluation.status === 'Draft' ? 'secondary' : 'default'}>
+            {evaluation.status}
+          </Badge>
+        </div>
       </div>
 
       {/* Bid Information */}
@@ -530,22 +570,64 @@ export default function EvaluationFormPage() {
 
       {/* Actions */}
       {!isReadOnly && (
-        <div className="flex items-center justify-end gap-4">
-          <Button
-            variant="outline"
-            onClick={handleSaveDraft}
-            disabled={saving}
-          >
-            <Save className="h-4 w-4 mr-2" />
-            Save Draft
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={saving}
-          >
-            <Send className="h-4 w-4 mr-2" />
-            Submit Evaluation
-          </Button>
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Signed score-sheet lock</CardTitle>
+              <CardDescription>
+                Submission requires current committee acceptance, COI, signed
+                attendance, and confirmed quorum. The exact score snapshot becomes
+                immutable; correction requires controlled recall.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="submissionSignature">
+                  Evaluator signature reference *
+                </Label>
+                <Input
+                  id="submissionSignature"
+                  value={submissionSignature}
+                  onChange={(event) =>
+                    setSubmissionSignature(event.target.value)
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="submissionEvidence">
+                  Score-sheet evidence reference *
+                </Label>
+                <Input
+                  id="submissionEvidence"
+                  value={submissionEvidence}
+                  onChange={(event) =>
+                    setSubmissionEvidence(event.target.value)
+                  }
+                />
+              </div>
+            </CardContent>
+          </Card>
+          <div className="flex flex-wrap items-center justify-end gap-4">
+            <Button
+              variant="outline"
+              onClick={handleSaveDraft}
+              disabled={saving}
+            >
+              <Save className="h-4 w-4 mr-2" />
+              Save Draft
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={
+                saving ||
+                !submissionSignature.trim() ||
+                !submissionEvidence.trim()
+              }
+            >
+              <Send className="h-4 w-4 mr-2" />
+              Submit and lock evaluation
+            </Button>
+          </div>
         </div>
       )}
     </div>

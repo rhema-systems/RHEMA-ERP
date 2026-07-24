@@ -21,6 +21,7 @@ import {
   FileCheck,
   Info,
   MessageSquare,
+  MailCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { tenderService, type TenderDetailDto } from '@/services/tenderService';
@@ -184,6 +185,26 @@ export default function ExternalTenderDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() =>
+              router.push(
+                `/external-portal/tenders/${tenderId}/document-controls`
+              )
+            }
+          >
+            <FileCheck className="h-4 w-4 mr-2" />
+            Controlled documents
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() =>
+              router.push(`/external-portal/tenders/${tenderId}/award-status`)
+            }
+          >
+            <MailCheck className="h-4 w-4 mr-2" />
+            Award status
+          </Button>
           <Badge>{tender.tenderType}</Badge>
           <Badge variant={deadlineStatus.variant}>{deadlineStatus.text}</Badge>
         </div>

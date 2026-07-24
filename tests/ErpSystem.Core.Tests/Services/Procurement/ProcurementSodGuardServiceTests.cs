@@ -77,6 +77,34 @@ public sealed class ProcurementSodGuardServiceTests
     }
 
     [Fact]
+    public async Task SoleActorConflictAllowsOnlyARecordedDistinctNonProhibitedActor()
+    {
+        await using var fixture = new GuardFixture();
+        await fixture.AddCompletePolicyAsync();
+        var independentActorId = Guid.NewGuid();
+        var request = Request(
+            "SOD-EVALUATOR-AWARD-APPROVER",
+            fixture.UserId);
+        request.RequireSoleActorConflict = true;
+        request.IndependentActorUserIds = [independentActorId];
+
+        var allowed = await fixture.Service.EnforceAsync(
+            request, "trace-sole-actor-independent");
+
+        allowed.Allowed.Should().BeTrue();
+        allowed.Code.Should().Be("SOD_ALLOWED");
+
+        request.IndependentActorUserIds =
+            [fixture.UserId, fixture.UserId];
+        var blocked = await fixture.Service.EnforceAsync(
+            request, "trace-sole-actor-no-independent");
+
+        blocked.Allowed.Should().BeFalse();
+        blocked.Code.Should().Be("SOD_CONFLICT");
+        blocked.WasAudited.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task ReadOnlyCheckBlocksWithoutWritingWhileEnforceWritesExactlyOneAttempt()
     {
         await using var fixture = new GuardFixture();

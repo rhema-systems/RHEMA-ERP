@@ -139,14 +139,36 @@ public class TenderAwardsController : ControllerBase
     /// Create award
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
-    public async Task<ActionResult<TenderAwardDto>> CreateAward([FromBody] CreateAwardDto dto)
+    [Authorize]
+    public async Task<ActionResult<TenderAwardDto>> CreateAward(
+        [FromBody] CreateAwardDto dto,
+        CancellationToken cancellationToken)
     {
         try
         {
-            // Service interface requires (Guid tenderId, CreateAwardDto dto)
-            var award = await _awardService.CreateAwardAsync(dto.TenderId, dto);
+            var award = await _awardService.CreateAwardAsync(
+                dto.TenderId, dto, CorrelationId, cancellationToken);
             return CreatedAtAction(nameof(GetAward), new { id = award.Id }, award);
+        }
+        catch (ProcurementAwardReadinessNotFoundException ex)
+        {
+            return NotFound(ReadinessProblem(404, ex.Code, ex.Message));
+        }
+        catch (ProcurementAwardReadinessAuthorizationException ex)
+        {
+            return StatusCode(403, ReadinessProblem(403, "AWARD_READINESS_ACCESS_FORBIDDEN", ex.Message));
+        }
+        catch (ProcurementAwardReadinessConflictException ex)
+        {
+            return Conflict(ReadinessProblem(409, ex.Code, ex.Message));
+        }
+        catch (ProcurementAwardReadinessBlockedException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message, ex.Decision));
+        }
+        catch (ProcurementAwardReadinessValidationException ex)
+        {
+            return UnprocessableEntity(ReadinessProblem(422, ex.Code, ex.Message));
         }
         catch (InvalidOperationException ex)
         {
@@ -158,6 +180,34 @@ public class TenderAwardsController : ControllerBase
             return StatusCode(500, "An error occurred while creating the award");
         }
     }
+
+    private string CorrelationId
+    {
+        get
+        {
+            var supplied = Request.Headers["X-Correlation-ID"].FirstOrDefault();
+            return string.IsNullOrWhiteSpace(supplied)
+                ? string.IsNullOrWhiteSpace(HttpContext.TraceIdentifier)
+                    ? Guid.NewGuid().ToString("N")
+                    : HttpContext.TraceIdentifier
+                : supplied;
+        }
+    }
+
+    private object ReadinessProblem(
+        int status,
+        string code,
+        string message,
+        object? decision = null) => new
+    {
+        status,
+        title = status == 422 ? "Award is not ready" : "Award-readiness check failed",
+        detail = message,
+        instance = Request.Path.Value,
+        code,
+        correlationId = CorrelationId,
+        decision
+    };
 
     /// <summary>
     /// Approve award

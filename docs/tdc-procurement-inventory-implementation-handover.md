@@ -1,22 +1,22 @@
 # TDC Procurement and Inventory Implementation Handover
 
-Last updated: 2026-07-23
+Last updated: 2026-07-24
 
-Document status: `TDC-0206` complete; `TDC-0207` not started
+Document status: `TDC-0212` complete; `TDC-0301` is `Not started`
 
 ## Handover Objective
 
 This document transfers the TDC Procurement and Inventory implementation from completed requirement and gap analysis into controlled delivery. The next agent should be able to open this repository, verify the live state, and continue the next tracker slice without repeating the analysis or inventing a parallel architecture.
 
-The governing delivery ledger is `docs/tdc-procurement-inventory-gap-implementation-tracker.md`. It currently contains 93 roadmap tasks across phases 0 through 9 and 27 mandatory end-to-end acceptance scenarios. Phase 0 (`TDC-0001` through `TDC-0007`), Phase 1 (`TDC-0101` through `TDC-0108`), and Phase-2 slices `TDC-0201` through `TDC-0206` are verified `Done`; later roadmap tasks and end-to-end scenarios retain the status recorded in the tracker and must change only as verified implementation work progresses.
+The governing delivery ledger is `docs/tdc-procurement-inventory-gap-implementation-tracker.md`. It currently contains 93 roadmap tasks across phases 0 through 9 and 27 mandatory end-to-end acceptance scenarios. Phase 0 (`TDC-0001` through `TDC-0007`), Phase 1 (`TDC-0101` through `TDC-0108`), and Phase 2 (`TDC-0201` through `TDC-0212`) are verified `Done`; later roadmap tasks and end-to-end scenarios retain the status recorded in the tracker and must change only as verified implementation work progresses.
 
 ## Immediate Starting Decision
 
-Start with `TDC-0207` only: add reusable controlled tender-document templates and an immutable issuance/addenda/extension register, reusing the delivered sourcing-case, RFQ, NCT/ICT, exceptional-sourcing, prequalification, workflow, evidence, identity, notification, SOD, and audit architecture.
+`TDC-0212` is complete in the accepted dirty worktree after full migration, SQL, API, browser, visual, and cleanup acceptance. No task is currently `In progress`; `TDC-0301` is the next eligible Phase-3 slice and remains `Not started`.
 
-Phase 1 is complete. `TDC-0201` derives one tenant-safe sourcing case from a current immutable PR sourcing release and enforces that current case at RFQ/tender entry. `TDC-0202` makes the method recommendation server-derived from the exact current policy and protects any override with eligible exception, capability, independent workflow, evidence, actors, and SOD. `TDC-0203` completes the RFQ vertical flow. `TDC-0204` completes NCT/ICT from approved advertisement and controlled paid/free document issue through sealed/late submissions, signed public opening, separate technical/financial evaluation, exact authority/PPA workflow, approved award, executed-contract reference, bidder acceptance, immutable SQL records, and `DEC-001` through `DEC-014` control-event lineage. `TDC-0205` completes Restricted Tendering and Single Source from exact method/exception/evidence/supplier lineage through Board/MD/PPA approval, negotiation, recommendation, award, contract/acceptance, PPA filing, exception reporting, immutable SQL protection, and all fourteen decision events. `TDC-0206` completes tenant-safe prequalification from exact current policy/configuration and workflow lineage through advertisement, controlled supplier evidence, independent criterion evaluation, exact decision, reusable qualified-list validity/expiry, deterministic category eligibility, SQL protection, and all fourteen decision events. Complete and expired history remains readable; final acceptance preserved `TDC-0207` and later statutory workflows plus general PO, receiving, and inventory runtime behavior.
+Phase 2 sourcing through award is complete. `TDC-0201` derives one tenant-safe sourcing case from a current immutable PR sourcing release and enforces that current case at RFQ/tender entry. `TDC-0202` makes the method recommendation server-derived from the exact current policy and protects any override with eligible exception, capability, independent workflow, evidence, actors, and SOD. `TDC-0203` completes the RFQ vertical flow. `TDC-0204` completes NCT/ICT from approved advertisement and controlled paid/free document issue through sealed/late submissions, signed public opening, separate technical/financial evaluation, exact authority/PPA workflow, approved award, executed-contract reference, bidder acceptance, immutable SQL records, and `DEC-001` through `DEC-014` control-event lineage. `TDC-0205` completes Restricted Tendering and Single Source. `TDC-0206` completes tenant-safe prequalification and deterministic qualified-list eligibility. `TDC-0207` completes reusable controlled tender-document families, immutable approved versions, exact Tender/RFQ binding, issuance/receipt, addenda/acknowledgements, and controlled extensions. `TDC-0208` completes the reusable tenant-safe evaluation-committee control: exact composition and appointments, acceptance/COI evidence, signed attendance and remote/hybrid evidence, server-derived quorum, scorer eligibility, immutable signed score attempts, independently approved recall, exact RFQ/NCT/legacy projection parity, eight-table SQL protection, all fourteen decision events, and dedicated Tender/RFQ history-first controls. `TDC-0209` completes the reusable tenant-safe recommendation-approval and award-readiness decision across RFQ, formal Tender, Exceptional Sourcing, and legacy tender-award boundaries, including exact current evaluation/score, supplier/prequalification, verification/due-diligence, recommendation, authority/workflow, evidence, actor, policy/method, integrity, immutable SQL/audit, API, and shared history-first UI controls. `TDC-0210` completes the reusable evaluator-versus-award-approver hard stop across those four boundaries, deriving exact direct and committee score-attempt lineage, allowing only independently approved non-sole outcomes, recording enriched allowed/denied control events, and exposing fail-closed current-actor status in the shared readiness UI without adding schema. `TDC-0211` completes the reusable successful/unsuccessful bidder-communication and tender-security register across formal Tender, RFQ, and Exceptional Sourcing, with server-derived award/readiness/supplier/subject lineage, immutable approved letter versions, dispatch/delivery/acknowledgement, standstill/appeal, security release/return, shared workflow/evidence/notification control events, ten-table SQL protection, and dedicated internal/external views. `TDC-0212` completes the configurable manual/API-ready GHANEPS publication and award exchange across formal Tender, RFQ, and Exceptional Sourcing, including exact evidenced Published/effective `DEC-009` and mapping lineage, immutable payload/attempt/failure/retry/acknowledgement/reconciliation history, SQL protection, role-neutral API, and dedicated shared Tender/RFQ history controls.
 
-Do not begin `TDC-0208` or later committee/GHANEPS expansion, broadly redesign PO/receiving/inventory behavior, or recreate the delivered configuration, compliance, sourcing-release, sourcing-case, RFQ/NCT/ICT/exceptional-sourcing/prequalification, workflow, evidence, identity, notification, SOD, supplier-validation, or control-event architecture. `TDC-0207` must track reusable document templates, exact approved version, issued recipient, paid/free fee and receipt, immutable issue history, addendum acknowledgement, deadline extension, and bid-validity extension required by the tracker. Every hard stop must be server-enforced and tenant safe; the UI must explain readiness and retain history. The slice must pass every applicable tracker Delivery Contract gate before it can be marked `Done`.
+The next slice is `TDC-0301`: configure category-aware TDC supplier-registration evidence packs for Goods, Works, and Services. It must reuse the existing shared evidence, document, workflow, configuration-profile, authorization, audit, notification, identity, and supplier architecture. Preserve the already-recorded onboarding boundary for `TDC-0302`/`TDC-0309`: the application token may be free or paid, has no time-based expiry while the application is active, and expires only when the application reaches Approved or Rejected. Do not begin the token/payment or restricted applicant-portal lifecycle as part of `TDC-0301` unless a verified evidence-pack dependency requires a narrowly scoped shared contract.
 
 ## Authoritative Inputs And Precedence
 
@@ -33,32 +33,82 @@ If the SRS and questionnaire differ, preserve the SRS requirement and record the
 
 ## Verified Repository Snapshot
 
-This snapshot was refreshed on 2026-07-23 after `TDC-0206` acceptance and must be reverified at the beginning of the next slice.
+This snapshot was refreshed on 2026-07-24 at `TDC-0211` acceptance closure. The accepted through-`TDC-0206` baseline remains pushed at `9010ffe8b620b9c6eea51bf07791e99caa66fe93`; the completed `TDC-0207` through `TDC-0211` worktree is intentionally uncommitted until the user requests a checkpoint.
 
 | Item | Verified state |
 | --- | --- |
 | Repository root | `D:\DEVELOPMENTS\ASP.NET\TDC\DEV\erp-system\erp-system - Aug2` |
-| Branch | `agent/tdc-procurement-phase-0-controls`, tracking its upstream with zero divergence at the `TDC-0206` kickoff |
-| Baseline commit | `41d6e4fff98856150f8ddb0699eeb5d9825dea43` (pushed accepted Phase-0/Phase-1/`TDC-0201` through `TDC-0203` checkpoint before uncommitted `TDC-0204` through `TDC-0206`) |
+| Branch | `agent/tdc-procurement-phase-0-controls`, tracking its upstream with zero divergence from pushed commit `9010ffe8b620b9c6eea51bf07791e99caa66fe93` before the uncommitted `TDC-0207` through `TDC-0211` stack |
+| Baseline commit | `9010ffe8b620b9c6eea51bf07791e99caa66fe93` (pushed accepted Phase-0, Phase-1, and `TDC-0201` through `TDC-0206` checkpoint) |
 | .NET SDK | `8.0.206` from `global.json` |
 | Frontend | Next.js `15.5.3`, React `19.1.0`, TypeScript 5, React Query 5, Vitest 3, Lucide icons, shared Radix/shadcn controls |
-| Backend build | Core, Data, and API builds pass with zero errors and only existing warnings |
-| Focused Core tests | Full procurement filter passes 201/201; focused prequalification controls pass 8/8 |
-| Focused API tests | Full discovered procurement controller suite passes 117/117, including seven prequalification controller cases |
-| Targeted frontend verification | Twenty-three test files pass 92/92 Vitest tests; the focused prequalification helper passes 5/5 and all changed prequalification files pass targeted ESLint |
-| Full frontend type-check | Retains 108 documented unrelated baseline diagnostics; none matches a changed `TDC-0206` prequalification file and no new procurement work may add errors |
-| Test database | `RhemaERP` is current through `20260723161619_AddProcurementPrequalificationPolicyLineage`; the five prequalification tables, 32 named indexes, 17 restrictive foreign keys, six trusted checks, six enabled lifecycle/immutability triggers, and all legacy sourcing/RFQ/tender guards are enabled, and EF reports no pending model changes |
+| Backend build | Targeted Core, Data, API, and API-test builds pass with zero errors. The very large Data compilation uses the recorded isolated SDK 10 path and retains only repository baseline warnings. |
+| Focused Core tests | Full procurement filter passes 264/264; focused `TDC-0211` service lifecycle, authorization/SOD, tenant, immutability, appeal/security, concurrency, and idempotency suite passes 12/12 |
+| Focused API tests | Full procurement controller filter passes 182/182; focused `TDC-0211` route, structured-error, hostile-binding, authorization, external-scope, and cross-source-resource suite passes 16/16 |
+| Targeted frontend verification | Seventy-two test files pass 134/134 Vitest tests; focused `TDC-0211` helper/service/workspace/register tests pass 11/11 and targeted TDC-0211 ESLint is clean |
+| Full frontend type-check | Retains 114 unrelated repository baseline diagnostics in the final attribution run; none matches a changed `TDC-0211` file |
+| Test database | `RhemaERP` is current through `20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns`; apply/rollback/reapply/repeat-latest, ten append-only probes, source-mapping probe, and EF no-model-drift checks pass. Ten new tables are empty, ten new triggers are enabled, new foreign keys are trusted, and protected totals remain `Plans=4`, `PRs=17` (`3` active), `POs=1`, `Receipts=1`, `StockMovements=0`, and `InventoryMovements=0` |
 
 ### Dirty Worktree Protection
 
-The worktree is not clean. The accepted Phase-0, Phase-1, and `TDC-0201` through `TDC-0203` baseline is pushed at `41d6e4fff98856150f8ddb0699eeb5d9825dea43`. At this handover point the tree contains the completed, uncommitted `TDC-0204` through `TDC-0206` implementations and evidence updates, plus team-owned changes that predated the slices:
+The worktree is not clean. The accepted Phase-0, Phase-1, and `TDC-0201` through `TDC-0206` baseline is pushed at `9010ffe8b620b9c6eea51bf07791e99caa66fe93`. The completed `TDC-0207` through `TDC-0212` implementations, migrations, tests, frontend, and active delivery-document evidence are intentionally uncommitted; the tree also contains team-owned changes that predated the slices:
 
-- Modified active procurement tracker and handover documents, including the supplier-onboarding token clarification.
+- Modified active procurement tracker and handover documents plus the complete `TDC-0207` controlled-document, `TDC-0208` evaluation-committee, `TDC-0209` award-readiness, `TDC-0210` evaluator/award-approver SOD, `TDC-0211` bidder-communication/security-return, and `TDC-0212` GHANEPS exchange implementations.
+- A pre-existing whitespace-only diff in `src/ErpSystem.Core/Services/Procurement/SupplierValidationService.cs`.
 - Untracked Fleet, Sales/CRM, Quantity Survey, and Civil Engineering tracker documents under `docs`.
 - Untracked `src/ErpSystem.Api/full_database.sql`.
-- The focused `TDC-0204` through `TDC-0206` backend, API, migration, frontend, test, and smoke-evidence files listed in the procurement tracker's Current Code Evidence Anchors and Verification Log.
 
 Treat these as user/team changes. Do not reset, revert, delete, stash, commit, or reformat them merely to obtain a clean tree. Before editing a file that is already modified, inspect its current diff and preserve the existing change. Keep procurement implementation commits narrowly scoped and never add `full_database.sql` unless the user explicitly requests it.
+
+### TDC-0207 Acceptance Summary
+
+`TDC-0207` is `Done`. The authoritative code and evidence anchors are recorded in the tracker. The accepted slice includes:
+
+- One tenant-safe reusable template/version lifecycle with exact policy/configuration/workflow/evidence/checksum/effective/supersession lineage, soft-delete-safe clone numbering, immutable Published/Retired history, and future-effective replacement behavior.
+- One exact Tender/RFQ register with supplier-validated paid/free issuance and receipts, recipient/channel/actor evidence, append-only issue history, addenda and acknowledgement, authorized submission-deadline extension, and permitted post-closing bid-validity extension while validity remains active.
+- Explicit authorization, external ownership isolation, independent approval/SOD, shared workflow/evidence/notification/control-event reuse, concurrency/idempotency, legacy NCT/ICT issue delegation, and unchanged PR/PO/receiving/inventory behavior.
+- Migration `20260723184003_AddProcurementTenderDocumentControls`, seven protected tables/triggers, successful rollback-only SQL hard-stop probes, repeat database apply, no pending EF model changes, and zero acceptance residue.
+- 209/209 Core procurement, 123/123 procurement API, 100/100 frontend, focused 7/7 Core, 6/6 API, and 8/8 frontend tests; zero-error builds; targeted lint and TDC-owned TypeScript clean; authenticated API and real-browser/visual smoke complete.
+
+### TDC-0209 Acceptance Summary
+
+`TDC-0209` is `Done`. The authoritative code and exact evidence are recorded in the tracker. The accepted slice includes:
+
+- One reusable append-only tenant/source/sequence award-readiness decision with exact current evaluation/locked-score, recommendation, supplier/prequalification, verification/due-diligence, authority/workflow, evidence, actor/roles, policy/method, prerequisite, timeline, source-integrity, and `DEC-001` through `DEC-014` control-event lineage.
+- Four server-enforced irreversible award gates covering RFQ handoff, formal Tender award, Exceptional Sourcing award, and legacy `TenderAward`; each re-evaluates current server state and asserts exact recommended subjects/suppliers before accepting `RecordAward`.
+- A tenant-safe latest/history/evaluate API with structured errors and no public decision-record endpoint, plus shared dedicated Tender/RFQ history-first pages whose actions require both permission and the current server-provided allowed action.
+- Migration `20260724020403_AddProcurementAwardReadinessControls`, append-only/source-parity SQL errors `51400` through `51409`, verified apply/rollback/reapply/repeat-latest, selected direct negative probes, and zero fixture residue.
+- 239/239 Core procurement, 149/149 procurement API, and 120/120 frontend regressions; focused 36/36 Core, 12/12 API, and 8/8 frontend; zero-error builds; clean targeted lint and TDC-owned TypeScript; authenticated API and real-browser/visual smoke with exact process cleanup.
+
+### TDC-0210 Acceptance Summary
+
+`TDC-0210` is `Done`. The authoritative code and exact evidence are recorded in the tracker. The accepted slice includes:
+
+- One trusted server-derived evaluator-versus-award-approver decision across RFQ, formal Tender, Exceptional Sourcing, and legacy award paths, including direct evaluator projections and exact committee control, appointment, subject, retained/recalled score-attempt, method-rule, current-readiness/hash, authority/workflow approval-actor, policy/rule, actor/roles, and correlation lineage.
+- Same-source evaluator denial before any readiness or award mutation when no distinct recorded non-evaluator approval actor exists; exact independent approval prevents over-blocking. Missing, duplicate, foreign, mismatched, or non-contiguous lineage fails closed.
+- Reuse of the existing SOD/AuditLog/control-event architecture with enriched allowed/denied events. Sole-actor relaxation inputs are internal-only and ignored by public JSON binding, so the generic SOD API cannot manufacture an independent actor.
+- Authenticated tenant-safe `/api/procurement/award-readiness/sod-status`, structured four-boundary outcomes, and a shared Tender/RFQ/Exceptional SOD card that renders before the first readiness decision and fail-closes Evaluate for loading/error/incomplete/blocked state or missing approval permission.
+- No new migration: EF reports no model drift, the database remains current through `20260724020403_AddProcurementAwardReadinessControls`, and live evidence shows zero readiness residue, zero disabled procurement triggers, and zero untrusted procurement foreign keys.
+- 252/252 Core procurement, 166/166 procurement API, and 123/123 frontend regressions; focused 29/29 Core, 55/55 API, 5/5 boundary, 2/2 legacy, and 11/11 frontend; zero-warning/zero-error solution build; successful optimized Next build; clean targeted lint and zero TDC-0210 TypeScript diagnostic matches; authenticated API/browser/visual smoke and exact process cleanup.
+
+### TDC-0211 Acceptance Summary
+
+`TDC-0211` is `Done`. The authoritative code and exact evidence are recorded in the tracker. The accepted slice includes:
+
+- One tenant-safe register spanning formal Tender, RFQ, and Exceptional Sourcing with server-derived successful/unsuccessful recipients and exact current award/readiness/supplier/bid-or-quote lineage.
+- Approved immutable letter versions with template/content checksums; dispatch channel/reference/time/actor; delivery and acknowledgement; standstill and appeal dates/outcomes; and tender-security instrument, release, and return history.
+- Shared workflow, evidence, notification, access/SOD, and `DEC-001` through `DEC-014` control-event reuse; structured role-neutral API; cross-source resource binding; fail-closed external supplier scope; and dedicated shared internal/external UI.
+- Migration `20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns`, ten protected tables and triggers, successful exact rollback/reapply/repeat-latest, ten append-only probes, RFQ/Tender source-mapping probe, trusted foreign keys, no model drift, and zero acceptance residue.
+- 264/264 Core procurement, 182/182 procurement API, and 134/134 frontend regressions; focused 12/12 Core, 16/16 API, and 11/11 frontend; zero-error targeted builds; successful optimized Next build; clean targeted lint and zero TDC-0211 TypeScript diagnostic matches; bounded API/browser/visual smoke and exact process cleanup.
+
+### TDC-0212 Acceptance Summary
+
+`TDC-0212` is `Done`. The authoritative code and exact evidence are recorded in the tracker. The accepted slice includes:
+
+- One configurable tenant-safe manual/API-ready exchange across formal Tender, RFQ, and Exceptional Sourcing publication/award events, deriving exact source lifecycle/reference and one evidenced Published/effective `DEC-009` decision with a unique applicable 17-property mapping.
+- Immutable source/configuration/mapping snapshots and SHA-256 lineage, versioned export/import payloads, typed safe downloads, submission success/failure/retry, acknowledgement, reconciliation/mismatch resolution, authorization/SOD, concurrency, idempotency, shared evidence/notification, and `DEC-001` through `DEC-014` control-event reuse.
+- Migration `20260724175059_AddProcurementGhanepsExchangeControls`, five protected tables/triggers/checks, exact rollback/reapply, 26 rollback-only SQL probes passing both before and after the cycle, trusted foreign keys, no model drift, and zero acceptance residue.
+- 307/307 Core procurement, 209/209 procurement API, and 161/161 frontend regressions; focused 43/43 Core, 26/26 API, and 27/27 frontend; zero-error builds; successful optimized Next build; clean targeted lint and zero GHANEPS TypeScript diagnostic matches; bounded API/browser/visual smoke with three reviewed screenshots and exact process cleanup.
 
 ## Delivery Contract
 
@@ -139,7 +189,7 @@ Shared administration anchors:
 
 | Delivery wave | Tracker tasks | Outcome before the next wave |
 | --- | --- | --- |
-| F. Supplier controls | `TDC-0301` through `TDC-0308` | Portal/registration, fees, due diligence, AVL, risk, performance, sanctions, and controlled master changes. |
+| F. Supplier controls | `TDC-0301` through `TDC-0309` | Evidence packs, token-gated portal/registration, fees, due diligence, AVL, risk, performance, sanctions, controlled master changes, and approval-based account activation. |
 | G. Frameworks/contracts/POs | `TDC-0401` through `TDC-0409` | Commitments, call-offs, amendments, dispatch, acknowledgements, and contract controls. |
 | H. Receipt through payment | `TDC-0501` through `TDC-0509` | Receipt inspection, GRN/MRN, rejection, landed cost, three-way matching, exception approval, payment, and GL. |
 | I. Inventory control | `TDC-0601` through `TDC-0616` | Stores, traceability, reservation, issue/return/transfer, counts, valuation, replenishment, barcode/mobile, disposal, and item master. |
@@ -162,7 +212,7 @@ For every later module, create a fresh module-specific implementation handover f
 
 ## Historical First Slice Specification: TDC-0001
 
-The following specification is retained as delivery history for the completed configuration foundation. It is not the next implementation instruction; current work resumes at `TDC-0207` under the live tracker row and Delivery Contract.
+The following specification is retained as delivery history for the completed configuration foundation. It is not the next implementation instruction; current work resumes at `TDC-0301` under the live tracker row and Delivery Contract.
 
 ### Slice Name
 
@@ -314,24 +364,24 @@ Create a dedicated administration workspace rather than extending the current Pu
 
 If any applicable item is incomplete, keep the active tracker task `In progress`; do not create a misleading `Done` state.
 
-## Step-By-Step Start Procedure
+## Historical TDC-0210 Start Procedure
 
 1. Re-run `git status --short --branch`, upstream/divergence checks, `git diff --check`, and the diff for every already modified file the slice may touch.
-2. Read `SRC-006`, `SRC-011` through `SRC-013`, `TDC-0207`, `PROC-005` through `PROC-007`, `E2E-001` through `E2E-003`, the Delivery Rule, Tracker Maintenance, and the completed `TDC-0201` through `TDC-0206` evidence before changing procurement behavior.
-3. Preserve the pushed `TDC-0101` through `TDC-0203` baseline, completed uncommitted `TDC-0204` through `TDC-0206`, and all team-owned dirty/untracked files; do not commit `full_database.sql` or unrelated module trackers.
-4. Confirm the 201 Core/117 API/92 frontend procurement baseline, verify `RhemaERP` remains current through `20260723161619_AddProcurementPrequalificationPolicyLineage` with all sourcing, RFQ, tender, exceptional-sourcing, and prequalification guards enabled, and record any drift before editing.
-5. Change only `TDC-0207` from `Not started` to `In progress`; add a dated Verification Log kickoff entry with the exact tender-document/template/issuance boundary.
-6. Inventory existing tender documents, NCT/ICT issue/sale receipts, RFQ dispatch records, advertisement references, fee handling, addenda or revision fields, bid deadlines/validity, shared workflow/evidence/storage, capabilities/SOD, notifications, and control events before adding behavior.
-7. Model reusable tenant-safe tender-document templates and immutable approved versions for the applicable procurement methods, preserving exact source policy/configuration, workflow, approver, evidence, checksum, effective dates, and supersession lineage.
-8. Bind each controlled issue to one exact approved document version, tender/sourcing case, recipient, paid-or-free fee decision, payment/receipt, channel, issuer, timestamp, and acknowledgement; prevent duplicate or stale-version issue and retain all historical issues.
-9. Implement governed addenda with exact changed version, reason, approval/evidence, affected recipients, dispatch/acknowledgement, and deadline consequences. Do not mutate an already issued document version or recreate the existing evidence/storage platform.
-10. Implement deadline and bid-validity extensions with authorized reason, exact shared-workflow outcome where required, evidence, previous/new instants, affected bidders, notification/acknowledgement, and immutable history without weakening sealed receipt/opening rules.
-11. Define fail-closed states for missing/unapproved/stale/foreign document versions, fee/receipt mismatch, duplicate issue, unacknowledged mandatory addendum, invalid or retroactive extension, unauthorized actors, SOD conflicts, concurrency/idempotency, and direct API/SQL bypass.
-12. Expose tenant-safe authenticated history-first API/UI surfaces for templates, versions, approvals, tender bindings, issue/fee receipts, addenda, acknowledgements, deadline/validity extensions, evidence, actors, blocked reasons, and immutable timeline. Reuse shared dialogs, grids, evidence controls, and status patterns.
-13. Add service/direct-API/frontend tests for applicable method happy paths and every hard stop, authorization, tenant isolation, concurrency/idempotency, exact-version issue, fee handling, addenda acknowledgement, deadline/validity extension, workflow/evidence/SOD, and unchanged `TDC-0201` through `TDC-0206` boundaries. Add a focused migration only for verified missing persistence/SQL enforcement, apply it to `RhemaERP`, and run SQL/API/browser smoke plus protected-count cleanup.
-14. Review `git diff --check`, synchronize all genuinely changed coverage/traceability rows, code anchors, and exact Verification Log evidence, and mark `TDC-0207` `Done` only when every applicable Delivery Contract gate passes. Commit only when the user requests it; do not begin `TDC-0208` in the same slice.
+2. Read `SRC-007` through `SRC-010`, `TDC-0210`, `PROC-007`, `E2E-002`, `E2E-004`, `E2E-014`, the Delivery Rule, Tracker Maintenance, and completed `TDC-0204` through `TDC-0209` evidence before changing award behavior.
+3. Preserve the pushed through-`TDC-0206` baseline, completed uncommitted `TDC-0207` through `TDC-0209`, and every team-owned dirty/untracked file; do not commit `full_database.sql` or unrelated module trackers.
+4. Reverify the accepted 239 Core procurement, 149 API procurement-controller, and 120 frontend tests. Confirm `RhemaERP` remains current through `20260724020403_AddProcurementAwardReadinessControls`, readiness/committee guards are enabled/trusted, readiness decisions remain empty, and protected transaction counts have not drifted.
+5. Change only `TDC-0210` from `Not started` to `In progress`; add a dated Verification Log kickoff entry with the exact evaluator-versus-award-approver boundary.
+6. Inventory the existing required SOD registry/guard, award-readiness source/evaluation/committee/authority lineage, four award boundaries, control events, API, and shared frontend before adding behavior.
+7. Derive direct and committee evaluator identities, retained/recalled attempts, exact source/method lineage, and actual authority/workflow approval actors server-side. Never accept an evaluator or independent-actor list from the client.
+8. Deny and audit a same-source evaluator acting as sole award approver before any readiness or award mutation. Allow only when exact retained authority/workflow lineage contains a distinct non-evaluator approval actor.
+9. Fail closed for missing, duplicate, foreign, mismatched, recalled-only/current-state-invalid, or non-contiguous evaluator/appointment/score lineage, incomplete policy, capability denial, tenant mismatch, and direct-route bypass.
+10. Keep generic SOD behavior backward compatible and prevent any trusted sole-actor relaxation option from binding through the public SOD API.
+11. Compose the rule through `EvaluateAsync` and `EnsureAwardReadyAsync` so RFQ, formal Tender, Exceptional Sourcing, and legacy award boundaries share one enforcement point without duplicating the four workflows.
+12. Expose authenticated tenant-safe current-actor status and shared Tender/RFQ/Exceptional visibility; fail-close Evaluate during loading/error/incomplete/blocked status and require the exact approval permission.
+13. Add domain/shared-guard/API/four-boundary/frontend automation, verify no migration is required, run test-database apply/model-drift checks, API/browser smoke, visual review, and exact process cleanup.
+14. Review `git diff --check`, synchronize all changed coverage/traceability rows, code anchors, and exact Verification Log evidence, and mark `TDC-0210` `Done` only when every applicable Delivery Contract gate passes. Commit only when the user requests it; do not begin `TDC-0211` in the same slice.
 
-## Verification Commands
+## Historical TDC-0210 Verification Commands
 
 Run from the repository root unless a command says otherwise:
 
@@ -348,13 +398,13 @@ dotnet ef database update --project src/ErpSystem.Data --startup-project src/Erp
 Run from `frontend`:
 
 ```powershell
-npx eslint <all changed TDC-0207 TypeScript and TSX files>
-npx tsc --noEmit 2>&1 | Select-String "<TDC-0207 tender-document file names>"
-npm run test -- --run <focused tender-document and issuance tests>
-npm run dev
+npx eslint <all changed TDC-0210 TypeScript and TSX files>
+npx tsc --noEmit 2>&1 | Select-String "<TDC-0210 award-readiness SOD file names>"
+npm run test -- --run <focused award-readiness SOD tests>
+npm run build
 ```
 
-The full `npm run type-check` currently fails in unrelated Finance/tax/mock-data files. The next agent must still run it, retain the baseline distinction, and prove there are no new errors in changed procurement files. Do not fix unrelated Finance errors in this slice.
+The full TypeScript check currently fails in unrelated baseline files. Each next slice must still run attribution, retain the baseline distinction, and prove there are no new errors in changed procurement files. Do not fix unrelated module diagnostics in a procurement slice.
 
 ## Known Traps And Required Responses
 
@@ -385,7 +435,7 @@ The full `npm run type-check` currently fails in unrelated Finance/tax/mock-data
 
 Use this prompt in the new chat after opening the repository:
 
-> Continue the TDC Procurement and Inventory implementation using `docs/tdc-procurement-inventory-implementation-handover.md` and `docs/tdc-procurement-inventory-gap-implementation-tracker.md` as the active delivery documents. Start with `TDC-0207` only. Reverify the dirty worktree and completed Phase-0/Phase-1/`TDC-0201` through `TDC-0206` baseline first, preserve all existing team changes, update `TDC-0207` to `In progress`, then add controlled tender-document templates and the issuance/addenda/extension register across backend, focused migration and SQL protection where required, tenant-safe API, explicit authorization/SOD, shared workflow/evidence/notifications, immutable audit, dedicated history-first UI, tests, test-database apply, and SQL/API/browser smoke. Enforce reusable approved document versions, exact tender/version/recipient issue lineage, paid-or-free fee and receipt, immutable issuance history, governed addenda with acknowledgement, and authorized deadline/bid-validity extensions; reuse the delivered policy, sourcing-release/case, RFQ/tender/exceptional-sourcing/prequalification, workflow, evidence, identity, notification, supplier-validation, SOD, and control-event architecture; do not recreate those controls, begin `TDC-0208`, or broadly change PO, receiving, or inventory runtime behavior, and do not mark the task `Done` until every applicable acceptance gate passes.
+> Continue the TDC Procurement and Inventory implementation using `docs/tdc-procurement-inventory-implementation-handover.md` and `docs/tdc-procurement-inventory-gap-implementation-tracker.md` as the active delivery documents. Start with `TDC-0301` only. Reverify the dirty worktree, pushed baseline, completed Phase 0 through Phase 2 (`TDC-0001` through `TDC-0212`), and test database first; preserve all existing team changes, then update only `TDC-0301` to `In progress`. Configure category-aware TDC supplier-registration evidence packs for Goods, Works, and Services, including mandatory documents, classifications, validity/effective rules, approval steps, authorization, shared evidence/document/workflow/configuration/notification/control-event reuse, tenant-safe API, dedicated shared-control UI, automation, focused migration/test-database verification, and API/browser smoke. Preserve the supplier-onboarding token requirement recorded for `TDC-0302`/`TDC-0309`: it may be free or paid, remains valid throughout an active application with no time-based expiry, and expires only on Approved or Rejected. Do not implement the broader token/payment/applicant-portal lifecycle, recreate shared controls, begin later supplier/general transaction tasks, or broadly change PR/PO/receiving/inventory runtime, and do not mark the task `Done` until every applicable acceptance gate passes.
 
 ## Handover Completion Signal
 
@@ -393,6 +443,6 @@ The next agent should consider this handover successfully picked up when it has:
 
 - Reverified repository and worktree state.
 - Confirmed the tracker and existing planning tracker were read.
-- Named `TDC-0207` as the only active task.
-- Reported the intended tender-document/template/issuance domain, migration, API, UI, and test files before editing.
-- Started implementation without touching unrelated dirty files, recreating shared compliance/release/case/method-selection/RFQ/NCT/ICT/exceptional-sourcing/prequalification/workflow/evidence/identity/audit controls, beginning `TDC-0208`, or changing completed Phase-1/`TDC-0201` through `TDC-0206` and unrelated PO/receiving/inventory behavior.
+- Named `TDC-0301` as the only active task.
+- Reported the intended Goods/Works/Services evidence-pack domain, persistence, API, shared-control UI, approval/validity behavior, and test files before editing.
+- Started implementation without touching unrelated dirty files, recreating shared configuration/notification/document/workflow/evidence/identity/supplier/SOD/audit controls, implementing the later token/payment/applicant-portal lifecycle, beginning later tasks, or changing completed Phase 0 through Phase 2 and unrelated PR/PO/receiving/inventory behavior.

@@ -168,7 +168,11 @@ public interface ITenderAwardService
     Task<TenderAwardDto?> GetAwardByBidIdAsync(Guid bidId);
     Task<PagedResult<TenderAwardDto>> GetAwardsAsync(int page, int pageSize, string? search = null, string? status = null);
     Task<AwardRecommendationDto> GenerateAwardRecommendationAsync(Guid tenderId);
-    Task<TenderAwardDto> CreateAwardAsync(Guid tenderId, CreateAwardDto dto);
+    Task<TenderAwardDto> CreateAwardAsync(
+        Guid tenderId,
+        CreateAwardDto dto,
+        string? correlationId = null,
+        CancellationToken cancellationToken = default);
     Task<TenderAwardDto> UpdateAwardAsync(Guid id, CreateAwardDto dto);
     Task CancelAwardAsync(Guid id, CancelAwardDto dto);
     Task SendAwardNotificationsAsync(Guid tenderId, AwardNotificationDto dto);

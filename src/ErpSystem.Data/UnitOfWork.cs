@@ -110,6 +110,11 @@ public class UnitOfWork : IUnitOfWork
         }
     }
 
+    public void ClearTrackedChanges()
+    {
+        _context.ChangeTracker.Clear();
+    }
+
     public IGenericRepository<T> Repository<T>() where T : BaseEntity
     {
         var type = typeof(T);

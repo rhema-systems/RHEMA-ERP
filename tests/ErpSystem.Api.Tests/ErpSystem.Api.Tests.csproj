@@ -49,6 +49,15 @@
     <Compile Include="Controllers\Procurement\TenderControlsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ExceptionalSourcingControlsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PrequalificationControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementTenderDocumentRegisterControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementTenderDocumentTemplatesControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementEvaluationCommitteesControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementAwardReadinessControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderAwardsAwardReadinessControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementBidderCommunicationsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementGhanepsExchangesControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderEvaluationsCommitteeGuardControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\TendersCommitteeGuardControllerTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />

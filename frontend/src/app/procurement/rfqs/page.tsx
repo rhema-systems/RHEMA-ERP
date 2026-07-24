@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { rfqService, type RfqDto } from '@/services/rfqService';
 import { toast } from 'sonner';
-import { Loader2, Search, FileText } from 'lucide-react';
+import { Loader2, Search, FileText, Users } from 'lucide-react';
 
 export default function RfqsPage() {
   const [loading, setLoading] = useState(true);
@@ -95,7 +95,18 @@ export default function RfqsPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`/procurement/rfqs/${r.id}/document-controls`}>
+                        Document register
+                      </Link>
+                    </Button>
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`/procurement/rfqs/${r.id}/committee-controls`}>
+                        <Users className="mr-2 h-4 w-4" />
+                        Committee
+                      </Link>
+                    </Button>
                     <Button asChild size="sm">
                       <Link href={`/procurement/rfqs/${r.id}/controls`}>
                         Controls

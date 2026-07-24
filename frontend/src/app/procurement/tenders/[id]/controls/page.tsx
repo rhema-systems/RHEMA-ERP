@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, CheckCircle2, FileKey2, Loader2, LockKeyhole, RefreshCw, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileKey2, Loader2, LockKeyhole, RefreshCw, ShieldCheck, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,22 +19,26 @@ import {
   tenderControlStatusLabel,
 } from '@/lib/procurement-tender-control';
 import { procurementTenderControlService as service } from '@/services/procurement-tender-control.service';
+import { procurementAwardReadinessService } from '@/services/procurement-award-readiness.service';
+import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
 import {
   ProcurementTenderControlStatus as Status,
   ProcurementTenderSubmissionDisposition as Disposition,
   type ProcurementTenderControl,
 } from '@/types/procurement-tender-control';
+import type { ProcurementAwardReadinessDecision } from '@/types/procurement-award-readiness';
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '—';
 const methodLabel = (method: number) => method === 2 ? 'ICT' : 'NCT';
 
 export default function ProcurementTenderControlsPage() {
   const { id: tenderId } = useParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const [control, setControl] = useState<ProcurementTenderControl | null>(null);
+  const [awardGate, setAwardGate] =
+    useState<ProcurementAwardReadinessDecision | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  const [issue, setIssue] = useState({ businessPartnerId: '', recipientName: '', recipientEmail: '', recipientPhone: '', amountPaid: 0, paymentReference: '', issueReceiptNumber: '', evidenceReference: '' });
   const [opening, setOpening] = useState({ evidence: '', observerName: '', observerRole: 'Independent observer', observerSignature: '', officerSignature: '' });
   const [technicalEvidence, setTechnicalEvidence] = useState('');
   const [technicalScores, setTechnicalScores] = useState<ReturnType<typeof buildTechnicalScores>>([]);
@@ -63,6 +67,13 @@ export default function ProcurementTenderControlsPage() {
       setRecommendedBidId(next.recommendedBidId ?? next.submissionReceipts.find((item) => item.disposition === Disposition.OnTimeAccepted)?.tenderBidId ?? '');
       setAuthorityReference(next.authorityApprovalReference ?? '');
       setPpaReference(next.ppaApprovalReference ?? '');
+      try {
+        setAwardGate(
+          await procurementAwardReadinessService.latest('Tender', tenderId)
+        );
+      } catch {
+        setAwardGate(null);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to load NCT/ICT controls');
     } finally {
@@ -73,6 +84,14 @@ export default function ProcurementTenderControlsPage() {
   useEffect(() => { void load(); }, [load]);
   const readiness = useMemo(() => control ? getTenderControlReadiness(control) : null, [control]);
   const actorName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || 'Opening officer';
+  const awardGateAllows = Boolean(
+    awardGate?.isReady &&
+      awardGate.isCurrent &&
+      hasAwardReadinessAction(awardGate.allowedActions, 'RecordAward') &&
+      hasPermission('procurement.tender.approve') &&
+      control?.recommendedBidId &&
+      awardGate.recommendation.subjectIds.includes(control.recommendedBidId)
+  );
 
   const run = async (key: string, action: () => Promise<unknown>, success: string) => {
     try {
@@ -98,8 +117,20 @@ export default function ProcurementTenderControlsPage() {
           <h1 className="text-2xl font-semibold">{methodLabel(control.method)} statutory controls</h1>
           <p className="text-sm text-muted-foreground">{control.tenderNumber} · {control.tenderTitle}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant={control.status === Status.Rejected ? 'destructive' : 'secondary'}>{tenderControlStatusLabel[control.status]}</Badge>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/procurement/tenders/${tenderId}/committee-controls`}>
+              <Users className="mr-2 h-4 w-4" />
+              Committee controls
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/procurement/tenders/${tenderId}/award-readiness`}>
+              <ShieldCheck className="mr-2 h-4 w-4" />
+              Award readiness
+            </Link>
+          </Button>
           <Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
         </div>
       </div>
@@ -152,15 +183,20 @@ export default function ProcurementTenderControlsPage() {
       {control.status === Status.Advertised && (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
-            <CardHeader><CardTitle>Issue or sell tender document</CardTitle></CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2">
-              <Field label="Supplier ID (approved supplier)" value={issue.businessPartnerId} onChange={(value) => setIssue({ ...issue, businessPartnerId: value })} />
-              <Field label="Recipient name" value={issue.recipientName} onChange={(value) => setIssue({ ...issue, recipientName: value })} />
-              <Field label="Receipt number" value={issue.issueReceiptNumber} onChange={(value) => setIssue({ ...issue, issueReceiptNumber: value })} />
-              <Field label="Payment reference" value={issue.paymentReference} onChange={(value) => setIssue({ ...issue, paymentReference: value })} />
-              <Field label="Amount paid" type="number" value={String(issue.amountPaid)} onChange={(value) => setIssue({ ...issue, amountPaid: Number(value) })} />
-              <Field label="Evidence reference" value={issue.evidenceReference} onChange={(value) => setIssue({ ...issue, evidenceReference: value })} />
-              <Button className="md:col-span-2" disabled={busy === 'issue'} onClick={() => void run('issue', () => service.issueDocument(tenderId, { ...issue, businessPartnerId: issue.businessPartnerId || undefined }), 'Document issue recorded')}>{busy === 'issue' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Record controlled issue</Button>
+            <CardHeader><CardTitle>Controlled tender-document register</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Approved-version binding, paid or free issue records, addenda,
+                extensions and recipient acknowledgements are maintained in the
+                dedicated register. Direct issue entry is disabled here so the
+                immutable version and receipt lineage cannot be bypassed.
+              </p>
+              <Button asChild>
+                <Link href={`/procurement/tenders/${tenderId}/document-controls`}>
+                  <FileKey2 className="mr-2 h-4 w-4" />
+                  Open document register
+                </Link>
+              </Button>
             </CardContent>
           </Card>
           <Card>
@@ -203,7 +239,8 @@ export default function ProcurementTenderControlsPage() {
 
       {readiness.canDecide && <ActionCard title="Authority and PPA decision"><Field label="Authority approval reference" value={authorityReference} onChange={setAuthorityReference} /><Field label={`PPA/central reference${control.ppaApprovalRequired ? ' (required)' : ''}`} value={ppaReference} onChange={setPpaReference} /><Label>Comments</Label><Textarea value={approvalComments} onChange={(event) => setApprovalComments(event.target.value)} /><div className="flex gap-2"><Button onClick={() => void run('approve', () => service.decideApproval(tenderId, { action: 'approve', authorityApprovalReference: authorityReference, ppaApprovalReference: ppaReference || undefined, comments: approvalComments, rowVersion: control.rowVersion }), 'Approval step completed')}>Approve</Button><Button variant="destructive" onClick={() => void run('reject', () => service.decideApproval(tenderId, { action: 'reject', authorityApprovalReference: authorityReference, ppaApprovalReference: ppaReference || undefined, comments: approvalComments, rowVersion: control.rowVersion }), 'Rejection recorded')}>Reject</Button></div></ActionCard>}
 
-      {readiness.canAward && <ActionCard title="Record approved award"><Field label="Award reference" value={awardReference} onChange={setAwardReference} /><Field label="Award evidence" value={awardEvidence} onChange={setAwardEvidence} /><Button onClick={() => void run('award', () => service.award(tenderId, { bidId: control.recommendedBidId, awardReference, evidenceReference: awardEvidence, rowVersion: control.rowVersion }), 'Award recorded')}>Record award</Button></ActionCard>}
+      {readiness.canAward && !awardGateAllows && <ActionCard title="Award-readiness gate"><p className="text-sm text-muted-foreground">The source is locally at the award stage, but a current server-derived Ready decision with the exact recommended bid and allowed award action is still required.</p><Button asChild variant="outline"><Link href={`/procurement/tenders/${tenderId}/award-readiness`}>Review blocked reasons and re-evaluate</Link></Button></ActionCard>}
+      {readiness.canAward && awardGateAllows && <ActionCard title="Record approved award"><Field label="Award reference" value={awardReference} onChange={setAwardReference} /><Field label="Award evidence" value={awardEvidence} onChange={setAwardEvidence} /><Button onClick={() => void run('award', () => service.award(tenderId, { bidId: control.recommendedBidId, awardReference, evidenceReference: awardEvidence, rowVersion: control.rowVersion }), 'Award recorded')}>Record award</Button></ActionCard>}
       {readiness.canContract && <ActionCard title="Record executed contract"><Field label="Contract reference" value={contractReference} onChange={setContractReference} /><Field label="Contract evidence" value={contractEvidence} onChange={setContractEvidence} /><Button onClick={() => void run('contract', () => service.contract(tenderId, { contractReference, evidenceReference: contractEvidence, rowVersion: control.rowVersion }), 'Contract recorded')}>Record contract</Button></ActionCard>}
       {readiness.canAccept && <ActionCard title="Record successful bidder acceptance"><Field label="Acceptance reference" value={acceptanceReference} onChange={setAcceptanceReference} /><Field label="Acceptance evidence" value={acceptanceEvidence} onChange={setAcceptanceEvidence} /><Button onClick={() => void run('acceptance', () => service.acceptance(tenderId, { acceptanceReference, evidenceReference: acceptanceEvidence, rowVersion: control.rowVersion }), 'Bidder acceptance recorded')}>Complete statutory record</Button></ActionCard>}
 

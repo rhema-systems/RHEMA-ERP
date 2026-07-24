@@ -95,6 +95,56 @@ public sealed class TenderControlsControllerTests
         Assert.Contains("Employee", technical);
         Assert.DoesNotContain("Employee", decision);
         Assert.Contains("Manager", decision);
+
+        var awardAuthorization = type.GetMethod(nameof(TenderControlsController.RecordAward))!
+            .GetCustomAttribute<AuthorizeAttribute>()!;
+        Assert.Null(awardAuthorization.Roles);
+        Assert.Null(type.GetMethod(nameof(TenderControlsController.RecordAward))!
+            .GetCustomAttribute<AllowAnonymousAttribute>());
+    }
+
+    [Theory]
+    [InlineData("cross-tenant", 404, "AWARD_READINESS_SOURCE_NOT_FOUND")]
+    [InlineData("evaluator-or-external", 403, "AWARD_READINESS_ACCESS_FORBIDDEN")]
+    [InlineData("blocked", 422, "AWARD_READINESS_BLOCKED")]
+    public async Task AwardDirectRouteMapsReadinessHardStopsWithoutRolePreemption(
+        string failure,
+        int expectedStatus,
+        string expectedCode)
+    {
+        var fixture = new Fixture();
+        var tenderId = Guid.NewGuid();
+        var request = new RecordProcurementTenderAwardRequest();
+        fixture.Service.Setup(service => service.RecordAwardAsync(
+                tenderId,
+                request,
+                "corr-0204",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure switch
+            {
+                "cross-tenant" => new ProcurementAwardReadinessNotFoundException(
+                    "AWARD_READINESS_SOURCE_NOT_FOUND",
+                    "The tender was not found in the current tenant."),
+                "evaluator-or-external" => new ProcurementAwardReadinessAuthorizationException(
+                    "An evaluator cannot approve the same award."),
+                _ => new ProcurementAwardReadinessBlockedException(
+                    "AWARD_READINESS_BLOCKED",
+                    "Award readiness controls are not satisfied.",
+                    new ProcurementAwardReadinessDto { SourceId = tenderId })
+            });
+
+        var result = await fixture.Controller.RecordAward(
+            tenderId, request, CancellationToken.None);
+
+        var objectResult = Assert.IsAssignableFrom<ObjectResult>(result);
+        Assert.Equal(expectedStatus, objectResult.StatusCode);
+        Assert.Equal(expectedStatus,
+            objectResult.Value!.GetType().GetProperty("status")!
+                .GetValue(objectResult.Value));
+        Assert.Equal(expectedCode,
+            objectResult.Value.GetType().GetProperty("code")!
+                .GetValue(objectResult.Value));
+        fixture.Service.VerifyAll();
     }
 
     private sealed class Fixture

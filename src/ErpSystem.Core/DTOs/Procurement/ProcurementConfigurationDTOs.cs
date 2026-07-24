@@ -330,7 +330,7 @@ public sealed class ProcurementSignatureDecisionValueDto : EffectiveDatedDecisio
 public sealed class ProcurementGhanepsDecisionValueDto : EffectiveDatedDecisionValueDto
 {
     [Required, StringLength(100)] public string ProfileCode { get; set; } = string.Empty;
-    [MinLength(1)] public List<string> FileTemplateMappings { get; set; } = new();
+    [Required, MinLength(1)] public List<string> FileTemplateMappings { get; set; } = new();
     [Required, StringLength(100)] public string Frequency { get; set; } = string.Empty;
     [Required, StringLength(200)] public string Owner { get; set; } = string.Empty;
     [Required, StringLength(1000)] public string AcknowledgementRule { get; set; } = string.Empty;

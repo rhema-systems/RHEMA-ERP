@@ -303,6 +303,10 @@ app.UseRouting();
 // CORS must be after UseRouting and before UseAuthentication
 app.UseCors("ErpSystemCorsPolicy");
 
+// Keep framework-generated authentication and method failures structured for
+// the source-scoped GHANEPS exchange API without changing other API contracts.
+app.UseMiddleware<ProcurementGhanepsProblemDetailsMiddleware>();
+
 app.UseAuthentication();
 app.UseMiddleware<JwtBlacklistMiddleware>();
 

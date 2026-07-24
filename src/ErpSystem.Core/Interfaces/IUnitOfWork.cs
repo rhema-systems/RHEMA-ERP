@@ -39,6 +39,12 @@ public interface IUnitOfWork : IDisposable
     Task RollbackAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Detach all tracked entities after a rejected or rolled-back operation so a later
+    /// audit write cannot accidentally flush pending business changes.
+    /// </summary>
+    void ClearTrackedChanges();
+
+    /// <summary>
     /// Get repository for specific entity type
     /// </summary>
     IGenericRepository<T> Repository<T>() where T : BaseEntity;

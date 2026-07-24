@@ -126,7 +126,7 @@ public class RfqsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/award")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize]
     public async Task<ActionResult<CreatePurchaseOrdersFromRfqResponseDto>> AwardRfqAndCreatePurchaseOrders(Guid id, [FromBody] CreatePurchaseOrdersFromRfqDto dto)
     {
         try
@@ -149,6 +149,26 @@ public class RfqsController : ControllerBase
         catch (ProcurementRfqControlValidationException ex)
         {
             return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
+        }
+        catch (ProcurementAwardReadinessNotFoundException ex)
+        {
+            return NotFound(AwardReadinessProblem(404, ex.Code, ex.Message));
+        }
+        catch (ProcurementAwardReadinessAuthorizationException ex)
+        {
+            return StatusCode(403, AwardReadinessProblem(403, "AWARD_READINESS_ACCESS_FORBIDDEN", ex.Message));
+        }
+        catch (ProcurementAwardReadinessConflictException ex)
+        {
+            return Conflict(AwardReadinessProblem(409, ex.Code, ex.Message));
+        }
+        catch (ProcurementAwardReadinessBlockedException ex)
+        {
+            return UnprocessableEntity(AwardReadinessProblem(422, ex.Code, ex.Message, ex.Decision));
+        }
+        catch (ProcurementAwardReadinessValidationException ex)
+        {
+            return UnprocessableEntity(AwardReadinessProblem(422, ex.Code, ex.Message));
         }
         catch (InvalidOperationException ex)
         {
@@ -204,6 +224,24 @@ public class RfqsController : ControllerBase
             return StatusCode(500, "An error occurred while sending the RFQ");
         }
     }
+
+    private object AwardReadinessProblem(
+        int status,
+        string code,
+        string message,
+        object? decision = null) => new
+    {
+        status,
+        title = status == 422 ? "Award is not ready" : "Award-readiness check failed",
+        detail = message,
+        instance = Request.Path.Value,
+        code,
+        correlationId = Request.Headers.TryGetValue("X-Correlation-ID", out var supplied) &&
+                        !string.IsNullOrWhiteSpace(supplied)
+            ? supplied.ToString()
+            : HttpContext.TraceIdentifier,
+        decision
+    };
 
     [HttpGet("{id:guid}/controls")]
     [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT,TDC_EVALUATOR,TDC_OBSERVER,TDC_INTERNAL_AUDIT")]

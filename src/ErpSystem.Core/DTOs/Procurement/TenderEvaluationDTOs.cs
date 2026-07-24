@@ -125,6 +125,15 @@ public class SubmitEvaluationDto
 {
     [Required]
     public bool ConfirmSubmission { get; set; }
+
+    [Required, StringLength(500)]
+    public string SignatureReference { get; set; } = string.Empty;
+
+    [Required, StringLength(500)]
+    public string EvidenceReference { get; set; } = string.Empty;
+
+    [Required, StringLength(100)]
+    public string IdempotencyKey { get; set; } = string.Empty;
 }
 
 /// <summary>

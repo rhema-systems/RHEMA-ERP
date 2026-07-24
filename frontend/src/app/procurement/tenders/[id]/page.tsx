@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ArrowLeft, Edit, FileText, Package, Upload, DollarSign, Users, Award, MessageSquare, Clock, CheckCircle2, XCircle, Send, Download, AlertCircle, ClipboardList } from 'lucide-react';
+import { ArrowLeft, Edit, FileText, Package, Upload, DollarSign, Users, Award, MessageSquare, Clock, CheckCircle2, XCircle, Send, Download, AlertCircle, ClipboardList, MailCheck, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderService from '@/services/tenderService';
 import { type TenderDetailDto } from '@/services/tenderService';
@@ -27,11 +27,14 @@ import { Calculator, Shield } from 'lucide-react';
 export default function TenderDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(
+    searchParams.get('tab') === 'verification' ? 'verification' : 'overview'
+  );
   const [showPublishDialog, setShowPublishDialog] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishData, setPublishData] = useState({
@@ -288,6 +291,64 @@ export default function TenderDetailPage() {
             <Button onClick={handlePublishClick}>
               <Send className="h-4 w-4 mr-2" />
               Publish Tender
+            </Button>
+          )}
+          {['Approved', 'Published', 'Awarded'].includes(tender.status) && tender.sourcingCaseId && tender.tenderType !== 'RFQ' && (
+            <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${tenderId}/document-controls`)}>
+              <FileText className="h-4 w-4 mr-2" />
+              Document Register
+            </Button>
+          )}
+          {tender.tenderType !== 'RFQ' && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(
+                  `/procurement/tenders/${tenderId}/committee-controls`
+                )
+              }
+            >
+              <Users className="h-4 w-4 mr-2" />
+              Committee Controls
+            </Button>
+          )}
+          {tender.tenderType !== 'RFQ' && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(
+                  `/procurement/tenders/${tenderId}/award-readiness`
+                )
+              }
+            >
+              <Award className="h-4 w-4 mr-2" />
+              Award Readiness
+            </Button>
+          )}
+          {tender.tenderType !== 'RFQ' && tender.status === 'Awarded' && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(
+                  `/procurement/tenders/${tenderId}/bidder-communications`
+                )
+              }
+            >
+              <MailCheck className="h-4 w-4 mr-2" />
+              Bidder Communications
+            </Button>
+          )}
+          {tender.tenderType !== 'RFQ' && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(
+                  `/procurement/tenders/${tenderId}/ghaneps-exchange`
+                )
+              }
+            >
+              <Share2 className="h-4 w-4 mr-2" />
+              GHANEPS Exchange
             </Button>
           )}
           {['Approved', 'Published', 'Awarded'].includes(tender.status) && tender.sourcingCaseId && tender.tenderType !== 'RFQ' && (
@@ -1102,6 +1163,28 @@ export default function TenderDetailPage() {
 
         {/* Evaluators Tab */}
         <TabsContent value="evaluators" className="space-y-4">
+          <Card>
+            <CardContent className="flex flex-col justify-between gap-3 pt-6 sm:flex-row sm:items-center">
+              <div>
+                <p className="font-medium">Source-specific committee controls</p>
+                <p className="text-sm text-muted-foreground">
+                  Appointment acceptance, COI, signed quorum, scorer eligibility,
+                  immutable score locks, and controlled recall.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  router.push(
+                    `/procurement/tenders/${tenderId}/committee-controls`
+                  )
+                }
+              >
+                <Users className="mr-2 h-4 w-4" />
+                Open committee controls
+              </Button>
+            </CardContent>
+          </Card>
           <TenderEvaluators tenderId={tenderId} tenderStatus={tender.status} onEvaluatorsChanged={loadTenderDetails} />
         </TabsContent>
 
@@ -1272,7 +1355,18 @@ export default function TenderDetailPage() {
             {tender?.tenderType !== 'RFQ' && (
               <div className="rounded-lg border bg-white p-4 space-y-3">
                 <h4 className="font-semibold text-sm">NCT / ICT statutory advertisement</h4>
-                <p className="text-xs text-muted-foreground">Required when the immutable sourcing case selected NCT or ICT. The server validates the exact method and authority lineage.</p>
+                <p className="text-xs text-muted-foreground">
+                  Required when the immutable sourcing case selected NCT or ICT. Bind the approved version, fee terms and deadlines in the{' '}
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => router.push(`/procurement/tenders/${tenderId}/document-controls`)}
+                  >
+                    controlled document register
+                  </Button>
+                  {' '}before publication; the server validates the exact method, version and authority lineage.
+                </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2"><Label>Advertisement reference</Label><Input value={publishData.advertisementReference} onChange={(e) => setPublishData({ ...publishData, advertisementReference: e.target.value })} /></div>
                   <div className="space-y-2"><Label>Publication channel</Label><Input value={publishData.publicationChannel} onChange={(e) => setPublishData({ ...publishData, publicationChannel: e.target.value })} /></div>

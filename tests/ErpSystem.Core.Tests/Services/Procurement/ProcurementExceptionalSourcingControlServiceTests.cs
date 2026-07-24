@@ -139,6 +139,18 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
         fixture.ControlEvents.Verify(service => service.RecordAsync(
             It.Is<ProcurementControlEventWriteRequest>(request => request.Action == "ExceptionalPostAwardFiled"),
             It.IsAny<CancellationToken>()), Times.Once);
+        fixture.AwardReadiness.Verify(service => service.EnsureAwardReadyAsync(
+            ProcurementAwardReadinessSourceType.ExceptionalSourcing,
+            fixture.Tender.Id,
+            It.Is<EvaluateProcurementAwardReadinessRequest>(request =>
+                request.IdempotencyKey.StartsWith("award-gate:2:") &&
+                request.ExpectedRecommendedSubjectIds.SequenceEqual(
+                    new[] { fixture.Bids[0].Id }) &&
+                request.ExpectedBusinessPartnerIds.SequenceEqual(
+                    new[] { fixture.Bids[0].BusinessPartnerId }) &&
+                request.ExpectedSourceIntegrityHash == null),
+            "award",
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -305,9 +317,36 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
                 { Allowed = !request.ProhibitedActorUserIds.Contains(CurrentUserId), Message = "Actors must be separated." });
             Notifications.Setup(service => service.SendTenderPublishedNotificationAsync(Tender.Id, It.IsAny<List<Guid>>(), It.IsAny<List<string>?>()))
                 .Returns(Task.CompletedTask);
+            TenderDocuments.Setup(service => service.EnsurePublicationReadyAsync(
+                    It.IsAny<ProcurementTenderDocumentSourceType>(), It.IsAny<Guid>(), It.IsAny<DateTime>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementTenderDocumentEffectiveStateDto { Ready = true });
+            TenderDocuments.Setup(service => service.EnsureDispatchReadyAsync(
+                    It.IsAny<ProcurementTenderDocumentSourceType>(), It.IsAny<Guid>(),
+                    It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<IReadOnlyCollection<string>>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementTenderDocumentEffectiveStateDto { Ready = true });
+            AwardReadiness.Setup(service => service.EnsureAwardReadyAsync(
+                    It.IsAny<ProcurementAwardReadinessSourceType>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<EvaluateProcurementAwardReadinessRequest>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((ProcurementAwardReadinessSourceType sourceType, Guid sourceId,
+                    EvaluateProcurementAwardReadinessRequest _, string correlationId, CancellationToken _) =>
+                    new ProcurementAwardReadinessDto
+                    {
+                        Id = Guid.NewGuid(),
+                        SourceType = sourceType,
+                        SourceId = sourceId,
+                        CorrelationId = correlationId,
+                        Status = ProcurementAwardReadinessDecisionStatus.Ready,
+                        IsCurrent = true
+                    });
             Service = new ProcurementExceptionalSourcingControlService(_unitOfWork, _currentUser.Object,
                 AccessControl.Object, SodGuard.Object, ControlEvents.Object, SourcingCases.Object,
-                Workflow.Object, SupplierValidation.Object, Notifications.Object);
+                Workflow.Object, SupplierValidation.Object, Notifications.Object, TenderDocuments.Object,
+                AwardReadiness.Object);
         }
 
         public Guid CurrentTenantId { get; set; }
@@ -328,11 +367,13 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
         public ProcurementExceptionalSourcingControlService Service { get; }
         public Mock<IProcurementAccessControlService> AccessControl { get; } = new();
         public Mock<IProcurementSodGuardService> SodGuard { get; } = new();
+        public Mock<IProcurementTenderDocumentControlService> TenderDocuments { get; } = new();
         public Mock<IProcurementControlEventService> ControlEvents { get; } = new();
         public Mock<IProcurementSourcingCaseService> SourcingCases { get; } = new();
         public Mock<IWorkflowService> Workflow { get; } = new();
         public Mock<ISupplierValidationService> SupplierValidation { get; } = new();
         public Mock<ITenderNotificationService> Notifications { get; } = new();
+        public Mock<IProcurementAwardReadinessService> AwardReadiness { get; } = new();
 
         public PrepareProcurementExceptionalSourcingRequest PreparationRequest() => new()
         {

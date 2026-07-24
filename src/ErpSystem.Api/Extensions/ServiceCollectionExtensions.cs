@@ -824,6 +824,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSourcingCaseService, ErpSystem.Core.Services.Procurement.ProcurementSourcingCaseService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRfqControlService, ErpSystem.Core.Services.Procurement.ProcurementRfqControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementTenderControlService, ErpSystem.Core.Services.Procurement.ProcurementTenderControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementTenderDocumentControlService, ErpSystem.Core.Services.Procurement.ProcurementTenderDocumentControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementEvaluationCommitteeControlService, ErpSystem.Core.Services.Procurement.ProcurementEvaluationCommitteeControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAwardReadinessService, ErpSystem.Core.Services.Procurement.ProcurementAwardReadinessService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementBidderCommunicationService, ErpSystem.Core.Services.Procurement.ProcurementBidderCommunicationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementGhanepsExchangeService, ErpSystem.Core.Services.Procurement.ProcurementGhanepsExchangeService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementExceptionalSourcingControlService, ErpSystem.Core.Services.Procurement.ProcurementExceptionalSourcingControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPrequalificationService, ErpSystem.Core.Services.Procurement.ProcurementPrequalificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementMasterDataChangeService, ErpSystem.Core.Services.Procurement.ProcurementMasterDataChangeService>();
