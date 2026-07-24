@@ -86,7 +86,9 @@ BEGIN
 
     IF @legacyCustomerFk IS NOT NULL
     BEGIN
-        EXEC(N'ALTER TABLE [dbo].[CustomerPayment] DROP CONSTRAINT ' + QUOTENAME(@legacyCustomerFk));
+        DECLARE @dropLegacyCustomerFkSql nvarchar(max) =
+            N'ALTER TABLE [dbo].[CustomerPayment] DROP CONSTRAINT ' + QUOTENAME(@legacyCustomerFk);
+        EXEC sp_executesql @dropLegacyCustomerFkSql;
     END;
 
     IF NOT EXISTS (
