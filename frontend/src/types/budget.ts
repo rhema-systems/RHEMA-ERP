@@ -45,6 +45,12 @@ export interface BudgetReturn {
     approverUserName?: string;
 }
 
+export interface BudgetAssignee {
+    id: string;
+    displayName: string;
+    email: string;
+}
+
 export interface BudgetEntry {
     id: string;
     budgetReturnId: string;
