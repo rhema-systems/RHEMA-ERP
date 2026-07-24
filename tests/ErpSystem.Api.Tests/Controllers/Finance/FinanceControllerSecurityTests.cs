@@ -154,6 +154,8 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(FixedAssetsController), "ExportToExcel", FinancePermissions.ExportFinanceReports)]
     [InlineData(typeof(FinanceReportExportsController), "Export", FinancePermissions.ExportFinanceReports)]
     [InlineData(typeof(FinanceReportExportsController), "Print", FinancePermissions.ExportFinanceReports)]
+    [InlineData(typeof(WithholdingTaxCertificatesController), "GetApCertificates", FinancePermissions.RunFinanceReports)]
+    [InlineData(typeof(WithholdingTaxCertificatesController), "GenerateApCertificate", FinancePermissions.ManageTaxConfiguration)]
     [Trait("Batch", "FinanceGoLive-2")]
     [Trait("Category", "FinanceSecurity")]
     public void CriticalFinanceActions_ShouldMapToExpectedPermissions(Type controllerType, string actionName, string expectedPermission)

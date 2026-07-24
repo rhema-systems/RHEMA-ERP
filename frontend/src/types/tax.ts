@@ -158,6 +158,55 @@ export interface WHTSummaryEntry {
     netAmount: number;
 }
 
+export interface WhtCertificate {
+    vendorPaymentId: string;
+    paymentNumber: string;
+    paymentStatus: string;
+    supplierId: string;
+    supplierName: string;
+    supplierTin?: string | null;
+    paymentDate: string;
+    currencyCode: string;
+    taxId?: string | null;
+    taxCode?: string | null;
+    taxName?: string | null;
+    taxRate: number;
+    taxableBase: number;
+    withholdingAmount: number;
+    netPaidAmount: number;
+    taxAccountNumber?: string | null;
+    taxAccountName?: string | null;
+    certificateNumber?: string | null;
+    certificateDate?: string | null;
+    certificateStatus: 'Missing' | 'Generated' | 'NumberOnly' | string;
+    journalEntryId?: string | null;
+}
+
+export interface WhtCertificateQuery {
+    page?: number;
+    pageSize?: number;
+    searchTerm?: string;
+    supplierId?: string;
+    fromDate?: string;
+    toDate?: string;
+    status?: string;
+}
+
+export interface GenerateWhtCertificateDto {
+    certificateNumber?: string;
+    certificateDate?: string;
+}
+
+export interface FinancePagedResult<T> {
+    items: T[];
+    totalCount: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    hasPrevious: boolean;
+    hasNext: boolean;
+}
+
 export interface VATReconciliation {
     period: string;
     outputVAT: number;

@@ -72,7 +72,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// </summary>
         /// <remarks>
         /// **Common Use Cases:**
-        /// - Initial system setup to populate standard tax rules (e.g., Ghana VAT, NHIL, GETFund, COVID levy)
+        /// - Initial system setup to populate standard tax rules (e.g., Ghana VAT, NHIL, GETFund, WHT)
         /// - Resetting tax rules to factory defaults after configuration changes
         ///
         /// **Integration Pattern:**

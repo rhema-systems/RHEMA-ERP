@@ -99,22 +99,24 @@ export default function TaxReportsPage() {
                         </Card>
                     </Link>
 
-                    <Card className="opacity-60">
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                                <FileText className="h-5 w-5 text-gray-600" />
-                                WHT Certificates
-                            </CardTitle>
-                            <CardDescription>
-                                Generate WHT certificates
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <p className="text-sm text-muted-foreground">
-                                Generate and print withholding tax certificates for suppliers (Coming Soon)
-                            </p>
-                        </CardContent>
-                    </Card>
+                    <Link href="/finance/tax/reports/wht-certificates">
+                        <Card className="hover:bg-accent cursor-pointer transition-colors h-full">
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    <FileText className="h-5 w-5 text-emerald-600" />
+                                    WHT Certificates
+                                </CardTitle>
+                                <CardDescription>
+                                    Generate supplier certificates
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-sm text-muted-foreground">
+                                    Generate and print AP withholding tax certificates from posted supplier payments
+                                </p>
+                            </CardContent>
+                        </Card>
+                    </Link>
                 </div>
             </div>
 
@@ -175,7 +177,6 @@ export default function TaxReportsPage() {
                                 <li>• VAT: 15% (Simple on base amount)</li>
                                 <li>• NHIL: 2.5% (Compound on base)</li>
                                 <li>• GETFL: 2.5% (Compound on base + NHIL)</li>
-                                <li>• COVID-19 Levy: 1% (Inactive)</li>
                             </ul>
                         </div>
                         <div>

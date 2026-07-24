@@ -147,6 +147,7 @@ public static class FinancePermissionPolicyMap
             "TaxConfiguration" => TaxConfigurationPolicy(action, methods),
             "TaxReports" => One(FinancePermissions.RunFinanceReports),
             "TaxRule" => TaxConfigurationPolicy(action, methods),
+            "WithholdingTaxCertificates" => WithholdingTaxCertificatePolicy(action),
             "UnitAccount" => UnitAccountPolicy(action, methods),
             "UnitBudget" => UnitBudgetPolicy(action, methods),
             "UnitJournalEntry" => UnitJournalEntryPolicy(action),
@@ -430,6 +431,11 @@ public static class FinancePermissionPolicyMap
         => IsRead(action, methods) || string.Equals(action, "CalculateTaxes", StringComparison.OrdinalIgnoreCase)
             ? One(FinancePermissions.ViewFinance)
             : One(FinancePermissions.ManageTaxConfiguration);
+
+    private static IReadOnlyList<string> WithholdingTaxCertificatePolicy(string action)
+        => string.Equals(action, "GenerateApCertificate", StringComparison.OrdinalIgnoreCase)
+            ? One(FinancePermissions.ManageTaxConfiguration)
+            : One(FinancePermissions.RunFinanceReports);
 
     private static IReadOnlyList<string> UnitAccountPolicy(string action, IReadOnlyCollection<string> methods)
     {

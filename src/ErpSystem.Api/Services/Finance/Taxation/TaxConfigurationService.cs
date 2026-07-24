@@ -862,7 +862,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 TenantId = TenantId,
                 Code = "GH-SALES-STD",
                 Name = "Ghana Standard Sales Tax",
-                Description = "VAT 15%, NHIL 2.5%, and GETFund 2.5% on the same taxable base. COVID-19 Health Recovery Levy is inactive.",
+                Description = "VAT 15%, NHIL 2.5%, and GETFund 2.5% on the same taxable base.",
                 Applicability = TaxApplicability.Sales,
                 IsDefault = true,
                 IsActive = true,
@@ -876,7 +876,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 TenantId = TenantId,
                 Code = "GH-PURCH-STD",
                 Name = "Ghana Standard Purchase Tax",
-                Description = "VAT 15%, NHIL 2.5%, and GETFund 2.5% on the same taxable base. COVID-19 Health Recovery Levy is inactive.",
+                Description = "VAT 15%, NHIL 2.5%, and GETFund 2.5% on the same taxable base.",
                 Applicability = TaxApplicability.Purchases,
                 IsDefault = true,
                 IsActive = true,
@@ -1019,7 +1019,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
 
             foreach (var group in candidateGroups)
             {
-                var activeDescription = "VAT 15%, NHIL 2.5%, and GETFund 2.5% on the same taxable base. COVID-19 Health Recovery Levy is inactive.";
+                var activeDescription = "VAT 15%, NHIL 2.5%, and GETFund 2.5% on the same taxable base.";
                 if (string.Equals(group.Code, "VAT-STD-SCHEME", StringComparison.OrdinalIgnoreCase))
                 {
                     if (!string.Equals(group.Description, activeDescription, StringComparison.Ordinal))

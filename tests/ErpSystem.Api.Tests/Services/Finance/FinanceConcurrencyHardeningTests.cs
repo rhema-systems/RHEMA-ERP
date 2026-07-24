@@ -558,6 +558,41 @@ public sealed class FinanceConcurrencyHardeningTests
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
+    public void WhtCertificateGeneration_ShouldSerializeNumberAssignment()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "Taxation",
+            "WithholdingTaxCertificateService.cs"));
+        var generateMethod = ExtractMember(
+            source,
+            "public async Task<WhtCertificateDto> GenerateApCertificateAsync",
+            "private async Task<WhtCertificateDto> GenerateApCertificateCoreAsync");
+        var coreMethod = ExtractMember(
+            source,
+            "private async Task<WhtCertificateDto> GenerateApCertificateCoreAsync",
+            "public async Task<string> GetApCertificateHtmlAsync");
+
+        generateMethod.Should().Contain("CreateExecutionStrategy",
+            "SQL retry behavior must wrap the complete certificate assignment transaction");
+        generateMethod.Should().Contain("IsolationLevel.Serializable",
+            "concurrent generated or manual certificate numbers must be serialized");
+        generateMethod.Should().Contain("GenerateApCertificateCoreAsync",
+            "ambient and service-owned transactions must share one assignment implementation");
+        coreMethod.Should().Contain("EnsureCertificateNumberIsUniqueAsync",
+            "manual certificate numbers must remain tenant-unique");
+        coreMethod.Should().Contain("GenerateCertificateNumberAsync",
+            "automatic numbering must be calculated inside the serialized transaction");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
     public void YearEndClose_ShouldPostThroughFinancePostingEngine()
     {
         var root = FindRepositoryRoot();

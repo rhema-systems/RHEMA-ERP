@@ -282,6 +282,7 @@ const navigationItems: NavItem[] = [
               { title: 'Output VAT Register', href: '/finance/tax/reports/output-vat', icon: TrendingUp },
               { title: 'VAT Reconciliation', href: '/finance/tax/reports/vat-reconciliation', icon: Scale },
               { title: 'WHT Summary', href: '/finance/tax/reports/withholding-tax', icon: FileCheck },
+              { title: 'WHT Certificates', href: '/finance/tax/reports/wht-certificates', icon: FileText },
             ],
           },
         ],

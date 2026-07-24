@@ -110,7 +110,8 @@ public sealed class GhanaTaxReportingExportFoundationTests
         var whtReceivable = await service.GetWhtReceivableReportAsync(request);
 
         vatWithholding.Lines.Should().ContainSingle(l => l.WithholdingType == "VAT Withholding" && l.WithholdingAmount == 7m);
-        whtPayable.Lines.Should().ContainSingle(l => l.WithholdingType == "AP WHT Payable" && l.CertificateStatus == "Received");
+        // AP certificates are generated/issued by the payer; AR certificates are received from customers.
+        whtPayable.Lines.Should().ContainSingle(l => l.WithholdingType == "AP WHT Payable" && l.CertificateStatus == "Generated");
         whtReceivable.Lines.Should().ContainSingle(l => l.WithholdingType == "AR WHT Receivable" && l.CertificateNumber == "CERT-AR-001");
     }
 

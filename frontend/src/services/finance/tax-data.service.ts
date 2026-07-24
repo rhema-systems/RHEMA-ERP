@@ -20,7 +20,11 @@ import type {
     CreateTaxRuleDto,
     UpdateTaxRuleDto,
     TransactionWithTax,
-    WHTSummaryEntry
+    WHTSummaryEntry,
+    WhtCertificate,
+    WhtCertificateQuery,
+    GenerateWhtCertificateDto,
+    FinancePagedResult
 } from '@/types/tax';
 import { apiService } from '@/services/api.service';
 
@@ -324,6 +328,33 @@ class TaxDataService {
             whtAmount: supplier.totalWithholdingTax,
             netAmount: supplier.totalNetPayment,
         }));
+    }
+
+    async getWhtCertificates(query: WhtCertificateQuery = {}): Promise<FinancePagedResult<WhtCertificate>> {
+        // Keep the route literal visible to the Finance route-contract test and let the
+        // shared API client encode optional query values consistently.
+        return apiService.get<FinancePagedResult<WhtCertificate>>('/finance/tax/wht-certificates', {
+            page: query.page,
+            pageSize: query.pageSize,
+            searchTerm: query.searchTerm,
+            supplierId: query.supplierId,
+            fromDate: query.fromDate,
+            toDate: query.toDate,
+            status: query.status && query.status !== 'All' ? query.status : undefined,
+        });
+    }
+
+    async generateWhtCertificate(
+        vendorPaymentId: string,
+        request: GenerateWhtCertificateDto = {}
+    ): Promise<WhtCertificate> {
+        return apiService.post<WhtCertificate>(
+            `/finance/tax/wht-certificates/${vendorPaymentId}/generate`,
+            request);
+    }
+
+    async getWhtCertificatePrintHtml(vendorPaymentId: string): Promise<string> {
+        return apiService.get<string>(`/finance/tax/wht-certificates/${vendorPaymentId}/print`);
     }
 
     // ===== TAX RULES =====

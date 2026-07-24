@@ -619,7 +619,7 @@ public sealed class TaxReportingService : ITaxReportingService
             }
 
             var postingEvent = TryGetPostingEvent(postingEvents, VendorPaymentDocumentType, payment.Id);
-            var certificateStatus = CertificateStatus(payment.WithholdingCertificateNumber, payment.WithholdingCertificateDate);
+            var certificateStatus = CertificateStatus(payment.WithholdingCertificateNumber, payment.WithholdingCertificateDate, datedStatus: "Generated");
             if (!CertificateFilterMatches(request, certificateStatus))
             {
                 continue;
@@ -1135,14 +1135,14 @@ public sealed class TaxReportingService : ITaxReportingService
         return false;
     }
 
-    private static string CertificateStatus(string? certificateNumber, DateTime? certificateDate)
+    private static string CertificateStatus(string? certificateNumber, DateTime? certificateDate, string datedStatus = "Received")
     {
         if (string.IsNullOrWhiteSpace(certificateNumber))
         {
             return "Missing";
         }
 
-        return certificateDate.HasValue ? "Received" : "NumberOnly";
+        return certificateDate.HasValue ? datedStatus : "NumberOnly";
     }
 
     private static TaxReportDiagnosticDto Diagnostic(

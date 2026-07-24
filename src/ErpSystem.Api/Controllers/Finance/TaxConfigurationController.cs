@@ -492,7 +492,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// </summary>
         /// <remarks>
         /// **Common Use Cases:**
-        /// - Setting up a new tax combination (e.g., Ghana standard sales taxes: NHIL + GETFL + COVID + VAT)
+        /// - Setting up a new tax combination (e.g., Ghana standard sales taxes: NHIL + GETFL + VAT)
         /// - Creating separate tax groups for different transaction types (Sales vs Purchases)
         /// - Defining compound tax calculation sequences with specific ordering
         ///
@@ -775,7 +775,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - All component IDs in the request must belong to the specified tax group
         /// - The list must contain exactly the same set of component IDs as the group currently has
         /// - Reordering affects compound tax calculations: taxes with Cumulative or Specific compound basis depend on the order
-        /// - Example order for Ghana: NHIL (1) -> GETFL (2) -> COVID (3) -> VAT (4, Cumulative on prior three)
+        /// - Example order for Ghana: NHIL (1) -> GETFL (2) -> VAT (3)
         /// - Changes take effect for new transactions only
         ///
         /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
@@ -959,7 +959,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// **Common Use Cases:**
         /// - Initializing the system with Ghana-specific tax rates during first-time setup
         /// - Resetting tax configurations to Ghana defaults after testing
-        /// - Bootstrapping a new tenant with standard Ghana taxes (VAT, NHIL, GETFL, COVID Levy, WHT)
+        /// - Bootstrapping a new tenant with standard Ghana taxes (VAT, NHIL, GETFL, WHT)
         ///
         /// **Integration Pattern:**
         /// - This is a one-time setup operation, typically called during system provisioning
@@ -967,7 +967,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - Seeded taxes include standard rates, levies, and withholding taxes as per Ghana Revenue Authority regulations
         ///
         /// **Business Rules:**
-        /// - Creates standard Ghana taxes: VAT (15%), NHIL (2.5%), GETFL (1%), COVID Levy (1%)
+        /// - Creates standard Ghana taxes: VAT (15%), NHIL (2.5%), GETFL (2.5%), and WHT
         /// - Creates withholding tax configurations for various transaction types
         /// - Sets up default tax groups with proper calculation order and compound basis
         /// - Skips creation of taxes or groups that already exist (idempotent for existing codes)
