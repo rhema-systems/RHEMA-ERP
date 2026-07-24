@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Procurement;
 
@@ -459,6 +460,14 @@ public class PurchaseRequisitionSummaryDto
     public string? Department { get; set; }
     public decimal TotalAmount { get; set; }
     public int ItemCount { get; set; }
+    public string? SourcePlanNumber { get; set; }
+    public string? SourcePlanItemDescription { get; set; }
+    public string? BudgetCode { get; set; }
+    public ProcurementCategoryClass? ProcurementCategory { get; set; }
+    public string? ProjectCode { get; set; }
+    public PurchaseRequisitionType RequisitionType { get; set; }
+    public string? SpecificationTemplateReference { get; set; }
+    public string? ApprovedExceptionReference { get; set; }
 
     // Workflow display helpers (optional)
     public string? CurrentWorkflowStepName { get; set; }
@@ -475,6 +484,8 @@ public class PurchaseRequisitionDetailDto : PurchaseRequisitionSummaryDto
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedAt { get; set; }
     public string? RejectionReason { get; set; }
+    public PurchaseRequisitionLinkageDto Linkage { get; set; } = new();
+    public string RowVersion { get; set; } = string.Empty;
     public List<PurchaseRequisitionItemDto> Items { get; set; } = new();
 }
 
@@ -514,12 +525,310 @@ public class CreatePurchaseRequisitionDto
     public string? CostCenter { get; set; }
     public string? Justification { get; set; }
     public string? Notes { get; set; }
+    public SavePurchaseRequisitionLinkageRequest Linkage { get; set; } = new();
 
     [Required]
     public Guid RequestedById { get; set; }
 
     [Required]
     public List<CreatePurchaseRequisitionItemDto> Items { get; set; } = new();
+}
+
+public sealed class UpdatePurchaseRequisitionDto : CreatePurchaseRequisitionDto
+{
+    [Required]
+    public string RowVersion { get; set; } = string.Empty;
+}
+
+public sealed class SavePurchaseRequisitionLinkageRequest
+{
+    public Guid? SourcePlanItemId { get; set; }
+    public Guid? BudgetId { get; set; }
+    public ProcurementCategoryClass? ProcurementCategory { get; set; }
+
+    [StringLength(100)]
+    public string? CostCenter { get; set; }
+
+    public Guid? ProjectId { get; set; }
+    public PurchaseRequisitionType RequisitionType { get; set; } = PurchaseRequisitionType.StockReplenishment;
+    public Guid? SpecificationTemplateId { get; set; }
+    public Guid? ApprovedExceptionRuleId { get; set; }
+    public Guid? ExceptionWorkflowInstanceId { get; set; }
+
+    [StringLength(200)]
+    public string? ExceptionApprovalReference { get; set; }
+
+    [StringLength(500)]
+    public string? ExceptionEvidenceReference { get; set; }
+}
+
+public sealed class PurchaseRequisitionLinkageDto
+{
+    public Guid? SourcePlanId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
+    public string? SourcePlanNumber { get; set; }
+    public string? SourcePlanTitle { get; set; }
+    public string? SourcePlanItemDescription { get; set; }
+    public Guid? BudgetId { get; set; }
+    public string? BudgetCode { get; set; }
+    public decimal? BudgetAllocated { get; set; }
+    public decimal? BudgetRemaining { get; set; }
+    public ProcurementCategoryClass? ProcurementCategory { get; set; }
+    public string? CostCenter { get; set; }
+    public Guid? ProjectId { get; set; }
+    public string? ProjectCode { get; set; }
+    public string? ProjectName { get; set; }
+    public PurchaseRequisitionType RequisitionType { get; set; }
+    public Guid? SpecificationTemplateId { get; set; }
+    public string? SpecificationTemplateCode { get; set; }
+    public string? SpecificationTemplateName { get; set; }
+    public int? SpecificationTemplateVersion { get; set; }
+    public Guid? ApprovedExceptionRuleId { get; set; }
+    public string? ApprovedExceptionRuleCode { get; set; }
+    public string? ApprovedExceptionName { get; set; }
+    public Guid? ExceptionWorkflowInstanceId { get; set; }
+    public string? ExceptionApprovalReference { get; set; }
+    public string? ExceptionEvidenceReference { get; set; }
+    public Guid? ExceptionApprovedById { get; set; }
+    public string? ExceptionApprovedByName { get; set; }
+    public DateTime? ExceptionApprovedAtUtc { get; set; }
+    public int Revision { get; set; }
+    public DateTime? LastUpdatedAtUtc { get; set; }
+    public Guid? LastUpdatedById { get; set; }
+    public string? LastUpdatedByName { get; set; }
+}
+
+public sealed class PurchaseRequisitionLinkageOptionDto
+{
+    public Guid Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? Status { get; set; }
+    public Guid? ParentId { get; set; }
+    public string? ParentReference { get; set; }
+    public string? Category { get; set; }
+    public decimal? Amount { get; set; }
+    public string? Currency { get; set; }
+}
+
+public sealed class PurchaseRequisitionNamedOptionDto
+{
+    public int Value { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+}
+
+public sealed class PurchaseRequisitionLinkageOptionsDto
+{
+    public List<PurchaseRequisitionLinkageOptionDto> PlanItems { get; set; } = new();
+    public List<PurchaseRequisitionLinkageOptionDto> Budgets { get; set; } = new();
+    public List<PurchaseRequisitionLinkageOptionDto> Projects { get; set; } = new();
+    public List<PurchaseRequisitionLinkageOptionDto> SpecificationTemplates { get; set; } = new();
+    public List<PurchaseRequisitionLinkageOptionDto> ApprovedExceptionRules { get; set; } = new();
+    public List<PurchaseRequisitionLinkageOptionDto> ApprovedExceptionWorkflows { get; set; } = new();
+    public List<PurchaseRequisitionNamedOptionDto> Categories { get; set; } = new();
+    public List<PurchaseRequisitionNamedOptionDto> RequestTypes { get; set; } = new();
+    public List<string> CostCenters { get; set; } = new();
+}
+
+public sealed class PurchaseRequisitionExportDto
+{
+    public string SchemaVersion { get; set; } = "tdc.pr-linkage.v1";
+    public DateTime ExportedAtUtc { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid RequisitionId { get; set; }
+    public string RequisitionNumber { get; set; } = string.Empty;
+    public DateTime RequisitionDate { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string RequestedByName { get; set; } = string.Empty;
+    public string? Department { get; set; }
+    public decimal TotalAmount { get; set; }
+    public PurchaseRequisitionLinkageDto Linkage { get; set; } = new();
+    public List<PurchaseRequisitionItemDto> Items { get; set; } = new();
+}
+
+public sealed class PurchaseRequisitionLinkageHistoryDto
+{
+    public Guid Id { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string Result { get; set; } = string.Empty;
+    public string ActorName { get; set; } = string.Empty;
+    public string? Reason { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+    public string IntegrityHash { get; set; } = string.Empty;
+}
+
+public sealed class PurchaseRequisitionSubmissionReadinessDto
+{
+    public Guid RequisitionId { get; set; }
+    public string RequisitionNumber { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool IsCompliant { get; set; }
+    public bool CanSubmit { get; set; }
+    public string DecisionCode { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public string? Basis { get; set; }
+    public Guid? SourcePlanId { get; set; }
+    public Guid? SourcePlanItemId { get; set; }
+    public string? SourcePlanNumber { get; set; }
+    public string? SourcePlanItemDescription { get; set; }
+    public Guid? AppSubmissionId { get; set; }
+    public string? AppSubmissionNumber { get; set; }
+    public int? AppSubmissionAttemptNumber { get; set; }
+    public string? AppSubmissionStatus { get; set; }
+    public string? AppAcknowledgementReference { get; set; }
+    public DateTime? AppAcknowledgedAtUtc { get; set; }
+    public Guid? ApprovedExceptionRuleId { get; set; }
+    public string? ApprovedExceptionRuleCode { get; set; }
+    public Guid? ExceptionWorkflowInstanceId { get; set; }
+    public string? ExceptionApprovalReference { get; set; }
+    public string? ExceptionEvidenceReference { get; set; }
+    public DateTime? ExceptionApprovedAtUtc { get; set; }
+    public List<string> RequiredActions { get; set; } = new();
+}
+
+public sealed class PurchaseRequisitionSubmissionControlHistoryDto
+{
+    public Guid Id { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string Result { get; set; } = string.Empty;
+    public string ActorName { get; set; } = string.Empty;
+    public string? RuleCode { get; set; }
+    public string? Reason { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+    public string IntegrityHash { get; set; } = string.Empty;
+}
+
+public sealed class PurchaseRequisitionBudgetReadinessDto
+{
+    public Guid RequisitionId { get; set; }
+    public string RequisitionNumber { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool IsCompliant { get; set; }
+    public bool CanReserve { get; set; }
+    public string DecisionCode { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public string? Basis { get; set; }
+    public Guid? BudgetId { get; set; }
+    public string? BudgetCode { get; set; }
+    public string? BudgetStatus { get; set; }
+    public string? Currency { get; set; }
+    public decimal RequestedAmount { get; set; }
+    public decimal AllocatedAmount { get; set; }
+    public decimal UtilizedAmount { get; set; }
+    public decimal CommittedAmount { get; set; }
+    public decimal AvailableAmount { get; set; }
+    public decimal ShortfallAmount { get; set; }
+    public Guid? CommitmentId { get; set; }
+    public string? CommitmentReference { get; set; }
+    public string? CommitmentStatus { get; set; }
+    public int? ReservationSequence { get; set; }
+    public DateTime? ReservedAtUtc { get; set; }
+    public bool IsOverride { get; set; }
+    public Guid? OverrideRuleId { get; set; }
+    public string? OverrideRuleCode { get; set; }
+    public Guid? OverrideWorkflowInstanceId { get; set; }
+    public string? OverrideApprovalReference { get; set; }
+    public string? OverrideEvidenceReference { get; set; }
+    public DateTime? OverrideApprovedAtUtc { get; set; }
+    public List<string> RequiredActions { get; set; } = new();
+}
+
+public sealed class PurchaseRequisitionBudgetReleaseDto
+{
+    public Guid RequisitionId { get; set; }
+    public bool Released { get; set; }
+    public Guid? CommitmentId { get; set; }
+    public string? CommitmentReference { get; set; }
+    public decimal ReleasedAmount { get; set; }
+    public decimal AvailableAmount { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
+public sealed class PurchaseRequisitionBudgetControlHistoryDto
+{
+    public Guid Id { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string Result { get; set; } = string.Empty;
+    public string ActorName { get; set; } = string.Empty;
+    public string? RuleCode { get; set; }
+    public string? Reason { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+    public string IntegrityHash { get; set; } = string.Empty;
+}
+
+public sealed class PurchaseRequisitionAuthorityReadinessDto
+{
+    public Guid RequisitionId { get; set; }
+    public string RequisitionNumber { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool IsCompliant { get; set; }
+    public bool CanSubmit { get; set; }
+    public string DecisionCode { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public ProcurementCategoryClass? Category { get; set; }
+    public decimal Amount { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public Guid? PolicySetId { get; set; }
+    public string? PolicyCode { get; set; }
+    public string? PolicyName { get; set; }
+    public int? PolicyVersion { get; set; }
+    public Guid? WorkflowDefinitionId { get; set; }
+    public string? WorkflowName { get; set; }
+    public int? WorkflowVersion { get; set; }
+    public Guid? AuthorityRouteId { get; set; }
+    public string? RouteReference { get; set; }
+    public int? AttemptNumber { get; set; }
+    public DateTime? CapturedAtUtc { get; set; }
+    public string? IntegrityHash { get; set; }
+    public string? CurrentWorkflowStage { get; set; }
+    public string? CurrentWorkflowStageStatus { get; set; }
+    public List<PurchaseRequisitionAuthorityStepDto> Steps { get; set; } = new();
+    public List<ProcurementComplianceFindingDto> Findings { get; set; } = new();
+    public List<string> RequiredActions { get; set; } = new();
+}
+
+public sealed class PurchaseRequisitionAuthorityStepDto
+{
+    public int Sequence { get; set; }
+    public Guid RuleId { get; set; }
+    public string RuleCode { get; set; } = string.Empty;
+    public string RulePolicyCode { get; set; } = string.Empty;
+    public int RulePolicyVersion { get; set; }
+    public string SourceDecisionKey { get; set; } = string.Empty;
+    public string AuthorityName { get; set; } = string.Empty;
+    public string AuthorityRole { get; set; } = string.Empty;
+    public int Quorum { get; set; }
+    public bool IsObserver { get; set; }
+    public string? EscalationAuthority { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal LowerBound { get; set; }
+    public decimal? UpperBound { get; set; }
+    public bool LowerInclusive { get; set; }
+    public bool UpperInclusive { get; set; }
+    public Guid WorkflowStepId { get; set; }
+    public string WorkflowStepName { get; set; } = string.Empty;
+    public int WorkflowStepOrder { get; set; }
+}
+
+public sealed class PurchaseRequisitionAuthorityRouteHistoryDto
+{
+    public Guid Id { get; set; }
+    public string RouteReference { get; set; } = string.Empty;
+    public int AttemptNumber { get; set; }
+    public string PolicyCode { get; set; } = string.Empty;
+    public string PolicyName { get; set; } = string.Empty;
+    public int PolicyVersion { get; set; }
+    public string WorkflowName { get; set; } = string.Empty;
+    public int WorkflowVersion { get; set; }
+    public ProcurementCategoryClass Category { get; set; }
+    public decimal Amount { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public DateTime CapturedAtUtc { get; set; }
+    public string CapturedByName { get; set; } = string.Empty;
+    public string CorrelationId { get; set; } = string.Empty;
+    public string IntegrityHash { get; set; } = string.Empty;
+    public List<PurchaseRequisitionAuthorityStepDto> Steps { get; set; } = new();
 }
 
 /// <summary>

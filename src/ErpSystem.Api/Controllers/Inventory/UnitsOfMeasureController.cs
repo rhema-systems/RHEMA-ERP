@@ -1,7 +1,9 @@
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -20,19 +22,22 @@ public class UnitsOfMeasureController : ControllerBase
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<UnitsOfMeasureController> _logger;
+    private readonly IProcurementMasterDataChangeService? _masterDataChanges;
 
     public UnitsOfMeasureController(
         IUnitOfMeasureRepository uomRepository,
         IUnitOfMeasureConversionRepository conversionRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
-        ILogger<UnitsOfMeasureController> logger)
+        ILogger<UnitsOfMeasureController> logger,
+        IProcurementMasterDataChangeService? masterDataChanges = null)
     {
         _uomRepository = uomRepository;
         _conversionRepository = conversionRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+        _masterDataChanges = masterDataChanges;
     }
 
     /// <summary>
@@ -124,6 +129,8 @@ public class UnitsOfMeasureController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(null, "UnitOfMeasure.Create");
+            if (protection is not null) return protection;
             var tenantId = _currentUserProvider.TenantId;
             if (tenantId == Guid.Empty)
             {
@@ -169,6 +176,8 @@ public class UnitsOfMeasureController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(id, "UnitOfMeasure.Update");
+            if (protection is not null) return protection;
             var unit = await _uomRepository.GetByIdAsync(id);
             if (unit == null)
                 return NotFound($"Unit of measure with ID {id} not found");
@@ -201,6 +210,8 @@ public class UnitsOfMeasureController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(id, "UnitOfMeasure.Delete");
+            if (protection is not null) return protection;
             var unit = await _uomRepository.GetByIdAsync(id);
             if (unit == null)
                 return NotFound($"Unit of measure with ID {id} not found");
@@ -314,6 +325,22 @@ public class UnitsOfMeasureController : ControllerBase
             _logger.LogError(ex, "Error deleting conversion {Id}", id);
             return StatusCode(500, "An error occurred while deleting the conversion");
         }
+    }
+
+    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid? id, string action)
+    {
+        if (_masterDataChanges is null) return null;
+        var decision = await _masterDataChanges.CheckDirectMutationAsync(
+            new[] { ProcurementMasterDataResourceType.UnitOfMeasure }, id, action,
+            HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+        return decision.Allowed ? null : Conflict(new ProblemDetails
+        {
+            Status = StatusCodes.Status409Conflict,
+            Title = "Staged unit-of-measure change required",
+            Detail = decision.Message,
+            Instance = HttpContext.Request.Path,
+            Extensions = { ["code"] = decision.Code, ["correlationId"] = decision.CorrelationId, ["policyId"] = decision.PolicyId }
+        });
     }
 
     private static UnitOfMeasureDto MapToDto(UnitOfMeasure unit) => new()

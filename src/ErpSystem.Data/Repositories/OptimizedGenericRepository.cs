@@ -474,6 +474,11 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
         return _dbSet.Where(predicate).AsQueryable();
     }
 
+    public IQueryable<T> GetQueryableIncludingDeleted(Expression<Func<T, bool>> predicate)
+    {
+        return _dbSet.IgnoreQueryFilters().Where(predicate);
+    }
+
     public async Task<IEnumerable<TResult>> GetProjectedAsync<TResult>(Expression<Func<T, TResult>> projection)
     {
         return await _dbSet.Select(projection).ToListAsync();

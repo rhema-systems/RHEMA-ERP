@@ -18,6 +18,7 @@ public class TenderNegotiationService : ITenderNegotiationService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<TenderNegotiationService> _logger;
+    private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
 
     public TenderNegotiationService(
         ITenderNegotiationRepository negotiationRepository,
@@ -26,6 +27,7 @@ public class TenderNegotiationService : ITenderNegotiationService
         ITenderAwardRepository awardRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
+        IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
         ILogger<TenderNegotiationService> logger)
     {
         _negotiationRepository = negotiationRepository;
@@ -34,6 +36,7 @@ public class TenderNegotiationService : ITenderNegotiationService
         _awardRepository = awardRepository;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _exceptionalSourcingControlService = exceptionalSourcingControlService;
         _logger = logger;
     }
 
@@ -66,6 +69,7 @@ public class TenderNegotiationService : ITenderNegotiationService
 
     public async Task<TenderNegotiationDto> CreateNegotiationAsync(CreateNegotiationDto dto)
     {
+        await _exceptionalSourcingControlService.EnsureNegotiationAllowedAsync(dto.TenderId, dto.TenderBidId);
         // Check if negotiation already exists
         var existing = await _negotiationRepository.GetByTenderBidAndLotAsync(dto.TenderId, dto.TenderBidId, dto.LotId);
         if (existing != null)

@@ -804,8 +804,12 @@ class ApiService {
     return this.privateRequest<T>(endpoint, options);
   }
 
-  public async delete<T = any>(endpoint: string): Promise<T> {
-    return this.privateRequest<T>(endpoint, { method: 'DELETE' });
+  public async delete<T = any>(endpoint: string, data?: any): Promise<T> {
+    const options: RequestInit = { method: 'DELETE' };
+    if (data) {
+      options.body = JSON.stringify(data);
+    }
+    return this.privateRequest<T>(endpoint, options);
   }
 
   public async patch<T = any>(endpoint: string, data?: any): Promise<T> {

@@ -179,13 +179,8 @@ public class RfqNotificationService : IRfqNotificationService
             throw new InvalidOperationException($"RFQ quote with ID {quoteId} not found");
         }
 
-        var supplierName = quote.BusinessPartner?.PartnerName ?? "Supplier";
-        var quoteTotal = (quote.Items ?? new List<RequestForQuotationQuoteItem>())
-            .Where(i => !i.IsDeleted)
-            .Sum(i => i.LineTotal);
-
         var portalUrl = _configuration["FrontendUrl"] ?? "http://localhost:3000";
-        var actionUrl = $"{portalUrl.TrimEnd('/')}/procurement/rfqs/{rfqId}/edit";
+        var actionUrl = $"{portalUrl.TrimEnd('/')}/procurement/rfqs/{rfqId}/controls";
 
         // Default internal recipients: RFQ creator + tenant managers/admins.
         var recipientIds = new HashSet<Guid>();
@@ -224,11 +219,11 @@ public class RfqNotificationService : IRfqNotificationService
 <html>
 <body style='font-family: Arial, sans-serif; color: #111827; line-height: 1.6;'>
   <div style='max-width: 700px; margin: 0 auto; padding: 16px;'>
-    <h2 style='margin: 0 0 8px 0;'>Supplier Quote Submitted</h2>
+    <h2 style='margin: 0 0 8px 0;'>Sealed Quotation Received</h2>
     <div style='padding: 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;'>
       <div><strong>RFQ:</strong> {rfq.RfqNumber}</div>
-      <div><strong>Supplier:</strong> {supplierName}</div>
-      <div><strong>Quote Total:</strong> {quoteTotal:N2} {rfq.Currency}</div>
+      <div><strong>Receipt status:</strong> Sealed</div>
+      <div>Supplier identity, prices, and commercial lines remain hidden until the controlled opening register is completed after the deadline.</div>
       <div style='margin-top: 10px;'>
         <a href='{actionUrl}' target='_blank' rel='noreferrer'
            style='display:inline-block; background:#0f766e; color:#ffffff; text-decoration:none; padding:10px 14px; border-radius:6px;'>
@@ -247,8 +242,8 @@ public class RfqNotificationService : IRfqNotificationService
             {
                 await _notificationService.CreateInAppNotificationAsync(
                     userId,
-                    title: $"RFQ Quote Submitted: {rfq.RfqNumber}",
-                    message: $"{supplierName} submitted a quote ({quoteTotal:N2} {rfq.Currency}).",
+                    title: $"Sealed RFQ quotation received: {rfq.RfqNumber}",
+                    message: "A sealed quotation was received. Commercial details remain inaccessible until controlled opening.",
                     type: "RFQ",
                     data: new Dictionary<string, object>
                     {
@@ -256,9 +251,6 @@ public class RfqNotificationService : IRfqNotificationService
                         ["EntityId"] = rfqId,
                         ["RfqId"] = rfqId,
                         ["RfqNumber"] = rfq.RfqNumber,
-                        ["QuoteId"] = quoteId,
-                        ["SupplierName"] = supplierName,
-                        ["TotalAmount"] = quoteTotal,
                         ["ActionUrl"] = actionUrl
                     },
                     tenantId: rfq.TenantId

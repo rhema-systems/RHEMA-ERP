@@ -40,6 +40,8 @@ namespace ErpSystem.Web.Services
         private readonly RoleManager<ApplicationRole> _roleManager;
         private readonly ILogger<DatabaseSeedingService> _logger;
         private readonly IWebHostEnvironment _environment;
+        private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
+        private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
 
         private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinanceApprovalStages =
             new List<WorkflowApprovalStageSeed>
@@ -77,13 +79,17 @@ namespace ErpSystem.Web.Services
             UserManager<ApplicationUser> userManager,
             RoleManager<ApplicationRole> roleManager,
             ILogger<DatabaseSeedingService> logger,
-            IWebHostEnvironment environment)
+            IWebHostEnvironment environment,
+            ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
+            ProcurementAccessControlSeeder? procurementAccessControlSeeder = null)
         {
             _context = context;
             _userManager = userManager;
             _roleManager = roleManager;
             _logger = logger;
             _environment = environment;
+            _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
+            _procurementAccessControlSeeder = procurementAccessControlSeeder;
         }
 
         public Task SeedAsync() => SeedCoreAsync(applyMigrations: true);
@@ -144,6 +150,18 @@ namespace ErpSystem.Web.Services
                 // Always ensure baseline file upload governance exists (Phase 2 attachment hardening)
                 _logger.LogInformation("Ensuring file upload policies are seeded...");
                 await EnsureFileUploadPoliciesSeededAsync();
+
+                if (_procurementConfigurationProfileSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring draft procurement configuration profiles are seeded...");
+                    await _procurementConfigurationProfileSeeder.SeedAsync();
+                }
+
+                if (_procurementAccessControlSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC access roles, permissions, committees, and Draft workflow templates are seeded...");
+                    await _procurementAccessControlSeeder.SeedAsync();
+                }
 
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
                 _logger.LogInformation("Ensuring EHC notification topics are seeded...");

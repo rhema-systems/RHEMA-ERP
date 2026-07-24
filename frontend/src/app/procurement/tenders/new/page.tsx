@@ -469,6 +469,7 @@ function NewTenderPageContent() {
       try {
         setSavingDraft(true);
         const createDto: CreateTenderDto = {
+          sourcePurchaseRequisitionId: fromRequisitionId || '',
           title: formData.title,
           description: formData.description,
           tenderType: formData.tenderType,
@@ -628,6 +629,7 @@ function NewTenderPageContent() {
       } else {
         // Create new tender with items
         const createDto: CreateTenderDto = {
+          sourcePurchaseRequisitionId: fromRequisitionId || '',
           title: formData.title,
           description: formData.description,
           tenderType: formData.tenderType,
@@ -738,6 +740,7 @@ function NewTenderPageContent() {
       if (!finalTenderId) {
         console.log('🔵 No tender ID yet, creating new tender...');
         const createDto: CreateTenderDto = {
+          sourcePurchaseRequisitionId: fromRequisitionId || '',
           title: formData.title,
           description: formData.description,
           tenderType: formData.tenderType,
@@ -834,6 +837,29 @@ function NewTenderPageContent() {
         return null;
     }
   };
+
+  if (!fromRequisitionId && !tenderId) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-6">
+        <Card className="border-amber-200 bg-amber-50">
+          <CardHeader>
+            <CardTitle>Sourcing release required</CardTitle>
+            <CardDescription>
+              New tenders must start from an Approved purchase requisition with a current immutable sourcing release.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-3">
+            <Link href="/procurement/purchase-requisitions">
+              <Button>Open purchase requisitions</Button>
+            </Link>
+            <Link href="/procurement/tenders">
+              <Button variant="outline">Back to tenders</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">

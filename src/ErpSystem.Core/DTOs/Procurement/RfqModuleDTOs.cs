@@ -10,6 +10,8 @@ public class RfqDto
     public string Currency { get; set; } = "USD";
     public decimal EstimatedValue { get; set; }
     public Guid? SourcePurchaseRequisitionId { get; set; }
+    public Guid? SourcingReleaseId { get; set; }
+    public Guid? SourcingCaseId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? SentAt { get; set; }
     public int SupplierCount { get; set; }

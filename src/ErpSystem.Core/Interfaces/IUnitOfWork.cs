@@ -55,4 +55,9 @@ public interface IUnitOfWork : IDisposable
     /// Execute an operation within an execution strategy (for SQL Server retry logic)
     /// </summary>
     Task ExecuteInStrategyAsync(Func<Task> operation, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Execute a value-returning operation within an execution strategy (for SQL Server retry logic)
+    /// </summary>
+    Task<T> ExecuteInStrategyAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken = default);
 }

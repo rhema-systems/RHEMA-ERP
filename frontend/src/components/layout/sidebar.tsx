@@ -416,10 +416,16 @@ const navigationItems: NavItem[] = [
       {
         title: 'Purchasing',
         href: '/procurement/purchasing',
-        icon: ShoppingCart,
-        children: [
-          { title: 'Purchase Requests', href: '/procurement/purchase-requisitions', icon: FileText },
-          { title: 'RFQs', href: '/procurement/rfqs', icon: FileText },
+          icon: ShoppingCart,
+          children: [
+            { title: 'Purchase Requests', href: '/procurement/purchase-requisitions', icon: FileText },
+            {
+              title: 'Sourcing Cases',
+              href: '/procurement/sourcing-cases',
+              icon: FileCheck,
+              permissions: ['procurement.records.read'],
+            },
+            { title: 'RFQs', href: '/procurement/rfqs', icon: FileText },
           { title: 'Purchase Orders', href: '/procurement/purchase-orders', icon: ShoppingCart },
           { title: 'Purchase Receipts', href: '/procurement/purchase-receipts', icon: ClipboardList },
           { title: 'Supplier Comparison', href: '/procurement/supplier-comparison', icon: BarChart3 },
@@ -431,6 +437,12 @@ const navigationItems: NavItem[] = [
         icon: Gavel,
         children: [
           { title: 'Tenders', href: '/procurement/tenders', icon: Gavel },
+          {
+            title: 'Prequalification',
+            href: '/procurement/prequalification',
+            icon: ShieldCheck,
+            permissions: ['procurement.records.read'],
+          },
           { title: 'My Assigned Tenders', href: '/procurement/my-assigned-tenders', icon: FileText },
           { title: 'Bids', href: '/procurement/bids', icon: FileText },
           { title: 'Evaluations', href: '/procurement/evaluations', icon: Star },
@@ -445,8 +457,11 @@ const navigationItems: NavItem[] = [
         children: [
           { title: 'Overview', href: '/procurement/planning', icon: LayoutDashboard },
           { title: 'Procurement Plans', href: '/procurement/planning/plans', icon: Target },
+          { title: 'APP Submissions', href: '/procurement/planning/app-submissions', icon: FileCheck },
+          { title: 'Specification Templates', href: '/procurement/planning/specification-templates', icon: BookTemplate },
           { title: 'Budgets', href: '/procurement/planning/budgets', icon: DollarSign },
           { title: 'Schedules', href: '/procurement/planning/schedules', icon: Calendar },
+          { title: 'Annual Calendar', href: '/procurement/planning/calendar', icon: CalendarClock },
           { title: 'Market Analysis', href: '/procurement/planning/market-analysis', icon: TrendingUp },
           { title: 'Supplier Consolidation', href: '/procurement/planning/supplier-consolidation', icon: Users },
           { title: 'Emergency Plans', href: '/procurement/planning/emergency-plans', icon: AlertCircle },
@@ -751,6 +766,15 @@ const navigationItems: NavItem[] = [
         icon: Briefcase,
         roles: ADMINISTRATION_ROLES,
         children: [
+          // Procurement governance routes come from the target branch; retain them alongside
+          // the existing partner/setup routes and the Finance branch's administration role gate.
+          { title: 'Policy Profiles', href: '/administration/procurement/policy-profiles', icon: ShieldCheck },
+          { title: 'Executable Policies', href: '/administration/procurement/policy-sets', icon: ShieldCheck },
+          { title: 'Policy Simulator', href: '/administration/procurement/compliance-simulator', icon: ClipboardCheck },
+          { title: 'SOD Controls', href: '/administration/procurement/sod-controls', icon: Swords },
+          { title: 'Access & Committees', href: '/administration/procurement/access-controls', icon: Users },
+          { title: 'Master Data Changes', href: '/administration/procurement/master-data-changes', icon: FileCheck },
+          { title: 'Control Events', href: '/administration/procurement/control-events', icon: Activity },
           { title: 'Pending Partners', href: '/administration/procurement/business-partners/pending', icon: Users },
           { title: 'Business Partners', href: '/procurement/business-partners', icon: Users },
           { title: 'Purchase Order Settings', href: '/administration/procurement/purchase-order-settings', icon: Settings },

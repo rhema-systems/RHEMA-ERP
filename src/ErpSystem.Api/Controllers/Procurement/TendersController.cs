@@ -161,6 +161,22 @@ public class TendersController : ControllerBase
             var tender = await _tenderService.CreateTenderAsync(dto);
             return CreatedAtAction(nameof(GetTender), new { id = tender.Id }, tender);
         }
+        catch (ProcurementRequisitionSourcingBlockedException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Readiness.DecisionCode, ex.Message, ex.Readiness));
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(403, SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
+        }
+        catch (ProcurementExceptionalSourcingConflictException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating tender");
@@ -285,6 +301,18 @@ public class TendersController : ControllerBase
         {
             var tender = await _tenderService.PublishTenderAsync(id, dto);
             return Ok(tender);
+        }
+        catch (ProcurementRequisitionSourcingBlockedException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Readiness.DecisionCode, ex.Message, ex.Readiness));
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(403, SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
         }
         catch (InvalidOperationException ex)
         {
@@ -565,6 +593,10 @@ public class TendersController : ControllerBase
         {
             await _tenderService.InviteTenderersAsync(id, dto);
             return Ok(new { message = "Invitations sent successfully" });
+        }
+        catch (ProcurementExceptionalSourcingConflictException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -932,6 +964,21 @@ public class TendersController : ControllerBase
     }
 
     #endregion
+
+    private ProblemDetails SourcingProblem(
+        string code,
+        string detail,
+        PurchaseRequisitionSourcingReadinessDto? readiness = null,
+        int status = 422)
+    {
+        var problem = new ProblemDetails { Status = status, Title = code, Detail = detail, Instance = HttpContext?.Request.Path };
+        problem.Extensions["code"] = code;
+        problem.Extensions["correlationId"] = string.IsNullOrWhiteSpace(HttpContext?.TraceIdentifier)
+            ? Guid.NewGuid().ToString("N")
+            : HttpContext.TraceIdentifier;
+        if (readiness is not null) problem.Extensions["readiness"] = readiness;
+        return problem;
+    }
 }
 
 public record ApproveTenderRequest(string? Notes);

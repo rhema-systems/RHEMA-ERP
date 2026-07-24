@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text;
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
@@ -9,6 +11,7 @@ using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Procurement;
 
@@ -29,6 +32,11 @@ public class PurchaseRequisitionsController : ControllerBase
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IWorkflowService _workflowService;
+    private readonly IProcurementRequisitionLinkageService _linkageService;
+    private readonly IProcurementRequisitionSubmissionControlService _submissionControlService;
+    private readonly IProcurementRequisitionBudgetControlService _budgetControlService;
+    private readonly IProcurementRequisitionAuthorityRouteService _authorityRouteService;
+    private readonly IProcurementRequisitionSourcingReleaseService _sourcingReleaseService;
     private readonly IAppEventBus _appEventBus;
     private readonly ILogger<PurchaseRequisitionsController> _logger;
 
@@ -42,6 +50,11 @@ public class PurchaseRequisitionsController : ControllerBase
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IWorkflowService workflowService,
+        IProcurementRequisitionLinkageService linkageService,
+        IProcurementRequisitionSubmissionControlService submissionControlService,
+        IProcurementRequisitionBudgetControlService budgetControlService,
+        IProcurementRequisitionAuthorityRouteService authorityRouteService,
+        IProcurementRequisitionSourcingReleaseService sourcingReleaseService,
         IAppEventBus appEventBus,
         ILogger<PurchaseRequisitionsController> logger)
     {
@@ -54,8 +67,361 @@ public class PurchaseRequisitionsController : ControllerBase
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _workflowService = workflowService;
+        _linkageService = linkageService;
+        _submissionControlService = submissionControlService;
+        _budgetControlService = budgetControlService;
+        _authorityRouteService = authorityRouteService;
+        _sourcingReleaseService = sourcingReleaseService;
         _appEventBus = appEventBus;
         _logger = logger;
+    }
+
+    [HttpPut("{id}")]
+    public async Task<ActionResult<PurchaseRequisitionDetailDto>> UpdatePurchaseRequisition(
+        Guid id,
+        [FromBody] UpdatePurchaseRequisitionDto updateDto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+            var contractError = ValidateDraftContract(updateDto);
+            if (contractError is not null) return UnprocessableEntity(Problem("PR_CONTRACT_INVALID", contractError, 422));
+            var requisition = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(id);
+            if (requisition is null)
+                return NotFound(Problem("PR_NOT_FOUND", "The purchase requisition was not found in the current tenant.", 404));
+            if (!string.Equals(requisition.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+                return Conflict(Problem("PR_NOT_DRAFT", "Only a Draft purchase requisition can be edited.", 409));
+            if (!TryDecodeRowVersion(updateDto.RowVersion, out var suppliedVersion))
+                return UnprocessableEntity(Problem("ROW_VERSION_INVALID", "RowVersion must be a valid base64 value.", 422));
+            if (!requisition.RowVersion.SequenceEqual(suppliedVersion))
+                return Conflict(Problem("ROW_VERSION_STALE", "The purchase requisition changed after it was loaded. Refresh and try again.", 409));
+
+            var before = _linkageService.Map(requisition);
+            if (string.IsNullOrWhiteSpace(updateDto.Linkage.CostCenter))
+                updateDto.Linkage.CostCenter = updateDto.CostCenter;
+            await _linkageService.PrepareAsync(requisition, updateDto.Linkage, CorrelationId, cancellationToken);
+
+            requisition.RequiredDate = updateDto.RequiredDate;
+            requisition.Priority = updateDto.Priority.Trim();
+            requisition.Department = TrimOrNull(updateDto.Department, 100);
+            requisition.Justification = TrimOrNull(updateDto.Justification, 2000);
+            requisition.Notes = TrimOrNull(updateDto.Notes, 2000);
+            requisition.TotalAmount = updateDto.Items.Sum(item => item.Quantity * item.EstimatedUnitPrice);
+            requisition.UpdatedAt = DateTime.UtcNow;
+
+            await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    var existingItems = (await _purchaseRequisitionItemRepository.GetItemsByRequisitionIdAsync(id)).ToList();
+                    foreach (var item in existingItems)
+                        await _unitOfWork.Repository<PurchaseRequisitionItem>().DeleteAsync(item);
+                    foreach (var itemDto in updateDto.Items)
+                        await _purchaseRequisitionItemRepository.CreateItemAsync(CreateItem(requisition.TenantId, requisition.Id, itemDto));
+                    await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    await _linkageService.RecordMutationAsync(
+                        requisition, "Updated", before, CorrelationId,
+                        "Draft purchase requisition and governance linkage were updated.", cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }, cancellationToken);
+
+            return Ok(await GetPurchaseRequisitionDetailDto(id));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(Problem("ROW_VERSION_STALE", "The purchase requisition changed after it was loaded. Refresh and try again.", 409));
+        }
+        catch (ProcurementRequisitionLinkageAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_LINKAGE_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionLinkageNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+        catch (ProcurementRequisitionLinkageConflictException ex)
+        {
+            return Conflict(Problem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementRequisitionLinkageValidationException ex)
+        {
+            return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating purchase requisition {RequisitionId}", id);
+            return StatusCode(500, Problem("PR_UPDATE_FAILED", "The purchase requisition could not be updated.", 500));
+        }
+    }
+
+    [HttpGet("linkage-options")]
+    public async Task<ActionResult<PurchaseRequisitionLinkageOptionsDto>> GetLinkageOptions(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _linkageService.GetOptionsAsync(cancellationToken));
+        }
+        catch (ProcurementRequisitionLinkageAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_LINKAGE_FORBIDDEN", ex.Message, 403));
+        }
+    }
+
+    [HttpGet("{id}/linkage-history")]
+    public async Task<ActionResult<IReadOnlyList<PurchaseRequisitionLinkageHistoryDto>>> GetLinkageHistory(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _linkageService.GetHistoryAsync(id, cancellationToken));
+        }
+        catch (ProcurementRequisitionLinkageAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_LINKAGE_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionLinkageNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+    }
+
+    [HttpGet("{id}/submission-readiness")]
+    public async Task<ActionResult<PurchaseRequisitionSubmissionReadinessDto>> GetSubmissionReadiness(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _submissionControlService.GetReadinessAsync(id, cancellationToken));
+        }
+        catch (ProcurementRequisitionSubmissionAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_SUBMISSION_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionSubmissionNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+    }
+
+    [HttpGet("{id}/submission-control-history")]
+    public async Task<ActionResult<IReadOnlyList<PurchaseRequisitionSubmissionControlHistoryDto>>> GetSubmissionControlHistory(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _submissionControlService.GetHistoryAsync(id, cancellationToken));
+        }
+        catch (ProcurementRequisitionSubmissionAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_SUBMISSION_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionSubmissionNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+    }
+
+    [HttpGet("{id}/budget-readiness")]
+    public async Task<ActionResult<PurchaseRequisitionBudgetReadinessDto>> GetBudgetReadiness(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _budgetControlService.GetReadinessAsync(id, cancellationToken));
+        }
+        catch (ProcurementRequisitionBudgetAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_BUDGET_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionBudgetNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+    }
+
+    [HttpGet("{id}/budget-control-history")]
+    public async Task<ActionResult<IReadOnlyList<PurchaseRequisitionBudgetControlHistoryDto>>> GetBudgetControlHistory(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _budgetControlService.GetHistoryAsync(id, cancellationToken));
+        }
+        catch (ProcurementRequisitionBudgetAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_BUDGET_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionBudgetNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+    }
+
+    [HttpGet("{id}/authority-readiness")]
+    public async Task<ActionResult<PurchaseRequisitionAuthorityReadinessDto>> GetAuthorityReadiness(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _authorityRouteService.GetReadinessAsync(id, cancellationToken));
+        }
+        catch (ProcurementRequisitionAuthorityAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_AUTHORITY_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionAuthorityNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+    }
+
+    [HttpGet("{id}/authority-route-history")]
+    public async Task<ActionResult<IReadOnlyList<PurchaseRequisitionAuthorityRouteHistoryDto>>> GetAuthorityRouteHistory(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _authorityRouteService.GetHistoryAsync(id, cancellationToken));
+        }
+        catch (ProcurementRequisitionAuthorityAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_AUTHORITY_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionAuthorityNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+    }
+
+    [HttpGet("{id}/sourcing-readiness")]
+    public async Task<ActionResult<PurchaseRequisitionSourcingReadinessDto>> GetSourcingReadiness(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _sourcingReleaseService.GetReadinessAsync(id, cancellationToken));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionSourcingNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+    }
+
+    [HttpGet("{id}/sourcing-release-history")]
+    public async Task<ActionResult<IReadOnlyList<PurchaseRequisitionSourcingReleaseDto>>> GetSourcingReleaseHistory(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _sourcingReleaseService.GetHistoryAsync(id, cancellationToken));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionSourcingNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+    }
+
+    [HttpPost("{id}/sourcing-release")]
+    public async Task<ActionResult<PurchaseRequisitionSourcingReleaseDto>> ReleaseForSourcing(
+        Guid id,
+        [FromBody] ReleasePurchaseRequisitionForSourcingRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!ModelState.IsValid) return ValidationProblem(ModelState);
+            return Ok(await _sourcingReleaseService.ReleaseAsync(id, request.Reason, CorrelationId, cancellationToken));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionSourcingNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+        catch (ProcurementRequisitionSourcingBlockedException ex)
+        {
+            var problem = Problem(ex.Readiness.DecisionCode, ex.Message, 422);
+            problem.Extensions["readiness"] = ex.Readiness;
+            return UnprocessableEntity(problem);
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
+        }
+        catch (ProcurementRequisitionSourcingConflictException ex)
+        {
+            return Conflict(Problem(ex.Code, ex.Message, 409));
+        }
+    }
+
+    [HttpGet("{id}/export")]
+    public async Task<IActionResult> ExportPurchaseRequisition(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var requisition = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(id);
+            if (requisition is null)
+                return NotFound(Problem("PR_NOT_FOUND", "The purchase requisition was not found in the current tenant.", 404));
+            var detail = await GetPurchaseRequisitionDetailDto(id);
+            await _linkageService.RecordExportAsync(requisition, CorrelationId, cancellationToken);
+            var export = new PurchaseRequisitionExportDto
+            {
+                ExportedAtUtc = DateTime.UtcNow,
+                TenantId = requisition.TenantId,
+                RequisitionId = requisition.Id,
+                RequisitionNumber = requisition.RequisitionNumber,
+                RequisitionDate = requisition.RequisitionDate,
+                Status = requisition.Status,
+                RequestedByName = detail.RequestedByName,
+                Department = requisition.Department,
+                TotalAmount = requisition.TotalAmount,
+                Linkage = detail.Linkage,
+                Items = detail.Items
+            };
+            var json = JsonSerializer.Serialize(export, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
+            return File(Encoding.UTF8.GetBytes(json), "application/json", $"{requisition.RequisitionNumber}-linkage.json");
+        }
+        catch (ProcurementRequisitionLinkageAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_EXPORT_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementControlEventConflictException ex)
+        {
+            return Conflict(Problem("PR_EXPORT_AUDIT_CONFLICT", ex.Message, 409));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error exporting purchase requisition {RequisitionId}", id);
+            return StatusCode(500, Problem("PR_EXPORT_FAILED", "The purchase requisition export could not be generated.", 500));
+        }
     }
 
     /// <summary>
@@ -77,19 +443,7 @@ public class PurchaseRequisitionsController : ControllerBase
             var requisitions = await _purchaseRequisitionRepository.GetRequisitionsAsync(
                 page, pageSize, search, status, priority, startDate, endDate, department);
 
-            var requisitionDtos = requisitions.Items.Select(r => new PurchaseRequisitionSummaryDto
-            {
-                Id = r.Id,
-                RequisitionNumber = r.RequisitionNumber,
-                RequisitionDate = r.RequisitionDate,
-                RequestedByName = r.RequestedBy?.FirstName + " " + r.RequestedBy?.LastName,
-                RequiredDate = r.RequiredDate,
-                Status = r.Status,
-                Priority = r.Priority,
-                Department = r.Department,
-                TotalAmount = r.TotalAmount,
-                ItemCount = r.Items?.Count ?? 0
-            }).ToList();
+            var requisitionDtos = requisitions.Items.Select(MapSummary).ToList();
 
             // Provide more accurate UX for pending approvals: show the actual current workflow step name.
             var pendingDtos = requisitionDtos
@@ -137,54 +491,11 @@ public class PurchaseRequisitionsController : ControllerBase
     {
         try
         {
-            var requisition = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(id);
-            if (requisition == null)
+            var requisitionDto = await GetPurchaseRequisitionDetailDto(id);
+            if (requisitionDto == null)
             {
                 return NotFound($"Purchase requisition with ID {id} not found");
             }
-
-            var items = await _purchaseRequisitionItemRepository.GetItemsByRequisitionIdAsync(id);
-
-            var requisitionDto = new PurchaseRequisitionDetailDto
-            {
-                Id = requisition.Id,
-                RequisitionNumber = requisition.RequisitionNumber,
-                RequisitionDate = requisition.RequisitionDate,
-                RequestedByName = requisition.RequestedBy?.FirstName + " " + requisition.RequestedBy?.LastName,
-                RequiredDate = requisition.RequiredDate,
-                Status = requisition.Status,
-                Priority = requisition.Priority,
-                Department = requisition.Department,
-                CostCenter = requisition.CostCenter,
-                Justification = requisition.Justification,
-                Notes = requisition.Notes,
-                ApprovedByName = requisition.ApprovedBy?.FirstName + " " + requisition.ApprovedBy?.LastName,
-                ApprovedAt = requisition.ApprovedAt,
-                RejectionReason = requisition.RejectionReason,
-                TotalAmount = requisition.TotalAmount,
-                ItemCount = items.Count(),
-                Items = items.Select(item => new PurchaseRequisitionItemDto
-                {
-                    Id = item.Id,
-                    RequisitionId = item.RequisitionId,
-                    InventoryItemId = item.InventoryItemId,
-                    ItemDescription = item.ItemDescription,
-                    Quantity = item.Quantity,
-                    UnitOfMeasure = item.UnitOfMeasure,
-                    EstimatedUnitPrice = item.EstimatedUnitPrice,
-                    LineTotal = item.LineTotal,
-                    RequiredDate = item.RequiredDate,
-                    PreferredSupplierId = item.PreferredBusinessPartnerId,
-                    PreferredSupplierName = item.PreferredBusinessPartner?.PartnerName,
-                    Notes = item.Notes,
-                    Specifications = item.Specifications,
-                    Status = item.Status,
-                    PurchaseOrderId = item.PurchaseOrderId,
-                    PurchaseOrderNumber = item.PurchaseOrder?.OrderNumber,
-                    ItemCode = item.InventoryItem?.ItemCode,
-                    ItemName = item.InventoryItem?.Name
-                }).ToList()
-            };
 
             if (requisitionDto.Status == "Pending Approval" || requisitionDto.Status == "Submitted")
             {
@@ -213,7 +524,8 @@ public class PurchaseRequisitionsController : ControllerBase
     /// </summary>
     [HttpPost]
     public async Task<ActionResult<PurchaseRequisitionDetailDto>> CreatePurchaseRequisition(
-        [FromBody] CreatePurchaseRequisitionDto createDto)
+        [FromBody] CreatePurchaseRequisitionDto createDto,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -221,70 +533,60 @@ public class PurchaseRequisitionsController : ControllerBase
             {
                 return BadRequest(ModelState);
             }
+            var contractError = ValidateDraftContract(createDto);
+            if (contractError is not null) return UnprocessableEntity(Problem("PR_CONTRACT_INVALID", contractError, 422));
+            if (!_currentUserProvider.IsAuthenticated || _currentUserProvider.UserId == Guid.Empty)
+                return Unauthorized(Problem("AUTHENTICATION_REQUIRED", "An authenticated user is required.", 401));
 
-            // Get tenant ID from context
             var tenantId = _tenantContext.GetCurrentTenantId();
-
-            // Generate requisition number
             var requisitionNumber = await _purchaseRequisitionRepository.GenerateRequisitionNumberAsync();
-
-            // Calculate total amount
             var totalAmount = createDto.Items.Sum(item => item.Quantity * item.EstimatedUnitPrice);
-
             var requisition = new PurchaseRequisition
             {
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 RequisitionNumber = requisitionNumber,
                 RequisitionDate = DateTime.UtcNow,
-                RequestedById = createDto.RequestedById,
+                RequestedById = _currentUserProvider.UserId,
                 RequiredDate = createDto.RequiredDate,
                 Status = "Draft",
                 Priority = createDto.Priority,
                 Department = createDto.Department,
-                CostCenter = createDto.CostCenter,
                 Justification = createDto.Justification,
                 Notes = createDto.Notes,
                 TotalAmount = totalAmount,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
+            if (string.IsNullOrWhiteSpace(createDto.Linkage.CostCenter))
+                createDto.Linkage.CostCenter = createDto.CostCenter;
+            await _linkageService.PrepareAsync(requisition, createDto.Linkage, CorrelationId, cancellationToken);
 
-            await _purchaseRequisitionRepository.CreateRequisitionAsync(requisition);
-
-            // Create requisition items
-            foreach (var itemDto in createDto.Items)
+            await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
-                var item = new PurchaseRequisitionItem
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+                try
                 {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    RequisitionId = requisition.Id,
-                    InventoryItemId = itemDto.InventoryItemId,
-                    ItemDescription = itemDto.ItemDescription,
-                    Quantity = itemDto.Quantity,
-                    UnitOfMeasure = itemDto.UnitOfMeasure ?? "EA",
-                    EstimatedUnitPrice = itemDto.EstimatedUnitPrice,
-                    LineTotal = itemDto.Quantity * itemDto.EstimatedUnitPrice,
-                    RequiredDate = itemDto.RequiredDate,
-                    PreferredBusinessPartnerId = itemDto.PreferredSupplierId,
-                    Notes = itemDto.Notes,
-                    Specifications = itemDto.Specifications,
-                    Status = "Pending",
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
+                    await _purchaseRequisitionRepository.CreateRequisitionAsync(requisition);
+                    foreach (var itemDto in createDto.Items)
+                    {
+                        await _purchaseRequisitionItemRepository.CreateItemAsync(CreateItem(tenantId, requisition.Id, itemDto));
+                    }
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    await _linkageService.RecordMutationAsync(
+                        requisition, "Created", null, CorrelationId,
+                        "Purchase requisition and its governance linkage were created.", cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }, cancellationToken);
 
-                await _purchaseRequisitionItemRepository.CreateItemAsync(item);
-            }
-
-            // CRITICAL: Save changes to database
-            await _unitOfWork.SaveChangesAsync();
-
-            // Publish event for admin-configurable notification topics (best-effort).
             try
             {
-                var triggeredBy = _currentUserProvider.IsAuthenticated ? _currentUserProvider.UserId : (Guid?)null;
                 await _appEventBus.PublishAsync(new EntityActivityEvent
                 {
                     TenantId = tenantId,
@@ -292,7 +594,7 @@ public class PurchaseRequisitionsController : ControllerBase
                     Activity = "Created",
                     Audience = "Internal",
                     EntityId = requisition.Id,
-                    TriggeredByUserId = triggeredBy,
+                    TriggeredByUserId = _currentUserProvider.UserId,
                     Data = new Dictionary<string, object>
                     {
                         ["PurchaseRequisitionId"] = requisition.Id,
@@ -310,9 +612,24 @@ public class PurchaseRequisitionsController : ControllerBase
                 _logger.LogWarning(ex, "Failed to publish PurchaseRequisition.Created entity activity event for requisition {RequisitionId}", requisition.Id);
             }
 
-            // Return the created requisition
             var createdRequisition = await GetPurchaseRequisitionDetailDto(requisition.Id);
             return CreatedAtAction(nameof(GetPurchaseRequisition), new { id = requisition.Id }, createdRequisition);
+        }
+        catch (ProcurementRequisitionLinkageAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_LINKAGE_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionLinkageNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+        catch (ProcurementRequisitionLinkageConflictException ex)
+        {
+            return Conflict(Problem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementRequisitionLinkageValidationException ex)
+        {
+            return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
         }
         catch (Exception ex)
         {
@@ -334,16 +651,76 @@ public class PurchaseRequisitionsController : ControllerBase
                 return BadRequest(ModelState);
             }
 
+            var normalizedStatus = statusDto.Status.Trim().Replace(" ", string.Empty);
+            if (normalizedStatus.Equals("Submitted", StringComparison.OrdinalIgnoreCase) ||
+                normalizedStatus.Equals("PendingApproval", StringComparison.OrdinalIgnoreCase) ||
+                normalizedStatus.Equals("Approved", StringComparison.OrdinalIgnoreCase) ||
+                normalizedStatus.Equals("Rejected", StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict(Problem(
+                    "PR_WORKFLOW_STATUS_REQUIRES_ACTION",
+                    "Workflow-controlled requisition statuses cannot be assigned directly. Use the submit or approval action so APP/exception, budget-reservation, and workflow controls execute.",
+                    409));
+            }
+
             var requisition = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(id);
             if (requisition == null)
             {
-                return NotFound($"Purchase requisition with ID {id} not found");
+                return NotFound(Problem("PR_NOT_FOUND", "The purchase requisition was not found in the current tenant.", 404));
             }
 
-            await _purchaseRequisitionRepository.UpdateStatusAsync(id, statusDto.Status);
-            await _unitOfWork.SaveChangesAsync();
+            var isCancellation = normalizedStatus.Equals("Cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                 normalizedStatus.Equals("Canceled", StringComparison.OrdinalIgnoreCase);
+            if (isCancellation)
+            {
+                await _unitOfWork.ExecuteInStrategyAsync(async () =>
+                {
+                    await _unitOfWork.BeginTransactionAsync(HttpContext.RequestAborted);
+                    try
+                    {
+                        // The linkage trigger permits the budget snapshot to clear only when the
+                        // same atomic write carries the requisition into a release-eligible status.
+                        requisition.Status = statusDto.Status;
+                        requisition.UpdatedAt = DateTime.UtcNow;
+                        await _budgetControlService.ReleaseAsync(
+                            requisition,
+                            "Purchase requisition cancelled.",
+                            "procurement.requisition.create",
+                            CorrelationId,
+                            HttpContext.RequestAborted);
+                        await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
+                        await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
+                    }
+                    catch
+                    {
+                        await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                        throw;
+                    }
+                }, HttpContext.RequestAborted);
+            }
+            else
+            {
+                await _purchaseRequisitionRepository.UpdateStatusAsync(id, statusDto.Status);
+                await _unitOfWork.SaveChangesAsync();
+            }
 
             return NoContent();
+        }
+        catch (ProcurementRequisitionBudgetAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_BUDGET_RELEASE_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionBudgetNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+        catch (ProcurementRequisitionBudgetConflictException ex)
+        {
+            return Conflict(Problem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementRequisitionBudgetValidationException ex)
+        {
+            return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
         }
         catch (Exception ex)
         {
@@ -389,6 +766,8 @@ public class PurchaseRequisitionsController : ControllerBase
                 return Unauthorized("User identifier claim is missing or invalid");
             }
 
+            var authorityApproval = await _authorityRouteService.EnforceApprovalAsync(
+                requisition, CorrelationId, HttpContext.RequestAborted);
             var canApprove = await _workflowIntegrationService.CanUserApproveAsync("PurchaseRequisition", id, userId);
             if (!canApprove)
             {
@@ -407,18 +786,45 @@ public class PurchaseRequisitionsController : ControllerBase
                 return BadRequest("Rejection comment is required");
             }
 
-            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-                "PurchaseRequisition",
-                id,
-                userId,
-                action,
-                comments);
+            WorkflowIntegrationResult? workflowResult = null;
+            PurchaseRequisitionBudgetReleaseDto? budgetRelease = null;
+            await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(HttpContext.RequestAborted);
+                try
+                {
+                    workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                        "PurchaseRequisition",
+                        id,
+                        userId,
+                        action,
+                        comments);
 
-            var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseRequisition");
-            statusAdapter.ApplyApprovalOutcome(requisition, workflowResult.Outcome, userId, approvalDto.RejectionReason);
+                    var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseRequisition");
+                    statusAdapter.ApplyApprovalOutcome(requisition, workflowResult.Outcome, userId, approvalDto.RejectionReason);
 
-            await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
-            await _unitOfWork.SaveChangesAsync();
+                    if (!approvalDto.Approved)
+                    {
+                        budgetRelease = await _budgetControlService.ReleaseAsync(
+                            requisition,
+                            comments!,
+                            "procurement.requisition.approve",
+                            CorrelationId,
+                            HttpContext.RequestAborted);
+                    }
+
+                    await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
+                    await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                    throw;
+                }
+            }, HttpContext.RequestAborted);
+
+            if (workflowResult is null)
+                return Conflict(Problem("PR_WORKFLOW_RESULT_MISSING", "The workflow did not return an approval outcome.", 409));
 
             // Publish event for admin-configurable notification topics (best-effort).
             try
@@ -458,9 +864,49 @@ public class PurchaseRequisitionsController : ControllerBase
                     id = requisition.Id,
                     status = requisition.Status,
                     workflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId,
-                    workflowOutcome = workflowResult.Outcome.ToString()
+                    workflowOutcome = workflowResult.Outcome.ToString(),
+                    authorityControl = authorityApproval,
+                    budgetRelease
                 }
             });
+        }
+        catch (ProcurementRequisitionAuthorityAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_AUTHORITY_APPROVAL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionAuthorityNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+        catch (ProcurementRequisitionAuthorityBlockedException ex)
+        {
+            var status = ex.Readiness.DecisionCode.StartsWith("SOD_", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Readiness.DecisionCode.StartsWith("SOD-", StringComparison.OrdinalIgnoreCase)
+                ? 403
+                : 409;
+            var problem = Problem(ex.Readiness.DecisionCode, ex.Message, status);
+            problem.Extensions["authorityReadiness"] = ex.Readiness;
+            return StatusCode(status, problem);
+        }
+        catch (ProcurementRequisitionAuthorityConflictException ex)
+        {
+            return Conflict(Problem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementRequisitionBudgetAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_BUDGET_RELEASE_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionBudgetNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+        catch (ProcurementRequisitionBudgetConflictException ex)
+        {
+            return Conflict(Problem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementRequisitionBudgetValidationException ex)
+        {
+            return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
         }
         catch (Exception ex)
         {
@@ -485,29 +931,121 @@ public class PurchaseRequisitionsController : ControllerBase
             var requisition = await _purchaseRequisitionRepository.GetRequisitionByIdAsync(id);
             if (requisition == null)
             {
-                return NotFound($"Purchase requisition with ID {id} not found");
+                return NotFound(Problem("PR_NOT_FOUND", "The purchase requisition was not found in the current tenant.", 404));
             }
 
             if (requisition.Status != "Draft")
             {
-                return BadRequest($"Purchase requisition cannot be submitted in current status: {requisition.Status}");
+                if (string.Equals(requisition.Status, "Pending Approval", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(requisition.Status, "Submitted", StringComparison.OrdinalIgnoreCase))
+                {
+                    var retryReadiness = await _budgetControlService.GetReadinessAsync(
+                        requisition.Id, HttpContext.RequestAborted);
+                    var retryRoute = await _authorityRouteService.GetLatestRouteAsync(
+                        requisition.Id, HttpContext.RequestAborted);
+                    if (string.Equals(retryReadiness.Basis, "ExistingCommitment", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(retryReadiness.CommitmentStatus, "Reserved", StringComparison.OrdinalIgnoreCase) &&
+                        retryRoute is not null)
+                    {
+                        var authorityReadiness = await _authorityRouteService.GetReadinessAsync(
+                            requisition.Id, HttpContext.RequestAborted);
+                        return Ok(new
+                        {
+                            success = true,
+                            idempotent = true,
+                            message = "The purchase requisition was already submitted and its active budget commitment was reused.",
+                            data = new
+                            {
+                                id = requisition.Id,
+                                status = requisition.Status,
+                                budgetControl = retryReadiness,
+                                authorityControl = authorityReadiness
+                            }
+                        });
+                    }
+                }
+                return Conflict(Problem("PR_NOT_DRAFT", $"Purchase requisition cannot be submitted in current status: {requisition.Status}.", 409));
             }
 
-            WorkflowIntegrationResult workflowResult;
-            try
+
+            var submissionReadiness = await _submissionControlService.EnforceAsync(
+                requisition, CorrelationId, HttpContext.RequestAborted);
+            var authorityDecision = await _authorityRouteService.EnforceSubmissionAsync(
+                requisition, CorrelationId, HttpContext.RequestAborted);
+
+            WorkflowIntegrationResult? workflowResult = null;
+            PurchaseRequisitionBudgetReadinessDto? budgetReadiness = null;
+            ProcurementRequisitionAuthorityRoute? authorityRoute = null;
+            await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
-                workflowResult = await _workflowIntegrationService.SubmitAsync("PurchaseRequisition", id);
-            }
-            catch (InvalidOperationException ex)
+                await _unitOfWork.BeginTransactionAsync(HttpContext.RequestAborted);
+                try
+                {
+                    budgetReadiness = await _budgetControlService.ReserveAsync(
+                        requisition, CorrelationId, HttpContext.RequestAborted);
+                    if (!budgetReadiness.CanReserve)
+                    {
+                        await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
+                        return;
+                    }
+                    if (string.Equals(budgetReadiness.Basis, "ExistingCommitment", StringComparison.OrdinalIgnoreCase))
+                    {
+                        authorityRoute = await _authorityRouteService.GetLatestRouteAsync(
+                            requisition.Id, HttpContext.RequestAborted);
+                        if (authorityRoute is null)
+                            throw new ProcurementRequisitionAuthorityConflictException(
+                                "PR_AUTHORITY_ROUTE_NOT_CAPTURED",
+                                "An active budget commitment exists without an immutable authority route. Recall or cancel the requisition before resubmitting.");
+                        await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
+                        return;
+                    }
+
+                    authorityRoute = await _authorityRouteService.CaptureAsync(
+                        requisition, authorityDecision, CorrelationId, HttpContext.RequestAborted);
+                    workflowResult = await _workflowIntegrationService.SubmitAsync(
+                        "PurchaseRequisition", id, authorityRoute.WorkflowDefinitionId);
+                    var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseRequisition");
+                    statusAdapter.ApplySubmitOutcome(requisition, workflowResult.Outcome, _currentUserProvider.UserId);
+                    await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
+                    await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                    throw;
+                }
+            }, HttpContext.RequestAborted);
+
+            if (budgetReadiness is null)
+                return Conflict(Problem("PR_BUDGET_RESULT_MISSING", "The budget control did not return a result.", 409));
+            if (!budgetReadiness.CanReserve)
             {
-                return BadRequest(ex.Message);
+                var problem = Problem(budgetReadiness.DecisionCode, budgetReadiness.Message, 422);
+                problem.Extensions["budgetReadiness"] = budgetReadiness;
+                return UnprocessableEntity(problem);
             }
-
-            var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseRequisition");
-            statusAdapter.ApplySubmitOutcome(requisition, workflowResult.Outcome, _currentUserProvider.UserId);
-
-            await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
-            await _unitOfWork.SaveChangesAsync();
+            if (string.Equals(budgetReadiness.Basis, "ExistingCommitment", StringComparison.OrdinalIgnoreCase) &&
+                workflowResult is null)
+            {
+                var authorityReadiness = await _authorityRouteService.GetReadinessAsync(
+                    requisition.Id, HttpContext.RequestAborted);
+                return Ok(new
+                {
+                    success = true,
+                    idempotent = true,
+                    message = "The purchase requisition submission already has an active budget commitment.",
+                    data = new
+                    {
+                        id = requisition.Id,
+                        budgetControl = budgetReadiness,
+                        authorityControl = authorityReadiness
+                    }
+                });
+            }
+            if (workflowResult is null)
+                return Conflict(Problem("PR_WORKFLOW_RESULT_MISSING", "The workflow did not return a submission outcome.", 409));
+            var capturedAuthorityReadiness = await _authorityRouteService.GetReadinessAsync(
+                requisition.Id, HttpContext.RequestAborted);
 
             // Publish event for admin-configurable notification topics (best-effort).
             try
@@ -544,9 +1082,68 @@ public class PurchaseRequisitionsController : ControllerBase
                     id = requisition.Id,
                     status = requisition.Status,
                     workflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId,
-                    workflowOutcome = workflowResult.Outcome.ToString()
+                    workflowOutcome = workflowResult.Outcome.ToString(),
+                    submissionControl = submissionReadiness,
+                    budgetControl = budgetReadiness,
+                    authorityControl = capturedAuthorityReadiness
                 }
             });
+        }
+        catch (ProcurementRequisitionSubmissionAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_SUBMISSION_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionSubmissionNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+        catch (ProcurementRequisitionSubmissionBlockedException ex)
+        {
+            var problem = Problem(ex.Readiness.DecisionCode, ex.Message, 422);
+            problem.Extensions["submissionReadiness"] = ex.Readiness;
+            return UnprocessableEntity(problem);
+        }
+        catch (ProcurementControlEventConflictException ex)
+        {
+            return Conflict(Problem("PR_SUBMISSION_AUDIT_CONFLICT", ex.Message, 409));
+        }
+        catch (ProcurementRequisitionAuthorityAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_AUTHORITY_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionAuthorityNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+        catch (ProcurementRequisitionAuthorityBlockedException ex)
+        {
+            var problem = Problem(ex.Readiness.DecisionCode, ex.Message, 422);
+            problem.Extensions["authorityReadiness"] = ex.Readiness;
+            return UnprocessableEntity(problem);
+        }
+        catch (ProcurementRequisitionAuthorityConflictException ex)
+        {
+            return Conflict(Problem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementRequisitionBudgetAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_BUDGET_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionBudgetNotFoundException ex)
+        {
+            return NotFound(Problem(ex.Code, ex.Message, 404));
+        }
+        catch (ProcurementRequisitionBudgetConflictException ex)
+        {
+            return Conflict(Problem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementRequisitionBudgetValidationException ex)
+        {
+            return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(Problem("PR_WORKFLOW_SUBMISSION_FAILED", ex.Message, 400));
         }
         catch (Exception ex)
         {
@@ -565,19 +1162,7 @@ public class PurchaseRequisitionsController : ControllerBase
         {
             var requisitions = await _purchaseRequisitionRepository.GetRequisitionsByStatus(status);
 
-            var requisitionDtos = requisitions.Select(r => new PurchaseRequisitionSummaryDto
-            {
-                Id = r.Id,
-                RequisitionNumber = r.RequisitionNumber,
-                RequisitionDate = r.RequisitionDate,
-                RequestedByName = r.RequestedBy?.FirstName + " " + r.RequestedBy?.LastName,
-                RequiredDate = r.RequiredDate,
-                Status = r.Status,
-                Priority = r.Priority,
-                Department = r.Department,
-                TotalAmount = r.TotalAmount,
-                ItemCount = r.Items?.Count ?? 0
-            }).ToList();
+            var requisitionDtos = requisitions.Select(MapSummary).ToList();
 
             await PopulateCurrentStepNamesAsync(requisitionDtos);
             return Ok(requisitionDtos);
@@ -599,19 +1184,7 @@ public class PurchaseRequisitionsController : ControllerBase
         {
             var requisitions = await _purchaseRequisitionRepository.GetRequisitionsByPriority(priority);
 
-            var requisitionDtos = requisitions.Select(r => new PurchaseRequisitionSummaryDto
-            {
-                Id = r.Id,
-                RequisitionNumber = r.RequisitionNumber,
-                RequisitionDate = r.RequisitionDate,
-                RequestedByName = r.RequestedBy?.FirstName + " " + r.RequestedBy?.LastName,
-                RequiredDate = r.RequiredDate,
-                Status = r.Status,
-                Priority = r.Priority,
-                Department = r.Department,
-                TotalAmount = r.TotalAmount,
-                ItemCount = r.Items?.Count ?? 0
-            }).ToList();
+            var requisitionDtos = requisitions.Select(MapSummary).ToList();
 
             await PopulateCurrentStepNamesAsync(requisitionDtos);
             return Ok(requisitionDtos);
@@ -633,19 +1206,7 @@ public class PurchaseRequisitionsController : ControllerBase
         {
             var requisitions = await _purchaseRequisitionRepository.GetRequisitionsByDepartment(department);
 
-            var requisitionDtos = requisitions.Select(r => new PurchaseRequisitionSummaryDto
-            {
-                Id = r.Id,
-                RequisitionNumber = r.RequisitionNumber,
-                RequisitionDate = r.RequisitionDate,
-                RequestedByName = r.RequestedBy?.FirstName + " " + r.RequestedBy?.LastName,
-                RequiredDate = r.RequiredDate,
-                Status = r.Status,
-                Priority = r.Priority,
-                Department = r.Department,
-                TotalAmount = r.TotalAmount,
-                ItemCount = r.Items?.Count ?? 0
-            }).ToList();
+            var requisitionDtos = requisitions.Select(MapSummary).ToList();
 
             await PopulateCurrentStepNamesAsync(requisitionDtos);
             return Ok(requisitionDtos);
@@ -667,19 +1228,7 @@ public class PurchaseRequisitionsController : ControllerBase
         {
             var requisitions = await _purchaseRequisitionRepository.GetPendingApprovalRequisitions();
 
-            var requisitionDtos = requisitions.Select(r => new PurchaseRequisitionSummaryDto
-            {
-                Id = r.Id,
-                RequisitionNumber = r.RequisitionNumber,
-                RequisitionDate = r.RequisitionDate,
-                RequestedByName = r.RequestedBy?.FirstName + " " + r.RequestedBy?.LastName,
-                RequiredDate = r.RequiredDate,
-                Status = r.Status,
-                Priority = r.Priority,
-                Department = r.Department,
-                TotalAmount = r.TotalAmount,
-                ItemCount = r.Items?.Count ?? 0
-            }).ToList();
+            var requisitionDtos = requisitions.Select(MapSummary).ToList();
 
             await PopulateCurrentStepNamesAsync(requisitionDtos);
             return Ok(requisitionDtos);
@@ -903,6 +1452,20 @@ public class PurchaseRequisitionsController : ControllerBase
                 RfqNumber = rfq.RfqNumber
             });
         }
+        catch (ProcurementRequisitionSourcingBlockedException ex)
+        {
+            var problem = Problem(ex.Readiness.DecisionCode, ex.Message, 422);
+            problem.Extensions["readiness"] = ex.Readiness;
+            return UnprocessableEntity(problem);
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(403, Problem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(Problem(ex.Code, ex.Message, 422));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -915,6 +1478,28 @@ public class PurchaseRequisitionsController : ControllerBase
     }
 
     #region Private Helper Methods
+
+    private static PurchaseRequisitionSummaryDto MapSummary(PurchaseRequisition requisition) => new()
+    {
+        Id = requisition.Id,
+        RequisitionNumber = requisition.RequisitionNumber,
+        RequisitionDate = requisition.RequisitionDate,
+        RequestedByName = requisition.RequestedBy?.FirstName + " " + requisition.RequestedBy?.LastName,
+        RequiredDate = requisition.RequiredDate,
+        Status = requisition.Status,
+        Priority = requisition.Priority,
+        Department = requisition.Department,
+        TotalAmount = requisition.TotalAmount,
+        ItemCount = requisition.Items?.Count ?? 0,
+        SourcePlanNumber = requisition.SourcePlanNumber,
+        SourcePlanItemDescription = requisition.SourcePlanItemDescription,
+        BudgetCode = requisition.BudgetCode,
+        ProcurementCategory = requisition.ProcurementCategory,
+        ProjectCode = requisition.ProjectCode,
+        RequisitionType = requisition.RequisitionType,
+        SpecificationTemplateReference = SpecificationReference(requisition),
+        ApprovedExceptionReference = requisition.ExceptionApprovalReference
+    };
 
     private async Task<PurchaseRequisitionDetailDto> GetPurchaseRequisitionDetailDto(Guid requisitionId)
     {
@@ -944,6 +1529,16 @@ public class PurchaseRequisitionsController : ControllerBase
             RejectionReason = requisition.RejectionReason,
             TotalAmount = requisition.TotalAmount,
             ItemCount = items.Count(),
+            SourcePlanNumber = requisition.SourcePlanNumber,
+            SourcePlanItemDescription = requisition.SourcePlanItemDescription,
+            BudgetCode = requisition.BudgetCode,
+            ProcurementCategory = requisition.ProcurementCategory,
+            ProjectCode = requisition.ProjectCode,
+            RequisitionType = requisition.RequisitionType,
+            SpecificationTemplateReference = SpecificationReference(requisition),
+            ApprovedExceptionReference = requisition.ExceptionApprovalReference,
+            Linkage = _linkageService.Map(requisition),
+            RowVersion = Convert.ToBase64String(requisition.RowVersion),
             Items = items.Select(item => new PurchaseRequisitionItemDto
             {
                 Id = item.Id,
@@ -966,6 +1561,88 @@ public class PurchaseRequisitionsController : ControllerBase
                 ItemName = item.InventoryItem?.Name
             }).ToList()
         };
+    }
+
+    private string CorrelationId => string.IsNullOrWhiteSpace(HttpContext?.TraceIdentifier)
+        ? Guid.NewGuid().ToString("N")
+        : HttpContext.TraceIdentifier;
+
+    private ProblemDetails Problem(string code, string detail, int status)
+    {
+        var problem = new ProblemDetails
+        {
+            Status = status,
+            Title = code,
+            Detail = detail,
+            Instance = HttpContext?.Request.Path
+        };
+        problem.Extensions["code"] = code;
+        problem.Extensions["correlationId"] = CorrelationId;
+        return problem;
+    }
+
+    private static string? ValidateDraftContract(CreatePurchaseRequisitionDto request)
+    {
+        if (request.Items is null || request.Items.Count == 0) return "At least one requisition item is required.";
+        if (request.Items.Any(item => string.IsNullOrWhiteSpace(item.ItemDescription))) return "Every requisition item requires a description.";
+        if (request.Items.Any(item => item.Quantity <= 0)) return "Every requisition item quantity must be greater than zero.";
+        if (request.Items.Any(item => item.EstimatedUnitPrice < 0)) return "Estimated unit prices cannot be negative.";
+        if (string.IsNullOrWhiteSpace(request.Priority)) return "Priority is required.";
+        return null;
+    }
+
+    private static bool TryDecodeRowVersion(string value, out byte[] rowVersion)
+    {
+        rowVersion = Array.Empty<byte>();
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        try
+        {
+            rowVersion = Convert.FromBase64String(value);
+            return rowVersion.Length > 0;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private static PurchaseRequisitionItem CreateItem(
+        Guid tenantId,
+        Guid requisitionId,
+        CreatePurchaseRequisitionItemDto itemDto)
+    {
+        var now = DateTime.UtcNow;
+        return new PurchaseRequisitionItem
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            RequisitionId = requisitionId,
+            InventoryItemId = itemDto.InventoryItemId,
+            ItemDescription = itemDto.ItemDescription.Trim(),
+            Quantity = itemDto.Quantity,
+            UnitOfMeasure = string.IsNullOrWhiteSpace(itemDto.UnitOfMeasure) ? "EA" : itemDto.UnitOfMeasure.Trim(),
+            EstimatedUnitPrice = itemDto.EstimatedUnitPrice,
+            LineTotal = itemDto.Quantity * itemDto.EstimatedUnitPrice,
+            RequiredDate = itemDto.RequiredDate,
+            PreferredBusinessPartnerId = itemDto.PreferredSupplierId,
+            Notes = TrimOrNull(itemDto.Notes, 1000),
+            Specifications = TrimOrNull(itemDto.Specifications, 1000),
+            Status = "Pending",
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+    }
+
+    private static string? SpecificationReference(PurchaseRequisition requisition) =>
+        string.IsNullOrWhiteSpace(requisition.SpecificationTemplateCode)
+            ? null
+            : $"{requisition.SpecificationTemplateCode}/v{requisition.SpecificationTemplateVersion}";
+
+    private static string? TrimOrNull(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var normalized = value.Trim();
+        return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
     }
 
     private async Task PopulateCurrentStepNamesAsync(IEnumerable<PurchaseRequisitionSummaryDto> requisitions)
