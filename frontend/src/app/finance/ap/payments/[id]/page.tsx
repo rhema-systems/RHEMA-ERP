@@ -141,7 +141,7 @@ export default function VendorPaymentDetailsPage() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
                         <div>
                             <p className="text-xs text-muted-foreground uppercase font-bold mb-2">Amount Paid</p>
-                            <p className="font-bold text-2xl">{formatCurrency(payment.totalAmount)}</p>
+                            <p className="font-bold text-2xl">{formatCurrency(payment.totalAmount, payment.currencyCode)}</p>
                         </div>
                         <div>
                             <p className="text-xs text-muted-foreground uppercase font-bold mb-2">Method</p>
@@ -150,18 +150,18 @@ export default function VendorPaymentDetailsPage() {
                         </div>
                         <div>
                             <p className="text-xs text-muted-foreground uppercase font-bold mb-2">Allocated</p>
-                            <p className="font-semibold text-green-600">{formatCurrency(payment.allocatedAmount)}</p>
+                            <p className="font-semibold text-green-600">{formatCurrency(payment.allocatedAmount, payment.currencyCode)}</p>
                         </div>
                         <div>
                             <p className="text-xs text-muted-foreground uppercase font-bold mb-2">WHT Withheld</p>
                             <p className={payment.withholdingTaxAmount > 0 ? 'font-semibold text-orange-600' : 'font-semibold text-muted-foreground'}>
-                                {payment.withholdingTaxAmount > 0 ? formatCurrency(payment.withholdingTaxAmount) : '-'}
+                                {payment.withholdingTaxAmount > 0 ? formatCurrency(payment.withholdingTaxAmount, payment.currencyCode) : '-'}
                             </p>
                         </div>
                         <div>
                             <p className="text-xs text-muted-foreground uppercase font-bold mb-2">Unallocated</p>
                             <p className={`font-semibold ${payment.unallocatedAmount > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
-                                {formatCurrency(payment.unallocatedAmount)}
+                                {formatCurrency(payment.unallocatedAmount, payment.currencyCode)}
                             </p>
                         </div>
                     </div>
@@ -186,13 +186,13 @@ export default function VendorPaymentDetailsPage() {
                                         {format(new Date(alloc.allocationDate), 'MMM dd, yyyy')}
                                     </div>
                                     <div className="col-span-2 text-right text-muted-foreground">
-                                        {alloc.discountAmount > 0 ? formatCurrency(alloc.discountAmount) : '-'}
+                                        {alloc.discountAmount > 0 ? formatCurrency(alloc.discountAmount, payment.currencyCode) : '-'}
                                     </div>
                                     <div className="col-span-2 text-right text-orange-600">
-                                        {alloc.withholdingTaxAmount > 0 ? formatCurrency(alloc.withholdingTaxAmount) : '-'}
+                                        {alloc.withholdingTaxAmount > 0 ? formatCurrency(alloc.withholdingTaxAmount, payment.currencyCode) : '-'}
                                     </div>
                                     <div className="col-span-2 text-right font-medium">
-                                        {formatCurrency(alloc.allocatedAmount)}
+                                        {formatCurrency(alloc.allocatedAmount, payment.currencyCode)}
                                     </div>
                                 </div>
                             ))}

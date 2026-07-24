@@ -1,6 +1,6 @@
 'use client';
 
-const DEFAULT_CURRENCY = 'USD';
+const DEFAULT_CURRENCY = 'GHS';
 const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
 
 export function normalizeCurrencyCode(currency?: string | null, fallback: string = DEFAULT_CURRENCY) {

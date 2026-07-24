@@ -257,8 +257,8 @@ export default function VendorInvoicesPage() {
                                                     {invoice.dueDate ? format(new Date(invoice.dueDate), 'MMM dd, yyyy') : '-'}
                                                 </span>
                                             </TableCell>
-                                            <TableCell className="text-right">{formatCurrency(invoice.totalAmount)}</TableCell>
-                                            <TableCell className="text-right font-medium">{formatCurrency(invoice.balanceAmount)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(invoice.totalAmount, invoice.currencyCode)}</TableCell>
+                                            <TableCell className="text-right font-medium">{formatCurrency(invoice.balanceAmount, invoice.currencyCode)}</TableCell>
                                             <TableCell>{getStatusBadge(invoice.status)}</TableCell>
                                             <TableCell>
                                                 <DropdownMenu>

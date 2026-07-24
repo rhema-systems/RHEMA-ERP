@@ -300,10 +300,7 @@ export default function NewInvoicePage() {
     };
 
     const formatAmountWithCurrency = (amount: number) => {
-        if (watchCurrencyCode === 'GHS') {
-            return formatCurrency(amount);
-        }
-        return `${watchCurrencyCode} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return formatCurrency(amount, watchCurrencyCode);
     };
 
     const formatPaymentTerm = (term: PaymentTermListDto) => {

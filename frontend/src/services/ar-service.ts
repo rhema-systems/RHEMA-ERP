@@ -152,6 +152,7 @@ class ArService {
         id: string;
         invoiceNumber: string;
         balanceAmount: number;
+        currencyCode: string;
         invoiceDate: string;
         dueDate?: string;
         earlyPaymentDiscountPercentage?: number;
@@ -163,6 +164,7 @@ class ArService {
             id: string;
             invoiceNumber: string;
             balanceAmount: number;
+            currencyCode: string;
             invoiceDate: string;
             dueDate?: string;
             earlyPaymentDiscountPercentage?: number;

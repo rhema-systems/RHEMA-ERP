@@ -22,8 +22,8 @@ import Link from 'next/link';
 const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
     {
         id: '1',
-        baseCurrencyCode: 'USD',
-        targetCurrencyCode: 'GHS',
+        baseCurrencyCode: 'GHS',
+        targetCurrencyCode: 'USD',
         rate: 12.5,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Daily',
@@ -34,8 +34,8 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
     },
     {
         id: '2',
-        baseCurrencyCode: 'GBP',
-        targetCurrencyCode: 'GHS',
+        baseCurrencyCode: 'GHS',
+        targetCurrencyCode: 'GBP',
         rate: 15.8,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Daily',
@@ -46,8 +46,8 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
     },
     {
         id: '3',
-        baseCurrencyCode: 'EUR',
-        targetCurrencyCode: 'GHS',
+        baseCurrencyCode: 'GHS',
+        targetCurrencyCode: 'EUR',
         rate: 13.6,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Daily',
@@ -58,8 +58,8 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
     },
     {
         id: '4',
-        baseCurrencyCode: 'USD',
-        targetCurrencyCode: 'GHS',
+        baseCurrencyCode: 'GHS',
+        targetCurrencyCode: 'USD',
         rate: 12.8,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Spot',
@@ -71,6 +71,19 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
 ];
 
 const MOCK_CURRENCIES = ['GHS', 'USD', 'EUR', 'GBP'];
+const EXCHANGE_RATE_TYPE_OPTIONS: Array<{ value: ExchangeRateType; label: string }> = [
+    { value: 'Daily', label: 'Daily' },
+    { value: 'Average', label: 'Average' },
+    { value: 'MonthEnd', label: 'Month End' },
+    { value: 'QuarterEnd', label: 'Quarter End' },
+    { value: 'YearEnd', label: 'Year End' },
+    { value: 'Budget', label: 'Budget' },
+    { value: 'Fixed', label: 'Fixed' },
+    { value: 'Spot', label: 'Spot' },
+];
+
+const formatRateType = (rateType: ExchangeRateType | string) =>
+    EXCHANGE_RATE_TYPE_OPTIONS.find((option) => option.value === rateType)?.label ?? rateType;
 
 export default function ExchangeRatesPage() {
     const { toast } = useToast();
@@ -89,8 +102,8 @@ export default function ExchangeRatesPage() {
         rateType: 'all',
     });
     const [formData, setFormData] = useState({
-        baseCurrencyCode: 'USD',
-        targetCurrencyCode: 'GHS',
+        baseCurrencyCode: 'GHS',
+        targetCurrencyCode: 'USD',
         rate: '',
         rateType: 'Daily' as ExchangeRateType,
         effectiveDate: new Date().toISOString().split('T')[0],
@@ -163,8 +176,8 @@ export default function ExchangeRatesPage() {
 
     const resetForm = () => {
         setFormData({
-            baseCurrencyCode: 'USD',
-            targetCurrencyCode: 'GHS',
+            baseCurrencyCode: 'GHS',
+            targetCurrencyCode: 'USD',
             rate: '',
             effectiveDate: new Date().toISOString().split('T')[0],
             rateType: 'Daily',
@@ -407,11 +420,11 @@ export default function ExchangeRatesPage() {
                                 <div className="text-sm text-muted-foreground">
                                     <p className="font-semibold mb-2">Required columns:</p>
                                     <ul className="list-disc list-inside space-y-1">
-                                        <li>baseCurrencyCode (e.g., USD)</li>
-                                        <li>targetCurrencyCode (e.g., GHS)</li>
+                                        <li>baseCurrencyCode (e.g., GHS)</li>
+                                        <li>targetCurrencyCode (e.g., USD)</li>
                                         <li>rate (e.g., 12.5000)</li>
                                         <li>effectiveDate (YYYY-MM-DD)</li>
-                                        <li>rateType (Daily/Spot/Official/Market/Custom)</li>
+                                        <li>rateType (Daily/Average/MonthEnd/QuarterEnd/YearEnd/Budget/Fixed/Spot)</li>
                                         <li>rateSource (e.g., Manual, BankFeed, Bank of Ghana)</li>
                                     </ul>
                                 </div>
@@ -464,7 +477,7 @@ export default function ExchangeRatesPage() {
                             <div className="space-y-4 py-4">
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
-                                        <Label htmlFor="baseCurrencyCode">From Currency</Label>
+                                        <Label htmlFor="baseCurrencyCode">Base Currency</Label>
                                         <Select
                                             value={formData.baseCurrencyCode}
                                             onValueChange={(value) => setFormData({ ...formData, baseCurrencyCode: value })}
@@ -473,14 +486,12 @@ export default function ExchangeRatesPage() {
                                                 <SelectValue placeholder="Select currency" />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="USD">USD - US Dollar</SelectItem>
-                                                <SelectItem value="EUR">EUR - Euro</SelectItem>
-                                                <SelectItem value="GBP">GBP - British Pound</SelectItem>
+                                                <SelectItem value="GHS">GHS - Ghanaian Cedi</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
                                     <div className="space-y-2">
-                                        <Label htmlFor="targetCurrencyCode">To Currency</Label>
+                                        <Label htmlFor="targetCurrencyCode">Target Currency</Label>
                                         <Select
                                             value={formData.targetCurrencyCode}
                                             onValueChange={(value) =>
@@ -491,7 +502,9 @@ export default function ExchangeRatesPage() {
                                                 <SelectValue placeholder="Select currency" />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="GHS">GHS - Ghanaian Cedi</SelectItem>
+                                                <SelectItem value="USD">USD - US Dollar</SelectItem>
+                                                <SelectItem value="EUR">EUR - Euro</SelectItem>
+                                                <SelectItem value="GBP">GBP - British Pound</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -526,11 +539,11 @@ export default function ExchangeRatesPage() {
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="Daily">Daily</SelectItem>
-                                            <SelectItem value="Spot">Spot</SelectItem>
-                                            <SelectItem value="Official">Official</SelectItem>
-                                            <SelectItem value="Market">Market</SelectItem>
-                                            <SelectItem value="Custom">Custom</SelectItem>
+                                            {EXCHANGE_RATE_TYPE_OPTIONS.map((option) => (
+                                                <SelectItem key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
                                 </div>
@@ -583,7 +596,7 @@ export default function ExchangeRatesPage() {
                 <CardContent>
                     <div className="grid grid-cols-3 gap-4">
                         <div className="space-y-2">
-                            <Label htmlFor="filterFrom">From Currency</Label>
+                            <Label htmlFor="filterFrom">Base Currency</Label>
                             <Select
                                 value={filters.fromCurrency}
                                 onValueChange={(value) => setFilters({ ...filters, fromCurrency: value })}
@@ -600,7 +613,7 @@ export default function ExchangeRatesPage() {
                             </Select>
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="filterTo">To Currency</Label>
+                            <Label htmlFor="filterTo">Target Currency</Label>
                             <Select
                                 value={filters.toCurrency}
                                 onValueChange={(value) => setFilters({ ...filters, toCurrency: value })}
@@ -627,11 +640,11 @@ export default function ExchangeRatesPage() {
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All Types</SelectItem>
-                                    <SelectItem value="Daily">Daily</SelectItem>
-                                    <SelectItem value="Spot">Spot</SelectItem>
-                                    <SelectItem value="Official">Official</SelectItem>
-                                    <SelectItem value="Market">Market</SelectItem>
-                                    <SelectItem value="Custom">Custom</SelectItem>
+                                    {EXCHANGE_RATE_TYPE_OPTIONS.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                            {option.label}
+                                        </SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>
@@ -668,7 +681,7 @@ export default function ExchangeRatesPage() {
                                         <td className="p-4">{formatDate(rate.effectiveDate)}</td>
                                         <td className="p-4">
                                             <Badge variant={rate.rateType === 'Daily' ? 'default' : 'secondary'}>
-                                                {rate.rateType}
+                                                {formatRateType(rate.rateType)}
                                             </Badge>
                                         </td>
                                         <td className="p-4 text-sm text-muted-foreground">{rate.rateSource}</td>
@@ -693,11 +706,11 @@ export default function ExchangeRatesPage() {
                                                     <div className="space-y-4 py-4">
                                                         <div className="grid grid-cols-2 gap-4">
                                                             <div className="space-y-2">
-                                                                <Label>From Currency</Label>
+                                                                <Label>Base Currency</Label>
                                                                 <Input value={formData.baseCurrencyCode} disabled />
                                                             </div>
                                                             <div className="space-y-2">
-                                                                <Label>To Currency</Label>
+                                                                <Label>Target Currency</Label>
                                                                 <Input value={formData.targetCurrencyCode} disabled />
                                                             </div>
                                                         </div>
@@ -724,15 +737,17 @@ export default function ExchangeRatesPage() {
                                                             <Label htmlFor="edit-rateType">Rate Type</Label>
                                                             <Select
                                                                 value={formData.rateType}
-                                                                onValueChange={(value: any) => setFormData({ ...formData, rateType: value })}
+                                                                onValueChange={(value: ExchangeRateType) => setFormData({ ...formData, rateType: value })}
                                                             >
                                                                 <SelectTrigger id="edit-rateType">
                                                                     <SelectValue />
                                                                 </SelectTrigger>
                                                                 <SelectContent>
-                                                                    <SelectItem value="Official">Official</SelectItem>
-                                                                    <SelectItem value="Market">Market</SelectItem>
-                                                                    <SelectItem value="Custom">Custom</SelectItem>
+                                                                    {EXCHANGE_RATE_TYPE_OPTIONS.map((option) => (
+                                                                        <SelectItem key={option.value} value={option.value}>
+                                                                            {option.label}
+                                                                        </SelectItem>
+                                                                    ))}
                                                                 </SelectContent>
                                                             </Select>
                                                         </div>

@@ -255,8 +255,8 @@ export default function VendorInvoiceDetailsPage() {
                                     {item.inventoryItemId && <p className="text-xs text-muted-foreground">Item ID: {item.inventoryItemId}</p>}
                                 </div>
                                 <div className="col-span-2 text-right">{item.quantity} {item.unit}</div>
-                                <div className="col-span-2 text-right">{formatCurrency(item.unitPrice)}</div>
-                                <div className="col-span-2 text-right font-medium">{formatCurrency(item.lineTotal || (item.quantity * item.unitPrice))}</div>
+                                <div className="col-span-2 text-right">{formatCurrency(item.unitPrice, invoice.currencyCode)}</div>
+                                <div className="col-span-2 text-right font-medium">{formatCurrency(item.lineTotal || (item.quantity * item.unitPrice), invoice.currencyCode)}</div>
                             </div>
                         ))}
                         {(!invoice.lineItems || invoice.lineItems.length === 0) && (
@@ -271,26 +271,26 @@ export default function VendorInvoiceDetailsPage() {
                         <div className="w-1/3 space-y-2">
                             <div className="flex justify-between text-sm">
                                 <span className="text-muted-foreground">Subtotal</span>
-                                <span>{formatCurrency(invoice.totalAmount - (invoice.taxAmount || 0))}</span>
+                                <span>{formatCurrency(invoice.totalAmount - (invoice.taxAmount || 0), invoice.currencyCode)}</span>
                             </div>
                             {(invoice.taxAmount || 0) > 0 && (
                                 <div className="flex justify-between text-sm">
                                     <span className="text-muted-foreground">Tax</span>
-                                    <span>{formatCurrency(invoice.taxAmount || 0)}</span>
+                                    <span>{formatCurrency(invoice.taxAmount || 0, invoice.currencyCode)}</span>
                                 </div>
                             )}
                             <Separator className="my-2" />
                             <div className="flex justify-between font-bold text-lg">
                                 <span>Total</span>
-                                <span>{formatCurrency(invoice.totalAmount)}</span>
+                                <span>{formatCurrency(invoice.totalAmount, invoice.currencyCode)}</span>
                             </div>
                             <div className="flex justify-between text-sm text-muted-foreground pt-1">
                                 <span>Amount Paid</span>
-                                <span>-{formatCurrency(invoice.paidAmount)}</span>
+                                <span>-{formatCurrency(invoice.paidAmount, invoice.currencyCode)}</span>
                             </div>
                             <div className="flex justify-between font-bold text-lg pt-2 border-t">
                                 <span>Balance Due</span>
-                                <span className={invoice.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>{formatCurrency(invoice.balanceAmount)}</span>
+                                <span className={invoice.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>{formatCurrency(invoice.balanceAmount, invoice.currencyCode)}</span>
                             </div>
                         </div>
                     </div>

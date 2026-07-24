@@ -34,9 +34,6 @@ const EXCHANGE_RATE_RATE_TYPES: ExchangeRateType[] = [
     'Budget',
     'Fixed',
     'Spot',
-    'Official',
-    'Market',
-    'Custom',
 ];
 
 type ExchangeRateImportColumn =
@@ -188,8 +185,8 @@ const normalizeOptionalBoolean = (
 
 export const buildExchangeRateTemplateCsv = (templateDate = new Date().toISOString().split('T')[0]) => {
     const templateRows = [
-        ['USD', 'GHS', '12.5000', templateDate, 'Daily', 'Manual', 'Bank of Ghana', `BOG-${templateDate}`, '', 'TRUE', 'Approved'],
-        ['EUR', 'GHS', '13.6000', templateDate, 'Daily', 'Manual', 'Bank of Ghana', `BOG-${templateDate}`, '', 'TRUE', 'Approved'],
+        ['GHS', 'USD', '12.5000', templateDate, 'Daily', 'Manual', 'Bank of Ghana', `BOG-${templateDate}`, '', 'TRUE', 'Approved'],
+        ['GHS', 'EUR', '13.6000', templateDate, 'MonthEnd', 'Manual', 'Bank of Ghana', `BOG-${templateDate}`, '', 'TRUE', 'Approved'],
     ];
 
     return [

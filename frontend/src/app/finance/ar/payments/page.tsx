@@ -166,10 +166,10 @@ export default function ReceiptsPage() {
                                             <TableCell>{format(new Date(payment.paymentDate), 'MMM dd, yyyy')}</TableCell>
                                             <TableCell>{payment.customerName}</TableCell>
                                             <TableCell>{payment.paymentMethod}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(payment.totalAmount)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(payment.totalAmount, payment.currencyCode)}</TableCell>
                                             <TableCell className="text-right">
                                                 {payment.unallocatedAmount > 0 ? (
-                                                    <span className="text-amber-600 font-medium">{formatCurrency(payment.unallocatedAmount)}</span>
+                                                    <span className="text-amber-600 font-medium">{formatCurrency(payment.unallocatedAmount, payment.currencyCode)}</span>
                                                 ) : (
                                                     <span className="text-muted-foreground">-</span>
                                                 )}

@@ -214,7 +214,7 @@ export default function CustomerDetailsPage() {
                                                 <p className="text-sm text-muted-foreground">Due: {inv.dueDate ? format(new Date(inv.dueDate), 'MMM dd, yyyy') : '-'}</p>
                                             </div>
                                             <div className="text-right">
-                                                <p className="font-bold">{formatCurrency(inv.balanceAmount)}</p>
+                                                <p className="font-bold">{formatCurrency(inv.balanceAmount, inv.currencyCode)}</p>
                                                 {inv.dueDate && new Date(inv.dueDate) < new Date() && (
                                                     <Badge variant="destructive" className="mt-1 text-xs">Overdue</Badge>
                                                 )}

@@ -383,10 +383,7 @@ export default function CreateVendorInvoicePage() {
     const totalAmount = taxEstimate.grandTotal;
 
     const formatAmountWithCurrency = (amount: number) => {
-        if (watchCurrencyCode === 'GHS') {
-            return formatCurrency(amount);
-        }
-        return `${watchCurrencyCode} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return formatCurrency(amount, watchCurrencyCode);
     };
 
     const onSupplierChange = async (supplierId: string) => {
@@ -949,7 +946,7 @@ export default function CreateVendorInvoicePage() {
                                                                                             <span className="font-bold text-sm">{item.itemCode}</span>
                                                                                             <div className="flex justify-between items-center w-full">
                                                                                                 <span className="text-xs text-muted-foreground mr-2">{item.name}</span>
-                                                                                                <span className="text-xs badge bg-muted px-1 rounded">{formatCurrency(item.averageCost || 0)}</span>
+                                                                                                <span className="text-xs badge bg-muted px-1 rounded">{formatCurrency(item.averageCost || 0, watchCurrencyCode)}</span>
                                                                                             </div>
                                                                                         </div>
                                                                                     </div>
