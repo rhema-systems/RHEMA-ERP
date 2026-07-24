@@ -71,6 +71,36 @@ public class WorkflowEngine : IWorkflowEngine
         var definition = await _workflowDefinitionRepository.GetByNameAsync(workflowName, tenantId)
             ?? throw new InvalidOperationException($"Workflow definition '{workflowName}' not found");
 
+        return await StartWorkflowAsync(definition, entityId, initiatedById, dataContext);
+    }
+
+    public async Task<WorkflowInstance> StartWorkflowAsync(
+        Guid workflowDefinitionId,
+        Guid entityId,
+        Guid initiatedById,
+        object? dataContext = null)
+    {
+        _logger.LogInformation(
+            "Starting workflow definition {WorkflowDefinitionId} for entity {EntityId}",
+            workflowDefinitionId,
+            entityId);
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var definition = await _workflowDefinitionRepository.GetWithDetailsAsync(workflowDefinitionId)
+            ?? throw new InvalidOperationException($"Workflow definition '{workflowDefinitionId}' not found");
+        if (definition.TenantId != tenantId)
+            throw new InvalidOperationException("Workflow definition does not belong to the current tenant");
+
+        return await StartWorkflowAsync(definition, entityId, initiatedById, dataContext);
+    }
+
+    private async Task<WorkflowInstance> StartWorkflowAsync(
+        WorkflowDefinition definition,
+        Guid entityId,
+        Guid initiatedById,
+        object? dataContext)
+    {
+        var workflowName = definition.Name;
+
         if (!WorkflowDefinitionLifecyclePolicy.IsRuntimeEligible(definition))
         {
             throw new InvalidOperationException($"Workflow definition '{workflowName}' is not published and active");

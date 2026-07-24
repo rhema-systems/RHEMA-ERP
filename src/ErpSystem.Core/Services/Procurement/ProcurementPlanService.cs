@@ -1405,6 +1405,8 @@ public class ProcurementPlanService : IProcurementPlanService
         // Create tender from plan item
         var createTenderDto = new CreateTenderDto
         {
+            SourcePurchaseRequisitionId = dto.PurchaseRequisitionId,
+            SourceProcurementPlanItemId = dto.PlanItemId,
             Title = dto.TenderTitle,
             Description = dto.TenderDescription ?? planItem.Specifications,
             TenderType = dto.TenderType,
@@ -1628,6 +1630,7 @@ public class ProcurementPlanService : IProcurementPlanService
         var rfqDto = new ConvertPlanItemToTenderDto
         {
             PlanItemId = dto.PlanItemId,
+            PurchaseRequisitionId = dto.PurchaseRequisitionId,
             TenderTitle = dto.TenderTitle,
             TenderDescription = dto.TenderDescription,
             TenderType = "RFQ", // Force RFQ type

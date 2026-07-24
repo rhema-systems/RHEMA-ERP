@@ -19,6 +19,8 @@ public class TenderEvaluationService : ITenderEvaluationService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TenderEvaluationService> _logger;
     private readonly IAppEventBus _appEventBus;
+    private readonly IProcurementTenderControlService _tenderControlService;
+    private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
 
     public TenderEvaluationService(
         ITenderEvaluationRepository evaluationRepository,
@@ -30,6 +32,8 @@ public class TenderEvaluationService : ITenderEvaluationService
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         IAppEventBus appEventBus,
+        IProcurementTenderControlService tenderControlService,
+        IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
         ILogger<TenderEvaluationService> logger)
     {
         _evaluationRepository = evaluationRepository;
@@ -41,6 +45,8 @@ public class TenderEvaluationService : ITenderEvaluationService
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _appEventBus = appEventBus;
+        _tenderControlService = tenderControlService;
+        _exceptionalSourcingControlService = exceptionalSourcingControlService;
         _logger = logger;
     }
 
@@ -116,6 +122,7 @@ public class TenderEvaluationService : ITenderEvaluationService
         {
             var bid = await _bidRepository.GetByIdAsync(dto.TenderBidId)
                 ?? throw new InvalidOperationException($"Bid with ID {dto.TenderBidId} not found");
+            await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
 
             // Get evaluator assignment for current user
             var evaluators = await _evaluatorRepository.GetByUserIdAsync(_currentUserProvider.UserId);
@@ -209,6 +216,7 @@ public class TenderEvaluationService : ITenderEvaluationService
         {
             var evaluation = await _evaluationRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Evaluation with ID {id} not found");
+            await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
 
             if (evaluation.Status == "Submitted")
             {
@@ -268,6 +276,7 @@ public class TenderEvaluationService : ITenderEvaluationService
         {
             var evaluation = await _evaluationRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Evaluation with ID {id} not found");
+            await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
 
             if (evaluation.Status == "Submitted")
             {
@@ -505,6 +514,8 @@ public class TenderEvaluationService : ITenderEvaluationService
         try
         {
             var evaluation = await _evaluationRepository.GetByIdAsync(id);
+            if (evaluation != null)
+                await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
             if (evaluation != null && evaluation.Status != "Submitted")
             {
                 await _evaluationRepository.DeleteAsync(id);
@@ -935,6 +946,7 @@ public class TenderEvaluationService : ITenderEvaluationService
     {
         try
         {
+            await EnsureLegacyEvaluationAllowedAsync(tenderId);
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
 
@@ -1207,5 +1219,24 @@ public class TenderEvaluationService : ITenderEvaluationService
             _logger.LogError(ex, "Error getting QCBS evaluation results for tender {TenderId}", tenderId);
             throw;
         }
+    }
+
+    private async Task EnsureLegacyEvaluationAllowedForBidAsync(Guid bidId)
+    {
+        var bid = await _bidRepository.GetByIdAsync(bidId)
+            ?? throw new InvalidOperationException($"Bid with ID {bidId} not found");
+        await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
+    }
+
+    private async Task EnsureLegacyEvaluationAllowedAsync(Guid tenderId)
+    {
+        if (await _tenderControlService.IsNctOrIctAsync(tenderId))
+            throw new ProcurementTenderControlConflictException(
+                "TENDER_STATUTORY_EVALUATION_REQUIRED",
+                "NCT/ICT technical and financial evaluations must use the signed statutory control.");
+        if (await _exceptionalSourcingControlService.IsExceptionalAsync(tenderId))
+            throw new ProcurementExceptionalSourcingConflictException(
+                "EXCEPTIONAL_RECOMMENDATION_CONTROL_REQUIRED",
+                "Restricted and single-source recommendations must follow approved supplier identity and completed negotiation in the dedicated control.");
     }
 }

@@ -15,6 +15,7 @@ namespace ErpSystem.Api.Controllers.Procurement;
 public class RfqsController : ControllerBase
 {
     private readonly IRfqService _rfqService;
+    private readonly IProcurementRfqControlService _rfqControlService;
     private readonly IRfqInvitationDocumentService _rfqInvitationDocumentService;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly IBusinessPartnerUserRepository _businessPartnerUserRepository;
@@ -23,6 +24,7 @@ public class RfqsController : ControllerBase
 
     public RfqsController(
         IRfqService rfqService,
+        IProcurementRfqControlService rfqControlService,
         IRfqInvitationDocumentService rfqInvitationDocumentService,
         IBusinessPartnerRepository businessPartnerRepository,
         IBusinessPartnerUserRepository businessPartnerUserRepository,
@@ -30,6 +32,7 @@ public class RfqsController : ControllerBase
         ILogger<RfqsController> logger)
     {
         _rfqService = rfqService;
+        _rfqControlService = rfqControlService;
         _rfqInvitationDocumentService = rfqInvitationDocumentService;
         _businessPartnerRepository = businessPartnerRepository;
         _businessPartnerUserRepository = businessPartnerUserRepository;
@@ -42,7 +45,7 @@ public class RfqsController : ControllerBase
     // -----------------------------
 
     [HttpGet]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT,TDC_EVALUATOR,TDC_OBSERVER,TDC_INTERNAL_AUDIT")]
     public async Task<ActionResult<PagedResult<RfqDto>>> GetRfqs(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
@@ -63,7 +66,7 @@ public class RfqsController : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT,TDC_EVALUATOR,TDC_OBSERVER,TDC_INTERNAL_AUDIT")]
     public async Task<ActionResult<RfqDetailDto>> GetRfq(Guid id)
     {
         try
@@ -131,6 +134,22 @@ public class RfqsController : ControllerBase
             var result = await _rfqService.CreatePurchaseOrdersFromAwardAsync(id, dto);
             return Ok(result);
         }
+        catch (ProcurementRfqControlAuthorizationException ex)
+        {
+            return StatusCode(403, ControlProblem("RFQ_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRfqControlNotFoundException ex)
+        {
+            return NotFound(ControlProblem(ex.Code, ex.Message, 404));
+        }
+        catch (ProcurementRfqControlConflictException ex)
+        {
+            return Conflict(ControlProblem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementRfqControlValidationException ex)
+        {
+            return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -151,6 +170,30 @@ public class RfqsController : ControllerBase
             await _rfqService.SendRfqAsync(id, dto);
             return Ok(new { success = true, message = "RFQ sent" });
         }
+        catch (ProcurementRequisitionSourcingBlockedException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Readiness.DecisionCode, ex.Message, ex.Readiness));
+        }
+        catch (ProcurementRequisitionSourcingValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementRequisitionSourcingAuthorizationException ex)
+        {
+            return StatusCode(403, SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
+        }
+        catch (ProcurementRfqControlAuthorizationException ex)
+        {
+            return StatusCode(403, ControlProblem("RFQ_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRfqControlConflictException ex)
+        {
+            return Conflict(ControlProblem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementRfqControlValidationException ex)
+        {
+            return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -161,6 +204,35 @@ public class RfqsController : ControllerBase
             return StatusCode(500, "An error occurred while sending the RFQ");
         }
     }
+
+    [HttpGet("{id:guid}/controls")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT,TDC_EVALUATOR,TDC_OBSERVER,TDC_INTERNAL_AUDIT")]
+    public Task<ActionResult<ProcurementRfqControlDto>> GetControls(Guid id) =>
+        ExecuteControlAsync(() => _rfqControlService.GetAsync(id));
+
+    [HttpPost("{id:guid}/opening-register")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager,TDC_PROCUREMENT_OFFICER,TDC_SENIOR_PROCUREMENT_OFFICER,TDC_HEAD_OF_PROCUREMENT")]
+    public Task<ActionResult<ProcurementRfqOpeningRegisterDto>> CompleteOpening(
+        Guid id, [FromBody] CompleteProcurementRfqOpeningRequest request) =>
+        ExecuteControlAsync(() => _rfqControlService.CompleteOpeningAsync(id, request, HttpContext.TraceIdentifier));
+
+    [HttpPut("{id:guid}/evaluation")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,TDC_EVALUATOR")]
+    public Task<ActionResult<ProcurementRfqEvaluationDto>> SaveEvaluation(
+        Guid id, [FromBody] SaveProcurementRfqEvaluationRequest request) =>
+        ExecuteControlAsync(() => _rfqControlService.SaveEvaluationAsync(id, request, HttpContext.TraceIdentifier));
+
+    [HttpPost("{id:guid}/evaluation/submit")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,TDC_EVALUATOR")]
+    public Task<ActionResult<ProcurementRfqEvaluationDto>> SubmitEvaluation(
+        Guid id, [FromBody] SubmitProcurementRfqEvaluationRequest request) =>
+        ExecuteControlAsync(() => _rfqControlService.SubmitEvaluationAsync(id, request, HttpContext.TraceIdentifier));
+
+    [HttpPost("{id:guid}/evaluation/decision")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin,TDC_HEAD_OF_PROCUREMENT,TDC_ETC_MEMBER,TDC_CENTRAL_REVIEW_MEMBER,TDC_BOARD_APPROVER,TDC_MANAGING_DIRECTOR")]
+    public Task<ActionResult<ProcurementRfqEvaluationDto>> DecideEvaluation(
+        Guid id, [FromBody] DecideProcurementRfqEvaluationRequest request) =>
+        ExecuteControlAsync(() => _rfqControlService.DecideEvaluationAsync(id, request, HttpContext.TraceIdentifier));
 
     // -----------------------------
     // Supplier portal endpoints
@@ -239,6 +311,22 @@ public class RfqsController : ControllerBase
 
             return Ok(quote);
         }
+        catch (ProcurementRfqControlAuthorizationException ex)
+        {
+            return StatusCode(403, ControlProblem("RFQ_CONTROL_FORBIDDEN", ex.Message, 403));
+        }
+        catch (ProcurementRfqControlNotFoundException ex)
+        {
+            return NotFound(ControlProblem(ex.Code, ex.Message, 404));
+        }
+        catch (ProcurementRfqControlConflictException ex)
+        {
+            return Conflict(ControlProblem(ex.Code, ex.Message, 409));
+        }
+        catch (ProcurementRfqControlValidationException ex)
+        {
+            return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -262,6 +350,37 @@ public class RfqsController : ControllerBase
         return message.Contains("IX_RequestForQuotationQuoteItems_TenantId_QuoteId_RfqItemId", StringComparison.OrdinalIgnoreCase)
             || (message.Contains("RequestForQuotationQuoteItems", StringComparison.OrdinalIgnoreCase)
                 && message.Contains("Cannot insert duplicate key row", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private ProblemDetails SourcingProblem(
+        string code,
+        string detail,
+        PurchaseRequisitionSourcingReadinessDto? readiness = null,
+        int status = 422)
+    {
+        var problem = new ProblemDetails { Status = status, Title = code, Detail = detail, Instance = HttpContext.Request.Path };
+        problem.Extensions["code"] = code;
+        problem.Extensions["correlationId"] = HttpContext.TraceIdentifier;
+        if (readiness is not null) problem.Extensions["readiness"] = readiness;
+        return problem;
+    }
+
+    private async Task<ActionResult<T>> ExecuteControlAsync<T>(Func<Task<T>> action)
+    {
+        try { return Ok(await action()); }
+        catch (ProcurementRfqControlAuthorizationException ex) { return StatusCode(403, ControlProblem("RFQ_CONTROL_FORBIDDEN", ex.Message, 403)); }
+        catch (ProcurementRfqControlNotFoundException ex) { return NotFound(ControlProblem(ex.Code, ex.Message, 404)); }
+        catch (ProcurementRfqControlConflictException ex) { return Conflict(ControlProblem(ex.Code, ex.Message, 409)); }
+        catch (ProcurementRfqControlValidationException ex) { return UnprocessableEntity(ControlProblem(ex.Code, ex.Message, 422)); }
+        catch (DbUpdateConcurrencyException) { return Conflict(ControlProblem("RFQ_CONTROL_VERSION_CONFLICT", "The RFQ control record changed. Reload before continuing.", 409)); }
+    }
+
+    private ProblemDetails ControlProblem(string code, string detail, int status)
+    {
+        var problem = new ProblemDetails { Status = status, Title = code, Detail = detail, Instance = HttpContext.Request.Path };
+        problem.Extensions["code"] = code;
+        problem.Extensions["correlationId"] = HttpContext.TraceIdentifier;
+        return problem;
     }
 
     private async Task<Core.Entities.Procurement.BusinessPartner?> ResolveCurrentBusinessPartnerAsync()

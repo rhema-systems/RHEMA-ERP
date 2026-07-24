@@ -22,6 +22,8 @@ public class TenderAwardService : ITenderAwardService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TenderAwardService> _logger;
+    private readonly IProcurementTenderControlService _tenderControlService;
+    private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
 
     public TenderAwardService(
         ITenderAwardRepository awardRepository,
@@ -36,6 +38,8 @@ public class TenderAwardService : ITenderAwardService
         ITenderNegotiationRepository negotiationRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IProcurementTenderControlService tenderControlService,
+        IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
         ILogger<TenderAwardService> logger)
     {
         _awardRepository = awardRepository;
@@ -50,6 +54,8 @@ public class TenderAwardService : ITenderAwardService
         _negotiationRepository = negotiationRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _tenderControlService = tenderControlService;
+        _exceptionalSourcingControlService = exceptionalSourcingControlService;
         _logger = logger;
     }
 
@@ -221,6 +227,7 @@ public class TenderAwardService : ITenderAwardService
     {
         try
         {
+            await EnsureLegacyAwardAllowedAsync(tenderId);
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
 
@@ -310,6 +317,7 @@ public class TenderAwardService : ITenderAwardService
         {
             var award = await _awardRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Award with ID {id} not found");
+            await EnsureLegacyAwardAllowedAsync(award.TenderId);
 
             var bid = await _bidRepository.GetByIdAsync(dto.TenderBidId)
                 ?? throw new InvalidOperationException($"Bid with ID {dto.TenderBidId} not found");
@@ -344,6 +352,7 @@ public class TenderAwardService : ITenderAwardService
         {
             var award = await _awardRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Award with ID {id} not found");
+            await EnsureLegacyAwardAllowedAsync(award.TenderId);
 
             var bid = await _bidRepository.GetByIdAsync(award.TenderBidId);
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId);
@@ -403,6 +412,7 @@ public class TenderAwardService : ITenderAwardService
             // Get the tender award
             var award = await _awardRepository.GetByIdAsync(dto.TenderAwardId)
                 ?? throw new InvalidOperationException($"Tender award with ID {dto.TenderAwardId} not found");
+            await EnsureLegacyAwardAllowedAsync(award.TenderId);
 
             // Check if PO already exists for this award
             if (award.PurchaseOrderId.HasValue)
@@ -609,6 +619,18 @@ public class TenderAwardService : ITenderAwardService
             CreatedById = award.CreatedById,
             CreatedAt = award.CreatedAt
         };
+    }
+
+    private async Task EnsureLegacyAwardAllowedAsync(Guid tenderId)
+    {
+        if (await _tenderControlService.IsNctOrIctAsync(tenderId))
+            throw new ProcurementTenderControlConflictException(
+                "TENDER_STATUTORY_AWARD_REQUIRED",
+                "NCT/ICT awards and downstream PO handoff require the statutory approval, contract, and bidder-acceptance control.");
+        if (await _exceptionalSourcingControlService.IsExceptionalAsync(tenderId))
+            throw new ProcurementExceptionalSourcingConflictException(
+                "EXCEPTIONAL_AWARD_CONTROL_REQUIRED",
+                "Restricted and single-source awards require completed justification, authority approval, negotiation, filing, and statutory control.");
     }
 }
 

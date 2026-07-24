@@ -151,6 +151,12 @@ public class UnitOfWork : IUnitOfWork
 
     public void ClearChangeTracker() => _context.ChangeTracker.Clear();
 
+    public async Task<T> ExecuteInStrategyAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken = default)
+    {
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(operation);
+    }
+
     protected virtual void Dispose(bool disposing)
     {
         if (!_disposed && disposing)

@@ -320,6 +320,7 @@ export interface ProcurementPlanningReportDto {
 
 export interface ConvertPlanItemToTenderDto {
   planItemId: string;
+  purchaseRequisitionId: string;
   tenderTitle: string;
   tenderDescription?: string;
   tenderType: string;

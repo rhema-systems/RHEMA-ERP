@@ -61,4 +61,9 @@ public interface IUnitOfWork : IDisposable
     /// Detach all tracked entities from the change tracker (e.g. between bulk batches).
     /// </summary>
     void ClearChangeTracker();
+
+    /// <summary>
+    /// Execute a value-returning operation within an execution strategy (for SQL Server retry logic)
+    /// </summary>
+    Task<T> ExecuteInStrategyAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken = default);
 }

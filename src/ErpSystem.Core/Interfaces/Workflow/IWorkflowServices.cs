@@ -16,6 +16,12 @@ public interface IWorkflowEngine
         object? dataContext = null);
 
     /// <summary>
+    /// Starts a workflow from one exact immutable Published definition version.
+    /// </summary>
+    Task<WorkflowInstance> StartWorkflowAsync(Guid workflowDefinitionId, Guid entityId, Guid initiatedById,
+        object? dataContext = null);
+
+    /// <summary>
     /// Continues execution of a workflow instance
     /// </summary>
     Task<WorkflowExecutionResult> ExecuteNextStepAsync(Guid workflowInstanceId, Guid userId,

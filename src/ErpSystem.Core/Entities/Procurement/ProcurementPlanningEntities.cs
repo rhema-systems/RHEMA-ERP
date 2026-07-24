@@ -350,6 +350,10 @@ public class ProcurementBudget : TenantEntity
     public virtual ApplicationUser? ApprovedBy { get; set; }
     public virtual ICollection<ProcurementBudgetAllocation> Allocations { get; set; } = new List<ProcurementBudgetAllocation>();
     public virtual ICollection<ProcurementBudgetRevision> Revisions { get; set; } = new List<ProcurementBudgetRevision>();
+    public virtual ICollection<ProcurementBudgetCommitment> Commitments { get; set; } = new List<ProcurementBudgetCommitment>();
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 }
 
 /// <summary>

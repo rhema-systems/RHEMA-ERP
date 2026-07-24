@@ -14,6 +14,11 @@ public interface IWorkflowIntegrationService
     Task<WorkflowIntegrationResult> SubmitAsync(string entityType, Guid entityId);
 
     /// <summary>
+    /// Starts the approval workflow using one exact policy-selected Published definition version.
+    /// </summary>
+    Task<WorkflowIntegrationResult> SubmitAsync(string entityType, Guid entityId, Guid workflowDefinitionId);
+
+    /// <summary>
     /// Processes an approval action and returns a normalized outcome.
     /// userId must be the ApplicationUser.Id from the authenticated user, not an Employee.Id.
     /// </summary>
