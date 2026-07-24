@@ -362,6 +362,50 @@ public sealed class ControlledOpeningBalancePostingTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "Migration")]
+    public async Task MatchingNonTenantCurrencies_ShouldFailValidationBeforeApproval()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var request = CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id);
+        request.Lines = new[]
+        {
+            new CreateOpeningBalanceLineDto
+            {
+                AccountId = fixture.Cash.Id,
+                DebitAmount = 100m,
+                TransactionCurrencyCode = "USD",
+                FunctionalCurrencyCode = "USD"
+            },
+            new CreateOpeningBalanceLineDto
+            {
+                AccountId = fixture.Equity.Id,
+                CreditAmount = 100m,
+                TransactionCurrencyCode = "USD",
+                FunctionalCurrencyCode = "USD"
+            }
+        };
+
+        var batch = await service.CreateBatchAsync(request);
+        var validation = await service.ValidateBatchAsync(batch.Id);
+
+        validation.IsValid.Should().BeFalse();
+        validation.Errors.Should().Contain(error =>
+            error.Contains("must match the tenant functional currency 'GHS'", StringComparison.OrdinalIgnoreCase));
+        validation.Errors.Should().Contain(error =>
+            error.Contains("foreign-currency opening balances are not supported", StringComparison.OrdinalIgnoreCase));
+        Func<Task> submit = () => service.SubmitForApprovalAsync(batch.Id);
+        await submit.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*tenant functional currency*");
+        (await db.OpeningBalanceBatches.FindAsync(batch.Id))!.Status.Should().Be("Draft");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
     [Trait("Category", "Workflow")]
     public async Task RejectedOpeningBalanceBatch_ShouldNotPost()
     {

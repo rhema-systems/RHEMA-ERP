@@ -318,6 +318,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         var batch = await LoadBatchAsync(tenantId, batchId, cancellationToken);
         var errors = new List<string>();
         var warnings = new List<string>();
+        var tenantFunctionalCurrency = await GetFunctionalCurrencyAsync(tenantId, cancellationToken);
 
         if (batch.Lines.Count == 0)
         {
@@ -358,7 +359,13 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 errors.Add($"Line {line.LineNumber}: a line cannot contain both debit and credit amounts.");
             }
 
-            if (!string.Equals(line.TransactionCurrencyCode, line.FunctionalCurrencyCode, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(line.FunctionalCurrencyCode, tenantFunctionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(
+                    $"Line {line.LineNumber}: functional currency must match the tenant functional currency '{tenantFunctionalCurrency}'.");
+            }
+
+            if (!string.Equals(line.TransactionCurrencyCode, tenantFunctionalCurrency, StringComparison.OrdinalIgnoreCase))
             {
                 // This GL-only import records functional debit/credit amounts. It cannot safely
                 // reconstruct an original foreign amount for the posting-engine FX snapshot.
