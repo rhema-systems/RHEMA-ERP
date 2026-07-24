@@ -490,6 +490,8 @@ public sealed class EmployeePositionDataSeeder
                 Code = spec.Code,
                 Description = spec.Description,
                 OrganizationUnitId = orgUnit.Id,
+                // [HR-MODULE-PORT] OrganizationLevelId is also REQUIRED; take it from the resolved unit.
+                OrganizationLevelId = orgUnit.OrganizationLevelId,
                 StaffLevelId = staffLevel?.Id,
                 Level = spec.Level,
                 ExpectedHeadcount = spec.ExpectedHeadcount,

@@ -326,6 +326,10 @@ public class MaintenanceE2ETestSeeder
 
         await _context.SaveChangesAsync();
 
+        // [HR-MODULE-PORT] Positions require OrganizationUnitId + OrganizationLevelId; resolve a default
+        // org unit/level for the tenant so the position inserts below satisfy their FKs.
+        var (orgUnitId, orgLevelId) = await SeederOrgDefaults.EnsureDefaultUnitAsync(_context, _defaultTenantId);
+
         // Seed Positions
         if (!await _context.EmployeePositions.AnyAsync(p => p.Id == managerPosId))
         {
@@ -334,13 +338,10 @@ public class MaintenanceE2ETestSeeder
                 Id = managerPosId,
                 Title = "Manager",
                 Code = "MGR",
-                // [HR-MODULE-PORT] EmployeePosition no longer has `DepartmentId`. The HR module port
-                // (from HRApi) re-anchors positions to the organisation structure via the REQUIRED
-                // OrganizationUnitId + OrganizationLevelId instead of a department FK.
-                // ACTION NEEDED (Maintenance team): this seeder does not yet create OrganizationLevel/
-                // OrganizationUnit rows, so these positions will fail their FK at run time until an
-                // org unit/level is seeded and referenced here. Left unset deliberately rather than
-                // guessing the intended org structure.
+                // [HR-MODULE-PORT] Positions anchor to the org structure via the REQUIRED
+                // OrganizationUnitId + OrganizationLevelId (DepartmentId was removed).
+                OrganizationUnitId = orgUnitId,
+                OrganizationLevelId = orgLevelId,
                 Level = 5,
                 IsActive = true,
                 TenantId = _defaultTenantId,
@@ -356,13 +357,10 @@ public class MaintenanceE2ETestSeeder
                 Id = supervisorPosId,
                 Title = "Supervisor",
                 Code = "SUP",
-                // [HR-MODULE-PORT] EmployeePosition no longer has `DepartmentId`. The HR module port
-                // (from HRApi) re-anchors positions to the organisation structure via the REQUIRED
-                // OrganizationUnitId + OrganizationLevelId instead of a department FK.
-                // ACTION NEEDED (Maintenance team): this seeder does not yet create OrganizationLevel/
-                // OrganizationUnit rows, so these positions will fail their FK at run time until an
-                // org unit/level is seeded and referenced here. Left unset deliberately rather than
-                // guessing the intended org structure.
+                // [HR-MODULE-PORT] Positions anchor to the org structure via the REQUIRED
+                // OrganizationUnitId + OrganizationLevelId (DepartmentId was removed).
+                OrganizationUnitId = orgUnitId,
+                OrganizationLevelId = orgLevelId,
                 Level = 4,
                 IsActive = true,
                 TenantId = _defaultTenantId,
@@ -378,13 +376,10 @@ public class MaintenanceE2ETestSeeder
                 Id = technicianPosId,
                 Title = "Technician",
                 Code = "TECH",
-                // [HR-MODULE-PORT] EmployeePosition no longer has `DepartmentId`. The HR module port
-                // (from HRApi) re-anchors positions to the organisation structure via the REQUIRED
-                // OrganizationUnitId + OrganizationLevelId instead of a department FK.
-                // ACTION NEEDED (Maintenance team): this seeder does not yet create OrganizationLevel/
-                // OrganizationUnit rows, so these positions will fail their FK at run time until an
-                // org unit/level is seeded and referenced here. Left unset deliberately rather than
-                // guessing the intended org structure.
+                // [HR-MODULE-PORT] Positions anchor to the org structure via the REQUIRED
+                // OrganizationUnitId + OrganizationLevelId (DepartmentId was removed).
+                OrganizationUnitId = orgUnitId,
+                OrganizationLevelId = orgLevelId,
                 Level = 2,
                 IsActive = true,
                 TenantId = _defaultTenantId,
@@ -400,13 +395,10 @@ public class MaintenanceE2ETestSeeder
                 Id = inspectorPosId,
                 Title = "Inspector",
                 Code = "INSP",
-                // [HR-MODULE-PORT] EmployeePosition no longer has `DepartmentId`. The HR module port
-                // (from HRApi) re-anchors positions to the organisation structure via the REQUIRED
-                // OrganizationUnitId + OrganizationLevelId instead of a department FK.
-                // ACTION NEEDED (Maintenance team): this seeder does not yet create OrganizationLevel/
-                // OrganizationUnit rows, so these positions will fail their FK at run time until an
-                // org unit/level is seeded and referenced here. Left unset deliberately rather than
-                // guessing the intended org structure.
+                // [HR-MODULE-PORT] Positions anchor to the org structure via the REQUIRED
+                // OrganizationUnitId + OrganizationLevelId (DepartmentId was removed).
+                OrganizationUnitId = orgUnitId,
+                OrganizationLevelId = orgLevelId,
                 Level = 3,
                 IsActive = true,
                 TenantId = _defaultTenantId,

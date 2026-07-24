@@ -80,6 +80,10 @@ public static class SimpleMaintenanceSeeder
         context.Departments.Add(maintenanceDept);
         await context.SaveChangesAsync();
 
+        // [HR-MODULE-PORT] Positions require OrganizationUnitId + OrganizationLevelId (DepartmentId was
+        // removed); resolve a default org unit/level for the tenant so the insert satisfies its FKs.
+        var (orgUnitId, orgLevelId) = await ErpSystem.Data.Seeders.SeederOrgDefaults.EnsureDefaultUnitAsync(context, tenantId);
+
         // Create positions
         var techPosition = new EmployeePosition
         {
@@ -87,9 +91,8 @@ public static class SimpleMaintenanceSeeder
             TenantId = tenantId,
             Title = "Maintenance Technician",
             Code = "TECH",
-            // [HR-MODULE-PORT] EmployeePosition no longer has DepartmentId; positions now anchor to
-            // the org structure via the REQUIRED OrganizationUnitId + OrganizationLevelId.
-            // ACTION NEEDED: seed an OrganizationUnit/Level and reference it here.
+            OrganizationUnitId = orgUnitId,
+            OrganizationLevelId = orgLevelId,
             IsActive = true,
             CreatedAt = DateTime.UtcNow
         };

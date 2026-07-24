@@ -107,10 +107,40 @@ END;
             migrationBuilder.DropTable(
                 name: "AttendanceRecords");
 
-            // NOTE: EmployeeShiftPreferences has no replacement entity (the concept was dropped in the HR
-            // module) and Shifts is superseded by the ShiftDefinition model with a different shape. Their
-            // rows are intentionally not migrated. Revisit here if historical shift data ever needs to be
-            // preserved.
+            // [HR-MODULE-PORT] Fail-safe data-loss guards for the remaining destructive drops below.
+            // Each check is a no-op on a fresh/dev database (empty tables / no data) and HALTS the
+            // upgrade with guidance on a populated pre-port database instead of silently destroying
+            // history. The LeaveTypes.ApplicableTo* columns and EmployeePositions.SectionId/UnitId are
+            // intentionally NOT guarded — they were normalised onto the new lookup/organization-structure
+            // model and are deliberately superseded. See docs/hr-port-data-migration.md.
+            migrationBuilder.Sql(@"
+-- Table drops with no faithful replacement
+IF OBJECT_ID(N'EmployeeShiftPreferences', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM EmployeeShiftPreferences)
+    THROW 50000, 'HR-port upgrade halted: EmployeeShiftPreferences holds data and the concept was dropped (no replacement entity). Export/migrate it per docs/hr-port-data-migration.md, then re-run.', 1;
+IF OBJECT_ID(N'Shifts', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM Shifts)
+    THROW 50000, 'HR-port upgrade halted: Shifts holds data. The replacement ShiftDefinition requires a WorkSchedule that has no legacy source, so it cannot be auto-migrated. Migrate per docs/hr-port-data-migration.md, then re-run.', 1;
+IF OBJECT_ID(N'WorkStations', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM WorkStations)
+    THROW 50000, 'HR-port upgrade halted: WorkStations holds data. This migration drops DepartmentId/StationType and adds a required CountryId with no legacy source. Migrate per docs/hr-port-data-migration.md, then re-run.', 1;
+-- Column drops that would silently lose data (nullable columns: only halt when actually populated)
+IF EXISTS (SELECT 1 FROM ShiftAssignments WHERE StartDate IS NOT NULL)
+    THROW 50000, 'HR-port upgrade halted: ShiftAssignments.StartDate holds data being dropped. Preserve it per docs/hr-port-data-migration.md, then re-run.', 1;
+IF EXISTS (SELECT 1 FROM LeaveRequests WHERE ApprovalDate IS NOT NULL OR ApprovalNotes IS NOT NULL)
+    THROW 50000, 'HR-port upgrade halted: LeaveRequests.ApprovalDate/ApprovalNotes hold approval history being dropped. Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+IF EXISTS (SELECT 1 FROM LeavePlans WHERE DepartmentId IS NOT NULL)
+    THROW 50000, 'HR-port upgrade halted: LeavePlans.DepartmentId holds data being dropped. Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+IF EXISTS (SELECT 1 FROM LeaveBalances WHERE AdjustmentReason IS NOT NULL)
+    THROW 50000, 'HR-port upgrade halted: LeaveBalances.AdjustmentReason holds data being dropped. Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+IF EXISTS (SELECT 1 FROM EmployeePositions WHERE MinSalary IS NOT NULL OR MaxSalary IS NOT NULL OR Requirements IS NOT NULL OR Responsibilities IS NOT NULL)
+    THROW 50000, 'HR-port upgrade halted: EmployeePositions.MinSalary/MaxSalary/Requirements/Responsibilities hold data being dropped (no target column in the new model). Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+IF EXISTS (SELECT 1 FROM EmployeeIdentificationCards WHERE DocumentType IS NOT NULL OR IssuingAuthority IS NOT NULL)
+    THROW 50000, 'HR-port upgrade halted: EmployeeIdentificationCards.DocumentType/IssuingAuthority hold data being dropped. Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+IF EXISTS (SELECT 1 FROM EmployeeDependents WHERE IsEmergencyContact = 1 OR IsStudentDependent = 1)
+    THROW 50000, 'HR-port upgrade halted: EmployeeDependents.IsEmergencyContact/IsStudentDependent hold data being dropped. Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+-- Required FK added to a brand-new empty table with no legacy source (would fail the FK on a populated table)
+IF EXISTS (SELECT 1 FROM PublicHolidays)
+    THROW 50000, 'HR-port upgrade halted: PublicHolidays holds rows but this migration adds a required HolidayCalendarId pointing at the new (empty) HolidayCalendars table. Create a calendar and assign holidays per docs/hr-port-data-migration.md, then re-run.', 1;
+");
+
             migrationBuilder.DropTable(
                 name: "EmployeeShiftPreferences");
 
@@ -567,6 +597,10 @@ END;
                 nullable: false,
                 defaultValue: false);
 
+            // [HR-MODULE-PORT] Backfill: leave types were implicitly active before this flag existed.
+            // Keep every pre-existing row active. No-op on an empty/fresh table.
+            migrationBuilder.Sql("UPDATE LeaveTypes SET IsActive = 1;");
+
             migrationBuilder.AlterColumn<int>(
                 name: "MaxDaysAllowed",
                 table: "LeaveSubTypes",
@@ -581,6 +615,10 @@ END;
                 type: "bit",
                 nullable: false,
                 defaultValue: false);
+
+            // [HR-MODULE-PORT] Backfill: leave sub-types were implicitly active before this flag existed.
+            // Keep every pre-existing row active. No-op on an empty/fresh table.
+            migrationBuilder.Sql("UPDATE LeaveSubTypes SET IsActive = 1;");
 
             migrationBuilder.AlterColumn<DateOnly>(
                 name: "StartDate",
@@ -803,11 +841,74 @@ END;
                 nullable: false,
                 defaultValue: false);
 
+            // [HR-MODULE-PORT] Backfill: eligibility used to be COMPUTED as "employee's department is
+            // Maintenance" (see the surviving fallback in EmployeeRepository: `... || Department.Code ==
+            // "MAINT"`). Persisting it as a flag defaulted to false would silently lock existing maintenance
+            // staff out of work-order/scheduling gates. Reproduce the old rule as a one-time backfill.
+            // No-op on an empty/fresh database.
+            migrationBuilder.Sql(@"
+UPDATE e SET e.CanBeAssignedToMaintenance = 1
+FROM Employees e
+INNER JOIN Departments d ON e.DepartmentId = d.Id
+WHERE d.Code = 'MAINT';");
+
             migrationBuilder.AddColumn<DateOnly>(
                 name: "EndDate",
                 table: "Employees",
                 type: "date",
                 nullable: true);
+
+            // [HR-MODULE-PORT] Backfill BEFORE the OrganizationUnitId/OrganizationLevelId columns are made
+            // non-null + FK-constrained below. Legacy positions had these org links nullable; without a
+            // backfill they default to Guid.Empty and the required FKs (to OrganizationUnits/Levels) fail on
+            // any populated database. For each tenant that has positions needing an org link, reuse an
+            // existing 'UNASSIGNED' placeholder or create one (OrganizationStructure -> Level -> Unit), then
+            // point the orphaned positions at it. Admins can re-assign to real units afterwards. No-op on a
+            // fresh/empty database.
+            migrationBuilder.Sql(@"
+IF EXISTS (SELECT 1 FROM EmployeePositions
+           WHERE OrganizationUnitId IS NULL  OR OrganizationUnitId  = '00000000-0000-0000-0000-000000000000'
+              OR OrganizationLevelId IS NULL OR OrganizationLevelId = '00000000-0000-0000-0000-000000000000')
+BEGIN
+    DECLARE @orgMap TABLE (TenantId uniqueidentifier PRIMARY KEY, StructureId uniqueidentifier, LevelId uniqueidentifier, UnitId uniqueidentifier);
+
+    INSERT INTO @orgMap (TenantId, StructureId, LevelId, UnitId)
+    SELECT t.TenantId, NEWID(), NEWID(), NEWID()
+    FROM (SELECT DISTINCT TenantId
+          FROM EmployeePositions
+          WHERE OrganizationUnitId IS NULL  OR OrganizationUnitId  = '00000000-0000-0000-0000-000000000000'
+             OR OrganizationLevelId IS NULL OR OrganizationLevelId = '00000000-0000-0000-0000-000000000000') t;
+
+    -- Structure (create placeholder where the tenant has none)
+    INSERT INTO OrganizationStructures (Id, Name, Code, IsDefault, IsActive, CreatedAt, IsDeleted, TenantId)
+    SELECT m.StructureId, 'Unassigned (HR port)', 'UNASSIGNED', 0, 1, SYSUTCDATETIME(), 0, m.TenantId
+    FROM @orgMap m
+    WHERE NOT EXISTS (SELECT 1 FROM OrganizationStructures s WHERE s.TenantId = m.TenantId AND s.Code = 'UNASSIGNED');
+    UPDATE m SET StructureId = (SELECT TOP 1 s.Id FROM OrganizationStructures s WHERE s.TenantId = m.TenantId AND s.Code = 'UNASSIGNED') FROM @orgMap m;
+
+    -- Level
+    INSERT INTO OrganizationLevels (Id, Name, Code, LevelNumber, RequiresHead, AllowsDirectEmployees, IsLocked, IsActive, StructureId, CreatedAt, IsDeleted, TenantId)
+    SELECT m.LevelId, 'Unassigned (HR port)', 'UNASSIGNED', 1, 0, 1, 0, 1, m.StructureId, SYSUTCDATETIME(), 0, m.TenantId
+    FROM @orgMap m
+    WHERE NOT EXISTS (SELECT 1 FROM OrganizationLevels l WHERE l.TenantId = m.TenantId AND l.Code = 'UNASSIGNED');
+    UPDATE m SET LevelId = (SELECT TOP 1 l.Id FROM OrganizationLevels l WHERE l.TenantId = m.TenantId AND l.Code = 'UNASSIGNED') FROM @orgMap m;
+
+    -- Unit
+    INSERT INTO OrganizationUnits (Id, Name, Code, OrganizationLevelId, Sequence, Path, IsActive, CreatedAt, IsDeleted, TenantId)
+    SELECT m.UnitId, 'Unassigned (HR port)', 'UNASSIGNED', m.LevelId, 0, '/UNASSIGNED', 1, SYSUTCDATETIME(), 0, m.TenantId
+    FROM @orgMap m
+    WHERE NOT EXISTS (SELECT 1 FROM OrganizationUnits u WHERE u.TenantId = m.TenantId AND u.Code = 'UNASSIGNED');
+    UPDATE m SET UnitId = (SELECT TOP 1 u.Id FROM OrganizationUnits u WHERE u.TenantId = m.TenantId AND u.Code = 'UNASSIGNED') FROM @orgMap m;
+
+    -- Point orphaned positions at the placeholder unit/level for their tenant
+    UPDATE p
+    SET p.OrganizationUnitId  = m.UnitId,
+        p.OrganizationLevelId = m.LevelId
+    FROM EmployeePositions p
+    INNER JOIN @orgMap m ON m.TenantId = p.TenantId
+    WHERE p.OrganizationUnitId IS NULL  OR p.OrganizationUnitId  = '00000000-0000-0000-0000-000000000000'
+       OR p.OrganizationLevelId IS NULL OR p.OrganizationLevelId = '00000000-0000-0000-0000-000000000000';
+END;");
 
             migrationBuilder.AlterColumn<Guid>(
                 name: "OrganizationUnitId",

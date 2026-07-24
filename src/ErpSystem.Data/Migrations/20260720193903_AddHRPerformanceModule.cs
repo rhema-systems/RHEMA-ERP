@@ -59,6 +59,30 @@ namespace ErpSystem.Data.Migrations
                 name: "FK_Teams_Teams_ParentTeamId",
                 table: "Teams");
 
+            // [HR-MODULE-PORT] Fail-safe data-loss guards. The performance module was REDESIGNED
+            // (not renamed): the tables/columns dropped below have no faithful auto-migration path
+            // into the new snapshot/config/goal schema (no FK bridge to resolve the new parent keys).
+            // On a fresh/dev database these legacy tables are empty and this block is a no-op. On a
+            // populated pre-port database it HALTS the upgrade (rolls back the transaction) with
+            // guidance instead of silently destroying evaluation history. See
+            // docs/hr-port-data-migration.md.
+            migrationBuilder.Sql(@"
+IF OBJECT_ID(N'KpiEvaluationRecords', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM KpiEvaluationRecords)
+    THROW 50000, 'HR-port upgrade halted: KpiEvaluationRecords holds data the performance redesign cannot auto-migrate. Migrate it into AppraisalKpiEvaluationSnapshots per docs/hr-port-data-migration.md, then re-run.', 1;
+IF OBJECT_ID(N'EmployeeKpiTargets', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM EmployeeKpiTargets)
+    THROW 50000, 'HR-port upgrade halted: EmployeeKpiTargets holds data the performance redesign cannot auto-migrate. Migrate it into EmployeeGoals per docs/hr-port-data-migration.md, then re-run.', 1;
+IF OBJECT_ID(N'AppraisalCriterias', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM AppraisalCriterias)
+    THROW 50000, 'HR-port upgrade halted: AppraisalCriterias holds data the performance redesign cannot auto-migrate. Migrate it into PerformanceAppraisalCriterionConfigs/AppraisalCompetencies per docs/hr-port-data-migration.md, then re-run.', 1;
+IF OBJECT_ID(N'PositionCriteriaMappings', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM PositionCriteriaMappings)
+    THROW 50000, 'HR-port upgrade halted: PositionCriteriaMappings holds data the performance redesign cannot auto-migrate. Migrate it into PerformanceAppraisalCriterionConfigs per docs/hr-port-data-migration.md, then re-run.', 1;
+IF OBJECT_ID(N'MappingGradeRanges', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM MappingGradeRanges)
+    THROW 50000, 'HR-port upgrade halted: MappingGradeRanges holds data the performance redesign cannot auto-migrate. Migrate it into the new criterion/template GradeRanges tables per docs/hr-port-data-migration.md, then re-run.', 1;
+IF OBJECT_ID(N'PerformanceAppraisals', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM PerformanceAppraisals)
+    THROW 50000, 'HR-port upgrade halted: PerformanceAppraisals holds appraisals the redesign cannot auto-migrate (AppealOutcome is dropped, and required AppraisalCycleId/AppraisalTemplateId are added with no legacy source). Migrate per docs/hr-port-data-migration.md, then re-run.', 1;
+IF COL_LENGTH('EvaluatorEvaluations', 'EvaluationDate') IS NOT NULL AND EXISTS (SELECT 1 FROM EvaluatorEvaluations WHERE EvaluationDate IS NOT NULL)
+    THROW 50000, 'HR-port upgrade halted: EvaluatorEvaluations.EvaluationDate holds data with no target column in the redesign. Preserve it per docs/hr-port-data-migration.md, then re-run.', 1;
+");
+
             migrationBuilder.DropTable(
                 name: "KpiEvaluationRecords");
 
@@ -333,6 +357,11 @@ namespace ErpSystem.Data.Migrations
                 nullable: false,
                 defaultValue: false);
 
+            // [HR-MODULE-PORT] Backfill: KPI definitions were implicitly active before this flag
+            // existed. Keep every pre-existing row active (the false default would silently disable
+            // live configuration). No-op on an empty/fresh table.
+            migrationBuilder.Sql("UPDATE KpiDefinitions SET IsActive = 1;");
+
             migrationBuilder.AddColumn<DateTime>(
                 name: "StartedDate",
                 table: "EvaluatorEvaluations",
@@ -370,6 +399,10 @@ namespace ErpSystem.Data.Migrations
                 type: "bit",
                 nullable: false,
                 defaultValue: false);
+
+            // [HR-MODULE-PORT] Backfill: grade definitions were implicitly active before this flag
+            // existed. Keep every pre-existing row active. No-op on an empty/fresh table.
+            migrationBuilder.Sql("UPDATE AppraisalGradeDefinitions SET IsActive = 1;");
 
             migrationBuilder.AddColumn<int>(
                 name: "MappedRating",
