@@ -159,6 +159,9 @@ frontend/public/*
 !frontend/public/login.svg
 !frontend/public/manifest.json
 !frontend/public/sw.js
+!frontend/public/templates/
+frontend/public/templates/*
+!frontend/public/templates/bank-statement-import-template.xlsx
 
 # vuepress build output
 .vuepress/dist

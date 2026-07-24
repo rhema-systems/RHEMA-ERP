@@ -18,6 +18,10 @@ import type {
     CreateCashPaymentDto,
     CreateBankTransferDto,
     StartReconciliationDto,
+    CreateManualMatchDto,
+    CreateReconciliationAdjustmentDto,
+    ReconciliationAdjustment,
+    ReconciliationSummary,
     CashPositionSummary,
     CashFlowSummary,
 } from '@/types/cash-management';
@@ -111,10 +115,17 @@ class CashManagementDataService {
         return apiService.get<BankStatement>(`/finance/bank-statements/${id}`);
     }
 
-    async importBankStatement(bankAccountId: string, file: File): Promise<BankStatement> {
+    async importBankStatement(
+        bankAccountId: string,
+        file: File,
+        statementNumber?: string,
+        notes?: string,
+    ): Promise<BankStatement> {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('bankAccountId', bankAccountId);
+        if (statementNumber?.trim()) formData.append('statementNumber', statementNumber.trim());
+        if (notes?.trim()) formData.append('notes', notes.trim());
         return apiService.post<BankStatement>('/finance/bank-statements/import', formData);
     }
 
@@ -144,12 +155,36 @@ class CashManagementDataService {
         return apiService.get<ReconciliationMatch[]>(`/finance/bank-reconciliation/${reconciliationId}/matches`);
     }
 
-    async createReconciliationMatch(reconciliationId: string, match: Partial<ReconciliationMatch>): Promise<ReconciliationMatch> {
+    async getReconciliationSummary(reconciliationId: string): Promise<ReconciliationSummary> {
+        return apiService.get<ReconciliationSummary>(`/finance/bank-reconciliation/${reconciliationId}/summary`);
+    }
+
+    async autoMatchReconciliation(reconciliationId: string): Promise<ReconciliationMatch[]> {
+        return apiService.post<ReconciliationMatch[]>(`/finance/bank-reconciliation/${reconciliationId}/auto-match`, {});
+    }
+
+    async createReconciliationMatch(reconciliationId: string, match: CreateManualMatchDto): Promise<ReconciliationMatch> {
         return apiService.post<ReconciliationMatch>(`/finance/bank-reconciliation/${reconciliationId}/manual-match`, match);
+    }
+
+    async removeReconciliationMatch(matchId: string): Promise<ReconciliationMatch> {
+        return apiService.delete<ReconciliationMatch>(`/finance/bank-reconciliation/match/${matchId}`);
+    }
+
+    async postReconciliationAdjustment(reconciliationId: string, dto: CreateReconciliationAdjustmentDto): Promise<ReconciliationAdjustment> {
+        return apiService.post<ReconciliationAdjustment>(`/finance/bank-reconciliation/${reconciliationId}/adjustments/post`, dto);
     }
 
     async completeReconciliation(id: string): Promise<BankReconciliation> {
         return apiService.post<BankReconciliation>(`/finance/bank-reconciliation/${id}/finalize`, {});
+    }
+
+    async approveReconciliation(id: string): Promise<BankReconciliation> {
+        return apiService.post<BankReconciliation>(`/finance/bank-reconciliation/${id}/approve`, {});
+    }
+
+    async cancelReconciliation(id: string, reason: string): Promise<BankReconciliation> {
+        return apiService.post<BankReconciliation>(`/finance/bank-reconciliation/${id}/cancel`, { reason });
     }
 
     // ===== CHEQUES =====

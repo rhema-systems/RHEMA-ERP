@@ -19,7 +19,18 @@ export enum ReconciliationStatus {
     InProgress = 'InProgress',
     Completed = 'Completed',
     Approved = 'Approved',
-    Rejected = 'Rejected'
+    Rejected = 'Rejected',
+    Cancelled = 'Cancelled'
+}
+
+export enum ReconciliationAdjustmentType {
+    BankCharge = 'BankCharge',
+    BankFee = 'BankFee',
+    InterestIncome = 'InterestIncome',
+    AdjustmentReceipt = 'AdjustmentReceipt',
+    AdjustmentPayment = 'AdjustmentPayment',
+    CorrectionReceipt = 'CorrectionReceipt',
+    CorrectionPayment = 'CorrectionPayment'
 }
 
 export enum ChequeStatus {
@@ -158,6 +169,17 @@ export interface ReconciliationMatch {
     matchConfidence?: number;
     matchedAt: string;
     notes?: string;
+    cashTransactionNumber: string;
+    cashTransactionDate: string;
+    cashTransactionType: CashTransactionType;
+    cashTransactionDescription: string;
+    cashTransactionReference?: string;
+    cashTransactionAmount: number;
+    statementTransactionDate: string;
+    statementDescription: string;
+    statementReference?: string;
+    statementDebitAmount: number;
+    statementCreditAmount: number;
 }
 
 export interface Cheque {
@@ -260,6 +282,7 @@ export interface StartReconciliationDto {
     reconciliationDate: string;
     statementBalance: number;
     statementId?: string;
+    notes?: string;
 }
 
 export interface CreateManualMatchDto {
@@ -283,10 +306,12 @@ export interface ReconciliationSummary {
 
 export interface UnmatchedTransaction {
     id: string;
+    transactionNumber: string;
     transactionDate: string;
     description: string;
     amount: number;
     referenceNumber?: string;
+    transactionType: CashTransactionType;
 }
 
 export interface UnmatchedStatementLine {
@@ -295,6 +320,34 @@ export interface UnmatchedStatementLine {
     description: string;
     amount: number;
     referenceNumber?: string;
+    debitAmount: number;
+    creditAmount: number;
+}
+
+export interface CreateReconciliationAdjustmentDto {
+    adjustmentType: ReconciliationAdjustmentType;
+    transactionDate: string;
+    amount: number;
+    offsetAccountId: string;
+    referenceNumber?: string;
+    description?: string;
+    notes?: string;
+    idempotencyKey: string;
+}
+
+export interface ReconciliationAdjustment {
+    reconciliationId: string;
+    cashTransactionId: string;
+    journalEntryId?: string;
+    postingEventId?: string;
+    adjustmentType: ReconciliationAdjustmentType;
+    cashTransactionType: CashTransactionType;
+    amount: number;
+    bankAccountId: string;
+    offsetAccountId: string;
+    referenceNumber?: string;
+    transactionDate: string;
+    wasDuplicate: boolean;
 }
 
 // Summary/Report Interfaces

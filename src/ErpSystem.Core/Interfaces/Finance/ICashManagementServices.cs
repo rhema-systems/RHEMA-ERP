@@ -40,6 +40,7 @@ public interface IBankReconciliationService
     Task<IEnumerable<BankReconciliationDto>> GetByBankAccountAsync(Guid bankAccountId);
     Task<BankReconciliationDto> StartReconciliationAsync(StartReconciliationDto dto);
     Task<IEnumerable<ReconciliationMatchDto>> AutoMatchAsync(Guid reconciliationId);
+    Task<IEnumerable<ReconciliationMatchDto>> GetMatchesAsync(Guid reconciliationId);
     Task<ReconciliationMatchDto> CreateManualMatchAsync(CreateManualMatchDto dto);
     Task<ReconciliationMatchDto> RemoveMatchAsync(Guid matchId);
     Task<ReconciliationAdjustmentDto> CreateAndPostAdjustmentAsync(Guid reconciliationId, CreateReconciliationAdjustmentDto dto, CancellationToken cancellationToken = default);

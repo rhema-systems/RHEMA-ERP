@@ -123,7 +123,7 @@ public class BankReconciliationService : IBankReconciliationService
             Difference = RoundMoney(dto.StatementBalance - bookBalance),
             Status = ReconciliationStatus.InProgress,
             MatchedCount = 0,
-            UnmatchedBookCount = await CountUnmatchedBookTransactionsAsync(dto.BankAccountId),
+            UnmatchedBookCount = await CountUnmatchedBookTransactionsAsync(dto.BankAccountId, dto.ReconciliationDate),
             UnmatchedStatementCount = await CountUnmatchedStatementLinesAsync(dto.BankAccountId, dto.StatementId),
             Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim()
         };
@@ -161,6 +161,7 @@ public class BankReconciliationService : IBankReconciliationService
             .Where(t =>
                 t.TenantId == tenantId &&
                 t.BankAccountId == reconciliation.BankAccountId &&
+                t.TransactionDate <= reconciliation.ReconciliationDate.Date.AddDays(1).AddTicks(-1) &&
                 t.IsPosted &&
                 t.ApprovalStatus == CashTransactionApprovalStatus.Posted &&
                 t.JournalEntryId.HasValue &&
@@ -250,6 +251,44 @@ public class BankReconciliationService : IBankReconciliationService
         }
 
         return matchDtos;
+    }
+
+    public async Task<IEnumerable<ReconciliationMatchDto>> GetMatchesAsync(Guid reconciliationId)
+    {
+        var tenantId = TenantId;
+        var reconciliationExists = await _context.Set<BankReconciliation>()
+            .AnyAsync(r => r.TenantId == tenantId && r.Id == reconciliationId && !r.IsDeleted);
+        if (!reconciliationExists)
+        {
+            throw new Exception("Reconciliation not found");
+        }
+
+        return await _context.Set<ReconciliationMatch>()
+            .Where(m => m.TenantId == tenantId && m.ReconciliationId == reconciliationId && !m.IsDeleted)
+            .OrderByDescending(m => m.MatchedAt)
+            .Select(m => new ReconciliationMatchDto
+            {
+                Id = m.Id,
+                ReconciliationId = m.ReconciliationId,
+                CashTransactionId = m.CashTransactionId,
+                BankStatementLineId = m.BankStatementLineId,
+                IsAutoMatched = m.IsAutoMatched,
+                MatchConfidence = m.MatchConfidence,
+                MatchedAt = m.MatchedAt,
+                Notes = m.Notes,
+                CashTransactionNumber = m.CashTransaction.TransactionNumber,
+                CashTransactionDate = m.CashTransaction.TransactionDate,
+                CashTransactionType = m.CashTransaction.TransactionType,
+                CashTransactionDescription = m.CashTransaction.Description ?? string.Empty,
+                CashTransactionReference = m.CashTransaction.ReferenceNumber,
+                CashTransactionAmount = m.CashTransaction.Amount,
+                StatementTransactionDate = m.BankStatementLine.TransactionDate,
+                StatementDescription = m.BankStatementLine.Description ?? string.Empty,
+                StatementReference = m.BankStatementLine.ReferenceNumber,
+                StatementDebitAmount = m.BankStatementLine.DebitAmount,
+                StatementCreditAmount = m.BankStatementLine.CreditAmount
+            })
+            .ToListAsync();
     }
 
     public async Task<ReconciliationMatchDto> CreateManualMatchAsync(CreateManualMatchDto dto)
@@ -431,13 +470,14 @@ public class BankReconciliationService : IBankReconciliationService
         return matchDto;
     }
 
-    private Task<int> CountUnmatchedBookTransactionsAsync(Guid bankAccountId)
+    private Task<int> CountUnmatchedBookTransactionsAsync(Guid bankAccountId, DateTime reconciliationDate)
     {
         var tenantId = TenantId;
         return _context.Set<CashTransaction>()
             .CountAsync(t =>
                 t.TenantId == tenantId &&
                 t.BankAccountId == bankAccountId &&
+                t.TransactionDate <= reconciliationDate.Date.AddDays(1).AddTicks(-1) &&
                 t.IsPosted &&
                 t.ApprovalStatus == CashTransactionApprovalStatus.Posted &&
                 t.JournalEntryId.HasValue &&
@@ -468,7 +508,7 @@ public class BankReconciliationService : IBankReconciliationService
     {
         reconciliation.MatchedCount = await _context.Set<ReconciliationMatch>()
             .CountAsync(m => m.TenantId == reconciliation.TenantId && m.ReconciliationId == reconciliation.Id && !m.IsDeleted);
-        reconciliation.UnmatchedBookCount = await CountUnmatchedBookTransactionsAsync(reconciliation.BankAccountId);
+        reconciliation.UnmatchedBookCount = await CountUnmatchedBookTransactionsAsync(reconciliation.BankAccountId, reconciliation.ReconciliationDate);
         reconciliation.UnmatchedStatementCount = await CountUnmatchedStatementLinesAsync(
             reconciliation.BankAccountId,
             reconciliation.StatementId);
@@ -745,6 +785,10 @@ public class BankReconciliationService : IBankReconciliationService
 
         var tenantId = TenantId;
         var reconciliation = await _context.Set<BankReconciliation>()
+            .Include(r => r.Matches)
+                .ThenInclude(m => m.CashTransaction)
+            .Include(r => r.Matches)
+                .ThenInclude(m => m.BankStatementLine)
             .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == id && !r.IsDeleted, cancellationToken)
             ?? throw new Exception("Reconciliation not found");
 
@@ -753,11 +797,32 @@ public class BankReconciliationService : IBankReconciliationService
             throw new InvalidOperationException("Finalized bank reconciliations cannot be cancelled by mutation.");
         }
 
+        var now = DateTime.UtcNow;
+        foreach (var match in reconciliation.Matches.Where(m => !m.IsDeleted))
+        {
+            if (match.CashTransaction.ReconciliationId == reconciliation.Id)
+            {
+                match.CashTransaction.IsReconciled = false;
+                match.CashTransaction.ReconciliationId = null;
+            }
+
+            if (match.BankStatementLine.ReconciliationMatchId == match.Id)
+            {
+                match.BankStatementLine.IsMatched = false;
+                match.BankStatementLine.MatchedTransactionId = null;
+                match.BankStatementLine.ReconciliationMatchId = null;
+            }
+
+            match.IsDeleted = true;
+            match.DeletedAt = now;
+            match.DeletedBy = _currentUserService.UserName;
+        }
+
         reconciliation.Status = ReconciliationStatus.Cancelled;
         reconciliation.Notes = string.IsNullOrWhiteSpace(reconciliation.Notes)
             ? reason.Trim()
             : $"{reconciliation.Notes}{Environment.NewLine}Cancellation: {reason.Trim()}";
-        reconciliation.UpdatedAt = DateTime.UtcNow;
+        reconciliation.UpdatedAt = now;
         reconciliation.UpdatedBy = _currentUserService.UserName;
         await _context.SaveChangesAsync(cancellationToken);
         await RecordReconciliationAuditAsync(
@@ -848,6 +913,7 @@ public class BankReconciliationService : IBankReconciliationService
             .Where(t =>
                 t.TenantId == tenantId &&
                 t.BankAccountId == reconciliation.BankAccountId &&
+                t.TransactionDate <= reconciliation.ReconciliationDate.Date.AddDays(1).AddTicks(-1) &&
                 t.IsPosted &&
                 t.ApprovalStatus == CashTransactionApprovalStatus.Posted &&
                 t.JournalEntryId.HasValue &&
@@ -861,23 +927,34 @@ public class BankReconciliationService : IBankReconciliationService
             .Select(t => new UnmatchedTransactionDto
             {
                 Id = t.Id,
+                TransactionNumber = t.TransactionNumber,
                 TransactionDate = t.TransactionDate,
                 Description = t.Description ?? "",
                 Amount = t.Amount,
-                ReferenceNumber = t.ReferenceNumber
+                ReferenceNumber = t.ReferenceNumber,
+                TransactionType = t.TransactionType
             })
             .ToListAsync();
 
         // Get unmatched statement lines
-        var unmatchedLines = await _context.Set<BankStatementLine>()
-            .Where(l => l.TenantId == tenantId && l.BankStatement.TenantId == tenantId && l.BankStatement.BankAccountId == reconciliation.BankAccountId && !l.IsMatched && !l.IsDeleted)
+        var unmatchedLinesQuery = _context.Set<BankStatementLine>()
+            .Where(l => l.TenantId == tenantId && l.BankStatement.TenantId == tenantId && l.BankStatement.BankAccountId == reconciliation.BankAccountId && !l.IsMatched && !l.IsDeleted);
+
+        if (reconciliation.StatementId.HasValue)
+        {
+            unmatchedLinesQuery = unmatchedLinesQuery.Where(l => l.BankStatementId == reconciliation.StatementId.Value);
+        }
+
+        var unmatchedLines = await unmatchedLinesQuery
             .Select(l => new UnmatchedStatementLineDto
             {
                 Id = l.Id,
                 TransactionDate = l.TransactionDate,
                 Description = l.Description ?? "",
                 Amount = l.CreditAmount > 0 ? l.CreditAmount : l.DebitAmount,
-                ReferenceNumber = l.ReferenceNumber
+                ReferenceNumber = l.ReferenceNumber,
+                DebitAmount = l.DebitAmount,
+                CreditAmount = l.CreditAmount
             })
             .ToListAsync();
 

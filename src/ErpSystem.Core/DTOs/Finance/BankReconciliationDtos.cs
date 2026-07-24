@@ -47,6 +47,17 @@ public class ReconciliationMatchDto
     public int? MatchConfidence { get; set; }
     public DateTime MatchedAt { get; set; }
     public string? Notes { get; set; }
+    public string CashTransactionNumber { get; set; } = string.Empty;
+    public DateTime CashTransactionDate { get; set; }
+    public CashTransactionType CashTransactionType { get; set; }
+    public string CashTransactionDescription { get; set; } = string.Empty;
+    public string? CashTransactionReference { get; set; }
+    public decimal CashTransactionAmount { get; set; }
+    public DateTime StatementTransactionDate { get; set; }
+    public string StatementDescription { get; set; } = string.Empty;
+    public string? StatementReference { get; set; }
+    public decimal StatementDebitAmount { get; set; }
+    public decimal StatementCreditAmount { get; set; }
 }
 
 public class CreateManualMatchDto
@@ -106,10 +117,12 @@ public class ReconciliationSummaryDto
 public class UnmatchedTransactionDto
 {
     public Guid Id { get; set; }
+    public string TransactionNumber { get; set; } = string.Empty;
     public DateTime TransactionDate { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public string? ReferenceNumber { get; set; }
+    public CashTransactionType TransactionType { get; set; }
 }
 
 public class UnmatchedStatementLineDto
@@ -119,6 +132,8 @@ public class UnmatchedStatementLineDto
     public string Description { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public string? ReferenceNumber { get; set; }
+    public decimal DebitAmount { get; set; }
+    public decimal CreditAmount { get; set; }
 }
 
 #endregion

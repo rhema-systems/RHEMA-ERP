@@ -401,6 +401,86 @@ public sealed class BankReconciliationPostingMigrationTests
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.BankReconciliationFinalized && a.TenantId == tenantId)).Should().Be(1);
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public async Task MatchesAndSummary_ShouldReturnWorkspaceDetailsForSelectedStatementOnly()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedPostedCashTransactionAsync(db, tenantId, CashTransactionType.Receipt, 100m);
+        var selectedStatementLine = SeedStatementLine(db, tenantId, fixture.BankAccount.Id, creditAmount: 100m);
+        _ = SeedStatementLine(db, tenantId, fixture.BankAccount.Id, creditAmount: 250m);
+        await db.SaveChangesAsync();
+        var service = CreateReconciliationService(db, tenantId);
+        var reconciliation = await service.StartReconciliationAsync(new StartReconciliationDto
+        {
+            BankAccountId = fixture.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 100m,
+            StatementId = selectedStatementLine.BankStatementId
+        });
+
+        var beforeMatch = await service.GetSummaryAsync(reconciliation.Id);
+        beforeMatch.UnmatchedStatementLines.Should().ContainSingle()
+            .Which.Id.Should().Be(selectedStatementLine.Id);
+
+        await service.CreateManualMatchAsync(new CreateManualMatchDto
+        {
+            ReconciliationId = reconciliation.Id,
+            CashTransactionId = fixture.Transaction.Id,
+            BankStatementLineId = selectedStatementLine.Id
+        });
+
+        var match = (await service.GetMatchesAsync(reconciliation.Id)).Should().ContainSingle().Subject;
+        match.CashTransactionNumber.Should().Be(fixture.Transaction.TransactionNumber);
+        match.CashTransactionAmount.Should().Be(100m);
+        match.StatementCreditAmount.Should().Be(100m);
+        match.StatementDebitAmount.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public async Task CancelReconciliation_ShouldReleaseMatchedTransactionsAndStatementLines()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedPostedCashTransactionAsync(db, tenantId, CashTransactionType.Receipt, 100m);
+        var statementLine = SeedStatementLine(db, tenantId, fixture.BankAccount.Id, creditAmount: 100m);
+        await db.SaveChangesAsync();
+        var service = CreateReconciliationService(db, tenantId);
+        var reconciliation = await service.StartReconciliationAsync(new StartReconciliationDto
+        {
+            BankAccountId = fixture.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 100m,
+            StatementId = statementLine.BankStatementId
+        });
+        var match = await service.CreateManualMatchAsync(new CreateManualMatchDto
+        {
+            ReconciliationId = reconciliation.Id,
+            CashTransactionId = fixture.Transaction.Id,
+            BankStatementLineId = statementLine.Id
+        });
+
+        var cancelled = await service.CancelReconciliationAsync(reconciliation.Id, "Restart with corrected statement");
+
+        cancelled.Status.Should().Be(ReconciliationStatus.Cancelled);
+        var transaction = await db.Set<CashTransaction>().SingleAsync(t => t.Id == fixture.Transaction.Id);
+        transaction.IsReconciled.Should().BeFalse();
+        transaction.ReconciliationId.Should().BeNull();
+        var reloadedLine = await db.Set<BankStatementLine>().SingleAsync(l => l.Id == statementLine.Id);
+        reloadedLine.IsMatched.Should().BeFalse();
+        reloadedLine.ReconciliationMatchId.Should().BeNull();
+        // Cancellation soft-deletes the match; bypass the production query filter only to
+        // verify that the audit-preserving record remains present and marked deleted.
+        (await db.Set<ReconciliationMatch>()
+            .IgnoreQueryFilters()
+            .SingleAsync(m => m.Id == match.Id))
+            .IsDeleted.Should().BeTrue();
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

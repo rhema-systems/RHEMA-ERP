@@ -262,6 +262,22 @@ public class BankReconciliationController : ControllerBase
     }
 
     /// <summary>
+    /// Retrieves the transaction pairs already matched in a reconciliation.
+    /// </summary>
+    [HttpGet("{id}/matches")]
+    public async Task<ActionResult<IEnumerable<ReconciliationMatchDto>>> GetMatches(Guid id)
+    {
+        try
+        {
+            return Ok(await _reconciliationService.GetMatchesAsync(id));
+        }
+        catch (Exception ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Creates and posts an explicit reconciliation adjustment through the central Finance posting engine.
     /// </summary>
     [HttpPost("{id}/adjustments/post")]
