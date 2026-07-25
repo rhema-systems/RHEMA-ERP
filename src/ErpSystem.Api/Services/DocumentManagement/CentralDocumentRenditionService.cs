@@ -126,7 +126,7 @@ public sealed class CentralDocumentRenditionService : ICentralDocumentRenditionS
                     uploadResult.ErrorMessage ?? "Unable to store the generated PDF rendition.");
             }
 
-            return new CentralDocumentRenditionResult(true, true, uploadResult.PublicUrl, null);
+            return new CentralDocumentRenditionResult(true, true, uploadResult.FilePath, null);
         }
         catch (OperationCanceledException)
         {

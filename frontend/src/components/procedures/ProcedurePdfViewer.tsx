@@ -2,7 +2,6 @@
 
 import React from 'react';
 import {
-  Annotation,
   BookmarkView,
   Inject,
   LinkAnnotation,
@@ -42,19 +41,19 @@ export default function ProcedurePdfViewer({
       <PdfViewerComponent
         id={viewerId}
         documentPath={fileUrl}
-        resourceUrl="https://cdn.syncfusion.com/ej2/34.1.30/dist/ej2-pdfviewer-lib"
+        resourceUrl="/syncfusion/ej2-pdfviewer-lib"
         enableToolbar
         enableNavigationToolbar
         enableThumbnail
         enableTextSearch
         enableTextSelection
-        enableAnnotation
-        enableAnnotationToolbar
-        enableTextMarkupAnnotation
-        enableShapeAnnotation
-        enableStampAnnotations
-        enableStickyNotesAnnotation
-        enableInkAnnotation
+        enableAnnotation={false}
+        enableAnnotationToolbar={false}
+        enableTextMarkupAnnotation={false}
+        enableShapeAnnotation={false}
+        enableStampAnnotations={false}
+        enableStickyNotesAnnotation={false}
+        enableInkAnnotation={false}
         style={{ display: 'block', height: '520px', width: '100%' }}
       >
         <Inject
@@ -68,7 +67,6 @@ export default function ProcedurePdfViewer({
             Print,
             TextSelection,
             TextSearch,
-            Annotation,
           ]}
         />
       </PdfViewerComponent>

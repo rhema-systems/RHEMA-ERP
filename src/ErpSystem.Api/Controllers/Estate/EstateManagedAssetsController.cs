@@ -275,7 +275,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
         var sourceRecordReference = $"{asset.AssetCode} / {document.DocumentType} / {document.FileName}";
         var title = string.IsNullOrWhiteSpace(document.DocumentName) ? document.FileName : document.DocumentName.Trim();
         var repositoryStatus = string.IsNullOrWhiteSpace(document.FilePath) ? "Not linked" : "Linked";
-        var annotationStatus = IsPdf(document) ? "Ready for PDF viewer annotation" : "Not required";
+        var annotationStatus = IsPdf(document) ? "PDF preview ready" : "Not required";
 
         var record = new CentralDocumentRecord
         {

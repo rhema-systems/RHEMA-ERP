@@ -236,7 +236,7 @@ export default function CentralDocumentRecordDetailPage() {
                   version.repositoryPath || current.record.repositoryPath,
                 repositoryStatus: 'Linked',
                 annotationStatus: version.renditionPath
-                  ? 'Ready for PDF viewer annotation'
+                  ? 'PDF preview ready'
                   : current.record.annotationStatus,
               },
               versions: [version, ...current.versions],

@@ -712,6 +712,12 @@ class DocumentManagementService {
     );
   }
 
+  async downloadRecordContent(recordId: string): Promise<Blob> {
+    return rawApiService.downloadBlob(
+      `/document-management/records/${encodeURIComponent(recordId)}/content`
+    );
+  }
+
   async addAnnotationReview(
     recordId: string,
     payload: UpsertCentralDocumentAnnotationReview

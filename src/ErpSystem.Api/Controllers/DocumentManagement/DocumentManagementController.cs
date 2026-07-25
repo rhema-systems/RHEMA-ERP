@@ -721,10 +721,10 @@ public sealed class DocumentManagementController : ControllerBase
                 SourceRecordId = request.SourceRecordId,
                 MetadataTemplateCode = template.MetadataTemplateCode,
                 RepositoryStatus = "Linked",
-                RepositoryPath = storageResult.PublicUrl,
+                RepositoryPath = storageResult.FilePath,
                 CurrentVersion = "v1.0",
                 VersionStatus = "Draft",
-                AnnotationStatus = "Ready for PDF viewer annotation",
+                AnnotationStatus = "PDF preview ready",
                 CommentStatus = "No comments",
                 AccessProfile = template.AccessProfile,
                 RetentionStatus = "Current",
@@ -746,10 +746,10 @@ public sealed class DocumentManagementController : ControllerBase
             record.Title = title;
             record.SourceLabel = sourceLabel;
             record.RepositoryStatus = "Linked";
-            record.RepositoryPath = storageResult.PublicUrl;
+            record.RepositoryPath = storageResult.FilePath;
             record.CurrentVersion = NextVersionNumber(record.CurrentVersion);
             record.VersionStatus = "Draft";
-            record.AnnotationStatus = "Ready for PDF viewer annotation";
+            record.AnnotationStatus = "PDF preview ready";
             record.CommentStatus = "No comments";
             record.AccessProfile = template.AccessProfile;
             record.LifecycleStatus = "Draft";
@@ -783,8 +783,8 @@ public sealed class DocumentManagementController : ControllerBase
             DocumentRecordId = record.Id,
             VersionNumber = record.CurrentVersion ?? "v1.0",
             Status = "Draft",
-            RepositoryPath = storageResult.PublicUrl,
-            RenditionPath = storageResult.PublicUrl,
+            RepositoryPath = storageResult.FilePath,
+            RenditionPath = storageResult.FilePath,
             FileName = storageResult.OriginalFileName,
             ContentType = "application/pdf",
             FileSize = storageResult.FileSize,
@@ -813,7 +813,7 @@ public sealed class DocumentManagementController : ControllerBase
                 record = ToRecordDto(record, templatesByCode, values),
                 version = ToVersionDto(version),
                 content,
-                pdfUrl = storageResult.PublicUrl,
+                pdfUrl = VersionContentUrl(record.Id, version.Id),
                 dmsReference = record.DocumentReference,
                 sourceLabel = record.SourceLabel
             }
@@ -1410,7 +1410,7 @@ public sealed class DocumentManagementController : ControllerBase
         _db.FileUploadRecords.Add(uploadRecord);
 
         var isPdf = IsPdfFile(storageResult.ContentType, storageResult.OriginalFileName);
-        var pdfRenditionPath = isPdf ? storageResult.PublicUrl : TrimToNull(renditionPath);
+        var pdfRenditionPath = isPdf ? storageResult.FilePath : TrimToNull(renditionPath);
         CentralDocumentRenditionResult? renditionResult = null;
 
         if (!isPdf && string.IsNullOrWhiteSpace(pdfRenditionPath))
@@ -1437,7 +1437,7 @@ public sealed class DocumentManagementController : ControllerBase
             DocumentRecordId = record.Id,
             VersionNumber = string.IsNullOrWhiteSpace(versionNumber) ? NextVersionNumber(record.CurrentVersion) : versionNumber.Trim(),
             Status = string.IsNullOrWhiteSpace(status) ? "Submitted" : status.Trim(),
-            RepositoryPath = storageResult.PublicUrl,
+            RepositoryPath = storageResult.FilePath,
             RenditionPath = pdfRenditionPath,
             FileName = storageResult.OriginalFileName,
             ContentType = storageResult.ContentType,
@@ -1455,7 +1455,7 @@ public sealed class DocumentManagementController : ControllerBase
         record.RepositoryPath = version.RepositoryPath;
         record.RepositoryStatus = "Linked";
         record.AnnotationStatus = !string.IsNullOrWhiteSpace(version.RenditionPath)
-            ? "Ready for PDF viewer annotation"
+            ? "PDF preview ready"
             : renditionResult is { IsSupported: true }
                 ? "PDF rendition failed"
             : "PDF rendition required";
@@ -1516,7 +1516,7 @@ public sealed class DocumentManagementController : ControllerBase
         version.LastModifiedById = GetUserId();
 
         record.AnnotationStatus = string.IsNullOrWhiteSpace(request.AnnotationStatus)
-            ? "Ready for PDF viewer annotation"
+            ? "PDF preview ready"
             : request.AnnotationStatus.Trim();
         record.UpdatedAt = DateTime.UtcNow;
         record.UpdatedBy = _currentUserService.UserName ?? "System";
@@ -1565,7 +1565,7 @@ public sealed class DocumentManagementController : ControllerBase
         if (IsPdfFile(version.ContentType, version.FileName) && !string.IsNullOrWhiteSpace(version.RepositoryPath))
         {
             version.RenditionPath = version.RepositoryPath;
-            record.AnnotationStatus = "Ready for PDF viewer annotation";
+            record.AnnotationStatus = "PDF preview ready";
             await _db.SaveChangesAsync(cancellationToken);
             return Ok(new { success = true, data = ToVersionDto(version) });
         }
@@ -1621,7 +1621,7 @@ public sealed class DocumentManagementController : ControllerBase
         version.UpdatedBy = _currentUserService.UserName ?? "System";
         version.LastModifiedById = GetUserId();
 
-        record.AnnotationStatus = "Ready for PDF viewer annotation";
+        record.AnnotationStatus = "PDF preview ready";
         record.UpdatedAt = DateTime.UtcNow;
         record.UpdatedBy = _currentUserService.UserName ?? "System";
         record.LastModifiedById = GetUserId();
@@ -1719,6 +1719,77 @@ public sealed class DocumentManagementController : ControllerBase
                 WordDocumentContentType,
                 SafeDownloadFileName(wordResult.FileName, record.DocumentReference, ".docx"));
         }
+    }
+
+    [HttpGet("records/{id:guid}/content")]
+    public async Task<IActionResult> GetRecordContent(Guid id, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var record = await _db.CentralDocumentRecords
+            .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+
+        if (record is null)
+        {
+            return NotFound(new { success = false, message = "DMS document record was not found." });
+        }
+
+        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanView, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var version = await ResolveCurrentVersionAsync(record, tenantId, cancellationToken);
+        if (version is null)
+        {
+            return BadRequest(new { success = false, message = "This DMS record does not have a viewable current version." });
+        }
+
+        var pdfFile = await OpenPdfVersionFileAsync(record, version, tenantId, cancellationToken);
+        if (!pdfFile.Success || pdfFile.Stream is null)
+        {
+            return BadRequest(new { success = false, message = pdfFile.ErrorMessage ?? "The PDF preview could not be prepared." });
+        }
+
+        Response.Headers["Content-Disposition"] = $"inline; filename=\"{SafeDownloadFileName(pdfFile.FileName, record.DocumentReference, ".pdf")}\"";
+        return File(pdfFile.Stream, "application/pdf");
+    }
+
+    [HttpGet("records/{id:guid}/versions/{versionId:guid}/content")]
+    public async Task<IActionResult> GetVersionContent(Guid id, Guid versionId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var record = await _db.CentralDocumentRecords
+            .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+
+        if (record is null)
+        {
+            return NotFound(new { success = false, message = "DMS document record was not found." });
+        }
+
+        var version = await _db.CentralDocumentVersions
+            .FirstOrDefaultAsync(item => item.Id == versionId
+                && item.DocumentRecordId == record.Id
+                && item.TenantId == tenantId
+                && !item.IsDeleted, cancellationToken);
+
+        if (version is null)
+        {
+            return NotFound(new { success = false, message = "DMS version record was not found." });
+        }
+
+        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanView, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var pdfFile = await OpenPdfVersionFileAsync(record, version, tenantId, cancellationToken);
+        if (!pdfFile.Success || pdfFile.Stream is null)
+        {
+            return BadRequest(new { success = false, message = pdfFile.ErrorMessage ?? "The PDF preview could not be prepared." });
+        }
+
+        Response.Headers["Content-Disposition"] = $"inline; filename=\"{SafeDownloadFileName(pdfFile.FileName, record.DocumentReference, ".pdf")}\"";
+        return File(pdfFile.Stream, "application/pdf");
     }
 
     [HttpPost("source-handoffs/register")]
@@ -2838,7 +2909,7 @@ public sealed class DocumentManagementController : ControllerBase
         record.SourceRecordId,
         record.MetadataTemplateCode,
         record.RepositoryStatus,
-        record.RepositoryPath,
+        RepositoryPath = IsRepositoryLinked(record) ? RecordContentUrl(record.Id) : null,
         record.ExternalDocumentUrl,
         record.CurrentVersion,
         record.VersionStatus,
@@ -3140,6 +3211,33 @@ public sealed class DocumentManagementController : ControllerBase
                 || string.Equals(rule.Module, record.SourceModule, StringComparison.OrdinalIgnoreCase)));
     }
 
+    private async Task<CentralDocumentVersion?> ResolveCurrentVersionAsync(
+        CentralDocumentRecord record,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var query = _db.CentralDocumentVersions
+            .Where(item => item.DocumentRecordId == record.Id
+                && item.TenantId == tenantId
+                && !item.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(record.CurrentVersion))
+        {
+            var current = await query
+                .OrderByDescending(item => item.CreatedAt)
+                .FirstOrDefaultAsync(item => item.VersionNumber == record.CurrentVersion, cancellationToken);
+
+            if (current is not null)
+            {
+                return current;
+            }
+        }
+
+        return await query
+            .OrderByDescending(item => item.PublishedAt ?? item.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     private async Task<VersionDownloadFile> OpenPdfVersionFileAsync(
         CentralDocumentRecord record,
         CentralDocumentVersion version,
@@ -3210,7 +3308,7 @@ public sealed class DocumentManagementController : ControllerBase
             version.UpdatedBy = _currentUserService.UserName ?? "System";
             version.LastModifiedById = GetUserId();
 
-            record.AnnotationStatus = "Ready for PDF viewer annotation";
+            record.AnnotationStatus = "PDF preview ready";
             record.UpdatedAt = DateTime.UtcNow;
             record.UpdatedBy = _currentUserService.UserName ?? "System";
             record.LastModifiedById = GetUserId();
@@ -3846,8 +3944,12 @@ public sealed class DocumentManagementController : ControllerBase
         version.DocumentRecordId,
         version.VersionNumber,
         version.Status,
-        version.RepositoryPath,
-        version.RenditionPath,
+        RepositoryPath = string.IsNullOrWhiteSpace(version.RepositoryPath)
+            ? null
+            : VersionContentUrl(version.DocumentRecordId, version.Id),
+        RenditionPath = string.IsNullOrWhiteSpace(version.RenditionPath)
+            ? null
+            : VersionContentUrl(version.DocumentRecordId, version.Id),
         version.FileName,
         version.ContentType,
         version.FileSize,
@@ -3856,6 +3958,12 @@ public sealed class DocumentManagementController : ControllerBase
         version.ChangeSummary,
         version.CreatedAt
     };
+
+    private static string RecordContentUrl(Guid recordId)
+        => $"/api/document-management/records/{recordId}/content";
+
+    private static string VersionContentUrl(Guid recordId, Guid versionId)
+        => $"/api/document-management/records/{recordId}/versions/{versionId}/content";
 
     private static object ToAnnotationReviewDto(CentralDocumentAnnotationReview review) => new
     {

@@ -107,7 +107,7 @@ public sealed class FacilitiesBillingDocumentsController : ControllerBase
             ExternalDocumentUrl = TrimToNull(request.ExternalDocumentUrl),
             CurrentVersion = "v1.0",
             VersionStatus = "Published",
-            AnnotationStatus = IsPdf(request) ? "Ready for PDF viewer annotation" : "Not required",
+            AnnotationStatus = IsPdf(request) ? "PDF preview ready" : "Not required",
             CommentStatus = "Open for comments",
             AccessProfile = string.IsNullOrWhiteSpace(template?.AccessProfile) ? "Finance sensitive" : template.AccessProfile,
             RetentionStatus = "Current",

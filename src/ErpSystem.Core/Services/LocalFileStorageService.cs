@@ -16,9 +16,11 @@ public partial class LocalFileStorageService : IFileStorageService
     private readonly StorageProviderOptions _options;
     private readonly IHostEnvironment _environment;
     private readonly string _basePath;
+    private readonly string _privateBasePath;
     private readonly string _baseUrl;
 
     public string ProviderName => "Local";
+    private const string PrivatePathPrefix = "private/";
     private static readonly char[] second = new[] { ' ', '.', ',', ';' };
 
     public LocalFileStorageService(
@@ -43,6 +45,7 @@ public partial class LocalFileStorageService : IFileStorageService
                 ? _options.Local.BasePath
                 : Path.Combine(_environment.ContentRootPath, _options.Local.BasePath);
         }
+        _privateBasePath = Path.Combine(_environment.ContentRootPath, "secure-file-storage");
 
         // Configure base URL
         _baseUrl = _options.Local.BaseUrl ?? $"/{_options.Local.BasePath}";
@@ -56,6 +59,11 @@ public partial class LocalFileStorageService : IFileStorageService
         {
             Directory.CreateDirectory(_basePath);
             _logger.LogInformation("Created storage directory: {BasePath}", _basePath);
+        }
+        if (_options.Local.CreateDirectoryIfNotExists && !Directory.Exists(_privateBasePath))
+        {
+            Directory.CreateDirectory(_privateBasePath);
+            _logger.LogInformation("Created private storage directory: {BasePath}", _privateBasePath);
         }
     }
 
@@ -95,7 +103,7 @@ public partial class LocalFileStorageService : IFileStorageService
     {
         try
         {
-            var fullPath = Path.Combine(_basePath, filePath);
+            var fullPath = ResolvePhysicalPath(filePath);
             if (!File.Exists(fullPath))
             {
                 throw new FileNotFoundException($"File not found: {filePath}");
@@ -126,7 +134,9 @@ public partial class LocalFileStorageService : IFileStorageService
                 : "global";
 
             var relativePath = Path.Combine(categoryPath, tenantPath, datePath);
-            var fullDirectoryPath = Path.Combine(_basePath, relativePath);
+            var privateFile = IsPrivateCategory(request.Category);
+            var storageRoot = privateFile ? _privateBasePath : _basePath;
+            var fullDirectoryPath = Path.Combine(storageRoot, relativePath);
 
             // Ensure directory exists
             Directory.CreateDirectory(fullDirectoryPath);
@@ -134,6 +144,7 @@ public partial class LocalFileStorageService : IFileStorageService
             // Full file path
             var filePath = Path.Combine(fullDirectoryPath, uniqueFileName);
             var relativeFilePath = Path.Combine(relativePath, uniqueFileName).Replace('\\', '/');
+            var storedFilePath = privateFile ? $"{PrivatePathPrefix}{relativeFilePath}" : relativeFilePath;
 
             // Check if file already exists and handle overwrite
             if (File.Exists(filePath) && !request.OverwriteExisting)
@@ -144,8 +155,8 @@ public partial class LocalFileStorageService : IFileStorageService
                     ErrorMessage = "File already exists and overwrite is not allowed",
                     FileName = uniqueFileName,
                     OriginalFileName = request.FileName,
-                    FilePath = relativeFilePath,
-                    PublicUrl = GetPublicUrl(relativeFilePath),
+                    FilePath = storedFilePath,
+                    PublicUrl = GetPublicUrl(storedFilePath),
                     FileSize = request.FileSize,
                     ContentType = request.ContentType,
                     Category = request.Category,
@@ -166,15 +177,15 @@ public partial class LocalFileStorageService : IFileStorageService
             var actualFileSize = fileInfo.Length;
 
             _logger.LogInformation("File uploaded successfully: {OriginalFileName} -> {FilePath} ({FileSize} bytes)",
-                request.FileName, relativeFilePath, actualFileSize);
+                request.FileName, storedFilePath, actualFileSize);
 
             return new FileStorageResult
             {
                 Success = true,
                 FileName = uniqueFileName,
                 OriginalFileName = request.FileName,
-                FilePath = relativeFilePath,
-                PublicUrl = GetPublicUrl(relativeFilePath),
+                FilePath = storedFilePath,
+                PublicUrl = GetPublicUrl(storedFilePath),
                 FileSize = actualFileSize,
                 ContentType = request.ContentType,
                 Category = request.Category,
@@ -256,7 +267,7 @@ public partial class LocalFileStorageService : IFileStorageService
     {
         try
         {
-            var fullPath = Path.Combine(_basePath, filePath);
+            var fullPath = ResolvePhysicalPath(filePath);
 
             if (!File.Exists(fullPath))
             {
@@ -283,7 +294,7 @@ public partial class LocalFileStorageService : IFileStorageService
     {
         try
         {
-            var fullPath = Path.Combine(_basePath, filePath);
+            var fullPath = ResolvePhysicalPath(filePath);
             return File.Exists(fullPath);
         }
         catch (Exception ex)
@@ -297,7 +308,7 @@ public partial class LocalFileStorageService : IFileStorageService
     {
         try
         {
-            var fullPath = Path.Combine(_basePath, filePath);
+            var fullPath = ResolvePhysicalPath(filePath);
 
             if (!File.Exists(fullPath))
             {
@@ -341,8 +352,8 @@ public partial class LocalFileStorageService : IFileStorageService
     {
         try
         {
-            var sourcePath = Path.Combine(_basePath, sourceFilePath);
-            var destinationPath = Path.Combine(_basePath, destinationFilePath);
+            var sourcePath = ResolvePhysicalPath(sourceFilePath);
+            var destinationPath = ResolvePhysicalPath(destinationFilePath);
 
             if (!File.Exists(sourcePath))
             {
@@ -372,8 +383,8 @@ public partial class LocalFileStorageService : IFileStorageService
     {
         try
         {
-            var sourcePath = Path.Combine(_basePath, sourceFilePath);
-            var destinationPath = Path.Combine(_basePath, destinationFilePath);
+            var sourcePath = ResolvePhysicalPath(sourceFilePath);
+            var destinationPath = ResolvePhysicalPath(destinationFilePath);
 
             if (!File.Exists(sourcePath))
             {
@@ -508,7 +519,31 @@ public partial class LocalFileStorageService : IFileStorageService
 
     private string GetPublicUrl(string filePath)
     {
+        if (IsPrivatePath(filePath))
+        {
+            return string.Empty;
+        }
+
         return $"{_baseUrl}/{filePath}";
+    }
+
+    private static bool IsPrivateCategory(string? category)
+        => !string.IsNullOrWhiteSpace(category)
+            && category.StartsWith("central-dms", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPrivatePath(string? filePath)
+        => !string.IsNullOrWhiteSpace(filePath)
+            && filePath.Replace('\\', '/').TrimStart('/').StartsWith(PrivatePathPrefix, StringComparison.OrdinalIgnoreCase);
+
+    private string ResolvePhysicalPath(string filePath)
+    {
+        var normalizedPath = filePath.Replace('\\', '/').TrimStart('/');
+        if (IsPrivatePath(normalizedPath))
+        {
+            return Path.Combine(_privateBasePath, normalizedPath[PrivatePathPrefix.Length..]);
+        }
+
+        return Path.Combine(_basePath, normalizedPath);
     }
 
     private static string GetContentType(string extension)
@@ -540,8 +575,10 @@ public partial class LocalFileStorageService : IFileStorageService
                 return;
             }
 
-            // Don't delete the base directory
-            if (Path.GetFullPath(directoryPath) == Path.GetFullPath(_basePath))
+            // Don't delete storage roots.
+            var fullDirectoryPath = Path.GetFullPath(directoryPath);
+            if (fullDirectoryPath == Path.GetFullPath(_basePath)
+                || fullDirectoryPath == Path.GetFullPath(_privateBasePath))
             {
                 return;
             }

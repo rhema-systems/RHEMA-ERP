@@ -2,7 +2,6 @@
 
 import React from 'react';
 import {
-  Annotation,
   BookmarkView,
   Inject,
   LinkAnnotation,
@@ -25,8 +24,9 @@ interface CentralDocumentPdfViewerProps {
 export default function CentralDocumentPdfViewer({
   fileUrl,
   fileName,
-  enableAnnotations = true,
+  enableAnnotations = false,
 }: CentralDocumentPdfViewerProps) {
+  void enableAnnotations;
   const viewerId = React.useMemo(
     () => `central-dms-pdf-${Math.random().toString(36).slice(2)}`,
     []
@@ -45,19 +45,19 @@ export default function CentralDocumentPdfViewer({
         <PdfViewerComponent
           id={viewerId}
           documentPath={fileUrl}
-          resourceUrl="https://cdn.syncfusion.com/ej2/34.1.30/dist/ej2-pdfviewer-lib"
+          resourceUrl="/syncfusion/ej2-pdfviewer-lib"
           enableToolbar
           enableNavigationToolbar
           enableThumbnail
           enableTextSearch
           enableTextSelection
-          enableAnnotation={enableAnnotations}
-          enableAnnotationToolbar={enableAnnotations}
-          enableTextMarkupAnnotation={enableAnnotations}
-          enableShapeAnnotation={enableAnnotations}
-          enableStampAnnotations={enableAnnotations}
-          enableStickyNotesAnnotation={enableAnnotations}
-          enableInkAnnotation={enableAnnotations}
+          enableAnnotation={false}
+          enableAnnotationToolbar={false}
+          enableTextMarkupAnnotation={false}
+          enableShapeAnnotation={false}
+          enableStampAnnotations={false}
+          enableStickyNotesAnnotation={false}
+          enableInkAnnotation={false}
           style={{ display: 'block', height: '100%', width: '100%' }}
         >
           <Inject
@@ -71,7 +71,6 @@ export default function CentralDocumentPdfViewer({
               Print,
               TextSelection,
               TextSearch,
-              Annotation,
             ]}
           />
         </PdfViewerComponent>

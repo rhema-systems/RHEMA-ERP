@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { documentManagementService } from '@/services/document-management.service';
 
 const CentralDocumentPdfViewer = dynamic(
   () => import('@/components/document-management/CentralDocumentPdfViewer'),
@@ -118,8 +119,14 @@ export function CentralDocumentViewerDialog({
   onGenerateRendition,
   onDownload,
 }: CentralDocumentViewerDialogProps) {
+  void enableAnnotations;
+  const annotationsEnabled = false;
   const [localFile, setLocalFile] =
     React.useState<CentralDocumentViewerFile | null>(file);
+  const [previewObjectUrl, setPreviewObjectUrl] = React.useState<string | null>(
+    null
+  );
+  const [isLoadingPreview, setIsLoadingPreview] = React.useState(false);
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [downloadingFormat, setDownloadingFormat] = React.useState<
     'pdf' | 'word' | null
@@ -135,6 +142,7 @@ export function CentralDocumentViewerDialog({
   }, [file]);
 
   const view = resolvePdfView(localFile);
+  const viewerUrl = previewObjectUrl || view.url;
   const title = localFile?.title || 'Document preview';
   const canGenerateRendition =
     view.status === 'conversion-required' &&
@@ -143,6 +151,75 @@ export function CentralDocumentViewerDialog({
   const canDownloadVersion =
     Boolean(localFile?.documentRecordId && localFile?.versionId) &&
     Boolean(onDownload);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    setPreviewObjectUrl(null);
+
+    if (!open || !localFile?.documentRecordId) {
+      setIsLoadingPreview(false);
+      return () => undefined;
+    }
+
+    const shouldFetchSecurePreview =
+      Boolean(localFile.versionId) ||
+      view.url?.startsWith('/api/document-management/');
+
+    if (!shouldFetchSecurePreview) {
+      setIsLoadingPreview(false);
+      return () => undefined;
+    }
+
+    setIsLoadingPreview(true);
+    const loadPreview = async () => {
+      try {
+        const blob = localFile.versionId
+          ? await documentManagementService.downloadVersionFile(
+              localFile.documentRecordId!,
+              localFile.versionId,
+              'pdf'
+            )
+          : await documentManagementService.downloadRecordContent(
+              localFile.documentRecordId!
+            );
+
+        if (cancelled) return;
+
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewObjectUrl(objectUrl);
+      } catch (error) {
+        if (!cancelled) {
+          setDownloadError(
+            error instanceof Error
+              ? error.message
+              : 'Unable to load the secured document preview.'
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingPreview(false);
+        }
+      }
+    };
+
+    void loadPreview();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [
+    open,
+    localFile?.documentRecordId,
+    localFile?.versionId,
+    localFile?.repositoryPath,
+    localFile?.renditionPath,
+    view.url,
+  ]);
 
   const handleGenerateRendition = async () => {
     if (!localFile || !onGenerateRendition) return;
@@ -238,7 +315,7 @@ export function CentralDocumentViewerDialog({
               {view.status === 'direct' ? (
                 <Badge variant="secondary">PDF source</Badge>
               ) : null}
-              {!enableAnnotations ? (
+              {!annotationsEnabled ? (
                 <Badge variant="outline">Read only</Badge>
               ) : null}
             </div>
@@ -249,11 +326,11 @@ export function CentralDocumentViewerDialog({
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-hidden bg-background p-4">
-          {view.url ? (
+          {viewerUrl ? (
             <CentralDocumentPdfViewer
-              fileUrl={view.url}
+              fileUrl={viewerUrl}
               fileName={localFile?.fileName || title}
-              enableAnnotations={enableAnnotations}
+              enableAnnotations={annotationsEnabled}
             />
           ) : (
             <div className="flex h-full min-h-[420px] items-center justify-center rounded-md border bg-muted/30 p-6">
@@ -266,10 +343,14 @@ export function CentralDocumentViewerDialog({
                 <h3 className="mt-4 text-base font-semibold">
                   {view.status === 'conversion-required'
                     ? 'PDF rendition required'
+                    : isLoadingPreview
+                      ? 'Loading secure preview'
                     : 'No viewable file linked'}
                 </h3>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  {view.status === 'conversion-required'
+                  {isLoadingPreview
+                    ? 'Fetching the protected file through Central DMS permissions.'
+                    : view.status === 'conversion-required'
                     ? 'Generate a PDF rendition to open this document in the PDF viewer.'
                     : 'Link a PDF source or PDF rendition before previewing the document.'}
                 </p>
@@ -293,7 +374,8 @@ export function CentralDocumentViewerDialog({
                     {generateError}
                   </p>
                 ) : null}
-                {view.originalUrl ? (
+                {view.originalUrl &&
+                !view.originalUrl.startsWith('/api/document-management/') ? (
                   <Button asChild variant="outline" className="mt-4">
                     <a
                       href={view.originalUrl}
