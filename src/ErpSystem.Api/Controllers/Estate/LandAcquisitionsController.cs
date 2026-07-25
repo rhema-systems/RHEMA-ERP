@@ -1486,9 +1486,15 @@ public class LandAcquisitionsController : ControllerBase
             return;
         }
 
-        // Land Acquisition board ownership follows the live workflow step so approver-role users see their actions immediately after a handoff.
-        acquisition.StageOrder = matched.Order;
-        acquisition.CurrentStage = (AcquisitionProcedure)matched.Order;
+        var targetOrder = ResolveSequentialStageOrder(acquisition.StageOrder, matched.Order, allowCaptureStageAdvance: false);
+        if (targetOrder == acquisition.StageOrder)
+        {
+            return;
+        }
+
+        // Land Acquisition has capture stages between approval stages, so workflow sync must not skip the next operational workspace.
+        acquisition.StageOrder = targetOrder;
+        acquisition.CurrentStage = (AcquisitionProcedure)targetOrder;
         acquisition.Status = LandAcquisitionStatus.PendingApproval;
         acquisition.UpdatedAt = DateTime.UtcNow;
 
@@ -2117,8 +2123,9 @@ public class LandAcquisitionsController : ControllerBase
 
         if (matched != null)
         {
-            acquisition.StageOrder = matched.Order;
-            acquisition.CurrentStage = (AcquisitionProcedure)matched.Order;
+            var targetOrder = ResolveSequentialStageOrder(acquisition.StageOrder, matched.Order, allowCaptureStageAdvance: true);
+            acquisition.StageOrder = targetOrder;
+            acquisition.CurrentStage = (AcquisitionProcedure)targetOrder;
             return;
         }
 
@@ -2137,6 +2144,22 @@ public class LandAcquisitionsController : ControllerBase
         }
 
         await Task.CompletedTask;
+    }
+
+    private static int ResolveSequentialStageOrder(int currentStageOrder, int workflowStageOrder, bool allowCaptureStageAdvance)
+    {
+        if (workflowStageOrder <= currentStageOrder)
+        {
+            return currentStageOrder;
+        }
+
+        if (!allowCaptureStageAdvance && !ApprovalStageOrders.Contains(currentStageOrder))
+        {
+            return currentStageOrder;
+        }
+
+        // Workflow can jump from an approval step to the next approval step; the Estate module must still expose the intervening capture workspace.
+        return Math.Min(workflowStageOrder, Math.Min(15, currentStageOrder + 1));
     }
 
     private LandAcquisitionItemDto ToItemDto(LandAcquisition item)
