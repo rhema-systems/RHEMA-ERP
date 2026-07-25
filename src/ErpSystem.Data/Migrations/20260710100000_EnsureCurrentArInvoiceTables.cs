@@ -303,6 +303,34 @@ namespace ErpSystem.Data.Migrations
                     CREATE INDEX [IX_InvoiceLineItem_TenantId] ON [dbo].[InvoiceLineItem] ([TenantId]);
                     CREATE INDEX [IX_InvoiceLineItem_WarehouseId] ON [dbo].[InvoiceLineItem] ([WarehouseId]);
                 END
+
+                IF OBJECT_ID(N'[dbo].[ReturnOrders]', N'U') IS NOT NULL
+                   AND COL_LENGTH(N'[dbo].[ReturnOrders]', N'InvoiceId') IS NOT NULL
+                   AND OBJECT_ID(N'[dbo].[Invoices]', N'U') IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM sys.foreign_keys
+                       WHERE [parent_object_id] = OBJECT_ID(N'[dbo].[ReturnOrders]')
+                         AND [name] = N'FK_ReturnOrders_Invoices_InvoiceId')
+                BEGIN
+                    ALTER TABLE [dbo].[ReturnOrders] WITH CHECK
+                    ADD CONSTRAINT [FK_ReturnOrders_Invoices_InvoiceId]
+                        FOREIGN KEY ([InvoiceId]) REFERENCES [dbo].[Invoices] ([Id])
+                        ON DELETE NO ACTION;
+                END
+
+                IF OBJECT_ID(N'[dbo].[ReturnOrderLines]', N'U') IS NOT NULL
+                   AND COL_LENGTH(N'[dbo].[ReturnOrderLines]', N'InvoiceLineItemId') IS NOT NULL
+                   AND OBJECT_ID(N'[dbo].[InvoiceLineItem]', N'U') IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM sys.foreign_keys
+                       WHERE [parent_object_id] = OBJECT_ID(N'[dbo].[ReturnOrderLines]')
+                         AND [name] = N'FK_ReturnOrderLines_InvoiceLineItem_InvoiceLineItemId')
+                BEGIN
+                    ALTER TABLE [dbo].[ReturnOrderLines] WITH CHECK
+                    ADD CONSTRAINT [FK_ReturnOrderLines_InvoiceLineItem_InvoiceLineItemId]
+                        FOREIGN KEY ([InvoiceLineItemId]) REFERENCES [dbo].[InvoiceLineItem] ([Id])
+                        ON DELETE NO ACTION;
+                END
                 """);
         }
 
