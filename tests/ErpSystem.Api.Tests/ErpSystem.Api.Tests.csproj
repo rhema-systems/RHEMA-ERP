@@ -56,6 +56,7 @@
     <Compile Include="Controllers\Procurement\TenderAwardsAwardReadinessControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementBidderCommunicationsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementGhanepsExchangesControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierEvidencePacksControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TenderEvaluationsCommitteeGuardControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TendersCommitteeGuardControllerTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />

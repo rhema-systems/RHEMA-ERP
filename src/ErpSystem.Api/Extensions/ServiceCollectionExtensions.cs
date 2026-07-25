@@ -825,6 +825,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRfqControlService, ErpSystem.Core.Services.Procurement.ProcurementRfqControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementTenderControlService, ErpSystem.Core.Services.Procurement.ProcurementTenderControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementTenderDocumentControlService, ErpSystem.Core.Services.Procurement.ProcurementTenderDocumentControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierEvidencePackService, ErpSystem.Core.Services.Procurement.ProcurementSupplierEvidencePackService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementEvaluationCommitteeControlService, ErpSystem.Core.Services.Procurement.ProcurementEvaluationCommitteeControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAwardReadinessService, ErpSystem.Core.Services.Procurement.ProcurementAwardReadinessService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementBidderCommunicationService, ErpSystem.Core.Services.Procurement.ProcurementBidderCommunicationService>();

@@ -1317,6 +1317,11 @@ const navigationItems: NavItem[] = [
             icon: FileCheck,
           },
           {
+            title: 'Supplier Evidence Packs',
+            href: '/administration/procurement/supplier-evidence-packs',
+            icon: FileCheck,
+          },
+          {
             title: 'Control Events',
             href: '/administration/procurement/control-events',
             icon: Activity,

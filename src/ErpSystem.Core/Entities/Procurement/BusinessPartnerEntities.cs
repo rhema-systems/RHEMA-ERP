@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Procurement;
 
@@ -631,6 +632,8 @@ public class BusinessPartnerRegistration : TenantEntity
     [MaxLength(20)]
     public string PartnerType { get; set; } = "Supplier"; // Supplier, Contractor, Both
 
+    public ProcurementSupplierRegistrationCategory? RegistrationCategory { get; set; }
+
     // Status Tracking
     [Required]
     [MaxLength(50)]
@@ -661,6 +664,7 @@ public class BusinessPartnerRegistration : TenantEntity
     public virtual BusinessPartner? BusinessPartner { get; set; }
     public virtual ICollection<BusinessPartnerRegistrationDocument> Documents { get; set; } = new List<BusinessPartnerRegistrationDocument>();
     public virtual ICollection<BusinessPartnerRegistrationStatusHistory> StatusHistory { get; set; } = new List<BusinessPartnerRegistrationStatusHistory>();
+    public virtual ProcurementSupplierRegistrationEvidencePackBinding? EvidencePackBinding { get; set; }
 }
 
 /// <summary>
@@ -687,6 +691,18 @@ public class BusinessPartnerRegistrationDocument : TenantEntity
 
     [MaxLength(100)]
     public string? MimeType { get; set; }
+
+    [MaxLength(50)]
+    public string? EvidenceRequirementCode { get; set; }
+
+    [MaxLength(100)]
+    public string? ClassificationCode { get; set; }
+
+    public DateTime? IssuedAtUtc { get; set; }
+    public DateTime? ExpiresAtUtc { get; set; }
+
+    [MaxLength(64)]
+    public string? ChecksumSha256 { get; set; }
 
     public bool IsVerified { get; set; } = false;
     public Guid? VerifiedById { get; set; }

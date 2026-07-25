@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -305,6 +306,42 @@ public class BusinessPartnerRegistrationsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (ProcurementSupplierEvidencePackAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Status = StatusCodes.Status403Forbidden,
+                Title = "Supplier registration evidence access forbidden",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path
+            });
+        }
+        catch (ProcurementSupplierEvidencePackValidationException ex)
+        {
+            var problem = new ValidationProblemDetails(new Dictionary<string, string[]>
+            {
+                [ex.Code] = [ex.Message]
+            })
+            {
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Title = "Supplier registration evidence is incomplete",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path
+            };
+            problem.Extensions["code"] = ex.Code;
+            return UnprocessableEntity(problem);
+        }
+        catch (ProcurementSupplierEvidencePackConflictException ex)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Supplier registration evidence-pack conflict",
+                Detail = ex.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions = { ["code"] = ex.Code }
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -461,7 +498,11 @@ public class BusinessPartnerRegistrationsController : ControllerBase
     public async Task<ActionResult<BusinessPartnerRegistrationDocumentDto>> UploadDocument(
         Guid id,
         IFormFile file,
-        [FromForm] string documentType)
+        [FromForm] string documentType,
+        [FromForm] string? evidenceRequirementCode = null,
+        [FromForm] string? classificationCode = null,
+        [FromForm] DateTime? issueDate = null,
+        [FromForm] DateTime? expiryDate = null)
     {
         try
         {
@@ -483,6 +524,9 @@ public class BusinessPartnerRegistrationsController : ControllerBase
             {
                 await file.CopyToAsync(stream);
             }
+            await using var checksumStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var checksumSha256 = Convert.ToHexString(
+                await SHA256.HashDataAsync(checksumStream)).ToLowerInvariant();
 
             var dto = new CreateBusinessPartnerDocumentDto
             {
@@ -491,7 +535,12 @@ public class BusinessPartnerRegistrationsController : ControllerBase
                 DocumentPath = filePath,
                 FilePath = filePath,
                 FileSize = file.Length,
-                MimeType = file.ContentType
+                MimeType = file.ContentType,
+                EvidenceRequirementCode = evidenceRequirementCode,
+                ClassificationCode = classificationCode,
+                IssueDate = issueDate,
+                ExpiryDate = expiryDate,
+                ChecksumSha256 = checksumSha256
             };
 
             var document = await _registrationService.UploadDocumentAsync(id, dto, userId);

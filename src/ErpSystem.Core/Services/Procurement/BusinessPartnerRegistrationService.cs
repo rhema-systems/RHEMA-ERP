@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -25,6 +26,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
     private readonly IEmailService? _emailService;
     private readonly INotificationService? _notificationService;
     private readonly IAppEventBus _appEventBus;
+    private readonly IProcurementSupplierEvidencePackService? _evidencePackService;
 
     public BusinessPartnerRegistrationService(
         IBusinessPartnerRegistrationRepository registrationRepository,
@@ -40,7 +42,8 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         IAppEventBus appEventBus,
         ILogger<BusinessPartnerRegistrationService> logger,
         IEmailService? emailService = null,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        IProcurementSupplierEvidencePackService? evidencePackService = null)
     {
         _registrationRepository = registrationRepository;
         _documentRepository = documentRepository;
@@ -56,6 +59,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         _logger = logger;
         _emailService = emailService;
         _notificationService = notificationService;
+        _evidencePackService = evidencePackService;
     }
 
     public async Task<BusinessPartnerRegistrationDetailDto?> GetByIdAsync(Guid id)
@@ -106,6 +110,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             ApplicantEmail = dto.Email,
             ApplicantPhone = dto.Phone,
             PartnerType = dto.PartnerType,
+            RegistrationCategory = dto.RegistrationCategory,
             Status = "Draft",
             RegistrationDataJson = System.Text.Json.JsonSerializer.Serialize(dto),
             CreatedAt = DateTime.UtcNow,
@@ -197,9 +202,24 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
 
         _logger.LogInformation("Updating registration {RegistrationId} for user {UserId}", id, userId);
 
+        if (registration.RegistrationCategory != dto.RegistrationCategory)
+        {
+            var isBound = await _unitOfWork
+                .Repository<Entities.Procurement.ProcurementSupplierRegistrationEvidencePackBinding>()
+                .GetQueryable(item => item.TenantId == registration.TenantId &&
+                    item.RegistrationId == registration.Id && !item.IsDeleted)
+                .AnyAsync();
+            if (isBound)
+            {
+                throw new InvalidOperationException(
+                    "The registration category cannot change after the evidence pack is bound.");
+            }
+        }
+
         registration.ApplicantName = dto.CompanyName;
         registration.ApplicantEmail = dto.Email;
         registration.ApplicantPhone = dto.Phone;
+        registration.RegistrationCategory = dto.RegistrationCategory;
         registration.RegistrationDataJson = System.Text.Json.JsonSerializer.Serialize(dto);
         registration.UpdatedAt = DateTime.UtcNow;
 
@@ -337,6 +357,18 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         {
             throw new InvalidOperationException($"Cannot submit incomplete registration: {string.Join(", ", validationErrors)}");
         }
+
+        if (_evidencePackService is null)
+        {
+            throw new InvalidOperationException(
+                "Supplier evidence-pack validation is unavailable. The registration cannot be submitted.");
+        }
+
+        await _evidencePackService.BindAndValidateRegistrationAsync(
+            id,
+            userId,
+            $"supplier-registration-submit-{id:N}",
+            CancellationToken.None);
 
         await _registrationRepository.UpdateStatusAsync(id, "Submitted", userId, "Submitted for review");
 
@@ -824,6 +856,12 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             FilePath = d.DocumentPath,
             DocumentPath = d.DocumentPath,
             FileSize = d.FileSize ?? 0,
+            MimeType = d.MimeType,
+            EvidenceRequirementCode = d.EvidenceRequirementCode,
+            ClassificationCode = d.ClassificationCode,
+            IssuedAtUtc = d.IssuedAtUtc,
+            ExpiresAtUtc = d.ExpiresAtUtc,
+            ChecksumSha256 = d.ChecksumSha256,
             IsVerified = d.IsVerified,
             IsRejected = d.IsRejected,
             RejectionReason = d.RejectionReason,
@@ -835,6 +873,18 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
     public async Task<BusinessPartnerRegistrationDocumentDto> UploadDocumentAsync(Guid registrationId, CreateBusinessPartnerDocumentDto dto, Guid userId)
     {
         var registration = await _registrationRepository.GetByIdAsync(registrationId) ?? throw new InvalidOperationException($"Registration with ID {registrationId} not found");
+        if (registration.CreatedById.HasValue && registration.CreatedById.Value != userId &&
+            !_currentUserProvider.Roles.Contains("Admin") &&
+            !_currentUserProvider.Roles.Contains("BusinessPartnerAdmin"))
+        {
+            throw new UnauthorizedAccessException(
+                "You do not have permission to upload evidence for this registration.");
+        }
+        if (registration.Status is not ("Draft" or "MoreInfoRequired"))
+        {
+            throw new InvalidOperationException(
+                $"Cannot upload registration evidence in {registration.Status} status");
+        }
         var document = new Entities.Procurement.BusinessPartnerRegistrationDocument
         {
             Id = Guid.NewGuid(),
@@ -845,6 +895,11 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             DocumentPath = dto.DocumentPath ?? dto.FilePath ?? string.Empty,
             FileSize = dto.FileSize,
             MimeType = dto.MimeType,
+            EvidenceRequirementCode = dto.EvidenceRequirementCode,
+            ClassificationCode = dto.ClassificationCode,
+            IssuedAtUtc = dto.IssueDate,
+            ExpiresAtUtc = dto.ExpiryDate,
+            ChecksumSha256 = dto.ChecksumSha256,
             IsVerified = false,
             CreatedById = userId,
             CreatedAt = DateTime.UtcNow,
@@ -863,6 +918,12 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             FilePath = created.DocumentPath,
             DocumentPath = created.DocumentPath,
             FileSize = created.FileSize ?? 0,
+            MimeType = created.MimeType,
+            EvidenceRequirementCode = created.EvidenceRequirementCode,
+            ClassificationCode = created.ClassificationCode,
+            IssuedAtUtc = created.IssuedAtUtc,
+            ExpiresAtUtc = created.ExpiresAtUtc,
+            ChecksumSha256 = created.ChecksumSha256,
             IsVerified = created.IsVerified,
             IsRejected = created.IsRejected,
             RejectionReason = created.RejectionReason,
@@ -873,6 +934,29 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
 
     public async Task DeleteDocumentAsync(Guid registrationId, Guid documentId, Guid userId)
     {
+        var registration = await _registrationRepository.GetByIdAsync(registrationId) ??
+            throw new InvalidOperationException($"Registration with ID {registrationId} not found");
+        if (registration.CreatedById.HasValue && registration.CreatedById.Value != userId &&
+            !_currentUserProvider.Roles.Contains("Admin") &&
+            !_currentUserProvider.Roles.Contains("BusinessPartnerAdmin"))
+        {
+            throw new UnauthorizedAccessException(
+                "You do not have permission to delete evidence from this registration.");
+        }
+        if (registration.Status is not ("Draft" or "MoreInfoRequired"))
+        {
+            throw new InvalidOperationException(
+                $"Cannot delete registration evidence in {registration.Status} status");
+        }
+        if (await _unitOfWork
+                .Repository<Entities.Procurement.ProcurementSupplierRegistrationEvidencePackBinding>()
+                .GetQueryable(item => item.TenantId == registration.TenantId &&
+                    item.RegistrationId == registration.Id && !item.IsDeleted)
+                .AnyAsync())
+        {
+            throw new InvalidOperationException(
+                "Evidence cannot be deleted after the registration pack is bound.");
+        }
         var document = await _documentRepository.GetByIdAsync(documentId);
         if (document == null || document.RegistrationId != registrationId)
         {
@@ -965,6 +1049,11 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             DocumentPath = document.DocumentPath,
             FileSize = document.FileSize ?? 0,
             MimeType = document.MimeType,
+            EvidenceRequirementCode = document.EvidenceRequirementCode,
+            ClassificationCode = document.ClassificationCode,
+            IssuedAtUtc = document.IssuedAtUtc,
+            ExpiresAtUtc = document.ExpiresAtUtc,
+            ChecksumSha256 = document.ChecksumSha256,
             IsVerified = document.IsVerified,
             IsRejected = document.IsRejected,
             RejectionReason = document.RejectionReason,
@@ -1279,6 +1368,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             Email = registration.ApplicantEmail,
             Phone = registration.ApplicantPhone,
             PartnerType = registration.PartnerType,
+            RegistrationCategory = registration.RegistrationCategory,
             Status = registration.Status,
             SubmittedDate = registration.SubmittedDate,
             ReviewedDate = registration.ReviewedDate,
@@ -1300,6 +1390,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             Email = registration.ApplicantEmail,
             Phone = registration.ApplicantPhone,
             PartnerType = registration.PartnerType,
+            RegistrationCategory = registration.RegistrationCategory,
             Status = registration.Status,
             SubmittedDate = registration.SubmittedDate,
             ReviewedDate = registration.ReviewedDate,
@@ -1425,6 +1516,12 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
                 FilePath = d.DocumentPath,
                 DocumentPath = d.DocumentPath,
                 FileSize = d.FileSize ?? 0,
+                MimeType = d.MimeType,
+                EvidenceRequirementCode = d.EvidenceRequirementCode,
+                ClassificationCode = d.ClassificationCode,
+                IssuedAtUtc = d.IssuedAtUtc,
+                ExpiresAtUtc = d.ExpiresAtUtc,
+                ChecksumSha256 = d.ChecksumSha256,
                 IsVerified = d.IsVerified,
                 IsRejected = d.IsRejected,
                 RejectionReason = d.RejectionReason,

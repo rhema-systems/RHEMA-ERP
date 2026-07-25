@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Validation;
 
 namespace ErpSystem.Core.DTOs.Procurement;
@@ -657,6 +658,15 @@ public class CreateBusinessPartnerDocumentDto
 
     public DateTime? IssueDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
+
+    [MaxLength(50)]
+    public string? EvidenceRequirementCode { get; set; }
+
+    [MaxLength(100)]
+    public string? ClassificationCode { get; set; }
+
+    [MaxLength(64)]
+    public string? ChecksumSha256 { get; set; }
 }
 
 // ============================================================================
@@ -716,6 +726,7 @@ public class BusinessPartnerRegistrationDto
     public Guid Id { get; set; }
     public string ApplicationNumber { get; set; } = string.Empty;
     public string PartnerType { get; set; } = "Supplier";
+    public ProcurementSupplierRegistrationCategory? RegistrationCategory { get; set; }
     public string Status { get; set; } = "Draft";
     public string CompanyName { get; set; } = string.Empty;
     public string? RegistrationNumber { get; set; }
@@ -766,6 +777,7 @@ public class BusinessPartnerRegistrationDetailDto : BusinessPartnerRegistrationD
 
     public List<BusinessPartnerRegistrationDocumentDto> Documents { get; set; } = new();
     public List<BusinessPartnerRegistrationStatusHistoryDto> StatusHistory { get; set; } = new();
+    public ProcurementSupplierEvidenceReadinessDto? EvidenceReadiness { get; set; }
 }
 
 public class CreateBusinessPartnerRegistrationDto
@@ -773,6 +785,8 @@ public class CreateBusinessPartnerRegistrationDto
     [Required]
     [MaxLength(20)]
     public string PartnerType { get; set; } = "Supplier";
+
+    public ProcurementSupplierRegistrationCategory? RegistrationCategory { get; set; }
 
     [Required]
     [MaxLength(200)]
@@ -847,6 +861,8 @@ public class UpdateBusinessPartnerRegistrationDto
     [MaxLength(200)]
     public string CompanyName { get; set; } = string.Empty;
 
+    public ProcurementSupplierRegistrationCategory? RegistrationCategory { get; set; }
+
     [MaxLength(100)]
     public string? RegistrationNumber { get; set; }
 
@@ -897,6 +913,11 @@ public class BusinessPartnerRegistrationDocumentDto
     public string? DocumentPath { get; set; } // Alias for FilePath
     public long FileSize { get; set; }
     public string? MimeType { get; set; }
+    public string? EvidenceRequirementCode { get; set; }
+    public string? ClassificationCode { get; set; }
+    public DateTime? IssuedAtUtc { get; set; }
+    public DateTime? ExpiresAtUtc { get; set; }
+    public string? ChecksumSha256 { get; set; }
     public bool IsVerified { get; set; }
     public bool IsRejected { get; set; }
     public string? RejectionReason { get; set; }

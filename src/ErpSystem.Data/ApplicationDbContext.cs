@@ -581,6 +581,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProcurementTenderDocumentIssue> ProcurementTenderDocumentIssues { get; set; }
     public DbSet<ProcurementTenderSubmissionReceipt> ProcurementTenderSubmissionReceipts { get; set; }
     public DbSet<ProcurementTenderDocumentTemplateVersion> ProcurementTenderDocumentTemplateVersions { get; set; }
+    public DbSet<ProcurementSupplierEvidencePackVersion> ProcurementSupplierEvidencePackVersions { get; set; }
+    public DbSet<ProcurementSupplierEvidenceRequirement> ProcurementSupplierEvidenceRequirements { get; set; }
+    public DbSet<ProcurementSupplierRegistrationEvidencePackBinding> ProcurementSupplierRegistrationEvidencePackBindings { get; set; }
     public DbSet<ProcurementTenderDocumentTemplateMethod> ProcurementTenderDocumentTemplateMethods { get; set; }
     public DbSet<ProcurementTenderDocumentRegister> ProcurementTenderDocumentRegisters { get; set; }
     public DbSet<ProcurementTenderDocumentIssuance> ProcurementTenderDocumentIssuances { get; set; }
@@ -968,6 +971,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProcurementTenderDocumentChangeConfiguration());
         builder.ApplyConfiguration(new ProcurementTenderDocumentChangeRecipientConfiguration());
         builder.ApplyConfiguration(new ProcurementTenderDocumentAcknowledgementConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierEvidencePackVersionConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierEvidenceRequirementConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierRegistrationEvidencePackBindingConfiguration());
         builder.ApplyConfiguration(new ProcurementEvaluationCommitteeControlConfiguration());
         builder.ApplyConfiguration(new ProcurementEvaluationCommitteeRoleRequirementConfiguration());
         builder.ApplyConfiguration(new ProcurementEvaluationCommitteeAppointmentConfiguration());

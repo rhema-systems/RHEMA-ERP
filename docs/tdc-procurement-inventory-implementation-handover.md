@@ -1,8 +1,8 @@
 # TDC Procurement and Inventory Implementation Handover
 
-Last updated: 2026-07-24
+Last updated: 2026-07-25
 
-Document status: `TDC-0212` complete; `TDC-0301` is `Not started`
+Document status: `TDC-0301` complete; `TDC-0302` is next and remains `Not started`
 
 ## Handover Objective
 
@@ -12,11 +12,11 @@ The governing delivery ledger is `docs/tdc-procurement-inventory-gap-implementat
 
 ## Immediate Starting Decision
 
-`TDC-0212` is complete in the accepted dirty worktree after full migration, SQL, API, browser, visual, and cleanup acceptance. No task is currently `In progress`; `TDC-0301` is the next eligible Phase-3 slice and remains `Not started`.
+`TDC-0301` is complete in the preserved worktree above pushed Phase-2 commit `552bd61bdbdc328687a1f35de4aa157fa86bf8c5`. `TDC-0302` is the next eligible Phase-3 slice and remains `Not started`; it must not begin until the worktree and accepted `TDC-0301` evidence are reverified.
 
 Phase 2 sourcing through award is complete. `TDC-0201` derives one tenant-safe sourcing case from a current immutable PR sourcing release and enforces that current case at RFQ/tender entry. `TDC-0202` makes the method recommendation server-derived from the exact current policy and protects any override with eligible exception, capability, independent workflow, evidence, actors, and SOD. `TDC-0203` completes the RFQ vertical flow. `TDC-0204` completes NCT/ICT from approved advertisement and controlled paid/free document issue through sealed/late submissions, signed public opening, separate technical/financial evaluation, exact authority/PPA workflow, approved award, executed-contract reference, bidder acceptance, immutable SQL records, and `DEC-001` through `DEC-014` control-event lineage. `TDC-0205` completes Restricted Tendering and Single Source. `TDC-0206` completes tenant-safe prequalification and deterministic qualified-list eligibility. `TDC-0207` completes reusable controlled tender-document families, immutable approved versions, exact Tender/RFQ binding, issuance/receipt, addenda/acknowledgements, and controlled extensions. `TDC-0208` completes the reusable tenant-safe evaluation-committee control: exact composition and appointments, acceptance/COI evidence, signed attendance and remote/hybrid evidence, server-derived quorum, scorer eligibility, immutable signed score attempts, independently approved recall, exact RFQ/NCT/legacy projection parity, eight-table SQL protection, all fourteen decision events, and dedicated Tender/RFQ history-first controls. `TDC-0209` completes the reusable tenant-safe recommendation-approval and award-readiness decision across RFQ, formal Tender, Exceptional Sourcing, and legacy tender-award boundaries, including exact current evaluation/score, supplier/prequalification, verification/due-diligence, recommendation, authority/workflow, evidence, actor, policy/method, integrity, immutable SQL/audit, API, and shared history-first UI controls. `TDC-0210` completes the reusable evaluator-versus-award-approver hard stop across those four boundaries, deriving exact direct and committee score-attempt lineage, allowing only independently approved non-sole outcomes, recording enriched allowed/denied control events, and exposing fail-closed current-actor status in the shared readiness UI without adding schema. `TDC-0211` completes the reusable successful/unsuccessful bidder-communication and tender-security register across formal Tender, RFQ, and Exceptional Sourcing, with server-derived award/readiness/supplier/subject lineage, immutable approved letter versions, dispatch/delivery/acknowledgement, standstill/appeal, security release/return, shared workflow/evidence/notification control events, ten-table SQL protection, and dedicated internal/external views. `TDC-0212` completes the configurable manual/API-ready GHANEPS publication and award exchange across formal Tender, RFQ, and Exceptional Sourcing, including exact evidenced Published/effective `DEC-009` and mapping lineage, immutable payload/attempt/failure/retry/acknowledgement/reconciliation history, SQL protection, role-neutral API, and dedicated shared Tender/RFQ history controls.
 
-The next slice is `TDC-0301`: configure category-aware TDC supplier-registration evidence packs for Goods, Works, and Services. It must reuse the existing shared evidence, document, workflow, configuration-profile, authorization, audit, notification, identity, and supplier architecture. Preserve the already-recorded onboarding boundary for `TDC-0302`/`TDC-0309`: the application token may be free or paid, has no time-based expiry while the application is active, and expires only when the application reaches Approved or Rejected. Do not begin the token/payment or restricted applicant-portal lifecycle as part of `TDC-0301` unless a verified evidence-pack dependency requires a narrowly scoped shared contract.
+`TDC-0301` now supplies the category-aware TDC supplier-registration evidence-pack baseline for Goods, Works, and Services, including exact Published/effective resolution, immutable registration binding, server-derived readiness, authorization/SOD/concurrency/idempotency, shared workflow/evidence/notification/control-event reuse, migration/SQL protection, administration and applicant UI, and verified API/browser operation. Preserve the already-recorded onboarding boundary for `TDC-0302`/`TDC-0309`: the application token may be free or paid, has no time-based expiry while the application is active, and expires only when the application reaches Approved or Rejected. The next slice must compose this accepted evidence-pack baseline rather than recreate it or broaden unrelated PR/PO/receiving/inventory runtime.
 
 ## Authoritative Inputs And Precedence
 
@@ -33,27 +33,27 @@ If the SRS and questionnaire differ, preserve the SRS requirement and record the
 
 ## Verified Repository Snapshot
 
-This snapshot was refreshed on 2026-07-24 at `TDC-0211` acceptance closure. The accepted through-`TDC-0206` baseline remains pushed at `9010ffe8b620b9c6eea51bf07791e99caa66fe93`; the completed `TDC-0207` through `TDC-0211` worktree is intentionally uncommitted until the user requests a checkpoint.
+This snapshot was refreshed on 2026-07-25 at `TDC-0301` acceptance closure. The accepted Phase-0 through Phase-2 baseline is pushed at `552bd61bdbdc328687a1f35de4aa157fa86bf8c5`; the completed `TDC-0301` worktree is intentionally uncommitted until the user requests a checkpoint.
 
 | Item | Verified state |
 | --- | --- |
 | Repository root | `D:\DEVELOPMENTS\ASP.NET\TDC\DEV\erp-system\erp-system - Aug2` |
-| Branch | `agent/tdc-procurement-phase-0-controls`, tracking its upstream with zero divergence from pushed commit `9010ffe8b620b9c6eea51bf07791e99caa66fe93` before the uncommitted `TDC-0207` through `TDC-0211` stack |
-| Baseline commit | `9010ffe8b620b9c6eea51bf07791e99caa66fe93` (pushed accepted Phase-0, Phase-1, and `TDC-0201` through `TDC-0206` checkpoint) |
+| Branch | `agent/tdc-procurement-phase-0-controls`, tracking its upstream with zero divergence from pushed commit `552bd61bdbdc328687a1f35de4aa157fa86bf8c5` before the uncommitted `TDC-0301` stack |
+| Baseline commit | `552bd61bdbdc328687a1f35de4aa157fa86bf8c5` (pushed accepted Phase-0, Phase-1, and Phase-2 checkpoint) |
 | .NET SDK | `8.0.206` from `global.json` |
 | Frontend | Next.js `15.5.3`, React `19.1.0`, TypeScript 5, React Query 5, Vitest 3, Lucide icons, shared Radix/shadcn controls |
 | Backend build | Targeted Core, Data, API, and API-test builds pass with zero errors. The very large Data compilation uses the recorded isolated SDK 10 path and retains only repository baseline warnings. |
-| Focused Core tests | Full procurement filter passes 264/264; focused `TDC-0211` service lifecycle, authorization/SOD, tenant, immutability, appeal/security, concurrency, and idempotency suite passes 12/12 |
-| Focused API tests | Full procurement controller filter passes 182/182; focused `TDC-0211` route, structured-error, hostile-binding, authorization, external-scope, and cross-source-resource suite passes 16/16 |
-| Targeted frontend verification | Seventy-two test files pass 134/134 Vitest tests; focused `TDC-0211` helper/service/workspace/register tests pass 11/11 and targeted TDC-0211 ESLint is clean |
-| Full frontend type-check | Retains 114 unrelated repository baseline diagnostics in the final attribution run; none matches a changed `TDC-0211` file |
-| Test database | `RhemaERP` is current through `20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns`; apply/rollback/reapply/repeat-latest, ten append-only probes, source-mapping probe, and EF no-model-drift checks pass. Ten new tables are empty, ten new triggers are enabled, new foreign keys are trusted, and protected totals remain `Plans=4`, `PRs=17` (`3` active), `POs=1`, `Receipts=1`, `StockMovements=0`, and `InventoryMovements=0` |
+| Focused Core tests | `TDC-0301` lifecycle, effective-version continuity, authorization/SOD, tenant, validation, concurrency, and idempotency suite passes 5/5 |
+| Focused API tests | `TDC-0301` route, tenant-safe option/readiness, structured-error, authorization, and hostile-binding suite passes 2/2 |
+| Targeted frontend verification | Focused evidence-pack helper/client tests pass 5/5, targeted ESLint is clean, and the optimized production build contains the administration and external registration routes |
+| Full frontend type-check | Existing repository-wide diagnostics remain a documented baseline; targeted lint, tests, and production build prove no blocking error in the changed `TDC-0301` surface |
+| Test database | `RhemaERP` is current through `20260724203636_AddProcurementSupplierEvidencePacks`; all 16 SQL probes pass, guards `51700` through `51713` are present, three new triggers are enabled, new foreign keys are trusted, EF reports no model drift, all acceptance rows are empty, and protected totals remain `Plans=4`, `PRs=17`, `POs=1`, and `Receipts=1` |
 
 ### Dirty Worktree Protection
 
-The worktree is not clean. The accepted Phase-0, Phase-1, and `TDC-0201` through `TDC-0206` baseline is pushed at `9010ffe8b620b9c6eea51bf07791e99caa66fe93`. The completed `TDC-0207` through `TDC-0212` implementations, migrations, tests, frontend, and active delivery-document evidence are intentionally uncommitted; the tree also contains team-owned changes that predated the slices:
+The worktree is not clean. The accepted Phase-0 through Phase-2 baseline is pushed at `552bd61bdbdc328687a1f35de4aa157fa86bf8c5`. The completed `TDC-0301` implementation, migration, tests, frontend, artifacts, and active delivery-document evidence are intentionally uncommitted; the tree also contains team-owned changes that predated the slice:
 
-- Modified active procurement tracker and handover documents plus the complete `TDC-0207` controlled-document, `TDC-0208` evaluation-committee, `TDC-0209` award-readiness, `TDC-0210` evaluator/award-approver SOD, `TDC-0211` bidder-communication/security-return, and `TDC-0212` GHANEPS exchange implementations.
+- Modified active procurement tracker and handover documents plus the complete `TDC-0301` supplier-registration evidence-pack implementation.
 - A pre-existing whitespace-only diff in `src/ErpSystem.Core/Services/Procurement/SupplierValidationService.cs`.
 - Untracked Fleet, Sales/CRM, Quantity Survey, and Civil Engineering tracker documents under `docs`.
 - Untracked `src/ErpSystem.Api/full_database.sql`.
@@ -109,6 +109,16 @@ Treat these as user/team changes. Do not reset, revert, delete, stash, commit, o
 - Immutable source/configuration/mapping snapshots and SHA-256 lineage, versioned export/import payloads, typed safe downloads, submission success/failure/retry, acknowledgement, reconciliation/mismatch resolution, authorization/SOD, concurrency, idempotency, shared evidence/notification, and `DEC-001` through `DEC-014` control-event reuse.
 - Migration `20260724175059_AddProcurementGhanepsExchangeControls`, five protected tables/triggers/checks, exact rollback/reapply, 26 rollback-only SQL probes passing both before and after the cycle, trusted foreign keys, no model drift, and zero acceptance residue.
 - 307/307 Core procurement, 209/209 procurement API, and 161/161 frontend regressions; focused 43/43 Core, 26/26 API, and 27/27 frontend; zero-error builds; successful optimized Next build; clean targeted lint and zero GHANEPS TypeScript diagnostic matches; bounded API/browser/visual smoke with three reviewed screenshots and exact process cleanup.
+
+### TDC-0301 Acceptance Summary
+
+`TDC-0301` is `Done`. The authoritative code and exact evidence are recorded in the tracker. The accepted slice includes:
+
+- One tenant-safe, versioned and effective-dated supplier-registration evidence-pack family for Goods, Works, and Services, with Draft/Pending Approval/Published/Retired lifecycle, same-family future-replacement continuity, category-aware mandatory documents, classifications, validity rules, approval workflow, Works-classification hard stop, and exact Published/effective resolution.
+- Immutable registration-to-pack binding and server-derived applicant readiness; explicit manage/review/approve permissions; independent authorization/SOD; row-version concurrency; idempotency; shared workflow, evidence, document, notification, configuration-profile, and `DEC-001` through `DEC-014` control-event reuse.
+- Authenticated tenant-safe API and dedicated shared-control administration register/draft editor with lifecycle, loading, empty, error, and controlled-unavailable states, plus external registration category, requirements, document metadata, readiness, and status presentation. Token payment, restricted applicant sessions, and approved-account activation remain outside this slice.
+- Migration `20260724203636_AddProcurementSupplierEvidencePacks`, three enabled SQL protection triggers, guards `51700` through `51713`, 16/16 rollback-only valid-path and hard-stop probes, trusted foreign keys, no model drift, and zero acceptance residue.
+- Focused 5/5 Core, 2/2 API, and 5/5 frontend automation; zero-error backend build; clean targeted ESLint; successful optimized Next build; bounded authenticated API smoke with zero 5xx; real-browser smoke over 24 API requests with zero page/server/console errors; three visually reviewed screenshots; and exact process/port cleanup.
 
 ## Delivery Contract
 
@@ -435,7 +445,7 @@ The full TypeScript check currently fails in unrelated baseline files. Each next
 
 Use this prompt in the new chat after opening the repository:
 
-> Continue the TDC Procurement and Inventory implementation using `docs/tdc-procurement-inventory-implementation-handover.md` and `docs/tdc-procurement-inventory-gap-implementation-tracker.md` as the active delivery documents. Start with `TDC-0301` only. Reverify the dirty worktree, pushed baseline, completed Phase 0 through Phase 2 (`TDC-0001` through `TDC-0212`), and test database first; preserve all existing team changes, then update only `TDC-0301` to `In progress`. Configure category-aware TDC supplier-registration evidence packs for Goods, Works, and Services, including mandatory documents, classifications, validity/effective rules, approval steps, authorization, shared evidence/document/workflow/configuration/notification/control-event reuse, tenant-safe API, dedicated shared-control UI, automation, focused migration/test-database verification, and API/browser smoke. Preserve the supplier-onboarding token requirement recorded for `TDC-0302`/`TDC-0309`: it may be free or paid, remains valid throughout an active application with no time-based expiry, and expires only on Approved or Rejected. Do not implement the broader token/payment/applicant-portal lifecycle, recreate shared controls, begin later supplier/general transaction tasks, or broadly change PR/PO/receiving/inventory runtime, and do not mark the task `Done` until every applicable acceptance gate passes.
+> Continue the TDC Procurement and Inventory implementation using `docs/tdc-procurement-inventory-implementation-handover.md` and `docs/tdc-procurement-inventory-gap-implementation-tracker.md` as the active delivery documents. Start with `TDC-0302` only. Reverify the dirty worktree, pushed Phase-2 baseline, completed `TDC-0301` implementation and evidence, and test database first; preserve all existing team changes, then update only `TDC-0302` to `In progress`. Implement the effective-dated, configurable free/paid supplier-onboarding token payment and receipt workflow, including price, exemption, payment state, receipt number, Finance posting/reconciliation, authorization/SOD/concurrency/idempotency, tenant-safe API, dedicated shared-control UI, automation, migration/test-database verification, and API/browser smoke. Compose the accepted `TDC-0301` Goods/Works/Services evidence-pack and registration binding rather than recreating it. A token has no time-based expiry while its linked application is active and expires only when that application reaches Approved or Rejected. Do not begin `TDC-0309` restricted applicant-portal/account-activation behavior, recreate shared controls, begin later supplier/general transaction tasks, or broadly change PR/PO/receiving/inventory runtime, and do not mark the task `Done` until every applicable acceptance gate passes.
 
 ## Handover Completion Signal
 
@@ -443,6 +453,6 @@ The next agent should consider this handover successfully picked up when it has:
 
 - Reverified repository and worktree state.
 - Confirmed the tracker and existing planning tracker were read.
-- Named `TDC-0301` as the only active task.
-- Reported the intended Goods/Works/Services evidence-pack domain, persistence, API, shared-control UI, approval/validity behavior, and test files before editing.
-- Started implementation without touching unrelated dirty files, recreating shared configuration/notification/document/workflow/evidence/identity/supplier/SOD/audit controls, implementing the later token/payment/applicant-portal lifecycle, beginning later tasks, or changing completed Phase 0 through Phase 2 and unrelated PR/PO/receiving/inventory behavior.
+- Confirmed `TDC-0301` is complete and named `TDC-0302` as the only active task.
+- Reported the intended free/paid token, price/exemption/payment/receipt, Finance posting/reconciliation, persistence, API, shared-control UI, authorization/audit, and test files before editing.
+- Started implementation without touching unrelated dirty files, recreating shared configuration/notification/document/workflow/evidence/identity/supplier/SOD/audit controls, implementing `TDC-0309` restricted portal/account activation, beginning later tasks, adding time-based token expiry, or changing completed Phase 0 through `TDC-0301` and unrelated PR/PO/receiving/inventory behavior.
