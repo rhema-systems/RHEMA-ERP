@@ -50,6 +50,8 @@ public class CreatePaymentTermDto
     [Range(0, 365)]
     public int DiscountDays { get; set; }
 
+    public bool IsActive { get; set; } = true;
+
     public bool IsDefault { get; set; }
 
     public int DisplayOrder { get; set; }

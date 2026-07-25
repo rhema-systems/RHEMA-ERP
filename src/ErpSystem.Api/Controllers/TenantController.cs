@@ -1,8 +1,8 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
-using ErpSystem.Shared;
 using ErpSystem.Data.Seeders;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -18,6 +18,7 @@ public class TenantController : ControllerBase
     private readonly IAuditLogService _auditLogService;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILdapAuthenticationService _ldapAuthenticationService;
+    private readonly PaymentTermBaselineSeeder _paymentTermBaselineSeeder;
     private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
     private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
 
@@ -27,6 +28,7 @@ public class TenantController : ControllerBase
         IAuditLogService auditLogService,
         ICurrentUserService currentUserService,
         ILdapAuthenticationService ldapAuthenticationService,
+        PaymentTermBaselineSeeder paymentTermBaselineSeeder,
         ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
         ProcurementAccessControlSeeder? procurementAccessControlSeeder = null)
     {
@@ -35,6 +37,7 @@ public class TenantController : ControllerBase
         _auditLogService = auditLogService;
         _currentUserService = currentUserService;
         _ldapAuthenticationService = ldapAuthenticationService;
+        _paymentTermBaselineSeeder = paymentTermBaselineSeeder;
         _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
         _procurementAccessControlSeeder = procurementAccessControlSeeder;
     }
@@ -204,6 +207,9 @@ public class TenantController : ControllerBase
                     : (Guid?)null;
                 await _procurementAccessControlSeeder.SeedTenantAsync(createdTenant.Id, initializerActorId);
             }
+
+            // Tenant provisioning owns baseline installation; startup reconciliation is only the safety net.
+            await _paymentTermBaselineSeeder.SeedTenantAsync(createdTenant.Id);
 
             // Log audit trail for tenant creation
             try

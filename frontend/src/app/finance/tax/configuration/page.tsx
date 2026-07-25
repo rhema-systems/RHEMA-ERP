@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { taxDataService } from '@/services/finance/tax-data.service';
 import { Tax, TaxCategory } from '@/types/tax';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import {
     Calculator,
     FileText,
@@ -19,6 +20,11 @@ import {
 } from 'lucide-react';
 
 export default function TaxConfigurationPage() {
+    const pathname = usePathname() ?? '';
+    const administrationMode = pathname.startsWith('/administration/finance');
+    const configurationBasePath = administrationMode
+        ? '/administration/finance/tax'
+        : '/finance/tax/configuration';
     const [taxes, setTaxes] = useState<Tax[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -141,7 +147,7 @@ export default function TaxConfigurationPage() {
 
             {/* Quick Links */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Link href="/finance/tax/configuration/taxes">
+                <Link href={`${configurationBasePath}/taxes`}>
                     <Card className="hover:bg-accent cursor-pointer transition-colors">
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">
@@ -160,7 +166,7 @@ export default function TaxConfigurationPage() {
                     </Card>
                 </Link>
 
-                <Link href="/finance/tax/configuration/groups">
+                <Link href={`${configurationBasePath}/groups`}>
                     <Card className="hover:bg-accent cursor-pointer transition-colors">
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">
@@ -179,7 +185,7 @@ export default function TaxConfigurationPage() {
                     </Card>
                 </Link>
 
-                <Link href="/finance/tax/configuration/rules">
+                <Link href={`${configurationBasePath}/rules`}>
                     <Card className="hover:bg-accent cursor-pointer transition-colors">
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">
@@ -246,7 +252,7 @@ export default function TaxConfigurationPage() {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        <Link href={`/finance/tax/configuration/taxes/${tax.id}`}>
+                                        <Link href={`${configurationBasePath}/taxes/${tax.id}`}>
                                             <Button variant="ghost" size="sm">
                                                 View Details
                                             </Button>

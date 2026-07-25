@@ -56,11 +56,26 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public Guid? LossOnDisposalAccountId { get; set; }
         public virtual Account? LossOnDisposalAccount { get; set; }
 
+        public Guid? DisposalProceedsClearingAccountId { get; set; }
+        public virtual Account? DisposalProceedsClearingAccount { get; set; }
+
         /// <summary>
         /// OCI account for revaluation surplus (IAS 16)
         /// </summary>
         public Guid? RevaluationSurplusAccountId { get; set; }
         public virtual Account? RevaluationSurplusAccount { get; set; }
+
+        public Guid? RevaluationLossAccountId { get; set; }
+        public virtual Account? RevaluationLossAccount { get; set; }
+
+        public Guid? ImpairmentLossAccountId { get; set; }
+        public virtual Account? ImpairmentLossAccount { get; set; }
+
+        public Guid? AccumulatedImpairmentAccountId { get; set; }
+        public virtual Account? AccumulatedImpairmentAccount { get; set; }
+
+        public Guid? ImpairmentReversalAccountId { get; set; }
+        public virtual Account? ImpairmentReversalAccount { get; set; }
 
         /// <summary>
         /// Assets Under Construction (AUC/CIP) account — used during capital project capitalization

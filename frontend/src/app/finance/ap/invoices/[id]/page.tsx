@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -29,6 +30,9 @@ import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
+import { workflowApiService } from '@/services/workflow-api.service';
+import type { WorkflowEntitySummaryDto } from '@/types/workflow';
 
 export default function VendorInvoiceDetailsPage() {
     const router = useRouter();
@@ -36,10 +40,26 @@ export default function VendorInvoiceDetailsPage() {
     const id = params.id as string;
     const { toast } = useToast();
     const queryClient = useQueryClient();
+    const { hasPermission, hasAnyPermission } = useAuth();
+    const [workflowSummary, setWorkflowSummary] = useState<WorkflowEntitySummaryDto | null>(null);
 
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['vendor-invoice', id],
         queryFn: () => accountsPayableService.getInvoice(id),
+    });
+
+    useQuery({
+        queryKey: ['vendor-invoice-workflow-summary', id],
+        queryFn: async () => {
+            try {
+                const summary = await workflowApiService.getWorkflowEntitySummary('VendorInvoice', id);
+                setWorkflowSummary(summary);
+                return summary;
+            } catch {
+                setWorkflowSummary(null);
+                return null;
+            }
+        },
     });
 
     const voidInvoiceMutation = useMutation({
@@ -75,6 +95,17 @@ export default function VendorInvoiceDetailsPage() {
                 description: error.message || 'Failed to approve vendor invoice',
                 variant: 'destructive',
             });
+        },
+    });
+
+    const submitInvoiceMutation = useMutation({
+        mutationFn: (invoiceId: string) => accountsPayableService.submitInvoiceForApproval(invoiceId),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['vendor-invoice', id] });
+            toast({ title: 'Success', description: 'Vendor invoice submitted for approval.' });
+        },
+        onError: (error: any) => {
+            toast({ title: 'Error', description: error.message || 'Failed to submit for approval', variant: 'destructive' });
         },
     });
 
@@ -125,7 +156,13 @@ export default function VendorInvoiceDetailsPage() {
                     <Button variant="outline" size="sm" onClick={() => window.print()}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
-                    {invoice.status === 'PendingApproval' && (
+                    {invoice.status === 'Draft' && hasAnyPermission(['Finance.AP.Invoices.SubmitForApproval', 'Finance.AP.Invoices.Approve']) && (
+                        <Button size="sm" variant="outline" onClick={() => submitInvoiceMutation.mutate(invoice.id)} disabled={submitInvoiceMutation.isPending}>
+                            {submitInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
+                            Submit for Approval
+                        </Button>
+                    )}
+                    {invoice.status === 'PendingApproval' && hasPermission('Finance.AP.Invoices.Approve') && (workflowSummary?.canCurrentUserApprove ?? true) && (
                         <Button size="sm" onClick={() => approveInvoiceMutation.mutate(invoice.id)} disabled={approveInvoiceMutation.isPending}>
                             {approveInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
                             Approve
@@ -136,7 +173,7 @@ export default function VendorInvoiceDetailsPage() {
                             <CreditCard className="mr-2 h-4 w-4" /> Schedule Payment
                         </Button>
                     )}
-                    {(invoice.status === 'Approved' || invoice.status === 'Overdue') && (
+                    {(invoice.status === 'Approved' || invoice.status === 'Overdue') && hasPermission('Finance.AP.Invoices.Void') && (
                         <Button variant="destructive" size="sm" onClick={() => voidInvoiceMutation.mutate(invoice.id)} disabled={voidInvoiceMutation.isPending}>
                             {voidInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Ban className="mr-2 h-4 w-4" />}
                             Void
@@ -218,8 +255,8 @@ export default function VendorInvoiceDetailsPage() {
                                     {item.inventoryItemId && <p className="text-xs text-muted-foreground">Item ID: {item.inventoryItemId}</p>}
                                 </div>
                                 <div className="col-span-2 text-right">{item.quantity} {item.unit}</div>
-                                <div className="col-span-2 text-right">{formatCurrency(item.unitPrice)}</div>
-                                <div className="col-span-2 text-right font-medium">{formatCurrency(item.lineTotal || (item.quantity * item.unitPrice))}</div>
+                                <div className="col-span-2 text-right">{formatCurrency(item.unitPrice, invoice.currencyCode)}</div>
+                                <div className="col-span-2 text-right font-medium">{formatCurrency(item.lineTotal || (item.quantity * item.unitPrice), invoice.currencyCode)}</div>
                             </div>
                         ))}
                         {(!invoice.lineItems || invoice.lineItems.length === 0) && (
@@ -234,26 +271,26 @@ export default function VendorInvoiceDetailsPage() {
                         <div className="w-1/3 space-y-2">
                             <div className="flex justify-between text-sm">
                                 <span className="text-muted-foreground">Subtotal</span>
-                                <span>{formatCurrency(invoice.totalAmount - (invoice.taxAmount || 0))}</span>
+                                <span>{formatCurrency(invoice.totalAmount - (invoice.taxAmount || 0), invoice.currencyCode)}</span>
                             </div>
                             {(invoice.taxAmount || 0) > 0 && (
                                 <div className="flex justify-between text-sm">
                                     <span className="text-muted-foreground">Tax</span>
-                                    <span>{formatCurrency(invoice.taxAmount || 0)}</span>
+                                    <span>{formatCurrency(invoice.taxAmount || 0, invoice.currencyCode)}</span>
                                 </div>
                             )}
                             <Separator className="my-2" />
                             <div className="flex justify-between font-bold text-lg">
                                 <span>Total</span>
-                                <span>{formatCurrency(invoice.totalAmount)}</span>
+                                <span>{formatCurrency(invoice.totalAmount, invoice.currencyCode)}</span>
                             </div>
                             <div className="flex justify-between text-sm text-muted-foreground pt-1">
                                 <span>Amount Paid</span>
-                                <span>-{formatCurrency(invoice.paidAmount)}</span>
+                                <span>-{formatCurrency(invoice.paidAmount, invoice.currencyCode)}</span>
                             </div>
                             <div className="flex justify-between font-bold text-lg pt-2 border-t">
                                 <span>Balance Due</span>
-                                <span className={invoice.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>{formatCurrency(invoice.balanceAmount)}</span>
+                                <span className={invoice.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>{formatCurrency(invoice.balanceAmount, invoice.currencyCode)}</span>
                             </div>
                         </div>
                     </div>

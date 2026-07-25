@@ -36,6 +36,7 @@ public class CustomerDto
     public decimal CreditLimit { get; set; }
     public decimal OutstandingBalance { get; set; }
     public int PaymentTermsDays { get; set; }
+    public Guid? PaymentTermId { get; set; }
     public string? PriceGroup { get; set; }
     public string CurrencyCode { get; set; } = "GHS";
     public bool IsActive { get; set; }
@@ -61,6 +62,7 @@ public class CustomerCreateDto
     public string? TaxId { get; set; }
     public decimal CreditLimit { get; set; }
     public int PaymentTermsDays { get; set; } = 30;
+    public Guid? PaymentTermId { get; set; }
     public string? PriceGroup { get; set; }
     public string CurrencyCode { get; set; } = "GHS";
     public string? Notes { get; set; }
@@ -82,6 +84,7 @@ public class CustomerUpdateDto
     public string? TaxId { get; set; }
     public decimal CreditLimit { get; set; }
     public int PaymentTermsDays { get; set; }
+    public Guid? PaymentTermId { get; set; }
     public string? PriceGroup { get; set; }
     public string CurrencyCode { get; set; } = "GHS";
     public bool IsActive { get; set; }

@@ -15,7 +15,7 @@ export function getInitials(name: string): string {
     .slice(0, 2)
 }
 
-export function formatCurrency(value: number, currencyCode: string = 'USD') {
+export function formatCurrency(value: number, currencyCode: string = 'GHS') {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: currencyCode,

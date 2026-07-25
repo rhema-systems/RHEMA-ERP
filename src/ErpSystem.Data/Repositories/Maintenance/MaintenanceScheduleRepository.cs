@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 
 namespace ErpSystem.Data.Repositories.Maintenance;
 
@@ -276,16 +277,32 @@ public class MaintenanceScheduleRepository : GenericRepository<MaintenanceSchedu
     public async Task<IEnumerable<MaintenanceSchedule>> GetSchedulesDueInDaysAsync(int days)
     {
         var targetDate = DateTime.UtcNow.Date.AddDays(days);
-        return await _context.MaintenanceSchedules
-            .Where(ms => ms.IsActive && !ms.IsDeleted &&
-                        ms.NextDueDate <= targetDate)
-            .Include(ms => ms.Asset)
-            .Include(ms => ms.MaintenanceType)
-            .Include(ms => ms.DefaultTechnician)
-            .Include(ms => ms.DefaultTeam)
-            .Include(ms => ms.PriorityLevel)
-            .OrderBy(ms => ms.NextDueDate)
-            .ToListAsync();
+        try
+        {
+            return await _context.MaintenanceSchedules
+                .Where(ms => ms.IsActive && !ms.IsDeleted &&
+                            ms.NextDueDate <= targetDate)
+                .Include(ms => ms.Asset)
+                .Include(ms => ms.MaintenanceType)
+                .Include(ms => ms.DefaultTechnician)
+                .Include(ms => ms.DefaultTeam)
+                .Include(ms => ms.PriorityLevel)
+                .OrderBy(ms => ms.NextDueDate)
+                .ToListAsync();
+        }
+        catch (SqlException ex) when (ex.Number == 207)
+        {
+            // Schema drift fallback: avoid employee include paths when columns are missing.
+            return await _context.MaintenanceSchedules
+                .Where(ms => ms.IsActive && !ms.IsDeleted &&
+                            ms.NextDueDate <= targetDate)
+                .Include(ms => ms.Asset)
+                .Include(ms => ms.MaintenanceType)
+                .Include(ms => ms.DefaultTeam)
+                .Include(ms => ms.PriorityLevel)
+                .OrderBy(ms => ms.NextDueDate)
+                .ToListAsync();
+        }
     }
 
     public async Task UpdateNextDueDateAsync(Guid scheduleId, DateTime nextDueDate)

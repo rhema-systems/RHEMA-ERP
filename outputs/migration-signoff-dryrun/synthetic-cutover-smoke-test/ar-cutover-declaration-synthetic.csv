@@ -1,0 +1,6 @@
+TenantName,TenantId,ApprovedCutoverDate,ApprovedFiscalPeriod,BookClassification,CutoverItem,YesNo,DataFilePath,RecordCount,FunctionalAmount,Currency,RequiresPostedSourceImport,Owner,ApprovalStatus,Notes
+Default Tenant,00000000-0000-0000-0000-000000000001,2026-06-30,June 2026,IFRS,Open AR invoices,No,,0,0.00,GHS,No,Codex synthetic runner,Synthetic only,Not in scope for first GL-only smoke test.
+Default Tenant,00000000-0000-0000-0000-000000000001,2026-06-30,June 2026,IFRS,Customer advances,No,,0,0.00,GHS,No,Codex synthetic runner,Synthetic only,Not in scope for first GL-only smoke test.
+Default Tenant,00000000-0000-0000-0000-000000000001,2026-06-30,June 2026,IFRS,Unapplied AR receipts,No,,0,0.00,GHS,No,Codex synthetic runner,Synthetic only,Not in scope for first GL-only smoke test.
+Default Tenant,00000000-0000-0000-0000-000000000001,2026-06-30,June 2026,IFRS,AR WHT/VAT withholding certificate balances,No,,0,0.00,GHS,No,Codex synthetic runner,Synthetic only,Not in scope for first GL-only smoke test.
+Default Tenant,00000000-0000-0000-0000-000000000001,2026-06-30,June 2026,IFRS,Foreign-currency AR balances,No,,0,0.00,GHS,No,Codex synthetic runner,Synthetic only,Not in scope for first GL-only smoke test.

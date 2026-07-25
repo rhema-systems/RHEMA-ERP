@@ -45,6 +45,12 @@ namespace ErpSystem.Core.DTOs.Finance
         
         /// <summary>TRUE if period is permanently locked</summary>
         public bool IsLocked { get; set; }
+
+        /// <summary>TRUE when a global lock is temporarily represented by module locks.</summary>
+        public bool IsGlobalLockSuspended { get; set; }
+
+        /// <summary>TRUE when at least one lockable module is locked while the period is open.</summary>
+        public bool IsPartiallyLocked { get; set; }
         
         /// <summary>Date when period was locked</summary>
         public DateTime? LockedDate { get; set; }
@@ -136,6 +142,10 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? LockReason { get; set; }
         public DateTime? UnlockedDate { get; set; }
         public string? UnlockedByUserName { get; set; }
+        public string? UnlockReason { get; set; }
+        public DateTime? ReopenExpiresAtUtc { get; set; }
+        public DateTime? AutoRelockedDate { get; set; }
+        public bool IsTemporaryReopening { get; set; }
     }
 
     /// <summary>
@@ -155,8 +165,15 @@ namespace ErpSystem.Core.DTOs.Finance
     {
         [Required]
         public string ModuleCode { get; set; } = string.Empty;
-        
+
+        [Required]
         [MaxLength(500)]
         public string? Reason { get; set; }
+
+        /// <summary>
+        /// Required when reopening a module. Must be in the future and no more than
+        /// 24 hours from the request time.
+        /// </summary>
+        public DateTime? ReopenUntilUtc { get; set; }
     }
 }

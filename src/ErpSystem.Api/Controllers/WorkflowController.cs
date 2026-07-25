@@ -2894,6 +2894,7 @@ public class WorkflowController : ControllerBase
             IsRequired = step.IsRequired,
             RequiredRole = step.RequiredRole,
             EstimatedHours = step.EstimatedHours,
+            // Use the guarded deserializer because workflow JSON may come from older saved definitions.
             Configuration = DeserializeWorkflowJson<WorkflowStepConfigurationDto>(step.Configuration)
         };
     }
@@ -2912,6 +2913,7 @@ public class WorkflowController : ControllerBase
             Description = transition.Description,
             IsDefault = transition.IsDefault,
             Priority = transition.Priority,
+            // Keep transition deserialization non-fatal for legacy definitions edited by other modules.
             Condition = DeserializeWorkflowJson<WorkflowConditionDto>(transition.Condition)
         };
     }

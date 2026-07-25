@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -80,6 +81,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="401">Not authenticated.</response>
         /// <response code="500">Internal server error during account creation.</response>
         [HttpPost]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<IActionResult> CreateAccount([FromBody] AccountCreateDto accountDto)
         {
             try
@@ -201,6 +203,60 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Updates an existing GL account in the Chart of Accounts.
+        /// </summary>
+        /// <param name="id">The unique identifier (GUID) of the GL account to update.</param>
+        /// <param name="accountDto">The account update payload.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>The updated account details.</returns>
+        /// <response code="200">Account updated successfully.</response>
+        /// <response code="400">Validation failure or business rule violation.</response>
+        /// <response code="401">Not authenticated.</response>
+        /// <response code="404">No account exists with the specified ID.</response>
+        /// <response code="500">Internal server error during account update.</response>
+        [HttpPut("{id}")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
+        public async Task<ActionResult<AccountDto>> UpdateAccount(
+            Guid id,
+            [FromBody] AccountUpdateDto accountDto,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (accountDto == null)
+                    return BadRequest(new { error = "Request body cannot be null" });
+
+                if (accountDto.Id == Guid.Empty)
+                {
+                    accountDto.Id = id;
+                }
+
+                if (accountDto.Id != id)
+                    return BadRequest(new { error = "Account ID in route does not match request body." });
+
+                var account = await _accountService.UpdateAsync(accountDto, cancellationToken);
+                return Ok(account);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message, parameter = ex.ParamName });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR in UpdateAccount: {ex.Message}");
+                return StatusCode(500, new { error = "An error occurred while updating the account", details = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Deletes a GL account from the Chart of Accounts.
         /// </summary>
         /// <remarks>
@@ -230,6 +286,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No account exists with the specified ID.</response>
         /// <response code="500">Internal server error during deletion.</response>
         [HttpDelete("{id}")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<IActionResult> DeleteAccount(Guid id)
         {
             try
@@ -372,6 +429,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="401">Not authenticated.</response>
         /// <response code="500">Internal server error during bulk creation.</response>
         [HttpPost("combinations/bulk-create")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<BulkCreationResultDto>> BulkCreateAccounts(
             [FromBody] BulkCreateAccountsRequestDto request)
         {
@@ -433,6 +491,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Account or currency not found.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("{accountId}/currencies")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<CurrencyLinkDto>> AddCurrencyLink(Guid accountId, [FromBody] AddCurrencyLinkDto dto)
         {
             if (accountId != dto.AccountId)
@@ -487,6 +546,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Account or currency link not found.</response>
         /// <response code="500">Internal server error.</response>
         [HttpDelete("{accountId}/currencies/{currencyCode}")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<CurrencyLinkRemovalResultDto>> RemoveCurrencyLink(
             Guid accountId,
             string currencyCode,
@@ -543,6 +603,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Account or currency link not found.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPatch("{accountId}/currencies/{currencyCode}/inactivate")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
         public async Task<ActionResult<CurrencyLinkDto>> InactivateCurrencyLink(Guid accountId, string currencyCode)
         {
             try

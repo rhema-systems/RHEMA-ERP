@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Data.Repositories;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.Maintenance;
@@ -35,15 +36,28 @@ public class WorkOrderRepository : GenericRepository<WorkOrder>, IWorkOrderRepos
 
     public override async Task<IEnumerable<WorkOrder>> GetAllAsync()
     {
-        return await _dbSet
-            .Where(wo => !wo.IsDeleted)
-            .Include(wo => wo.JobCard)
-            .Include(wo => wo.Asset)
-            .Include(wo => wo.PriorityLevel)
-            .Include(wo => wo.MaintenanceType)
-            .Include(wo => wo.WorkOrderType)
-            .Include(wo => wo.Tasks)
-            .ToListAsync();
+        try
+        {
+            return await _dbSet
+                .Where(wo => !wo.IsDeleted)
+                .Include(wo => wo.JobCard)
+                .Include(wo => wo.Asset)
+                .Include(wo => wo.PriorityLevel)
+                .Include(wo => wo.MaintenanceType)
+                .Include(wo => wo.WorkOrderType)
+                .Include(wo => wo.Tasks)
+                .ToListAsync();
+        }
+        catch (SqlException ex) when (ex.Number == 207)
+        {
+            // Schema drift fallback: avoid includes that touch missing columns.
+            return await _dbSet
+                .Where(wo => !wo.IsDeleted)
+                .Include(wo => wo.PriorityLevel)
+                .Include(wo => wo.MaintenanceType)
+                .Include(wo => wo.WorkOrderType)
+                .ToListAsync();
+        }
     }
 
     public async Task<WorkOrder?> GetByWorkOrderNumberAsync(string workOrderNumber)

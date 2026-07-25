@@ -19,7 +19,8 @@ export type FixedAssetStatus =
   | 'Disposed'
   | 'HeldForSale'
   | 'WrittenOff'
-  | 'UnderConstruction';
+  | 'UnderConstruction'
+  | 'OnHold';
 
 export interface FixedAssetCategory {
   id: string;
@@ -63,6 +64,7 @@ export interface FixedAsset {
   assetCode: string;
   name: string;
   description?: string;
+  location?: string;
   fixedAssetCategoryId: string;
   fixedAssetCategoryName?: string;
   purchaseDate: string;
@@ -84,12 +86,37 @@ export interface FixedAsset {
   createdBy?: string;
   updatedAt?: string;
   updatedBy?: string;
+  bookValues: FixedAssetBookValue[];
+}
+
+export interface FixedAssetBookValue {
+  id: string;
+  fixedAssetId: string;
+  accountingBookId: string;
+  bookClassification: string;
+  accountingBookName?: string;
+  acquisitionCost: number;
+  accumulatedDepreciation: number;
+  netBookValue: number;
+  residualValue: number;
+  usefulLifeMonths: number;
+  remainingUsefulLifeMonths?: number;
+  depreciationMethod: DepreciationMethod;
+  depreciationConvention: DepreciationConvention;
+  placedInServiceDate?: string;
+  openingAsOfDate?: string;
+  openingYtdDepreciation: number;
+  lastDepreciationDate?: string;
+  openingPostedToGl: boolean;
+  openingPostedDate?: string;
+  openingSource: string;
 }
 
 export interface CreateFixedAssetDto {
   assetCode: string;
   name: string;
   description?: string;
+  location?: string;
   fixedAssetCategoryId: string;
   purchaseDate: string;
   placedInServiceDate?: string;
@@ -115,11 +142,14 @@ export interface RunDepreciationDto {
   fixedAssetId?: string;
   postToGl: boolean;
   postingDate?: string;
+  bookClassification?: string;
 }
 
 export interface AssetDepreciationSchedule {
   id: string;
   fixedAssetId: string;
+  accountingBookId?: string;
+  bookClassification: string;
   fiscalPeriodId: string;
   depreciationAmount: number;
   accumulatedDepreciation: number;
@@ -315,6 +345,7 @@ export interface BulkImportResult {
   totalRows: number;
   successCount: number;
   errorCount: number;
+  isDryRun: boolean;
   errors: BulkImportError[];
   successfulAssetCodes: string[];
 }

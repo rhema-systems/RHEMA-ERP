@@ -41,6 +41,11 @@ public interface ICurrentUserService
     IEnumerable<string> Roles { get; }
 
     /// <summary>
+    /// Gets the current user's claims.
+    /// </summary>
+    IDictionary<string, string> Claims { get; }
+
+    /// <summary>
     /// Checks if the current user has a specific role
     /// </summary>
     /// <param name="role">The role to check</param>

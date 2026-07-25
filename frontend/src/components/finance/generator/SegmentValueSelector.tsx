@@ -4,7 +4,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { SegmentStructure, SegmentLookupValue, SegmentSelection } from '@/types/finance';
+import type { AccountStatus, SegmentStructure, SegmentLookupValue, SegmentSelection } from '@/types/finance';
 import { financeService } from '@/services/finance.service';
 import { Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +12,33 @@ import { Badge } from '@/components/ui/badge';
 interface SegmentValueSelectorProps {
     onSelectionChange: (selections: SegmentSelection[]) => void;
 }
+
+const mapNaturalAccountChoices = async (segment: SegmentStructure): Promise<SegmentLookupValue[]> => {
+    const accounts = await financeService.getAllAccounts({
+        status: 'Active' as AccountStatus,
+    });
+
+    return accounts
+        .filter(account => account.accountNumber && account.accountName)
+        .map((account, index) => {
+            const naturalSegmentValue =
+                account.segmentValues?.find(value => value.segmentStructureId === segment.id)?.segmentValue
+                || account.accountCode
+                || account.accountNumber;
+
+            return {
+                id: account.id,
+                segmentStructureId: segment.id,
+                segmentValue: naturalSegmentValue,
+                description: account.accountName,
+                effectiveDate: account.createdAt,
+                isActive: account.status === 'Active',
+                displayOrder: index + 1,
+                createdAt: account.createdAt,
+                updatedAt: account.updatedAt,
+            };
+        });
+};
 
 export const SegmentValueSelector: React.FC<SegmentValueSelectorProps> = ({ onSelectionChange }) => {
     const [segments, setSegments] = useState<SegmentStructure[]>([]);
@@ -29,6 +56,16 @@ export const SegmentValueSelector: React.FC<SegmentValueSelectorProps> = ({ onSe
             // Filter for segments that are relevant (lookup required or has values)
             // And fetch lookup values for them if not already populated
             const enrichedSegments = await Promise.all(segmentsList.map(async (segment) => {
+                if (segment.isNaturalAccount) {
+                    try {
+                        const values = await mapNaturalAccountChoices(segment);
+                        return { ...segment, lookupValues: values };
+                    } catch (e) {
+                        console.warn(`Failed to load natural account choices for segment ${segment.segmentName}`, e);
+                        return segment;
+                    }
+                }
+
                 if (segment.lookupTableRequired || (segment.lookupValuesCount || 0) > 0) {
                     try {
                         const values = await financeService.getSegmentLookupValues(segment.id);
@@ -107,7 +144,11 @@ export const SegmentValueSelector: React.FC<SegmentValueSelectorProps> = ({ onSe
                         <div className="flex justify-between items-center">
                             <div>
                                 <CardTitle className="text-base">{segment.segmentName}</CardTitle>
-                                <CardDescription>Select values for {segment.segmentName}</CardDescription>
+                                <CardDescription>
+                                    {segment.isNaturalAccount
+                                        ? 'Select existing COA accounts to use as natural-account values'
+                                        : `Select values for ${segment.segmentName}`}
+                                </CardDescription>
                             </div>
                             <Button
                                 variant="outline"

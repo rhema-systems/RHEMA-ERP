@@ -16,7 +16,12 @@ public class FixedAssetCategoryDto
     public Guid DepreciationExpenseAccountId { get; set; }
     public Guid? GainOnDisposalAccountId { get; set; }
     public Guid? LossOnDisposalAccountId { get; set; }
+    public Guid? DisposalProceedsClearingAccountId { get; set; }
     public Guid? RevaluationSurplusAccountId { get; set; }
+    public Guid? RevaluationLossAccountId { get; set; }
+    public Guid? ImpairmentLossAccountId { get; set; }
+    public Guid? AccumulatedImpairmentAccountId { get; set; }
+    public Guid? ImpairmentReversalAccountId { get; set; }
     public Guid? AucAccountId { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
@@ -35,7 +40,12 @@ public class CreateFixedAssetCategoryDto
     public Guid DepreciationExpenseAccountId { get; set; }
     public Guid? GainOnDisposalAccountId { get; set; }
     public Guid? LossOnDisposalAccountId { get; set; }
+    public Guid? DisposalProceedsClearingAccountId { get; set; }
     public Guid? RevaluationSurplusAccountId { get; set; }
+    public Guid? RevaluationLossAccountId { get; set; }
+    public Guid? ImpairmentLossAccountId { get; set; }
+    public Guid? AccumulatedImpairmentAccountId { get; set; }
+    public Guid? ImpairmentReversalAccountId { get; set; }
     public Guid? AucAccountId { get; set; }
 }
 
@@ -52,7 +62,12 @@ public class UpdateFixedAssetCategoryDto
     public Guid DepreciationExpenseAccountId { get; set; }
     public Guid? GainOnDisposalAccountId { get; set; }
     public Guid? LossOnDisposalAccountId { get; set; }
+    public Guid? DisposalProceedsClearingAccountId { get; set; }
     public Guid? RevaluationSurplusAccountId { get; set; }
+    public Guid? RevaluationLossAccountId { get; set; }
+    public Guid? ImpairmentLossAccountId { get; set; }
+    public Guid? AccumulatedImpairmentAccountId { get; set; }
+    public Guid? ImpairmentReversalAccountId { get; set; }
     public Guid? AucAccountId { get; set; }
 }
 
@@ -62,6 +77,11 @@ public class FixedAssetDto
     public string AssetCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? Location { get; set; }
+    public Guid? CurrentCustodianId { get; set; }
+    public string? CurrentCustodianName { get; set; }
+    public string? CurrentSegmentString { get; set; }
+    public Guid? CurrentSegmentLookupValueId { get; set; }
     public Guid FixedAssetCategoryId { get; set; }
     public string? FixedAssetCategoryName { get; set; }
     public DateTime PurchaseDate { get; set; }
@@ -69,6 +89,7 @@ public class FixedAssetDto
     public decimal PurchasePrice { get; set; }
     public decimal InstallationCost { get; set; }
     public decimal TaxAmount { get; set; }
+    public DateTime? CapitalizationDate { get; set; }
     public decimal AcquisitionCost { get; set; }
     public decimal NetBookValue { get; set; }
     public DepreciationMethod DepreciationMethod { get; set; }
@@ -77,12 +98,54 @@ public class FixedAssetDto
     public decimal ResidualValue { get; set; }
     public FixedAssetStatus Status { get; set; }
     public DateTime? DisposalDate { get; set; }
+    public string FunctionalCurrencyCode { get; set; } = "GHS";
+    public string? TransactionCurrencyCode { get; set; }
+    public decimal? ExchangeRate { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public DateTime? ExchangeRateDate { get; set; }
+    public string? SourceDocumentType { get; set; }
+    public Guid? SourceDocumentId { get; set; }
+    public Guid? SourceDocumentLineId { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? PostingEventId { get; set; }
+    public DateTime? CapitalizedAt { get; set; }
     public Guid? MaintenanceAssetId { get; set; }
     public string? SerialNumber { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public string? UpdatedBy { get; set; }
+    public List<FixedAssetBookValueDto> BookValues { get; set; } = new();
+}
+
+public class FixedAssetBookValueDto
+{
+    public Guid Id { get; set; }
+    public Guid FixedAssetId { get; set; }
+    public Guid AccountingBookId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
+    public string? AccountingBookName { get; set; }
+    public decimal AcquisitionCost { get; set; }
+    public decimal AccumulatedDepreciation { get; set; }
+    public decimal NetBookValue { get; set; }
+    public decimal ResidualValue { get; set; }
+    public int UsefulLifeMonths { get; set; }
+    public int? RemainingUsefulLifeMonths { get; set; }
+    public DepreciationMethod DepreciationMethod { get; set; }
+    public DepreciationConvention DepreciationConvention { get; set; }
+    public DateTime? PlacedInServiceDate { get; set; }
+    public DateTime? OpeningAsOfDate { get; set; }
+    public decimal OpeningYtdDepreciation { get; set; }
+    public DateTime? LastDepreciationDate { get; set; }
+    public bool OpeningPostedToGl { get; set; }
+    public DateTime? OpeningPostedDate { get; set; }
+    public string OpeningSource { get; set; } = "Manual";
+    public DateTime? CapitalizationDate { get; set; }
+    public Guid? CapitalizationJournalEntryId { get; set; }
+    public Guid? CapitalizationPostingEventId { get; set; }
+    public string? SourceDocumentType { get; set; }
+    public Guid? SourceDocumentId { get; set; }
+    public Guid? SourceDocumentLineId { get; set; }
 }
 
 public class CreateFixedAssetDto
@@ -90,6 +153,7 @@ public class CreateFixedAssetDto
     public string AssetCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? Location { get; set; }
     public Guid FixedAssetCategoryId { get; set; }
     public DateTime PurchaseDate { get; set; }
     public DateTime? PlacedInServiceDate { get; set; }
@@ -110,6 +174,7 @@ public class UpdateFixedAssetDto
     public string AssetCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? Location { get; set; }
     public Guid FixedAssetCategoryId { get; set; }
     public DateTime PurchaseDate { get; set; }
     public DateTime? PlacedInServiceDate { get; set; }
@@ -127,10 +192,27 @@ public class UpdateFixedAssetDto
     public string? SerialNumber { get; set; }
 }
 
+public class CapitalizeFixedAssetDto
+{
+    public DateTime CapitalizationDate { get; set; } = DateTime.UtcNow;
+    public Guid? CreditAccountId { get; set; }
+    public string? SourceDocumentType { get; set; }
+    public Guid? SourceDocumentId { get; set; }
+    public Guid? SourceDocumentLineId { get; set; }
+    public string? Reference { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public decimal? Amount { get; set; }
+    public string? TransactionCurrencyCode { get; set; }
+    public decimal? ExchangeRate { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public DateTime? ExchangeRateDate { get; set; }
+}
+
 public class RunDepreciationDto
 {
     public Guid FiscalPeriodId { get; set; }
     public Guid? FixedAssetId { get; set; }
+    public string? BookClassification { get; set; }
     public bool PostToGl { get; set; } = true;
     public DateTime? PostingDate { get; set; }
 }
@@ -139,14 +221,44 @@ public class AssetDepreciationScheduleDto
 {
     public Guid Id { get; set; }
     public Guid FixedAssetId { get; set; }
+    public Guid? FixedAssetDepreciationRunId { get; set; }
+    public Guid? AccountingBookId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
     public Guid FiscalPeriodId { get; set; }
     public decimal DepreciationAmount { get; set; }
+    public decimal AccumulatedDepreciationBefore { get; set; }
     public decimal AccumulatedDepreciation { get; set; }
+    public decimal NetBookValueBefore { get; set; }
     public decimal NetBookValue { get; set; }
+    public decimal DepreciableAmount { get; set; }
+    public decimal ResidualValueSnapshot { get; set; }
+    public int UsefulLifeMonthsSnapshot { get; set; }
+    public DepreciationMethod DepreciationMethodSnapshot { get; set; }
+    public DateTime? PlacedInServiceDateSnapshot { get; set; }
     public bool IsPosted { get; set; }
     public DateTime? PostedDate { get; set; }
+    public DateTime? PostingDate { get; set; }
     public Guid? JournalEntryId { get; set; }
+    public Guid? PostingEventId { get; set; }
     public bool IsProjected { get; set; }
+}
+
+public class FixedAssetDepreciationRunDto
+{
+    public Guid Id { get; set; }
+    public Guid FiscalPeriodId { get; set; }
+    public Guid? FixedAssetId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
+    public DateTime PostingDate { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public decimal TotalDepreciationAmount { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? PostingEventId { get; set; }
+    public DateTime? CalculatedAt { get; set; }
+    public DateTime? PostedAt { get; set; }
+    public DateTime? FailedAt { get; set; }
+    public string? FailureReason { get; set; }
+    public List<AssetDepreciationScheduleDto> Lines { get; set; } = new();
 }
 
 public class FixedAssetGlAccountOptionDto
@@ -166,7 +278,12 @@ public class FixedAssetGlAccountOptionsDto
     public List<FixedAssetGlAccountOptionDto> DepreciationExpenseAccounts { get; set; } = new();
     public List<FixedAssetGlAccountOptionDto> GainOnDisposalAccounts { get; set; } = new();
     public List<FixedAssetGlAccountOptionDto> LossOnDisposalAccounts { get; set; } = new();
+    public List<FixedAssetGlAccountOptionDto> DisposalProceedsClearingAccounts { get; set; } = new();
     public List<FixedAssetGlAccountOptionDto> RevaluationSurplusAccounts { get; set; } = new();
+    public List<FixedAssetGlAccountOptionDto> RevaluationLossAccounts { get; set; } = new();
+    public List<FixedAssetGlAccountOptionDto> ImpairmentLossAccounts { get; set; } = new();
+    public List<FixedAssetGlAccountOptionDto> AccumulatedImpairmentAccounts { get; set; } = new();
+    public List<FixedAssetGlAccountOptionDto> ImpairmentReversalAccounts { get; set; } = new();
     public List<FixedAssetGlAccountOptionDto> AucAccounts { get; set; } = new();
 }
 
@@ -185,6 +302,12 @@ public class AssetTransferDto
     public string ToLocation { get; set; } = string.Empty;
     public Guid? ToCustodianId { get; set; }
     public string? ToCustodianName { get; set; }
+    public string? FromSegmentString { get; set; }
+    public Guid? FromSegmentLookupValueId { get; set; }
+    public string? ToSegmentString { get; set; }
+    public Guid? ToSegmentLookupValueId { get; set; }
+    public DateTime? AccountingDate { get; set; }
+    public Guid? FiscalPeriodId { get; set; }
     public string? Reason { get; set; }
     public decimal? TransferCost { get; set; }
     public Guid? RequestedById { get; set; }
@@ -192,8 +315,16 @@ public class AssetTransferDto
     public Guid? ApprovedById { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public DateTime? PostedAt { get; set; }
+    public DateTime? FailedAt { get; set; }
     public string? Comments { get; set; }
+    public string? FailureReason { get; set; }
     public string? ReferenceNumber { get; set; }
+    public string? IdempotencyKey { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? PostingEventId { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 
@@ -204,8 +335,12 @@ public class RequestAssetTransferDto
     public AssetTransferType TransferType { get; set; } = AssetTransferType.Internal;
     public string ToLocation { get; set; } = string.Empty;
     public Guid? ToCustodianId { get; set; }
+    public string? ToSegmentString { get; set; }
+    public Guid? ToSegmentLookupValueId { get; set; }
+    public DateTime? AccountingDate { get; set; }
     public string? Reason { get; set; }
     public decimal? TransferCost { get; set; }
+    public string? IdempotencyKey { get; set; }
 }
 
 public class ApproveAssetTransferDto
@@ -222,9 +357,20 @@ public class AssetDisposalDto
     public DateTime DisposalDate { get; set; }
     public DisposalType DisposalType { get; set; }
     public AssetDisposalStatus Status { get; set; }
+    public DateTime? AccountingDate { get; set; }
+    public Guid? FiscalPeriodId { get; set; }
+    public Guid? AccountingBookId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
     public string? Reason { get; set; }
     public decimal? SaleProceeds { get; set; }
     public decimal? DisposalCost { get; set; }
+    public decimal NetProceeds { get; set; }
+    public string ProceedsCurrencyCode { get; set; } = "GHS";
+    public Guid? ProceedsAccountId { get; set; }
+    public decimal CostAtDisposal { get; set; }
+    public decimal AccumulatedDepreciationAtDisposal { get; set; }
+    public decimal AccumulatedImpairmentAtDisposal { get; set; }
+    public decimal RevaluationSurplusAtDisposal { get; set; }
     public decimal NetBookValueAtDisposal { get; set; }
     public decimal GainOrLoss { get; set; }
     public string? BuyerName { get; set; }
@@ -234,7 +380,15 @@ public class AssetDisposalDto
     public Guid? ApprovedById { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public DateTime? PostedAt { get; set; }
+    public DateTime? FailedAt { get; set; }
     public string? Comments { get; set; }
+    public string? FailureReason { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? PostingEventId { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public string? IdempotencyKey { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 
@@ -246,7 +400,10 @@ public class RequestAssetDisposalDto
     public string? Reason { get; set; }
     public decimal SaleProceeds { get; set; }
     public decimal DisposalCost { get; set; }
+    public string? ProceedsCurrencyCode { get; set; }
+    public Guid? ProceedsAccountId { get; set; }
     public string? BuyerName { get; set; }
+    public string? IdempotencyKey { get; set; }
 }
 
 public class ApproveAssetDisposalDto
@@ -306,6 +463,7 @@ public class BulkImportResultDto
     public int TotalRows { get; set; }
     public int SuccessCount { get; set; }
     public int ErrorCount { get; set; }
+    public bool IsDryRun { get; set; }
     public List<BulkImportErrorDto> Errors { get; set; } = new();
     public List<string> SuccessfulAssetCodes { get; set; } = new();
 }
@@ -323,12 +481,22 @@ public class BulkAssetImportRowDto
     public string AssetCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? Location { get; set; }
     public string CategoryCode { get; set; } = string.Empty;
     public DateTime? PurchaseDate { get; set; }
+    public DateTime? PlacedInServiceDate { get; set; }
+    public string? BookCode { get; set; }
     public decimal? PurchasePrice { get; set; }
     public decimal? InstallationCost { get; set; }
     public decimal? TaxAmount { get; set; }
+    public decimal? AccumulatedDepreciation { get; set; }
+    public decimal? NetBookValue { get; set; }
+    public DateTime? OpeningAsOfDate { get; set; }
+    public decimal? OpeningYtdDepreciation { get; set; }
+    public int? RemainingUsefulLifeMonths { get; set; }
     public int? UsefulLifeMonths { get; set; }
     public decimal? ResidualValue { get; set; }
     public string? SerialNumber { get; set; }
+    public FixedAssetStatus? Status { get; set; }
+    public string? RawStatus { get; set; }
 }

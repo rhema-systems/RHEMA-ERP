@@ -112,7 +112,6 @@ export default function TaxCalculatorPage() {
                                         <li>• VAT: 15% (Standard)</li>
                                         <li>• NHIL: 2.5%</li>
                                         <li>• GETFund: 2.5%</li>
-                                        <li>• COVID-19: 1%</li>
                                         <li>• WHT: 3% (Goods), 7.5% (Services)</li>
                                     </ul>
                                 </div>

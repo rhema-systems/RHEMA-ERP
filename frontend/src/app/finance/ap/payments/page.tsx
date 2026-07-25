@@ -47,6 +47,7 @@ export default function VendorPaymentsPage() {
         queryFn: () => accountsPayableService.getPayments({
             page,
             pageSize,
+            searchTerm: debouncedSearchTerm,
             status: statusFilter
         }),
     });
@@ -138,14 +139,19 @@ export default function VendorPaymentsPage() {
                                 ) : (
                                     paymentsData?.items.map((payment) => (
                                         <TableRow key={payment.id}>
-                                            <TableCell className="font-medium">{payment.paymentNumber}</TableCell>
+                                            <TableCell
+                                                className="font-medium text-blue-600 hover:underline cursor-pointer"
+                                                onClick={() => router.push(`/finance/ap/payments/${payment.id}`)}
+                                            >
+                                                {payment.paymentNumber}
+                                            </TableCell>
                                             <TableCell>{format(new Date(payment.paymentDate), 'MMM dd, yyyy')}</TableCell>
                                             <TableCell>{payment.supplierName}</TableCell>
                                             <TableCell>{payment.paymentMethod}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(payment.totalAmount)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(payment.totalAmount, payment.currencyCode)}</TableCell>
                                             <TableCell className="text-right">
                                                 {payment.unallocatedAmount > 0 ? (
-                                                    <span className="text-amber-600 font-medium">{formatCurrency(payment.unallocatedAmount)}</span>
+                                                    <span className="text-amber-600 font-medium">{formatCurrency(payment.unallocatedAmount, payment.currencyCode)}</span>
                                                 ) : (
                                                     <span className="text-muted-foreground">-</span>
                                                 )}

@@ -3,8 +3,10 @@ using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Services.Projects;
 using Microsoft.EntityFrameworkCore;
@@ -21,11 +23,13 @@ public class SalesOrderService : ISalesOrderService
     private readonly IGenericRepository<SalesOrderStatusHistory> _historyRepo;
     private readonly IGenericRepository<BusinessPartner> _bpRepo;
     private readonly IGenericRepository<Quote> _quoteRepo;
+    private readonly IGenericRepository<PaymentTerm> _paymentTermRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ILogger<SalesOrderService> _logger;
+    private readonly IDocumentNumberingService _documentNumberingService;
 
     public SalesOrderService(
         IGenericRepository<SalesOrder> salesOrderRepo,
@@ -33,8 +37,10 @@ public class SalesOrderService : ISalesOrderService
         IGenericRepository<SalesOrderStatusHistory> historyRepo,
         IGenericRepository<BusinessPartner> bpRepo,
         IGenericRepository<Quote> quoteRepo,
+        IGenericRepository<PaymentTerm> paymentTermRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IDocumentNumberingService documentNumberingService,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ILogger<SalesOrderService> logger)
@@ -44,11 +50,14 @@ public class SalesOrderService : ISalesOrderService
         _historyRepo = historyRepo;
         _bpRepo = bpRepo;
         _quoteRepo = quoteRepo;
+        _paymentTermRepo = paymentTermRepo;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _logger = logger;
+        // Document numbering is kept with workflow governance so merged Sales orders remain traceable and approval-controlled.
+        _documentNumberingService = documentNumberingService;
     }
 
     #region CRUD
@@ -59,6 +68,7 @@ public class SalesOrderService : ISalesOrderService
         {
             var bp = await _bpRepo.GetByIdAsync(dto.BusinessPartnerId)
                 ?? throw new InvalidOperationException($"Business Partner {dto.BusinessPartnerId} not found");
+            var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? bp.PaymentTermId, bp.TenantId);
 
             var salesOrder = new SalesOrder
             {
@@ -75,8 +85,8 @@ public class SalesOrderService : ISalesOrderService
                 DiscountAmount = dto.DiscountAmount ?? 0,
                 DiscountPercentage = dto.DiscountPercentage ?? 0,
                 ShippingAmount = dto.ShippingAmount ?? 0,
-                PaymentTermId = dto.PaymentTermId ?? bp.PaymentTermId,
-                PaymentTermsDays = bp.PaymentTerms != null ? 30 : 30, // Default
+                PaymentTermId = paymentTerm?.Id,
+                PaymentTermsDays = paymentTerm?.DueDays ?? 0,
                 RequestedDeliveryDate = dto.RequestedDeliveryDate,
                 PromisedDeliveryDate = dto.PromisedDeliveryDate,
                 ShipmentMethod = dto.ShipmentMethod,
@@ -175,7 +185,12 @@ public class SalesOrderService : ISalesOrderService
             if (dto.DiscountAmount.HasValue) so.DiscountAmount = dto.DiscountAmount.Value;
             if (dto.DiscountPercentage.HasValue) so.DiscountPercentage = dto.DiscountPercentage.Value;
             if (dto.ShippingAmount.HasValue) so.ShippingAmount = dto.ShippingAmount.Value;
-            if (dto.PaymentTermId.HasValue) so.PaymentTermId = dto.PaymentTermId;
+            if (dto.PaymentTermId.HasValue)
+            {
+                var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId, so.TenantId, useDefaultWhenMissing: false);
+                so.PaymentTermId = paymentTerm!.Id;
+                so.PaymentTermsDays = paymentTerm.DueDays;
+            }
             if (dto.ShipmentMethod.HasValue) so.ShipmentMethod = dto.ShipmentMethod;
             if (dto.ShippingAddress != null) so.ShippingAddress = dto.ShippingAddress;
             if (dto.BillingAddress != null) so.BillingAddress = dto.BillingAddress;
@@ -364,6 +379,48 @@ public class SalesOrderService : ISalesOrderService
 
     #endregion
 
+    private async Task<PaymentTerm?> ResolvePaymentTermAsync(
+        Guid? paymentTermId,
+        Guid tenantId,
+        bool useDefaultWhenMissing = true)
+    {
+        PaymentTerm? term;
+        if (paymentTermId.HasValue)
+        {
+            term = await _paymentTermRepo.GetByIdAsync(paymentTermId.Value);
+            if (term == null || term.TenantId != tenantId || term.IsDeleted)
+            {
+                throw new InvalidOperationException("The selected payment term was not found for this tenant.");
+            }
+        }
+        else if (useDefaultWhenMissing)
+        {
+            term = (await _paymentTermRepo.FindAsync(candidate =>
+                    candidate.TenantId == tenantId &&
+                    !candidate.IsDeleted &&
+                    candidate.IsActive &&
+                    candidate.IsDefault &&
+                    (candidate.ApplicableTo == "All" || candidate.ApplicableTo == "Customer" || candidate.ApplicableTo == "Client")))
+                .OrderBy(candidate => candidate.ApplicableTo == "Customer" ? 0 : 1)
+                .ThenBy(candidate => candidate.DisplayOrder)
+                .FirstOrDefault();
+        }
+        else
+        {
+            term = null;
+        }
+
+        if (term != null && (!term.IsActive ||
+            !(term.ApplicableTo.Equals("All", StringComparison.OrdinalIgnoreCase) ||
+              term.ApplicableTo.Equals("Customer", StringComparison.OrdinalIgnoreCase) ||
+              term.ApplicableTo.Equals("Client", StringComparison.OrdinalIgnoreCase))))
+        {
+            throw new InvalidOperationException($"Payment term '{term.Code}' is not active and applicable to customers.");
+        }
+
+        return term;
+    }
+
     #region Lifecycle Actions
 
     public async Task<SalesOrderDetailDto> SubmitForApprovalAsync(Guid id)
@@ -421,6 +478,7 @@ public class SalesOrderService : ISalesOrderService
             if (userId == Guid.Empty)
                 throw new UnauthorizedAccessException("User is not authenticated");
 
+            // Keep the workflow assignment guard before applying Sales/Finance state changes.
             var canApprove = await _workflowIntegrationService.CanUserApproveAsync(WorkflowEntityType, id, userId);
             if (!canApprove)
                 throw new UnauthorizedAccessException("You are not assigned to approve the current workflow step");
@@ -697,8 +755,12 @@ public class SalesOrderService : ISalesOrderService
 
     public async Task<string> GenerateOrderNumberAsync()
     {
-        var count = await _salesOrderRepo.CountAsync() + 1;
-        return $"SO-{count:D6}";
+        return await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Sales,
+            SalesDocumentTypes.SalesOrder,
+            _currentUserProvider.TenantId,
+            DateTime.UtcNow,
+            nameof(SalesOrder));
     }
 
     public async Task<bool> ValidateCreditLimitAsync(Guid businessPartnerId, decimal orderAmount)

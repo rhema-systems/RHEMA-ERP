@@ -38,6 +38,10 @@ public class BusinessPartner : TenantEntity
     [MaxLength(100)]
     public string? VATNumber { get; set; }
 
+    public bool IsVatWithholdingAgent { get; set; }
+
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
+
     public DateTime? RegistrationDate { get; set; }
     public DateTime? IncorporationDate { get; set; }
 
@@ -93,6 +97,14 @@ public class BusinessPartner : TenantEntity
     public string? MailingPostalCode { get; set; }
 
     // Banking Information
+    /// <summary>
+    /// Currency code for the business partner (e.g., USD, EUR, GBP).
+    /// NOTE: This is available for all partner types (Suppliers, Contractors, Customers).
+    /// It is used as the default currency for Finance Purchase Orders, Invoices, and Billing.
+    /// </summary>
+    [MaxLength(50)]
+    public string? Currency { get; set; }
+
     [MaxLength(200)]
     public string? BankName { get; set; }
 
@@ -209,11 +221,7 @@ public class BusinessPartner : TenantEntity
     public Guid? DefaultExpenseAccountId { get; set; }
     public virtual Account? DefaultExpenseAccount { get; set; }
 
-    /// <summary>
-    /// Currency code for the customer (e.g., USD, EUR, GBP)
-    /// </summary>
-    [MaxLength(50)]
-    public string? Currency { get; set; }
+
 
     /// <summary>
     /// Default discount percentage for the customer

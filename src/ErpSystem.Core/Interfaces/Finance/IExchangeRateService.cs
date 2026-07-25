@@ -45,6 +45,25 @@ namespace ErpSystem.Core.Interfaces.Finance
             CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Retrieves historical exchange-rate trend points for a currency pair.
+        /// </summary>
+        /// <param name="baseCurrencyCode">Base currency code (defaults to tenant base currency when null)</param>
+        /// <param name="targetCurrencyCode">Target currency code</param>
+        /// <param name="startDate">Start date, inclusive</param>
+        /// <param name="endDate">End date, inclusive</param>
+        /// <param name="interval">Analysis interval label</param>
+        /// <param name="movingAverageWindow">Number of points to include in moving average calculations</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        Task<IReadOnlyList<TrendAnalysisDto>> GetTrendsAsync(
+            string? baseCurrencyCode,
+            string targetCurrencyCode,
+            DateTime startDate,
+            DateTime endDate,
+            string interval = "daily",
+            int movingAverageWindow = 7,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Creates a new exchange rate.
         /// </summary>
         Task<ExchangeRateDto> CreateExchangeRateAsync(CreateExchangeRateDto dto, CancellationToken cancellationToken = default);

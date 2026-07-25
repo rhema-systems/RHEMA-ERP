@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { 
+  Check,
+  ChevronsUpDown,
   Plus,
   Search,
   Edit,
@@ -19,6 +23,8 @@ import {
   Globe,
   Settings
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { ISO_4217_CURRENCIES, type ISO4217Currency } from '@/lib/iso-4217-currencies';
 import {
   currencyService,
   CurrencyListDto as CurrencyDto,
@@ -26,6 +32,28 @@ import {
   UpdateCurrencyDto
 } from '@/services/financeCommonService';
 import { toast } from 'sonner';
+
+const getCurrencySymbol = (currency: ISO4217Currency) => {
+  try {
+    return new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: currency.code,
+      currencyDisplay: 'narrowSymbol',
+    }).formatToParts(0).find(part => part.type === 'currency')?.value ?? currency.symbol;
+  } catch {
+    return currency.symbol;
+  }
+};
+
+const INITIAL_RATE_SOURCE = 'Manual Entry';
+
+const formatDateInputValue = (value?: string | Date) => {
+  if (value instanceof Date) return value.toISOString().split('T')[0];
+  if (value) return value.split('T')[0];
+  return new Date().toISOString().split('T')[0];
+};
+
+const buildFormatString = (decimalPlaces = 2) => `{0:N${decimalPlaces}}`;
 
 export default function CurrenciesPage() {
   const [currencies, setCurrencies] = useState<CurrencyDto[]>([]);
@@ -39,6 +67,7 @@ export default function CurrenciesPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedCurrency, setSelectedCurrency] = useState<CurrencyDto | null>(null);
+  const [isoPickerOpen, setIsoPickerOpen] = useState(false);
  
   // Form state
   const [formData, setFormData] = useState<CreateCurrencyDto>({
@@ -46,12 +75,15 @@ export default function CurrenciesPage() {
     name: '',
     symbol: '',
     decimalPlaces: 2,
-    exchangeRate: 1,
-    exchangeRateDate: new Date(),
+    createInitialExchangeRate: false,
+    initialExchangeRate: undefined,
+    initialExchangeRateDate: new Date(),
+    initialExchangeRateType: 'Daily',
+    initialExchangeRateSource: INITIAL_RATE_SOURCE,
     isBaseCurrency: false,
     isActive: true,
     displayOrder: 0,
-    formatString: '',
+    formatString: buildFormatString(2),
     country: ''
   });
 
@@ -101,7 +133,51 @@ export default function CurrenciesPage() {
     setFilteredCurrencies(filtered);
   }, [searchTerm, statusFilter, currencies]);
 
+  const availableISOCurrencies = useMemo(() => {
+    const configuredCodes = new Set(currencies.filter(Boolean).map(currency => currency.code?.toUpperCase()));
+    return ISO_4217_CURRENCIES.filter(currency => !configuredCodes.has(currency.code));
+  }, [currencies]);
+
+  const selectedISO = useMemo(
+    () => ISO_4217_CURRENCIES.find(currency => currency.code === formData.code),
+    [formData.code]
+  );
+
+  const baseCurrencyCode = useMemo(
+    () => currencies.find(currency => currency?.isBaseCurrency)?.code || 'GHS',
+    [currencies]
+  );
+
+  const initialRateRequiredButMissing =
+    !formData.isBaseCurrency &&
+    formData.createInitialExchangeRate &&
+    (!formData.initialExchangeRate || formData.initialExchangeRate <= 0);
+
+  const canCreateCurrency = Boolean(selectedISO) && !initialRateRequiredButMissing;
+
+  const handleSelectISOCurrency = (currency: ISO4217Currency) => {
+    setFormData(current => ({
+      ...current,
+      code: currency.code,
+      name: currency.name,
+      symbol: getCurrencySymbol(currency),
+      decimalPlaces: currency.decimalPlaces,
+      formatString: buildFormatString(currency.decimalPlaces),
+    }));
+    setIsoPickerOpen(false);
+  };
+
   const handleCreate = async () => {
+    if (!selectedISO) {
+      toast.error('Select an ISO 4217 currency');
+      return;
+    }
+
+    if (initialRateRequiredButMissing) {
+      toast.error('Enter an initial exchange rate greater than zero');
+      return;
+    }
+
     try {
       const newCurrency = await currencyService.create(formData);
       setCurrencies(prev => [...(prev || []), newCurrency]);
@@ -120,12 +196,15 @@ export default function CurrenciesPage() {
       name: currency.name,
       symbol: currency.symbol,
       decimalPlaces: currency.decimalPlaces,
-      exchangeRate: currency.exchangeRate,
-      exchangeRateDate: currency.exchangeRateDate ? new Date(currency.exchangeRateDate) : new Date(),
+      createInitialExchangeRate: false,
+      initialExchangeRate: undefined,
+      initialExchangeRateDate: currency.exchangeRateDate ? new Date(currency.exchangeRateDate) : new Date(),
+      initialExchangeRateType: 'Daily',
+      initialExchangeRateSource: INITIAL_RATE_SOURCE,
       isBaseCurrency: currency.isBaseCurrency,
       isActive: currency.isActive,
       displayOrder: currency.displayOrder,
-      formatString: currency.formatString || '',
+      formatString: currency.formatString || buildFormatString(currency.decimalPlaces),
       country: currency.country || ''
     });
     setIsEditDialogOpen(true);
@@ -140,8 +219,6 @@ export default function CurrenciesPage() {
         name: formData.name,
         symbol: formData.symbol,
         decimalPlaces: formData.decimalPlaces,
-        exchangeRate: formData.exchangeRate,
-        exchangeRateDate: formData.exchangeRateDate,
         isBaseCurrency: formData.isBaseCurrency,
         isActive: formData.isActive,
         displayOrder: formData.displayOrder,
@@ -175,15 +252,19 @@ export default function CurrenciesPage() {
       name: '',
       symbol: '',
       decimalPlaces: 2,
-      exchangeRate: 1,
-      exchangeRateDate: new Date(),
+      createInitialExchangeRate: false,
+      initialExchangeRate: undefined,
+      initialExchangeRateDate: new Date(),
+      initialExchangeRateType: 'Daily',
+      initialExchangeRateSource: INITIAL_RATE_SOURCE,
       isBaseCurrency: false,
       isActive: true,
       displayOrder: 0,
-      formatString: '',
+      formatString: buildFormatString(2),
       country: ''
     });
     setSelectedCurrency(null);
+    setIsoPickerOpen(false);
   };
 
   return (
@@ -196,20 +277,69 @@ export default function CurrenciesPage() {
             Manage currencies and exchange rates for financial transactions
           </p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <Dialog
+          open={isCreateDialogOpen}
+          onOpenChange={(open) => {
+            setIsCreateDialogOpen(open);
+            if (!open) resetForm();
+          }}
+        >
           <DialogTrigger asChild>
             <Button><Plus className="mr-2 h-4 w-4" />Add Currency</Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[720px]">
             <DialogHeader>
               <DialogTitle>Add Currency</DialogTitle>
-              <DialogDescription>Create a new currency configuration.</DialogDescription>
+              <DialogDescription>Select an ISO 4217 currency, then complete its tenant-specific accounting settings.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="iso-currency-picker">ISO 4217 Currency</Label>
+                <Popover open={isoPickerOpen} onOpenChange={setIsoPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="iso-currency-picker"
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={isoPickerOpen}
+                      className="w-full justify-between font-normal"
+                    >
+                      <span className={cn('truncate', !selectedISO && 'text-muted-foreground')}>
+                        {selectedISO ? `${selectedISO.code} - ${selectedISO.name}` : 'Search and select a currency'}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[520px] max-w-[calc(100vw-3rem)] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search by currency code or name..." />
+                      <CommandList>
+                        <CommandEmpty>No available ISO currency found.</CommandEmpty>
+                        <CommandGroup>
+                          {availableISOCurrencies.map(currency => (
+                            <CommandItem
+                              key={currency.code}
+                              value={`${currency.code} ${currency.name}`}
+                              onSelect={() => handleSelectISOCurrency(currency)}
+                            >
+                              <Check className={cn('mr-2 h-4 w-4', selectedISO?.code === currency.code ? 'opacity-100' : 'opacity-0')} />
+                              <span className="w-12 font-mono font-semibold">{currency.code}</span>
+                              <span className="flex-1">{currency.name}</span>
+                              <span className="text-muted-foreground">{getCurrencySymbol(currency)}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                <p className="text-xs text-muted-foreground">Currencies already configured for this tenant are excluded.</p>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="code">Code</Label>
-                  <Input id="code" value={formData.code} onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})} placeholder="e.g., USD, EUR" />
+                  <Input id="code" value={formData.code} disabled className="font-mono bg-muted" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="symbol">Symbol</Label>
@@ -218,39 +348,42 @@ export default function CurrenciesPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="name">Name</Label>
-                <Input id="name" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} placeholder="e.g., US Dollar, Euro" />
+                <Input id="name" value={formData.name} disabled className="bg-muted" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="country">Country</Label>
-                <Input id="country" value={formData.country} onChange={(e) => setFormData({...formData, country: e.target.value})} placeholder="e.g., United States, Germany" />
+                <Label htmlFor="country">Country / Region</Label>
+                <Input id="country" value={formData.country} onChange={(e) => setFormData({...formData, country: e.target.value})} placeholder="Optional" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="decimalPlaces">Decimal Places</Label>
-                  <Input id="decimalPlaces" type="number" value={formData.decimalPlaces} onChange={(e) => setFormData({...formData, decimalPlaces: parseInt(e.target.value) || 0})} />
+                  <Input
+                    id="decimalPlaces"
+                    type="number"
+                    value={formData.decimalPlaces}
+                    onChange={(e) => {
+                      const decimalPlaces = parseInt(e.target.value) || 0;
+                      setFormData({...formData, decimalPlaces, formatString: buildFormatString(decimalPlaces)});
+                    }}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="displayOrder">Display Order</Label>
                   <Input id="displayOrder" type="number" value={formData.displayOrder} onChange={(e) => setFormData({...formData, displayOrder: parseInt(e.target.value) || 0})} />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="exchangeRate">Exchange Rate</Label>
-                  <Input id="exchangeRate" type="number" step="0.000001" value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: parseFloat(e.target.value) || 1})} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="exchangeRateDate">Rate Date</Label>
-                  <Input id="exchangeRateDate" type="date" value={formData.exchangeRateDate instanceof Date ? formData.exchangeRateDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]} onChange={(e) => setFormData({...formData, exchangeRateDate: new Date(e.target.value)})} />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="formatString">Format String</Label>
-                <Input id="formatString" value={formData.formatString} onChange={(e) => setFormData({...formData, formatString: e.target.value})} placeholder="e.g., {0:N2}" />
-              </div>
               <div className="flex items-center space-x-4">
                 <div className="flex items-center space-x-2">
-                  <Switch id="isBaseCurrency" checked={formData.isBaseCurrency} onCheckedChange={(v) => setFormData({...formData, isBaseCurrency: v})} />
+                  <Switch
+                    id="isBaseCurrency"
+                    checked={formData.isBaseCurrency}
+                    onCheckedChange={(v) => setFormData(current => ({
+                      ...current,
+                      isBaseCurrency: v,
+                      createInitialExchangeRate: v ? false : current.createInitialExchangeRate,
+                      initialExchangeRate: v ? undefined : current.initialExchangeRate,
+                    }))}
+                  />
                   <Label htmlFor="isBaseCurrency">Base Currency</Label>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -258,10 +391,100 @@ export default function CurrenciesPage() {
                   <Label htmlFor="isActive">Active</Label>
                 </div>
               </div>
+              {formData.isBaseCurrency ? (
+                <div className="rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
+                  Base currency rate is fixed at 1. No exchange-rate history row will be created.
+                </div>
+              ) : (
+                <div className="rounded-md border p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <Label htmlFor="createInitialExchangeRate">Create initial exchange rate</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Stored as 1 {formData.code || 'currency'} = rate {baseCurrencyCode}.
+                      </p>
+                    </div>
+                    <Switch
+                      id="createInitialExchangeRate"
+                      checked={formData.createInitialExchangeRate === true}
+                      onCheckedChange={(v) => setFormData(current => ({
+                        ...current,
+                        createInitialExchangeRate: v,
+                        initialExchangeRate: v ? current.initialExchangeRate : undefined,
+                      }))}
+                    />
+                  </div>
+                  {formData.createInitialExchangeRate && (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="initialExchangeRate">Initial Rate</Label>
+                        <Input
+                          id="initialExchangeRate"
+                          type="number"
+                          step="0.000001"
+                          min="0.000001"
+                          value={formData.initialExchangeRate ?? ''}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            initialExchangeRate: e.target.value === '' ? undefined : parseFloat(e.target.value)
+                          })}
+                          placeholder={`1 ${formData.code || 'CUR'} = ? ${baseCurrencyCode}`}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="initialExchangeRateDate">Effective Date</Label>
+                        <Input
+                          id="initialExchangeRateDate"
+                          type="date"
+                          value={formatDateInputValue(formData.initialExchangeRateDate)}
+                          onChange={(e) => setFormData({...formData, initialExchangeRateDate: new Date(e.target.value)})}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="initialExchangeRateType">Rate Type</Label>
+                        <Select
+                          value={formData.initialExchangeRateType || 'Daily'}
+                          onValueChange={(value) => setFormData({...formData, initialExchangeRateType: value})}
+                        >
+                          <SelectTrigger id="initialExchangeRateType"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Daily">Daily</SelectItem>
+                            <SelectItem value="Average">Average</SelectItem>
+                            <SelectItem value="MonthEnd">Month End</SelectItem>
+                            <SelectItem value="YearEnd">Year End</SelectItem>
+                            <SelectItem value="Budget">Budget</SelectItem>
+                            <SelectItem value="Fixed">Fixed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="initialExchangeRateSource">Source</Label>
+                        <Input
+                          id="initialExchangeRateSource"
+                          maxLength={20}
+                          value={formData.initialExchangeRateSource || INITIAL_RATE_SOURCE}
+                          onChange={(e) => setFormData({...formData, initialExchangeRateSource: e.target.value})}
+                          placeholder="Manual Entry"
+                        />
+                      </div>
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label htmlFor="initialExchangeRateSourceReference">Source Reference</Label>
+                        <Input
+                          id="initialExchangeRateSourceReference"
+                          maxLength={100}
+                          value={formData.initialExchangeRateSourceReference || ''}
+                          onChange={(e) => setFormData({...formData, initialExchangeRateSourceReference: e.target.value})}
+                          placeholder="Optional"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreate}>Create</Button>
+              <Button onClick={handleCreate} disabled={!canCreateCurrency}>Create Currency</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -366,7 +589,7 @@ export default function CurrenciesPage() {
                             </Badge>
                             {currency.isBaseCurrency && <Badge className="bg-purple-100 text-purple-800">Base</Badge>}
                           </div>
-                          <p className="text-sm text-muted-foreground">Exchange Rate: {currency.exchangeRate ?? 1} | Decimal Places: {currency.decimalPlaces ?? 2}</p>
+                          <p className="text-sm text-muted-foreground">ISO Numeric: {currency.numericCode || '---'} | Decimal Places: {currency.decimalPlaces ?? 2}</p>
                           {currency.country && <p className="text-sm text-muted-foreground">{currency.country}</p>}
                         </div>
                       </div>
@@ -411,26 +634,22 @@ export default function CurrenciesPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Decimal Places</Label>
-                <Input type="number" value={formData.decimalPlaces} onChange={(e) => setFormData({...formData, decimalPlaces: parseInt(e.target.value) || 0})} />
+                <Input
+                  type="number"
+                  value={formData.decimalPlaces}
+                  onChange={(e) => {
+                    const decimalPlaces = parseInt(e.target.value) || 0;
+                    setFormData({...formData, decimalPlaces, formatString: buildFormatString(decimalPlaces)});
+                  }}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Display Order</Label>
                 <Input type="number" value={formData.displayOrder} onChange={(e) => setFormData({...formData, displayOrder: parseInt(e.target.value) || 0})} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Exchange Rate</Label>
-                <Input type="number" step="0.000001" value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: parseFloat(e.target.value) || 1})} />
-              </div>
-              <div className="space-y-2">
-                <Label>Rate Date</Label>
-                <Input type="date" value={formData.exchangeRateDate instanceof Date ? formData.exchangeRateDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]} onChange={(e) => setFormData({...formData, exchangeRateDate: new Date(e.target.value)})} />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Format String</Label>
-              <Input value={formData.formatString} onChange={(e) => setFormData({...formData, formatString: e.target.value})} />
+            <div className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+              Exchange rates are maintained from Finance &gt; Exchange Rates so historical rates remain auditable.
             </div>
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">

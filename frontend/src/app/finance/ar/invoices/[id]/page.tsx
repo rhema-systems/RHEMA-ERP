@@ -1,15 +1,13 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     ArrowLeft,
     Printer,
-    Mail,
-    Download,
+    Send,
     CreditCard,
-    Ban,
-    FileText
+    Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,15 +24,36 @@ import { arService } from '@/services/ar-service';
 import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAuth } from '@/hooks/use-auth';
+import { useToast } from '@/components/ui/use-toast';
 
 export default function InvoiceDetailsPage() {
     const router = useRouter();
     const params = useParams();
     const id = params.id as string;
+    const { hasPermission } = useAuth();
+    const { toast } = useToast();
+    const queryClient = useQueryClient();
 
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['invoice', id],
         queryFn: () => arService.getInvoice(id),
+    });
+
+    const issueInvoiceMutation = useMutation({
+        mutationFn: () => arService.sendInvoice(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['invoice', id] });
+            queryClient.invalidateQueries({ queryKey: ['invoices'] });
+            toast({ title: 'Success', description: 'Invoice issued and posted successfully' });
+        },
+        onError: (error: any) => {
+            toast({
+                title: 'Error',
+                description: error.message || 'Failed to issue invoice',
+                variant: 'destructive',
+            });
+        },
     });
 
     if (isLoading) {
@@ -51,6 +70,10 @@ export default function InvoiceDetailsPage() {
             </div>
         );
     }
+
+    const lineSubtotal = invoice.lineItems.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unitPrice)), 0);
+    const lineDiscounts = invoice.lineItems.reduce((sum, item) => sum + (Number(item.discountAmount) || 0), 0);
+    const documentDiscount = Number(invoice.discountAmount) || 0;
 
     return (
         <div className="space-y-8 p-8 max-w-[1000px] mx-auto">
@@ -75,12 +98,15 @@ export default function InvoiceDetailsPage() {
                     <Button variant="outline" size="sm" onClick={() => window.print()}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
-                    <Button variant="outline" size="sm">
-                        <Mail className="mr-2 h-4 w-4" /> Email
+                    {invoice.status === 'Draft' && hasPermission('Finance.AR.Invoices.Send') && (
+                    <Button variant="outline" size="sm" onClick={() => issueInvoiceMutation.mutate()} disabled={issueInvoiceMutation.isPending}>
+                        {issueInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                        Issue / Post
                     </Button>
-                    {invoice.status === 'Posted' && invoice.balanceAmount > 0 && (
-                        <Button size="sm" onClick={() => router.push(`/finance/ar/payments/new?customerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
-                            <CreditCard className="mr-2 h-4 w-4" /> Record Payment
+                    )}
+                    {(invoice.status === 'Sent' || invoice.status === 'Posted') && invoice.balanceAmount > 0 && (
+                        <Button size="sm" onClick={() => router.push(`/finance/ar/receipts/new?customerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
+                            <CreditCard className="mr-2 h-4 w-4" /> Record Receipt
                         </Button>
                     )}
                 </div>
@@ -148,8 +174,8 @@ export default function InvoiceDetailsPage() {
                                     <p className="font-medium">{item.description}</p>
                                 </div>
                                 <div className="col-span-2 text-right">{item.quantity}</div>
-                                <div className="col-span-2 text-right">{formatCurrency(item.unitPrice)}</div>
-                                <div className="col-span-2 text-right font-medium">{formatCurrency(item.lineTotal)}</div>
+                                <div className="col-span-2 text-right">{formatCurrency(item.unitPrice, invoice.currencyCode)}</div>
+                                <div className="col-span-2 text-right font-medium">{formatCurrency(item.lineTotal, invoice.currencyCode)}</div>
                             </div>
                         ))}
                     </div>
@@ -159,21 +185,32 @@ export default function InvoiceDetailsPage() {
                         <div className="w-1/3 space-y-2">
                             <div className="flex justify-between text-sm">
                                 <span className="text-muted-foreground">Subtotal</span>
-                                <span>{formatCurrency(invoice.totalAmount)}</span> {/* Assuming totalAmount includes tax for now or we calculate tax separately if provided */}
+                                <span>{formatCurrency(lineSubtotal || invoice.totalAmount, invoice.currencyCode)}</span>
                             </div>
-                            {/* Add Tax/Discount rows if available in Invoice object */}
+                            {lineDiscounts > 0 && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Line Discounts</span>
+                                    <span>-{formatCurrency(lineDiscounts, invoice.currencyCode)}</span>
+                                </div>
+                            )}
+                            {documentDiscount > 0 && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Discount Allowed</span>
+                                    <span>-{formatCurrency(documentDiscount, invoice.currencyCode)}</span>
+                                </div>
+                            )}
                             <Separator className="my-2" />
                             <div className="flex justify-between font-bold text-lg">
                                 <span>Total</span>
-                                <span>{formatCurrency(invoice.totalAmount)}</span>
+                                <span>{formatCurrency(invoice.totalAmount, invoice.currencyCode)}</span>
                             </div>
                             <div className="flex justify-between text-sm text-muted-foreground pt-1">
                                 <span>Amount Paid</span>
-                                <span>-{formatCurrency(invoice.paidAmount)}</span>
+                                <span>-{formatCurrency(invoice.paidAmount, invoice.currencyCode)}</span>
                             </div>
                             <div className="flex justify-between font-bold text-lg pt-2 border-t">
                                 <span>Balance Due</span>
-                                <span className={invoice.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>{formatCurrency(invoice.balanceAmount)}</span>
+                                <span className={invoice.balanceAmount > 0 ? 'text-red-600' : 'text-green-600'}>{formatCurrency(invoice.balanceAmount, invoice.currencyCode)}</span>
                             </div>
                         </div>
                     </div>

@@ -25,13 +25,14 @@ public class FileUploadController : ControllerBase
     private static readonly Dictionary<string, string[]> AllowedFileTypes = new()
     {
         { "image", new[] { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico" } },
-        { "document", new[] { ".pdf", ".doc", ".docx", ".txt", ".rtf" } }
+        { "document", new[] { ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt", ".rtf" } }
     };
 
     private static readonly string[] AllowedMimeTypes = new[]
     {
         "image/jpeg", "image/png", "image/gif", "image/bmp", "image/svg+xml", "image/webp", "image/x-icon", "image/vnd.microsoft.icon",
         "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv",
         "text/plain", "application/rtf"
     };
     private static readonly char[] second = new[] { ' ', '.', ',', ';' };
@@ -201,9 +202,10 @@ public class FileUploadController : ControllerBase
                 result.StorageProvider, file.FileName, result.FilePath);
 
             // Record upload for quotas/auditability
+            Guid? fileRecordId = null;
             try
             {
-                _db.FileUploadRecords.Add(new ErpSystem.Core.Entities.FileUploadRecord
+                var record = new ErpSystem.Core.Entities.FileUploadRecord
                 {
                     Id = Guid.NewGuid(),
                     TenantId = effectiveTenantId,
@@ -221,7 +223,9 @@ public class FileUploadController : ControllerBase
                     CreatedAt = DateTime.UtcNow,
                     CreatedBy = _currentUserService.UserName,
                     CreatedById = actorUserId
-                });
+                };
+                fileRecordId = record.Id;
+                _db.FileUploadRecords.Add(record);
                 await _db.SaveChangesAsync();
             }
             catch (Exception ex)
@@ -241,6 +245,7 @@ public class FileUploadController : ControllerBase
                 ContentType = result.ContentType,
                 Category = result.Category,
                 TenantId = effectiveTenantId.ToString(),
+                FileId = fileRecordId,
                 UploadedAt = result.UploadedAt
             });
         }
@@ -527,6 +532,7 @@ public class FileUploadOptions
 public class FileUploadResult
 {
     public bool Success { get; set; }
+    public Guid? FileId { get; set; }
     public string FileName { get; set; } = string.Empty;
     public string OriginalFileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;

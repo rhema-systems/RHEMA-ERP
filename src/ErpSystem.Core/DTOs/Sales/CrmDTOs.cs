@@ -291,6 +291,8 @@ public class QuoteSummaryDto
     public string? CustomerName { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal TaxAmount { get; set; }
+    public string Currency { get; set; } = "USD";
+    public decimal ExchangeRate { get; set; } = 1.0m;
     public DateTime ValidUntil { get; set; }
     public DateTime? SentDate { get; set; }
     public DateTime? AcceptedDate { get; set; }
@@ -307,6 +309,8 @@ public class QuoteDetailDto : QuoteSummaryDto
     public string? Proposal { get; set; }
     public Guid? ConvertedInvoiceId { get; set; }
     public string? ConvertedInvoiceNumber { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public decimal BaseCurrencyAmount { get; set; }
     public List<QuoteLineItemDto> LineItems { get; set; } = new();
 }
 
@@ -324,6 +328,7 @@ public class QuoteLineItemDto
     public decimal DiscountAmount { get; set; }
     public decimal TaxAmount { get; set; }
     public string? TaxCode { get; set; }
+    public Guid? TaxGroupId { get; set; }
 }
 
 public class CreateQuoteDto
@@ -343,6 +348,10 @@ public class CreateQuoteDto
 
     [StringLength(2000)]
     public string? Proposal { get; set; }
+
+    public string Currency { get; set; } = "USD";
+    public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? TaxGroupId { get; set; }
 
     [Required]
     public List<CreateQuoteLineItemDto> LineItems { get; set; } = new();
@@ -370,6 +379,7 @@ public class CreateQuoteLineItemDto
 
     [StringLength(50)]
     public string? TaxCode { get; set; }
+    public Guid? TaxGroupId { get; set; }
 }
 
 public class UpdateQuoteDto

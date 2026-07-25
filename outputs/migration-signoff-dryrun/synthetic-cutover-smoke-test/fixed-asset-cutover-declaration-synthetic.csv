@@ -1,0 +1,7 @@
+TenantName,TenantId,ApprovedCutoverDate,ApprovedFiscalPeriod,BookClassification,CutoverItem,YesNo,DataFilePath,RecordCount,FunctionalAmount,Currency,RequiresPostedSourceImport,Owner,ApprovalStatus,Notes
+Default Tenant,00000000-0000-0000-0000-000000000001,2026-06-30,June 2026,IFRS,Fixed asset opening register required,No,,0,0.00,GHS,No,Codex synthetic runner,Synthetic only,Not in scope for first GL-only smoke test.
+Default Tenant,00000000-0000-0000-0000-000000000001,2026-06-30,June 2026,IFRS,Asset cost opening balances,No,,0,0.00,GHS,No,Codex synthetic runner,Synthetic only,Not in scope for first GL-only smoke test.
+Default Tenant,00000000-0000-0000-0000-000000000001,2026-06-30,June 2026,IFRS,Accumulated depreciation opening balances,No,,0,0.00,GHS,No,Codex synthetic runner,Synthetic only,Not in scope for first GL-only smoke test.
+Default Tenant,00000000-0000-0000-0000-000000000001,2026-06-30,June 2026,IFRS,Impairment opening balances,No,,0,0.00,GHS,No,Codex synthetic runner,Synthetic only,Not in scope for first GL-only smoke test.
+Default Tenant,00000000-0000-0000-0000-000000000001,2026-06-30,June 2026,IFRS,Revaluation reserve balances,No,,0,0.00,GHS,No,Codex synthetic runner,Synthetic only,Not in scope for first GL-only smoke test.
+Default Tenant,00000000-0000-0000-0000-000000000001,2026-06-30,June 2026,IFRS,Asset location/custodian/segment details,No,,0,0.00,GHS,No,Codex synthetic runner,Synthetic only,Not in scope for first GL-only smoke test.

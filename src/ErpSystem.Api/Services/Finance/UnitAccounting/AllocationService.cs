@@ -9,6 +9,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting
 {
@@ -31,7 +32,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             _logger = logger;
         }
 
-        private Guid TenantId => _currentUserService.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
         private string UserName => _currentUserService.UserName ?? "system";
 
         public async Task<IReadOnlyList<AllocationRuleDto>> GetAllRulesAsync(CancellationToken cancellationToken = default)
@@ -98,11 +99,11 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (existing != null)
                 throw new InvalidOperationException($"An allocation rule with code '{dto.Code}' already exists.");
 
-            // Validate source account
-            var sourceAccount = await _unitOfWork.Repository<Account>()
-                .FirstOrDefaultAsync(a => a.Id == dto.SourceAccountId && !a.IsDeleted);
-            if (sourceAccount == null)
-                throw new ArgumentException($"Source account with ID '{dto.SourceAccountId}' not found.");
+            await ValidateAllocationReferencesAsync(
+                dto.SourceAccountId,
+                dto.DriverUnitAccountId,
+                dto.Targets,
+                cancellationToken);
 
             var rule = new AllocationRule
             {
@@ -156,6 +157,12 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
             if (rule == null)
                 throw new ArgumentException($"Allocation rule with ID '{id}' not found.");
+
+            await ValidateAllocationReferencesAsync(
+                dto.SourceAccountId,
+                dto.DriverUnitAccountId,
+                dto.Targets,
+                cancellationToken);
 
             rule.Name = dto.Name;
             rule.Description = dto.Description;
@@ -275,6 +282,12 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (!rule.IsActive)
                 throw new InvalidOperationException("Cannot run an inactive allocation rule.");
 
+            var fiscalPeriodExists = await _unitOfWork.Repository<FiscalPeriod>()
+                .GetQueryable(p => p.TenantId == TenantId && p.Id == dto.FiscalPeriodId && !p.IsDeleted)
+                .AnyAsync(cancellationToken);
+            if (!fiscalPeriodExists)
+                throw new ArgumentException($"Fiscal period with ID '{dto.FiscalPeriodId}' not found.");
+
             // Get source account balance (simplified - would need to get actual balance)
             var sourceBalance = rule.SourceAccount?.Balance ?? 0;
             
@@ -282,7 +295,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             var lines = new List<AllocationLineResultDto>();
             decimal totalAllocated = 0;
 
-            var activeTargets = rule.Targets.Where(t => !t.IsDeleted).ToList();
+            var activeTargets = rule.Targets.Where(t => t.TenantId == TenantId && !t.IsDeleted).ToList();
 
             switch (rule.AllocationType)
             {
@@ -406,6 +419,49 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                     t.CostCenterCode
                 )).ToList()
             );
+        }
+
+        private async Task ValidateAllocationReferencesAsync(
+            Guid sourceAccountId,
+            Guid? driverUnitAccountId,
+            IReadOnlyCollection<CreateAllocationTargetDto> targets,
+            CancellationToken cancellationToken)
+        {
+            var sourceAccountExists = await _unitOfWork.Repository<Account>()
+                .GetQueryable(a => a.TenantId == TenantId && a.Id == sourceAccountId && !a.IsDeleted)
+                .AnyAsync(cancellationToken);
+            if (!sourceAccountExists)
+                throw new ArgumentException($"Source account with ID '{sourceAccountId}' not found.");
+
+            if (driverUnitAccountId.HasValue)
+            {
+                var driverExists = await _unitOfWork.Repository<UnitAccount>()
+                    .GetQueryable(a => a.TenantId == TenantId && a.Id == driverUnitAccountId.Value && !a.IsDeleted)
+                    .AnyAsync(cancellationToken);
+                if (!driverExists)
+                    throw new ArgumentException($"Driver unit account with ID '{driverUnitAccountId.Value}' not found.");
+            }
+
+            var targetAccountIds = targets.Select(t => t.TargetAccountId).Distinct().ToList();
+            var validTargetAccountCount = await _unitOfWork.Repository<Account>()
+                .GetQueryable(a => a.TenantId == TenantId && targetAccountIds.Contains(a.Id) && !a.IsDeleted)
+                .CountAsync(cancellationToken);
+            if (validTargetAccountCount != targetAccountIds.Count)
+                throw new ArgumentException("One or more target accounts were not found for the current tenant.");
+
+            var targetDriverIds = targets
+                .Where(t => t.TargetDriverUnitAccountId.HasValue)
+                .Select(t => t.TargetDriverUnitAccountId!.Value)
+                .Distinct()
+                .ToList();
+            if (targetDriverIds.Count == 0)
+                return;
+
+            var validTargetDriverCount = await _unitOfWork.Repository<UnitAccount>()
+                .GetQueryable(a => a.TenantId == TenantId && targetDriverIds.Contains(a.Id) && !a.IsDeleted)
+                .CountAsync(cancellationToken);
+            if (validTargetDriverCount != targetDriverIds.Count)
+                throw new ArgumentException("One or more target driver unit accounts were not found for the current tenant.");
         }
     }
 }

@@ -254,6 +254,62 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Retrieves the target account distribution for an allocation rule.
+        /// </summary>
+        /// <response code="200">Returns the rule's allocation targets</response>
+        /// <response code="404">No allocation rule found with the specified ID</response>
+        [HttpGet("rules/{id}/targets")]
+        public async Task<ActionResult<IReadOnlyList<AllocationTargetDto>>> GetRuleTargets(Guid id)
+        {
+            var rule = await _allocationService.GetRuleByIdAsync(id);
+            if (rule == null)
+                return NotFound(new { error = $"Allocation rule with ID '{id}' not found" });
+            return Ok(rule.Targets);
+        }
+
+        /// <summary>
+        /// Replaces the target account distribution of an allocation rule.
+        /// </summary>
+        /// <remarks>
+        /// Targets are part of the rule contract, so this composes the existing rule update
+        /// (and its percentage/driver validation) with the submitted target list only.
+        /// </remarks>
+        /// <response code="200">Returns the updated allocation targets</response>
+        /// <response code="400">Invalid targets - percentages or account references failed validation</response>
+        /// <response code="404">No allocation rule found with the specified ID</response>
+        [HttpPut("rules/{id}/targets")]
+        public async Task<ActionResult<IReadOnlyList<AllocationTargetDto>>> UpdateRuleTargets(
+            Guid id,
+            [FromBody] List<CreateAllocationTargetDto> targets)
+        {
+            var rule = await _allocationService.GetRuleByIdAsync(id);
+            if (rule == null)
+                return NotFound(new { error = $"Allocation rule with ID '{id}' not found" });
+
+            try
+            {
+                var updated = await _allocationService.UpdateRuleAsync(id, new UpdateAllocationRuleDto(
+                    rule.Name,
+                    rule.Description,
+                    rule.SourceAccountId,
+                    rule.AllocationType,
+                    rule.DriverUnitAccountId,
+                    rule.IsActive,
+                    rule.AutoReverse,
+                    targets));
+                return Ok(updated.Targets);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Permanently deletes an allocation rule from the system.
         /// </summary>
         /// <remarks>

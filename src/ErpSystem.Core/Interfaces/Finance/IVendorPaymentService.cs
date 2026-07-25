@@ -33,6 +33,11 @@ public interface IVendorPaymentService
     /// </summary>
     Task<VendorPaymentDto> CreateAsync(VendorPaymentCreateDto dto, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Posts an approved or processed vendor payment to the General Ledger through the central finance posting engine.
+    /// </summary>
+    Task<VendorPaymentDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
+
     // ── Allocations ─────────────────────────────────────────────────────
 
     /// <summary>

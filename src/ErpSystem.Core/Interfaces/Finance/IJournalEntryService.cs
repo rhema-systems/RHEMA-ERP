@@ -62,12 +62,17 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// Reverses a posted journal entry.
         /// Creates a reversing entry with opposite debits/credits.
         /// </summary>
-        Task<JournalEntryDto> ReverseJournalEntryAsync(Guid id, string reason, CancellationToken cancellationToken = default);
+        Task<JournalEntryDto> ReverseJournalEntryAsync(Guid id, string reason, DateTime? reversalDate = null, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Validates if a journal entry is balanced (debits = credits).
         /// </summary>
         Task<bool> ValidateBalanceAsync(Guid id, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Validates a draft journal entry before it is submitted into the approval workflow.
+        /// </summary>
+        Task ValidateJournalEntryReadyForSubmissionAsync(Guid id, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Generates the next available journal entry number (JE-YYYY-XXXX).
@@ -85,5 +90,10 @@ namespace ErpSystem.Core.Interfaces.Finance
             Guid? approvedByUserId = null,
             string? rejectionReason = null,
             CancellationToken cancellationToken = default);
+
+        Task LinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default);
+        Task UnlinkAttachmentAsync(Guid journalEntryId, Guid fileUploadRecordId, CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<Guid>> GetAttachmentIdsAsync(Guid journalEntryId, CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<JournalEntryAttachmentDto>> GetAttachmentsAsync(Guid journalEntryId, CancellationToken cancellationToken = default);
     }
 }

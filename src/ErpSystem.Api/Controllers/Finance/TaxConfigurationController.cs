@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -20,6 +21,8 @@ namespace ErpSystem.Api.Controllers.Finance
     [Authorize]
     public class TaxConfigurationController : ControllerBase
     {
+        private const string TaxSetupPolicy = FinancePermissions.ConfigureTaxPolicy;
+
         private readonly ITaxConfigurationService _taxConfigService;
         private readonly ITaxCalculationEngine _taxCalculationEngine;
 
@@ -193,17 +196,17 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - Category defaults to Standard if not specified
         /// - Rate changes are tracked in the tax rate history
         ///
-        /// **Authorization:** Requires SuperAdmin or TenantAdmin role
+        /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
         /// <param name="dto">The tax data to create, including code, name, rate, applicability, category, and optional GL account links.</param>
         /// <returns>The created tax.</returns>
         /// <response code="201">Tax created successfully.</response>
         /// <response code="400">Invalid request data (e.g., duplicate code, invalid rate).</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
-        /// <response code="403">Forbidden - user does not have SuperAdmin or TenantAdmin role.</response>
+        /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("taxes")]
-        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxDto>> CreateTax([FromBody] CreateTaxDto dto)
         {
             try
@@ -238,7 +241,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - Deactivating a tax does not remove it from existing transactions
         /// - Threshold changes take effect immediately for new transactions
         ///
-        /// **Authorization:** Requires SuperAdmin or TenantAdmin role
+        /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
         /// <param name="id">The unique identifier (GUID) of the tax to update.</param>
         /// <param name="dto">The updated tax data. Only non-null fields will be applied.</param>
@@ -246,10 +249,10 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="200">Tax updated successfully.</response>
         /// <response code="400">Invalid request data or business rule violation.</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
-        /// <response code="403">Forbidden - user does not have SuperAdmin or TenantAdmin role.</response>
+        /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPut("taxes/{id}")]
-        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxDto>> UpdateTax(Guid id, [FromBody] UpdateTaxDto dto)
         {
             try
@@ -281,17 +284,17 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - Cannot delete a tax that has been used in posted transactions
         /// - Consider deactivating (`IsActive = false`) instead of deleting for audit trail preservation
         ///
-        /// **Authorization:** Requires SuperAdmin or TenantAdmin role
+        /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
         /// <param name="id">The unique identifier (GUID) of the tax to delete.</param>
         /// <returns>A success message confirming deletion.</returns>
         /// <response code="200">Tax deleted successfully.</response>
         /// <response code="400">Tax cannot be deleted (e.g., in use by tax groups or transactions).</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
-        /// <response code="403">Forbidden - user does not have SuperAdmin or TenantAdmin role.</response>
+        /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpDelete("taxes/{id}")]
-        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<IActionResult> DeleteTax(Guid id)
         {
             try
@@ -489,7 +492,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// </summary>
         /// <remarks>
         /// **Common Use Cases:**
-        /// - Setting up a new tax combination (e.g., Ghana standard sales taxes: NHIL + GETFL + COVID + VAT)
+        /// - Setting up a new tax combination (e.g., Ghana standard sales taxes: NHIL + GETFL + VAT)
         /// - Creating separate tax groups for different transaction types (Sales vs Purchases)
         /// - Defining compound tax calculation sequences with specific ordering
         ///
@@ -504,17 +507,17 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - Components define the calculation order and compound basis for each tax
         /// - CompoundBasis determines how each component tax is calculated (BaseOnly, Cumulative, or Specific)
         ///
-        /// **Authorization:** Requires SuperAdmin or TenantAdmin role
+        /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
         /// <param name="dto">The tax group data to create, including code, name, applicability, default flag, and optional initial components.</param>
         /// <returns>The created tax group with its components.</returns>
         /// <response code="201">Tax group created successfully.</response>
         /// <response code="400">Invalid request data (e.g., duplicate code, invalid component references).</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
-        /// <response code="403">Forbidden - user does not have SuperAdmin or TenantAdmin role.</response>
+        /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("groups")]
-        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxGroupDto>> CreateTaxGroup([FromBody] CreateTaxGroupDto dto)
         {
             try
@@ -548,7 +551,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - Deactivating a tax group does not affect existing transactions that reference it
         /// - Only metadata is updated through this endpoint; use component endpoints for tax composition changes
         ///
-        /// **Authorization:** Requires SuperAdmin or TenantAdmin role
+        /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
         /// <param name="id">The unique identifier (GUID) of the tax group to update.</param>
         /// <param name="dto">The updated tax group data. Only non-null fields will be applied.</param>
@@ -556,10 +559,10 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="200">Tax group updated successfully.</response>
         /// <response code="400">Invalid request data or business rule violation.</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
-        /// <response code="403">Forbidden - user does not have SuperAdmin or TenantAdmin role.</response>
+        /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPut("groups/{id}")]
-        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxGroupDto>> UpdateTaxGroup(Guid id, [FromBody] UpdateTaxGroupDto dto)
         {
             try
@@ -592,17 +595,17 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - Consider deactivating (`IsActive = false`) instead of deleting for audit trail preservation
         /// - Deleting a group also removes its component associations
         ///
-        /// **Authorization:** Requires SuperAdmin or TenantAdmin role
+        /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
         /// <param name="id">The unique identifier (GUID) of the tax group to delete.</param>
         /// <returns>A success message confirming deletion.</returns>
         /// <response code="200">Tax group deleted successfully.</response>
         /// <response code="400">Tax group cannot be deleted (e.g., in use by transactions or is the default group).</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
-        /// <response code="403">Forbidden - user does not have SuperAdmin or TenantAdmin role.</response>
+        /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpDelete("groups/{id}")]
-        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<IActionResult> DeleteTaxGroup(Guid id)
         {
             try
@@ -641,7 +644,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - CompoundBasis options: BaseOnly (tax on base amount), Cumulative (tax on base + all prior taxes), Specific (tax on base + specified prior taxes)
         /// - When CompoundBasis is Specific, provide `AppliesOnTaxCodes` to list which prior tax codes to compound on
         ///
-        /// **Authorization:** Requires SuperAdmin or TenantAdmin role
+        /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
         /// <param name="groupId">The unique identifier (GUID) of the tax group to add the component to.</param>
         /// <param name="dto">The component data including the tax ID, calculation order, compound basis, and optional compounding tax codes.</param>
@@ -649,10 +652,10 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="200">Component added successfully.</response>
         /// <response code="400">Invalid request data (e.g., duplicate tax in group, invalid tax ID, invalid compound configuration).</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
-        /// <response code="403">Forbidden - user does not have SuperAdmin or TenantAdmin role.</response>
+        /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("groups/{groupId}/components")]
-        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxGroupComponentDto>> AddComponentToGroup(Guid groupId, [FromBody] AddTaxGroupComponentDto dto)
         {
             try
@@ -686,7 +689,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - Calculation order changes may affect the tax amounts for compound taxes
         /// - Changes take effect for new transactions only; existing transactions are not recalculated
         ///
-        /// **Authorization:** Requires SuperAdmin or TenantAdmin role
+        /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
         /// <param name="componentId">The unique identifier (GUID) of the component to update.</param>
         /// <param name="dto">The updated component data. Only non-null fields will be applied.</param>
@@ -694,10 +697,10 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="200">Component updated successfully.</response>
         /// <response code="400">Invalid request data or business rule violation.</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
-        /// <response code="403">Forbidden - user does not have SuperAdmin or TenantAdmin role.</response>
+        /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPut("groups/components/{componentId}")]
-        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<ActionResult<TaxGroupComponentDto>> UpdateComponent(Guid componentId, [FromBody] UpdateTaxGroupComponentDto dto)
         {
             try
@@ -730,17 +733,17 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - If other components in the group have a Specific compound basis referencing the removed tax code, those references should be reviewed
         /// - Changes take effect for new transactions only; existing transactions are not recalculated
         ///
-        /// **Authorization:** Requires SuperAdmin or TenantAdmin role
+        /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
         /// <param name="componentId">The unique identifier (GUID) of the component to remove.</param>
         /// <returns>A success message confirming removal.</returns>
         /// <response code="200">Component removed successfully.</response>
         /// <response code="400">Component cannot be removed.</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
-        /// <response code="403">Forbidden - user does not have SuperAdmin or TenantAdmin role.</response>
+        /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpDelete("groups/components/{componentId}")]
-        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<IActionResult> RemoveComponentFromGroup(Guid componentId)
         {
             try
@@ -772,10 +775,10 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - All component IDs in the request must belong to the specified tax group
         /// - The list must contain exactly the same set of component IDs as the group currently has
         /// - Reordering affects compound tax calculations: taxes with Cumulative or Specific compound basis depend on the order
-        /// - Example order for Ghana: NHIL (1) -> GETFL (2) -> COVID (3) -> VAT (4, Cumulative on prior three)
+        /// - Example order for Ghana: NHIL (1) -> GETFL (2) -> VAT (3)
         /// - Changes take effect for new transactions only
         ///
-        /// **Authorization:** Requires SuperAdmin or TenantAdmin role
+        /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
         /// <param name="groupId">The unique identifier (GUID) of the tax group whose components should be reordered.</param>
         /// <param name="orderedComponentIds">List of component IDs in the desired calculation order. Must include all components of the group.</param>
@@ -783,10 +786,10 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="200">Components reordered successfully.</response>
         /// <response code="400">Invalid reorder request (e.g., missing component IDs, IDs not belonging to the group).</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
-        /// <response code="403">Forbidden - user does not have SuperAdmin or TenantAdmin role.</response>
+        /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("groups/{groupId}/reorder")]
-        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<IActionResult> ReorderComponents(Guid groupId, [FromBody] List<Guid> orderedComponentIds)
         {
             try
@@ -956,7 +959,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// **Common Use Cases:**
         /// - Initializing the system with Ghana-specific tax rates during first-time setup
         /// - Resetting tax configurations to Ghana defaults after testing
-        /// - Bootstrapping a new tenant with standard Ghana taxes (VAT, NHIL, GETFL, COVID Levy, WHT)
+        /// - Bootstrapping a new tenant with standard Ghana taxes (VAT, NHIL, GETFL, WHT)
         ///
         /// **Integration Pattern:**
         /// - This is a one-time setup operation, typically called during system provisioning
@@ -964,22 +967,22 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - Seeded taxes include standard rates, levies, and withholding taxes as per Ghana Revenue Authority regulations
         ///
         /// **Business Rules:**
-        /// - Creates standard Ghana taxes: VAT (15%), NHIL (2.5%), GETFL (1%), COVID Levy (1%)
+        /// - Creates standard Ghana taxes: VAT (15%), NHIL (2.5%), GETFL (2.5%), and WHT
         /// - Creates withholding tax configurations for various transaction types
         /// - Sets up default tax groups with proper calculation order and compound basis
         /// - Skips creation of taxes or groups that already exist (idempotent for existing codes)
         /// - Links taxes to appropriate GL accounts if chart of accounts is configured
         ///
-        /// **Authorization:** Requires SystemAdmin role
+        /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
         /// <returns>A success message confirming the seeding operation.</returns>
         /// <response code="200">Ghana taxes seeded successfully.</response>
         /// <response code="400">Seeding failed (e.g., prerequisite configurations missing).</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
-        /// <response code="403">Forbidden - user does not have SystemAdmin role.</response>
+        /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
         [HttpPost("seed/ghana")]
-        [Authorize(Roles = "SystemAdmin")]
+        [Authorize(Policy = TaxSetupPolicy)]
         public async Task<IActionResult> SeedGhanaTaxes()
         {
             try

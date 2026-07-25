@@ -23,6 +23,20 @@ public enum CashTransactionType
 }
 
 /// <summary>
+/// Workflow approval status for cash/bank transactions.
+/// </summary>
+public enum CashTransactionApprovalStatus
+{
+    Captured = 1,
+    Submitted = 2,
+    Approved = 3,
+    Rejected = 4,
+    Returned = 5,
+    Cancelled = 6,
+    Posted = 7
+}
+
+/// <summary>
 /// Status of bank reconciliation
 /// </summary>
 public enum ReconciliationStatus
@@ -31,7 +45,22 @@ public enum ReconciliationStatus
     InProgress = 2,
     Completed = 3,
     Approved = 4,
-    Rejected = 5
+    Rejected = 5,
+    Cancelled = 6
+}
+
+/// <summary>
+/// Supported reconciliation adjustment types.
+/// </summary>
+public enum ReconciliationAdjustmentType
+{
+    BankCharge = 1,
+    BankFee = 2,
+    InterestIncome = 3,
+    AdjustmentReceipt = 4,
+    AdjustmentPayment = 5,
+    CorrectionReceipt = 6,
+    CorrectionPayment = 7
 }
 
 /// <summary>

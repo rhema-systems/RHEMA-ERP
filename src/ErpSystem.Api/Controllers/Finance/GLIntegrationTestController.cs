@@ -67,13 +67,19 @@ public class GLIntegrationTestController : ControllerBase
                 SupplierCode = "SUP-TEST-01",
                 TenantId = tenant.Id
             };
-            var customer = new Customer 
+            var customer = new BusinessPartner
             { 
                 Id = Guid.NewGuid(),
-                CustomerName = "Test AR Customer", 
-                CustomerCode = "CUS-TEST-01",
+                PartnerName = "Test AR Customer",
+                PartnerCode = "CUS-TEST-01",
+                CustomerAccountNumber = "CUS-TEST-01",
+                PartnerType = "Customer",
+                CustomerType = "Corporate",
+                RegistrationStatus = "Approved",
+                ApprovalStatus = "Approved",
+                IsActive = true,
                 TenantId = tenant.Id,
-                CurrencyCode = baseCurrencyCode
+                Currency = baseCurrencyCode
             };
             
             var warehouse = await _context.Warehouses.FirstOrDefaultAsync(w => w.TenantId == tenant.Id && w.IsActive, cancellationToken);
@@ -105,7 +111,7 @@ public class GLIntegrationTestController : ControllerBase
             };
 
             await _context.Suppliers.AddAsync(supplier, cancellationToken);
-            await _context.Customers.AddAsync(customer, cancellationToken);
+            await _context.BusinessPartners.AddAsync(customer, cancellationToken);
             await _context.InventoryCategories.AddAsync(category, cancellationToken);
             await _context.InventoryItems.AddAsync(inventoryItem, cancellationToken);
             await _context.SaveChangesAsync(cancellationToken);

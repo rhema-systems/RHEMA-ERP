@@ -34,6 +34,11 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// </summary>
         Task DeleteFiscalYearAsync(Guid id, CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// Updates safe fiscal-year metadata (name/notes). Close state and dates are excluded.
+        /// </summary>
+        Task<FiscalYearDto> UpdateFiscalYearAsync(Guid id, UpdateFiscalYearDto dto, CancellationToken cancellationToken = default);
+
         // Fiscal Period Operations
         
         /// <summary>
@@ -41,6 +46,7 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// </summary>
         Task<IReadOnlyList<FiscalPeriodDto>> GetFiscalPeriodsAsync(
             Guid? fiscalYearId = null,
+            string? status = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -91,7 +97,12 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// <summary>
         /// Unlocks a period for a specific module.
         /// </summary>
-        Task<FiscalPeriodDto> UnlockPeriodForModuleAsync(Guid periodId, string moduleCode, string reason, CancellationToken cancellationToken = default);
+        Task<FiscalPeriodDto> UnlockPeriodForModuleAsync(
+            Guid periodId,
+            string moduleCode,
+            string reason,
+            DateTime reopenUntilUtc,
+            CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Checks if a period is locked for a specific module (checks both global and module lock).

@@ -1,5 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -19,10 +21,17 @@ namespace ErpSystem.Api.Controllers.Finance
     public class FiscalPeriodController : ControllerBase
     {
         private readonly IFiscalPeriodService _fiscalPeriodService;
+        private readonly IGeneralLedgerService _generalLedgerService;
+        private readonly IFinanceSettingsService _financeSettingsService;
 
-        public FiscalPeriodController(IFiscalPeriodService fiscalPeriodService)
+        public FiscalPeriodController(
+            IFiscalPeriodService fiscalPeriodService,
+            IGeneralLedgerService generalLedgerService,
+            IFinanceSettingsService financeSettingsService)
         {
             _fiscalPeriodService = fiscalPeriodService;
+            _generalLedgerService = generalLedgerService;
+            _financeSettingsService = financeSettingsService;
         }
 
         #region Fiscal Years
@@ -118,6 +127,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="400">Invalid data or overlapping dates</response>
         /// <response code="500">Internal server error</response>
         [HttpPost("fiscal-years")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<ActionResult<FiscalYearDto>> CreateFiscalYear([FromBody] CreateFiscalYearDto dto)
         {
             if (!ModelState.IsValid)
@@ -155,12 +165,119 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Fiscal year not found</response>
         /// <response code="500">Internal server error</response>
         [HttpDelete("fiscal-years/{id}")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<IActionResult> DeleteFiscalYear(Guid id)
         {
             try
             {
                 await _fiscalPeriodService.DeleteFiscalYearAsync(id);
                 return Ok(new { message = "Fiscal year deleted successfully" });
+            }
+            catch (ArgumentException ex) { return NotFound(ex.Message); }
+            catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+            catch (Exception ex) { return StatusCode(500, $"Internal server error: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Updates safe fiscal-year metadata (name/notes).
+        /// </summary>
+        /// <remarks>
+        /// Dates, period structure, and close state are intentionally excluded; those change
+        /// through dedicated create/close/reopen operations.
+        ///
+        /// **Authorization:** Requires Finance administration permission.
+        /// </remarks>
+        [HttpPut("fiscal-years/{id}")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
+        public async Task<ActionResult<FiscalYearDto>> UpdateFiscalYear(Guid id, [FromBody] UpdateFiscalYearDto dto)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                var year = await _fiscalPeriodService.UpdateFiscalYearAsync(id, dto);
+                return Ok(year);
+            }
+            catch (ArgumentException ex) { return NotFound(ex.Message); }
+            catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+            catch (Exception ex) { return StatusCode(500, $"Internal server error: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Performs the fiscal year-end close: zeroes revenue/expense accounts into retained
+        /// earnings and marks the year closed.
+        /// </summary>
+        /// <remarks>
+        /// **Business Rules:**
+        /// - All fiscal periods in the year must already be closed.
+        /// - The closing journal posts through the finance posting engine (posting event,
+        ///   idempotent re-run, account balance snapshots).
+        /// - The retained earnings account defaults from Finance Settings when not supplied.
+        ///
+        /// **Authorization:** Requires the close-accounting-periods permission.
+        /// </remarks>
+        /// <response code="200">Fiscal year closed; returns the close result.</response>
+        /// <response code="400">Open periods remain, or no retained earnings account is configured.</response>
+        /// <response code="404">Fiscal year not found.</response>
+        [HttpPost("fiscal-years/{id}/close")]
+        [Authorize(Policy = FinancePermissions.CloseAccountingPeriods)]
+        public async Task<ActionResult<PeriodCloseResultDto>> CloseFiscalYear(Guid id, [FromBody] CloseFiscalYearRequestDto? dto = null)
+        {
+            try
+            {
+                var retainedEarningsAccountId = dto?.RetainedEarningsAccountId;
+                if (retainedEarningsAccountId == null || retainedEarningsAccountId == Guid.Empty)
+                {
+                    var settings = await _financeSettingsService.GetSettingsAsync();
+                    retainedEarningsAccountId = settings.RetainedEarningsAccountId;
+                }
+
+                if (retainedEarningsAccountId == null || retainedEarningsAccountId == Guid.Empty)
+                {
+                    return BadRequest(new PeriodCloseResultDto
+                    {
+                        Success = false,
+                        Message = "No retained earnings account was supplied and none is configured in Finance Settings.",
+                        Errors = new List<string> { "Configure a retained earnings account in Finance Settings or pass retainedEarningsAccountId." }
+                    });
+                }
+
+                var result = await _generalLedgerService.CloseFiscalYearAsync(new YearEndCloseRequestDto
+                {
+                    FiscalYearId = id,
+                    RetainedEarningsAccountId = retainedEarningsAccountId.Value,
+                    ClosingNotes = dto?.ClosingNotes
+                });
+
+                return result.Success ? Ok(result) : BadRequest(result);
+            }
+            catch (ArgumentException ex) { return NotFound(ex.Message); }
+            catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+            catch (Exception ex) { return StatusCode(500, $"Internal server error: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Reopens a closed fiscal year by reversing its year-end closing entry.
+        /// </summary>
+        /// <remarks>
+        /// **Business Rules:**
+        /// - A reason is mandatory and is appended to the year's closing notes for audit.
+        /// - The closing journal is reversed through the finance posting engine.
+        ///
+        /// **Authorization:** Requires the reopen-accounting-periods permission.
+        /// </remarks>
+        [HttpPost("fiscal-years/{id}/reopen")]
+        [Authorize(Policy = FinancePermissions.ReopenAccountingPeriods)]
+        public async Task<ActionResult<PeriodCloseResultDto>> ReopenFiscalYear(Guid id, [FromBody] FiscalYearReopenRequestDto dto)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                var result = await _generalLedgerService.ReopenFiscalYearAsync(id, dto.Reason);
+                return result.Success ? Ok(result) : BadRequest(result);
             }
             catch (ArgumentException ex) { return NotFound(ex.Message); }
             catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
@@ -220,11 +337,14 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="200">Returns the list of fiscal periods</response>
         /// <response code="500">Internal server error</response>
         [HttpGet("fiscal-periods")]
-        public async Task<ActionResult<List<FiscalPeriodDto>>> GetFiscalPeriods([FromQuery] Guid? yearId = null)
+        public async Task<ActionResult<List<FiscalPeriodDto>>> GetFiscalPeriods(
+            [FromQuery] Guid? yearId = null,
+            [FromQuery] Guid? fiscalYearId = null,
+            [FromQuery] string? status = null)
         {
             try
             {
-                var periods = await _fiscalPeriodService.GetFiscalPeriodsAsync(yearId);
+                var periods = await _fiscalPeriodService.GetFiscalPeriodsAsync(yearId ?? fiscalYearId, status);
                 return Ok(periods);
             }
             catch (Exception ex)
@@ -296,15 +416,23 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Fiscal period not found</response>
         /// <response code="500">Internal server error</response>
         [HttpPost("periods/{id}/close")]
+        [Authorize(Policy = FinancePermissions.CloseAccountingPeriods)]
         public async Task<ActionResult> ClosePeriod(Guid id, [FromBody] PeriodCloseRequestDto dto)
         {
+            if (dto == null)
+                return BadRequest("Period close request is required.");
+
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
             try
             {
+                dto.FiscalPeriodId = id;
                 var result = await _fiscalPeriodService.ClosePeriodAsync(dto);
-                return Ok(new { message = "Period closed successfully" });
+                if (!result.Success)
+                    return BadRequest(result);
+
+                return Ok(result);
             }
             catch (ArgumentException ex)
             {
@@ -345,13 +473,20 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Fiscal period not found</response>
         /// <response code="500">Internal server error</response>
         [HttpPost("periods/{id}/reopen")]
-        public async Task<ActionResult> ReopenPeriod(Guid id)
+        [Authorize(Policy = FinancePermissions.ReopenAccountingPeriods)]
+        public async Task<ActionResult> ReopenPeriod(Guid id, [FromBody] PeriodReopenRequestDto dto)
         {
+            if (dto == null)
+                return BadRequest("Period reopen request is required.");
+
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
             try
             {
-                var request = new PeriodReopenRequestDto { FiscalPeriodId = id, Reason = "Manual reopen request" };
-                var result = await _fiscalPeriodService.ReopenPeriodAsync(request);
-                return Ok(new { message = "Period reopened successfully" });
+                dto.FiscalPeriodId = id;
+                var result = await _fiscalPeriodService.ReopenPeriodAsync(dto);
+                return Ok(result);
             }
             catch (ArgumentException ex)
             {
@@ -387,12 +522,19 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Fiscal period not found</response>
         /// <response code="500">Internal server error</response>
         [HttpPost("periods/{id}/unlock")]
-        public async Task<ActionResult> UnlockPeriod(Guid id)
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
+        public async Task<ActionResult> UnlockPeriod(Guid id, [FromBody] PeriodUnlockRequestDto dto)
         {
+            if (dto == null)
+                return BadRequest("Period unlock request is required.");
+
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
             try
             {
-                var result = await _fiscalPeriodService.UnlockPeriodAsync(id, "Manual unlock request");
-                return Ok(new { message = "Period unlocked successfully" });
+                var result = await _fiscalPeriodService.UnlockPeriodAsync(id, dto.Reason);
+                return Ok(result);
             }
             catch (ArgumentException ex)
             {
@@ -412,11 +554,11 @@ namespace ErpSystem.Api.Controllers.Finance
         #region Module Locking
 
         /// <summary>
-        /// Retrieves all defined system modules available for locking.
+        /// Retrieves the tenant's enabled top-level modules that post to Finance.
         /// </summary>
         /// <remarks>
-        /// Returns a list of module definitions that can be locked for specific fiscal periods.
-        /// This allows granular control over which modules can post to which periods.
+        /// Finance is always returned. Other modules appear only when enabled for the tenant
+        /// and included in the Finance module-lock catalog.
         ///
         /// **Authorization:** Requires Finance.Read permission
         /// </remarks>
@@ -445,11 +587,11 @@ namespace ErpSystem.Api.Controllers.Finance
         /// while allowing other modules to continue posting.
         ///
         /// **Business Rules:**
-        /// - Module must be a valid system module
-        /// - Period must exist and not be fully locked
+        /// - Module must be enabled for the tenant and integrated with Finance
+        /// - Period must be open and not globally locked
         /// - Audit trail is logged
         ///
-        /// **Authorization:** Requires Finance.Admin permission
+        /// **Authorization:** Requires Finance.PeriodClose permission
         /// </remarks>
         /// <param name="id">Fiscal period ID</param>
         /// <param name="dto">Module lock request with module code and reason</param>
@@ -459,13 +601,17 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">Fiscal period not found</response>
         /// <response code="500">Internal server error</response>
         [HttpPost("periods/{id}/lock-module")]
+        [Authorize(Policy = FinancePermissions.CloseAccountingPeriods)]
         public async Task<ActionResult> LockPeriodForModule(Guid id, [FromBody] ModuleLockRequestDto dto)
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
             try
             {
+                if (string.IsNullOrWhiteSpace(dto.Reason))
+                    return BadRequest("A reason is required to lock a module.");
+
                 var result = await _fiscalPeriodService.LockPeriodForModuleAsync(id, dto.ModuleCode, dto.Reason);
-                return Ok(new { message = $"Module {dto.ModuleCode} locked successfully", id = result });
+                return Ok(new { message = $"Module {dto.ModuleCode} locked successfully", period = result });
             }
             catch (ArgumentException ex) { return NotFound(ex.Message); }
             catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
@@ -473,33 +619,49 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
-        /// Unlocks a specific module for the given fiscal period.
+        /// Temporarily reopens a specific module for the given fiscal period.
         /// </summary>
         /// <remarks>
-        /// Allows a previously locked module to resume posting transactions to the given period.
+        /// Allows final Finance postings originating from one module until the required expiry.
+        /// Drafting, editing, viewing, and approval remain available while a module is locked.
         ///
         /// **Business Rules:**
-        /// - Module must be currently locked for this period
-        /// - Period must not be fully locked
+        /// - Module must be enabled for the tenant and integrated with Finance
+        /// - A reason and an expiry no more than 24 hours away are required
+        /// - Reopening inside a global lock converts the period to a partial lock
         /// - Audit trail is logged
         ///
-        /// **Authorization:** Requires Finance.Admin permission
+        /// **Authorization:** Requires Finance.PeriodReopen permission
         /// </remarks>
         /// <param name="id">Fiscal period ID</param>
-        /// <param name="dto">Module unlock request with module code and reason</param>
+        /// <param name="dto">Module reopening request with module code, reason, and expiry</param>
         /// <returns>Success message</returns>
-        /// <response code="200">Module unlocked successfully</response>
-        /// <response code="400">Module not locked or business rule violation</response>
+        /// <response code="200">Module temporarily reopened successfully</response>
+        /// <response code="400">Module is not locked or a business rule was violated</response>
         /// <response code="404">Fiscal period not found</response>
         /// <response code="500">Internal server error</response>
         [HttpPost("periods/{id}/unlock-module")]
+        [Authorize(Policy = FinancePermissions.ReopenAccountingPeriods)]
         public async Task<ActionResult> UnlockPeriodForModule(Guid id, [FromBody] ModuleLockRequestDto dto)
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
             try
             {
-                var result = await _fiscalPeriodService.UnlockPeriodForModuleAsync(id, dto.ModuleCode, dto.Reason);
-                return Ok(new { message = $"Module {dto.ModuleCode} unlocked successfully" });
+                if (string.IsNullOrWhiteSpace(dto.Reason))
+                    return BadRequest("A reason is required to reopen a module.");
+                if (!dto.ReopenUntilUtc.HasValue)
+                    return BadRequest("An automatic reopening expiry is required.");
+
+                var result = await _fiscalPeriodService.UnlockPeriodForModuleAsync(
+                    id,
+                    dto.ModuleCode,
+                    dto.Reason,
+                    dto.ReopenUntilUtc.Value);
+                return Ok(new
+                {
+                    message = $"Module {dto.ModuleCode} reopened until {dto.ReopenUntilUtc.Value:u}",
+                    period = result
+                });
             }
             catch (ArgumentException ex) { return NotFound(ex.Message); }
             catch (InvalidOperationException ex) { return BadRequest(ex.Message); }

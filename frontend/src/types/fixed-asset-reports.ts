@@ -6,6 +6,7 @@ export interface FixedAssetReportQuery {
     categoryId?: string;
     status?: FixedAssetStatus;
     searchTerm?: string;
+    bookClassification?: string;
 }
 
 export interface FixedAssetRegisterItem {
@@ -16,6 +17,7 @@ export interface FixedAssetRegisterItem {
     cost: number;
     accumulatedDepreciation: number;
     netBookValue: number;
+    bookClassification: string;
     status: FixedAssetStatus;
     serialNumber?: string;
     location?: string;

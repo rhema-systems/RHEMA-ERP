@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Building2, Edit, Filter, Loader2, Plus } from 'lucide-react';
+import { Building2, Edit, Filter, Loader2, Plus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -40,7 +40,8 @@ export default function FixedAssetRegisterPage() {
       const matchesSearch =
         searchTerm === '' ||
         asset.assetCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        asset.name.toLowerCase().includes(searchTerm.toLowerCase());
+        asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (asset.location || '').toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesStatus = statusFilter === 'all' || asset.status === statusFilter;
 
@@ -64,6 +65,7 @@ export default function FixedAssetRegisterPage() {
       HeldForSale: 'secondary',
       WrittenOff: 'destructive',
       UnderConstruction: 'outline',
+      OnHold: 'secondary',
     };
     return <Badge variant={variants[status] || 'default'}>{status}</Badge>;
   };
@@ -92,6 +94,12 @@ export default function FixedAssetRegisterPage() {
           </Link>
           <Link href="/finance/fixed-assets/depreciation">
             <Button variant="outline">Run Depreciation</Button>
+          </Link>
+          <Link href="/finance/fixed-assets/import">
+            <Button variant="outline">
+              <Upload className="mr-2 h-4 w-4" />
+              Import
+            </Button>
           </Link>
           <Link href="/finance/fixed-assets/register/new">
             <Button>
@@ -153,6 +161,7 @@ export default function FixedAssetRegisterPage() {
                 <SelectItem value="HeldForSale">Held For Sale</SelectItem>
                 <SelectItem value="WrittenOff">Written Off</SelectItem>
                 <SelectItem value="UnderConstruction">Under Construction</SelectItem>
+                <SelectItem value="OnHold">On Hold</SelectItem>
               </SelectContent>
             </Select>
           </CardContent>
@@ -170,6 +179,7 @@ export default function FixedAssetRegisterPage() {
                 <TableHead>Code</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Category</TableHead>
+                <TableHead>Location</TableHead>
                 <TableHead>Purchase Date</TableHead>
                 <TableHead className="text-right">Net Book Value</TableHead>
                 <TableHead>Status</TableHead>
@@ -179,7 +189,7 @@ export default function FixedAssetRegisterPage() {
             <TableBody>
               {filteredAssets.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                     No fixed assets found.
                   </TableCell>
                 </TableRow>
@@ -189,6 +199,7 @@ export default function FixedAssetRegisterPage() {
                     <TableCell className="font-mono">{asset.assetCode}</TableCell>
                     <TableCell className="font-medium">{asset.name}</TableCell>
                     <TableCell>{asset.fixedAssetCategoryName || 'Unassigned'}</TableCell>
+                    <TableCell>{asset.location || '-'}</TableCell>
                     <TableCell>
                       {new Date(asset.purchaseDate).toLocaleDateString('en-US', {
                         year: 'numeric',

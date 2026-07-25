@@ -82,6 +82,22 @@ public class PeriodModuleLock : BaseEntity
     [MaxLength(500)]
     public string? UnlockReason { get; set; }
 
+    /// <summary>
+    /// UTC instant when this temporary module reopening expires. An expired reopening
+    /// is treated as locked by the posting engine even before background reconciliation.
+    /// </summary>
+    public DateTime? ReopenExpiresAtUtc { get; set; }
+
+    /// <summary>
+    /// UTC instant when the automatic expiry warning was sent to the administrator.
+    /// </summary>
+    public DateTime? ExpiryWarningSentAtUtc { get; set; }
+
+    /// <summary>
+    /// UTC instant when the temporary reopening was automatically relocked.
+    /// </summary>
+    public DateTime? AutoRelockedDate { get; set; }
+
     // ========================================================================
     // NAVIGATION PROPERTIES
     // ========================================================================

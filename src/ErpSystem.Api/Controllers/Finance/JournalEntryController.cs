@@ -1,8 +1,13 @@
 using ErpSystem.Core.Interfaces; // For IGeneralLedgerService
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Enums;
+using ErpSystem.Api.Services.Finance;
+using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -23,17 +28,158 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly IGeneralLedgerService _generalLedgerService;
         private readonly IWorkflowService _workflowService;
         private readonly ICurrentUserService _currentUserService;
+        private readonly IFinanceAuditService _financeAuditService;
+        private readonly ApplicationDbContext _dbContext;
 
         public JournalEntryController(
             IJournalEntryService journalEntryService,
             IGeneralLedgerService generalLedgerService,
             IWorkflowService workflowService,
-            ICurrentUserService currentUserService)
+            ICurrentUserService currentUserService,
+            IFinanceAuditService financeAuditService,
+            ApplicationDbContext dbContext)
         {
             _journalEntryService = journalEntryService;
             _generalLedgerService = generalLedgerService;
             _workflowService = workflowService;
             _currentUserService = currentUserService;
+            _financeAuditService = financeAuditService;
+            _dbContext = dbContext;
+        }
+
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
+
+        /// <summary>
+        /// Gets business audit events recorded for this journal entry.
+        /// </summary>
+        [HttpGet("{id}/audit-trail")]
+        public async Task<ActionResult<IReadOnlyList<FinanceJournalAuditLogDto>>> GetJournalEntryAuditTrail(Guid id)
+        {
+            try
+            {
+                if (!await HasAnyPermissionAsync(
+                        "Finance.JournalEntries.Create",
+                        "Finance.JournalEntries.Edit",
+                        "Finance.JournalEntries.Write",
+                        "Finance.JournalEntries.SubmitForApproval",
+                        "Finance.JournalEntries.Approve",
+                        "Finance.JournalEntries.Post",
+                        "Finance.JournalEntries.Reverse"))
+                    return Forbid();
+
+                var tenantId = TenantId;
+                var exists = await _dbContext.JournalEntries
+                    .AnyAsync(j => j.Id == id && j.TenantId == tenantId && !j.IsDeleted);
+
+                if (!exists)
+                    return NotFound($"Journal entry with ID {id} not found");
+
+                var auditLogs = await _financeAuditService.GetAuditTrailAsync(
+                    tenantId,
+                    "Finance.JournalEntry",
+                    id.ToString(),
+                    limit: 100);
+
+                return Ok(auditLogs.Select(MapAuditLogToDto).ToList());
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
+
+        private async Task<bool> HasAnyPermissionAsync(params string[] requiredPermissions)
+        {
+            if (requiredPermissions.Length == 0) return true;
+            if (PrivilegedRoles.Any(_currentUserService.IsInRole)) return true;
+            if (!Guid.TryParse(_currentUserService.UserId, out var userId)) return false;
+
+            var userPermissions = await _dbContext.UserRoles
+                .Where(ur => ur.UserId == userId)
+                .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Name))
+                .ToListAsync();
+
+            return userPermissions.Any(p => requiredPermissions.Contains(p, StringComparer.OrdinalIgnoreCase));
+        }
+
+        private static readonly WorkflowInstanceStatus[] ActiveWorkflowStatuses =
+        {
+            WorkflowInstanceStatus.Created,
+            WorkflowInstanceStatus.InProgress,
+            WorkflowInstanceStatus.Waiting,
+            WorkflowInstanceStatus.Suspended
+        };
+
+        private async Task<bool> HasActiveJournalWorkflowAsync(Guid journalEntryId)
+        {
+            var tenantId = TenantId;
+            return await _dbContext.WorkflowInstances
+                .AnyAsync(i =>
+                    i.TenantId == tenantId &&
+                    i.EntityId == journalEntryId &&
+                    ActiveWorkflowStatuses.Contains(i.Status) &&
+                    (i.EntityType.Code == "JournalEntry" ||
+                     i.EntityType.Name == "JournalEntry" ||
+                     i.EntityType.Name == "Journal Entry"));
+        }
+
+        private async Task<bool> CanCurrentUserApproveJournalWorkflowAsync(Guid journalEntryId, Guid userId)
+        {
+            if (!await HasActiveJournalWorkflowAsync(journalEntryId))
+                return true;
+
+            return await _workflowService.CanUserApproveAsync("JournalEntry", journalEntryId, userId);
+        }
+
+        private async Task<HashSet<Guid>> GetWorkflowAssignedJournalIdsAsync(Guid userId)
+        {
+            var tenantId = TenantId;
+            var userRoles = (_currentUserService.Roles ?? Array.Empty<string>()).ToList();
+
+            var assignedIds = await _dbContext.WorkflowInstances
+                .Where(i =>
+                    i.TenantId == tenantId &&
+                    ActiveWorkflowStatuses.Contains(i.Status) &&
+                    (i.EntityType.Code == "JournalEntry" ||
+                     i.EntityType.Name == "JournalEntry" ||
+                     i.EntityType.Name == "Journal Entry") &&
+                    i.StepInstances.Any(si =>
+                        (si.Status == WorkflowStepInstanceStatus.Pending ||
+                         si.Status == WorkflowStepInstanceStatus.InProgress) &&
+                        (si.AssignedToId == userId ||
+                         si.Approvals.Any(a =>
+                             a.Status == WorkflowApprovalStatus.Pending &&
+                             (a.ApproverId == userId ||
+                              (a.ApproverRole != null && userRoles.Contains(a.ApproverRole)))))))
+                .Select(i => i.EntityId)
+                .Distinct()
+                .ToListAsync();
+
+            return assignedIds.ToHashSet();
+        }
+
+        private async Task<HashSet<Guid>> GetJournalIdsWithActiveWorkflowAsync(IEnumerable<Guid> journalEntryIds)
+        {
+            var ids = journalEntryIds.ToList();
+            if (ids.Count == 0)
+                return new HashSet<Guid>();
+
+            var tenantId = TenantId;
+            var workflowIds = await _dbContext.WorkflowInstances
+                .Where(i =>
+                    i.TenantId == tenantId &&
+                    ids.Contains(i.EntityId) &&
+                    ActiveWorkflowStatuses.Contains(i.Status) &&
+                    (i.EntityType.Code == "JournalEntry" ||
+                     i.EntityType.Name == "JournalEntry" ||
+                     i.EntityType.Name == "Journal Entry"))
+                .Select(i => i.EntityId)
+                .Distinct()
+                .ToListAsync();
+
+            return workflowIds.ToHashSet();
         }
 
         // ====================================================================
@@ -71,6 +217,41 @@ namespace ErpSystem.Api.Controllers.Finance
             {
                 var entries = await _journalEntryService.GetJournalEntriesAsync();
                 return Ok(entries);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Retrieves journal entries awaiting approval for the current finance approver.
+        /// </summary>
+        [HttpGet("pending-approvals")]
+        public async Task<ActionResult<List<JournalEntryDto>>> GetPendingApprovals()
+        {
+            try
+            {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Approve"))
+                    return Forbid();
+
+                Guid.TryParse(_currentUserService.UserId, out var userId);
+                var entries = await _journalEntryService.GetJournalEntriesAsync();
+                var pendingEntries = entries
+                    .Where(e => e.PostingStatus == "Pending Approval")
+                    .ToList();
+                var assignedWorkflowJournalIds = await GetWorkflowAssignedJournalIdsAsync(userId);
+                var activeWorkflowJournalIds = await GetJournalIdsWithActiveWorkflowAsync(pendingEntries.Select(e => e.Id));
+
+                var pending = pendingEntries
+                    .Where(e =>
+                        assignedWorkflowJournalIds.Contains(e.Id) ||
+                        (!activeWorkflowJournalIds.Contains(e.Id) &&
+                         (!e.CreatedById.HasValue || e.CreatedById.Value != userId)))
+                    .OrderBy(e => e.TransactionDate)
+                    .ToList();
+
+                return Ok(pending);
             }
             catch (Exception ex)
             {
@@ -139,6 +320,9 @@ namespace ErpSystem.Api.Controllers.Finance
 
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Edit", "Finance.JournalEntries.Write"))
+                    return Forbid();
+
                 var entry = await _journalEntryService.UpdateJournalEntryAsync(id, dto);
                 return Ok(entry);
             }
@@ -165,6 +349,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Delete", "Finance.JournalEntries.Write"))
+                    return Forbid();
+
                 await _journalEntryService.DeleteJournalEntryAsync(id);
                 return NoContent();
             }
@@ -191,6 +378,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Post"))
+                    return Forbid();
+
                 await _journalEntryService.PostJournalEntryAsync(id);
                 return Ok(new { message = "Journal entry posted successfully" });
             }
@@ -213,11 +403,17 @@ namespace ErpSystem.Api.Controllers.Finance
         /// Can only reverse posted entries that haven't already been reversed.
         /// </summary>
         [HttpPost("{id}/reverse")]
-        public async Task<ActionResult<JournalEntryDto>> ReverseJournalEntry(Guid id)
+        public async Task<ActionResult<JournalEntryDto>> ReverseJournalEntry(Guid id, [FromBody] ReverseJournalEntryDto request)
         {
             try
             {
-                var reversedEntry = await _journalEntryService.ReverseJournalEntryAsync(id, "Manual reversal");
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Reverse"))
+                    return Forbid();
+
+                if (request == null || string.IsNullOrWhiteSpace(request.Reason))
+                    return BadRequest("A reversal reason is required.");
+
+                var reversedEntry = await _journalEntryService.ReverseJournalEntryAsync(id, request.Reason, request.ReversalDate);
                 return Ok(reversedEntry);
             }
             catch (ArgumentException ex)
@@ -246,6 +442,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.SubmitForApproval", "Finance.JournalEntries.Approve"))
+                    return Forbid();
+
                 var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 if (entry == null)
                     return NotFound($"Journal entry with ID {id} not found");
@@ -253,11 +452,67 @@ namespace ErpSystem.Api.Controllers.Finance
                 if (entry.PostingStatus != "Draft")
                     return BadRequest($"Only draft journal entries can be submitted for approval. Current status: {entry.PostingStatus}");
 
-                // Trigger workflow stub
-                await _workflowService.StartApprovalWorkflowAsync("JournalEntry", id);
+                await _journalEntryService.ValidateJournalEntryReadyForSubmissionAsync(id);
+
+                var workflowResult = await _workflowService.StartApprovalWorkflowAsync("JournalEntry", id);
+                if (!workflowResult.Success)
+                    return BadRequest(workflowResult.Message ?? "Unable to start approval workflow.");
+
+                var currentWorkflowStep = await _workflowService.GetCurrentWorkflowStepAsync("JournalEntry", id);
+                if (currentWorkflowStep == null ||
+                    string.Equals(currentWorkflowStep.StepName, "Draft", StringComparison.OrdinalIgnoreCase))
+                {
+                    return BadRequest("Approval workflow did not advance to the approval step. Journal entry was not submitted.");
+                }
 
                 // Update the entry status
                 await _journalEntryService.UpdateApprovalStatusAsync(id, "Pending Approval", "Pending");
+
+                var updated = await _journalEntryService.GetJournalEntryByIdAsync(id);
+                return Ok(updated);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Withdraws a pending approval request and returns the journal entry to Draft.
+        /// </summary>
+        [HttpPost("{id}/withdraw-approval")]
+        public async Task<ActionResult<JournalEntryDto>> WithdrawApproval(Guid id, [FromBody] ApprovalActionDto? request = null)
+        {
+            try
+            {
+                if (!await HasAnyPermissionAsync(
+                        "Finance.JournalEntries.SubmitForApproval",
+                        "Finance.JournalEntries.Write",
+                        "Finance.JournalEntries.Delete"))
+                    return Forbid();
+
+                var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
+                if (entry == null)
+                    return NotFound($"Journal entry with ID {id} not found");
+
+                if (!string.Equals(entry.PostingStatus, "Pending Approval", StringComparison.OrdinalIgnoreCase))
+                    return BadRequest("Only journal entries pending approval can be withdrawn.");
+
+                var reason = request?.Reason?.Trim();
+                if (string.IsNullOrWhiteSpace(reason))
+                    reason = request?.Comments?.Trim();
+                if (string.IsNullOrWhiteSpace(reason))
+                    reason = "Approval request withdrawn.";
+
+                var workflowResult = await _workflowService.CancelWorkflowAsync("JournalEntry", id, reason);
+                if (!workflowResult.Success)
+                    return BadRequest(workflowResult.Message ?? "Unable to cancel the active approval workflow.");
+
+                await _journalEntryService.UpdateApprovalStatusAsync(id, "Draft", "Withdrawn", rejectionReason: reason);
 
                 var updated = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 return Ok(updated);
@@ -281,6 +536,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Approve"))
+                    return Forbid();
+
                 var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 if (entry == null)
                     return NotFound($"Journal entry with ID {id} not found");
@@ -290,11 +548,21 @@ namespace ErpSystem.Api.Controllers.Finance
 
                 Guid.TryParse(_currentUserService.UserId, out var userId);
 
-                // Process through workflow stub
-                await _workflowService.ProcessApprovalStepAsync("JournalEntry", id, userId, "Approve", request?.Comments);
+                var hasActiveWorkflow = await HasActiveJournalWorkflowAsync(id);
+                if (!hasActiveWorkflow)
+                    return BadRequest("No active approval workflow was found for this journal entry. Withdraw and resubmit the journal entry for approval.");
 
-                // Update the entry
-                await _journalEntryService.UpdateApprovalStatusAsync(id, "Approved", "Approved", userId);
+                if (!await CanCurrentUserApproveJournalWorkflowAsync(id, userId))
+                    return StatusCode(403, "This journal entry is assigned to another workflow approver.");
+
+                var workflowResult = await _workflowService.ProcessApprovalStepAsync("JournalEntry", id, userId, "Approve", request?.Comments);
+                if (!workflowResult.Success)
+                    return BadRequest(workflowResult.Message ?? "Unable to process workflow approval.");
+
+                if (workflowResult.Status == WorkflowInstanceStatus.Completed)
+                {
+                    await _journalEntryService.UpdateApprovalStatusAsync(id, "Approved", "Approved", userId);
+                }
 
                 var updated = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 return Ok(updated);
@@ -318,6 +586,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                if (!await HasAnyPermissionAsync("Finance.JournalEntries.Approve"))
+                    return Forbid();
+
                 if (string.IsNullOrWhiteSpace(request?.Reason))
                     return BadRequest("A rejection reason is required.");
 
@@ -330,11 +601,21 @@ namespace ErpSystem.Api.Controllers.Finance
 
                 Guid.TryParse(_currentUserService.UserId, out var userId);
 
-                // Process through workflow stub
-                await _workflowService.ProcessApprovalStepAsync("JournalEntry", id, userId, "Reject", request.Reason);
+                var hasActiveWorkflow = await HasActiveJournalWorkflowAsync(id);
+                if (!hasActiveWorkflow)
+                    return BadRequest("No active approval workflow was found for this journal entry. Withdraw and resubmit the journal entry for approval.");
 
-                // Update the entry
-                await _journalEntryService.UpdateApprovalStatusAsync(id, "Rejected", "Rejected", rejectionReason: request.Reason);
+                if (!await CanCurrentUserApproveJournalWorkflowAsync(id, userId))
+                    return StatusCode(403, "This journal entry is assigned to another workflow approver.");
+
+                var workflowResult = await _workflowService.ProcessApprovalStepAsync("JournalEntry", id, userId, "Reject", request.Reason);
+                if (!workflowResult.Success)
+                    return BadRequest(workflowResult.Message ?? "Unable to process workflow rejection.");
+
+                if (workflowResult.Status is WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed)
+                {
+                    await _journalEntryService.UpdateApprovalStatusAsync(id, "Rejected", "Rejected", rejectionReason: request.Reason);
+                }
 
                 var updated = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 return Ok(updated);
@@ -348,5 +629,112 @@ namespace ErpSystem.Api.Controllers.Finance
                 return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
+
+        /// <summary>
+        /// Links an uploaded file to a journal entry.
+        /// </summary>
+        [HttpPost("{id}/attachments/{fileUploadRecordId}")]
+        public async Task<IActionResult> LinkAttachment(Guid id, Guid fileUploadRecordId)
+        {
+            try
+            {
+                await _journalEntryService.LinkAttachmentAsync(id, fileUploadRecordId);
+                return NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Unlinks an attachment from a journal entry.
+        /// </summary>
+        [HttpDelete("{id}/attachments/{fileUploadRecordId}")]
+        public async Task<IActionResult> UnlinkAttachment(Guid id, Guid fileUploadRecordId)
+        {
+            try
+            {
+                await _journalEntryService.UnlinkAttachmentAsync(id, fileUploadRecordId);
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gets attachment metadata linked to a journal entry.
+        /// </summary>
+        [HttpGet("{id}/attachments")]
+        public async Task<ActionResult<IReadOnlyList<JournalEntryAttachmentDto>>> GetAttachments(Guid id)
+        {
+            try
+            {
+                var attachments = await _journalEntryService.GetAttachmentsAsync(id);
+                return Ok(attachments);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        private static FinanceJournalAuditLogDto MapAuditLogToDto(ErpSystem.Core.Entities.AuditLog auditLog)
+        {
+            return new FinanceJournalAuditLogDto
+            {
+                Id = auditLog.Id,
+                Action = auditLog.Action,
+                Resource = auditLog.Resource,
+                ResourceId = auditLog.ResourceId,
+                Username = auditLog.Username,
+                UserId = auditLog.UserId,
+                Timestamp = auditLog.Timestamp,
+                IpAddress = auditLog.IpAddress,
+                UserAgent = auditLog.UserAgent,
+                OldValues = DeserializeAuditValues(auditLog.OldValues),
+                NewValues = DeserializeAuditValues(auditLog.NewValues)
+            };
+        }
+
+        private static object? DeserializeAuditValues(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            try
+            {
+                return JsonSerializer.Deserialize<object>(json);
+            }
+            catch
+            {
+                return json;
+            }
+        }
+    }
+
+    public class FinanceJournalAuditLogDto
+    {
+        public Guid Id { get; set; }
+        public string Action { get; set; } = string.Empty;
+        public string Resource { get; set; } = string.Empty;
+        public string? ResourceId { get; set; }
+        public string Username { get; set; } = string.Empty;
+        public Guid UserId { get; set; }
+        public DateTime Timestamp { get; set; }
+        public string IpAddress { get; set; } = string.Empty;
+        public string? UserAgent { get; set; }
+        public object? OldValues { get; set; }
+        public object? NewValues { get; set; }
     }
 }

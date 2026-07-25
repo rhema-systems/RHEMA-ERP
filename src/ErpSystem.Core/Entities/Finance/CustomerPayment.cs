@@ -31,12 +31,20 @@ public class CustomerPayment : BusinessEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal AllocatedAmount { get; set; }
 
+    /// <summary>
+    /// True only when the original posted receipt was recorded to the configured customer-advance
+    /// liability account. Later allocations must reclassify that advance through the Finance posting engine.
+    /// </summary>
+    public bool IsCustomerAdvance { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
 
     [Required]
     [MaxLength(50)]
     public string PaymentMethod { get; set; } = "Cash"; // Cash, Check, BankTransfer, CreditCard, DebitCard, MobileMoney, Online
+    public Guid? PaymentMethodId { get; set; }
+    public virtual PaymentMethod? ConfiguredPaymentMethod { get; set; }
 
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = "USD";
@@ -53,6 +61,29 @@ public class CustomerPayment : BusinessEntity
 
     [MaxLength(100)]
     public string? TransactionReference { get; set; }
+
+    public Guid? WithholdingTaxId { get; set; }
+    public virtual Tax? WithholdingTax { get; set; }
+
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public virtual Account? WithholdingTaxAccount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal WithholdingTaxAmount { get; set; }
+
+    public Guid? VatWithholdingTaxId { get; set; }
+    public virtual Tax? VatWithholdingTax { get; set; }
+
+    public Guid? VatWithholdingAccountId { get; set; }
+    public virtual Account? VatWithholdingAccount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal VatWithholdingAmount { get; set; }
+
+    [MaxLength(100)]
+    public string? WithholdingCertificateNumber { get; set; }
+
+    public DateTime? WithholdingCertificateDate { get; set; }
 
     [MaxLength(500)]
     public string? Notes { get; set; }

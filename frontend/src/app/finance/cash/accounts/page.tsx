@@ -20,14 +20,11 @@ export default function BankAccountsPage() {
 
     const loadData = async () => {
         try {
-            const [accountsData, positionData] = await Promise.all([
-                cashManagementDataService.getBankAccounts(),
-                cashManagementDataService.getCashPosition()
-            ]);
+            const accountsData = await cashManagementDataService.getBankAccounts();
             setAccounts(accountsData);
-            setCashPosition(positionData);
+            setCashPosition(buildCashPositionSummary(accountsData));
         } catch (error) {
-            console.error('Failed to load data:', error);
+            console.error('Failed to load bank accounts:', error);
         } finally {
             setLoading(false);
         }
@@ -53,6 +50,37 @@ export default function BankAccountsPage() {
             case 'Credit': return 'bg-orange-50 text-orange-700 border-orange-200';
             default: return 'bg-gray-50 text-gray-700 border-gray-200';
         }
+    };
+
+    const buildCashPositionSummary = (bankAccounts: BankAccount[]): CashPositionSummary => {
+        const activeAccounts = bankAccounts.filter((account) => account.isActive);
+        const currency = activeAccounts.find((account) => account.currency)?.currency ?? 'GHS';
+        const byAccountType = Array.from(
+            activeAccounts.reduce((groups, account) => {
+                const current = groups.get(account.accountType) ?? { type: account.accountType, balance: 0, count: 0 };
+                current.balance += account.currentBalance;
+                current.count += 1;
+                groups.set(account.accountType, current);
+                return groups;
+            }, new Map<BankAccount['accountType'], CashPositionSummary['byAccountType'][number]>())
+        ).map(([, summary]) => summary);
+        const byCurrency = Array.from(
+            activeAccounts.reduce((groups, account) => {
+                const current = groups.get(account.currency) ?? { currency: account.currency, balance: 0, count: 0 };
+                current.balance += account.currentBalance;
+                current.count += 1;
+                groups.set(account.currency, current);
+                return groups;
+            }, new Map<string, CashPositionSummary['byCurrency'][number]>())
+        ).map(([, summary]) => summary);
+
+        return {
+            totalBalance: activeAccounts.reduce((total, account) => total + account.currentBalance, 0),
+            currency,
+            accountCount: activeAccounts.length,
+            byAccountType,
+            byCurrency,
+        };
     };
 
     return (

@@ -27,6 +27,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal ProfitBeforeTax { get; set; }
         public decimal TaxExpense { get; set; }
         public decimal NetProfit { get; set; }
+        public List<string> PresentationWarnings { get; set; } = new();
     }
 
     /// <summary>
@@ -62,5 +63,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime PeriodEnd { get; set; }
         public string BookClassification { get; set; } = "IFRS";
         public bool IncludeAccountDetails { get; set; } = false;
+        public List<Guid> AccountIds { get; set; } = new();
+        public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
     }
 }

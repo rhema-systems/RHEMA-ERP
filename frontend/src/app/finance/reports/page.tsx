@@ -10,6 +10,7 @@ import {
     Scale,
     Banknote,
     Globe,
+    ListTree,
     ArrowRight
 } from 'lucide-react';
 
@@ -53,6 +54,14 @@ const REPORTS = [
         href: '/finance/reports/multi-currency',
         icon: Globe,
         color: 'bg-cyan-500',
+    },
+    {
+        id: 'detailed-ledger',
+        title: 'Detailed Ledger',
+        description: 'Transaction listing for selected GL accounts and reporting date ranges',
+        href: '/finance/reports/detailed-ledger',
+        icon: ListTree,
+        color: 'bg-slate-600',
     },
 ];
 

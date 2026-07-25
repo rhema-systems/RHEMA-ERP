@@ -1,0 +1,2 @@
+TenantName,TenantId,ApprovedCutoverDate,ApprovedFiscalPeriod,BookClassification,AccountCode,AccountName,DebitAmount,CreditAmount,Currency,SegmentDimensionString,ReferenceNotes,PreparerName,ReviewerAccountantName,ApprovalDate,ValidationNotes
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,,,,,GHS,,,

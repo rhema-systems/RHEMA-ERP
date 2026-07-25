@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Finance;
@@ -16,6 +17,7 @@ namespace ErpSystem.Api.Controllers.Finance;
 /// - General Ledger for automatic journal posting
 /// </remarks>
 [ApiController]
+[Authorize]
 [Route("api/finance/bank-accounts")]
 public class BankAccountController : ControllerBase
 {

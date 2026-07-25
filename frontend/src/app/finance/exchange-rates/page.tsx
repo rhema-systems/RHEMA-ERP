@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,8 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { TrendingUp, Plus, Edit, Upload, Filter } from 'lucide-react';
-import type { ExchangeRate } from '@/types/finance';
+import { useToast } from '@/components/ui/use-toast';
+import { TrendingUp, Plus, Edit, Upload, Filter, LineChart, Download, AlertCircle, FileText, Loader2 } from 'lucide-react';
+import { financeService } from '@/services/finance.service';
+import { buildExchangeRateTemplateCsv, formatImportFileSize, parseExchangeRateImportFile } from '@/lib/finance/exchange-rate-import';
+import type { ExchangeRate, ExchangeRateType } from '@/types/finance';
+import Link from 'next/link';
 
 
 
@@ -18,8 +22,8 @@ import type { ExchangeRate } from '@/types/finance';
 const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
     {
         id: '1',
-        baseCurrencyCode: 'USD',
-        targetCurrencyCode: 'GHS',
+        baseCurrencyCode: 'GHS',
+        targetCurrencyCode: 'USD',
         rate: 12.5,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Daily',
@@ -30,8 +34,8 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
     },
     {
         id: '2',
-        baseCurrencyCode: 'GBP',
-        targetCurrencyCode: 'GHS',
+        baseCurrencyCode: 'GHS',
+        targetCurrencyCode: 'GBP',
         rate: 15.8,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Daily',
@@ -42,8 +46,8 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
     },
     {
         id: '3',
-        baseCurrencyCode: 'EUR',
-        targetCurrencyCode: 'GHS',
+        baseCurrencyCode: 'GHS',
+        targetCurrencyCode: 'EUR',
         rate: 13.6,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Daily',
@@ -54,8 +58,8 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
     },
     {
         id: '4',
-        baseCurrencyCode: 'USD',
-        targetCurrencyCode: 'GHS',
+        baseCurrencyCode: 'GHS',
+        targetCurrencyCode: 'USD',
         rate: 12.8,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Spot',
@@ -67,11 +71,30 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
 ];
 
 const MOCK_CURRENCIES = ['GHS', 'USD', 'EUR', 'GBP'];
+const EXCHANGE_RATE_TYPE_OPTIONS: Array<{ value: ExchangeRateType; label: string }> = [
+    { value: 'Daily', label: 'Daily' },
+    { value: 'Average', label: 'Average' },
+    { value: 'MonthEnd', label: 'Month End' },
+    { value: 'QuarterEnd', label: 'Quarter End' },
+    { value: 'YearEnd', label: 'Year End' },
+    { value: 'Budget', label: 'Budget' },
+    { value: 'Fixed', label: 'Fixed' },
+    { value: 'Spot', label: 'Spot' },
+];
+
+const formatRateType = (rateType: ExchangeRateType | string) =>
+    EXCHANGE_RATE_TYPE_OPTIONS.find((option) => option.value === rateType)?.label ?? rateType;
 
 export default function ExchangeRatesPage() {
+    const { toast } = useToast();
+    const bulkFileInputRef = useRef<HTMLInputElement | null>(null);
     const [rates, setRates] = useState<ExchangeRate[]>(MOCK_EXCHANGE_RATES);
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
+    const [bulkUploadFile, setBulkUploadFile] = useState<File | null>(null);
+    const [bulkUploadErrors, setBulkUploadErrors] = useState<string[]>([]);
+    const [isBulkUploading, setIsBulkUploading] = useState(false);
+    const [isBulkFileDragOver, setIsBulkFileDragOver] = useState(false);
     const [editingRate, setEditingRate] = useState<ExchangeRate | null>(null);
     const [filters, setFilters] = useState({
         fromCurrency: 'all',
@@ -79,13 +102,32 @@ export default function ExchangeRatesPage() {
         rateType: 'all',
     });
     const [formData, setFormData] = useState({
-        baseCurrencyCode: 'USD',
-        targetCurrencyCode: 'GHS',
+        baseCurrencyCode: 'GHS',
+        targetCurrencyCode: 'USD',
         rate: '',
         rateType: 'Daily' as ExchangeRateType,
         effectiveDate: new Date().toISOString().split('T')[0],
         rateSource: '',
     });
+
+    useEffect(() => {
+        let isMounted = true;
+
+        financeService.getExchangeRates()
+            .then((apiRates) => {
+                if (isMounted) {
+                    setRates(apiRates);
+                }
+            })
+            .catch((error) => {
+                // Keep the seeded rows visible in local/demo mode when the API is not reachable.
+                console.error('Failed to load exchange rates', error);
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
 
     const filteredRates = rates.filter((rate) => {
         if (filters.fromCurrency !== 'all' && rate.baseCurrencyCode !== filters.fromCurrency) return false;
@@ -134,8 +176,8 @@ export default function ExchangeRatesPage() {
 
     const resetForm = () => {
         setFormData({
-            baseCurrencyCode: 'USD',
-            targetCurrencyCode: 'GHS',
+            baseCurrencyCode: 'GHS',
+            targetCurrencyCode: 'USD',
             rate: '',
             effectiveDate: new Date().toISOString().split('T')[0],
             rateType: 'Daily',
@@ -153,6 +195,112 @@ export default function ExchangeRatesPage() {
             rateType: rate.rateType,
             rateSource: rate.rateSource || '',
         });
+    };
+
+    const resetBulkUploadState = () => {
+        setBulkUploadFile(null);
+        setBulkUploadErrors([]);
+        setIsBulkFileDragOver(false);
+        if (bulkFileInputRef.current) {
+            bulkFileInputRef.current.value = '';
+        }
+    };
+
+    const handleBulkDialogOpenChange = (open: boolean) => {
+        setIsBulkUploadOpen(open);
+        if (!open) {
+            resetBulkUploadState();
+        }
+    };
+
+    const handleBulkFileSelected = (file?: File) => {
+        if (!file) {
+            return;
+        }
+
+        setBulkUploadFile(file);
+        setBulkUploadErrors([]);
+    };
+
+    const handleBulkUpload = async () => {
+        if (!bulkUploadFile) {
+            toast({
+                title: 'Select a file',
+                description: 'Choose a CSV or XLSX exchange-rate file before uploading.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        try {
+            setIsBulkUploading(true);
+            setBulkUploadErrors([]);
+
+            const parsedImport = await parseExchangeRateImportFile(bulkUploadFile);
+            if (parsedImport.errors.length > 0) {
+                setBulkUploadErrors(parsedImport.errors);
+                toast({
+                    title: 'Upload validation failed',
+                    description: `${parsedImport.errors.length} issue(s) need correction before import.`,
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            const uploadedRates = await financeService.bulkUploadExchangeRates(parsedImport.rows);
+            setRates((currentRates) => {
+                const uploadedIds = new Set(uploadedRates.map((rate) => rate.id));
+                return [
+                    ...uploadedRates,
+                    ...currentRates.filter((rate) => !uploadedIds.has(rate.id)),
+                ];
+            });
+
+            const skippedCount = parsedImport.rows.length - uploadedRates.length;
+            if (skippedCount > 0) {
+                setBulkUploadErrors([
+                    `${uploadedRates.length} of ${parsedImport.rows.length} row(s) were imported. ${skippedCount} row(s) were rejected by server-side finance validation, usually because a matching rate already exists or overlaps an existing rate window.`,
+                ]);
+                toast({
+                    title: 'Import partially completed',
+                    description: `${uploadedRates.length} of ${parsedImport.rows.length} exchange-rate row(s) were imported.`,
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            toast({
+                title: 'Exchange rates imported',
+                description: `${uploadedRates.length} exchange-rate row(s) uploaded successfully.`,
+            });
+            setIsBulkUploadOpen(false);
+            resetBulkUploadState();
+        } catch (error: any) {
+            const message = error?.message || 'Unable to upload exchange rates.';
+            setBulkUploadErrors([message]);
+            toast({
+                title: 'Upload failed',
+                description: message,
+                variant: 'destructive',
+            });
+        } finally {
+            setIsBulkUploading(false);
+        }
+    };
+
+    const handleDownloadTemplate = () => {
+        const templateDate = new Date().toISOString().split('T')[0];
+        const csv = buildExchangeRateTemplateCsv(templateDate);
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `exchange-rate-upload-template-${templateDate}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
     };
 
     const formatDate = (dateString: string) => {
@@ -177,7 +325,13 @@ export default function ExchangeRatesPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <Dialog open={isBulkUploadOpen} onOpenChange={setIsBulkUploadOpen}>
+                    <Button asChild variant="outline" className="mr-2">
+                        <Link href="/finance/exchange-rates/trends">
+                            <LineChart className="mr-2 h-4 w-4" />
+                            Trend Analysis
+                        </Link>
+                    </Button>
+                    <Dialog open={isBulkUploadOpen} onOpenChange={handleBulkDialogOpenChange}>
                         <DialogTrigger asChild>
                             <Button variant="outline">
                                 <Upload className="mr-2 h-4 w-4" />
@@ -192,34 +346,117 @@ export default function ExchangeRatesPage() {
                                 </DialogDescription>
                             </DialogHeader>
                             <div className="space-y-4 py-4">
-                                <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                                    <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
-                                    <p className="mt-2 text-sm text-muted-foreground">
-                                        Drag and drop your file here, or click to browse
-                                    </p>
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                        Supported formats: CSV, XLSX
-                                    </p>
-                                    <Button variant="outline" className="mt-4">
+                                <input
+                                    ref={bulkFileInputRef}
+                                    type="file"
+                                    accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    className="hidden"
+                                    onChange={(event) => handleBulkFileSelected(event.target.files?.[0])}
+                                />
+                                <div
+                                    role="button"
+                                    tabIndex={0}
+                                    className={`rounded-lg border-2 border-dashed p-8 text-center transition-colors ${isBulkFileDragOver ? 'border-primary bg-primary/5' : ''}`}
+                                    onClick={() => bulkFileInputRef.current?.click()}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            bulkFileInputRef.current?.click();
+                                        }
+                                    }}
+                                    onDragOver={(event) => {
+                                        event.preventDefault();
+                                        setIsBulkFileDragOver(true);
+                                    }}
+                                    onDragLeave={() => setIsBulkFileDragOver(false)}
+                                    onDrop={(event) => {
+                                        event.preventDefault();
+                                        setIsBulkFileDragOver(false);
+                                        handleBulkFileSelected(event.dataTransfer.files?.[0]);
+                                    }}
+                                >
+                                    {bulkUploadFile ? (
+                                        <div className="space-y-2">
+                                            <FileText className="mx-auto h-12 w-12 text-primary" />
+                                            <p className="text-sm font-medium">{bulkUploadFile.name}</p>
+                                            <p className="text-xs text-muted-foreground">{formatImportFileSize(bulkUploadFile)}</p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
+                                            <p className="mt-2 text-sm text-muted-foreground">
+                                                Drag and drop your file here, or click to browse
+                                            </p>
+                                            <p className="text-xs text-muted-foreground mt-1">
+                                                Supported formats: CSV, XLSX
+                                            </p>
+                                        </>
+                                    )}
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="mt-4"
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            bulkFileInputRef.current?.click();
+                                        }}
+                                        disabled={isBulkUploading}
+                                    >
                                         Select File
+                                    </Button>
+                                </div>
+                                <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <p className="text-sm font-medium">Need the correct format?</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            Start from the CSV template with required and optional fields.
+                                        </p>
+                                    </div>
+                                    <Button type="button" variant="outline" onClick={handleDownloadTemplate}>
+                                        <Download className="mr-2 h-4 w-4" />
+                                        Download Template
                                     </Button>
                                 </div>
                                 <div className="text-sm text-muted-foreground">
                                     <p className="font-semibold mb-2">Required columns:</p>
                                     <ul className="list-disc list-inside space-y-1">
-                                        <li>From Currency (e.g., USD)</li>
-                                        <li>To Currency (e.g., GHS)</li>
-                                        <li>Rate (e.g., 12.50)</li>
-                                        <li>Effective Date (YYYY-MM-DD)</li>
-                                        <li>Rate Type (Official/Market/Custom)</li>
+                                        <li>baseCurrencyCode (e.g., GHS)</li>
+                                        <li>targetCurrencyCode (e.g., USD)</li>
+                                        <li>rate (e.g., 12.5000)</li>
+                                        <li>effectiveDate (YYYY-MM-DD)</li>
+                                        <li>rateType (Daily/Average/MonthEnd/QuarterEnd/YearEnd/Budget/Fixed/Spot)</li>
+                                        <li>rateSource (e.g., Manual, BankFeed, Bank of Ghana)</li>
                                     </ul>
                                 </div>
+                                {bulkUploadErrors.length > 0 && (
+                                    <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                                        <div className="flex items-start gap-2 font-medium">
+                                            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                            <span>Upload checks found issues</span>
+                                        </div>
+                                        <ul className="mt-2 list-disc space-y-1 pl-5">
+                                            {bulkUploadErrors.slice(0, 8).map((error, index) => (
+                                                <li key={`${error}-${index}`}>{error}</li>
+                                            ))}
+                                        </ul>
+                                        {bulkUploadErrors.length > 8 && (
+                                            <p className="mt-2">Showing first 8 of {bulkUploadErrors.length} issue(s).</p>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                             <DialogFooter>
-                                <Button variant="outline" onClick={() => setIsBulkUploadOpen(false)}>
+                                <Button variant="outline" onClick={() => handleBulkDialogOpenChange(false)} disabled={isBulkUploading}>
                                     Cancel
                                 </Button>
-                                <Button disabled>Upload Rates</Button>
+                                <Button onClick={handleBulkUpload} disabled={!bulkUploadFile || isBulkUploading}>
+                                    {isBulkUploading ? (
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Upload className="mr-2 h-4 w-4" />
+                                    )}
+                                    Upload Rates
+                                </Button>
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
@@ -240,7 +477,7 @@ export default function ExchangeRatesPage() {
                             <div className="space-y-4 py-4">
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
-                                        <Label htmlFor="baseCurrencyCode">From Currency</Label>
+                                        <Label htmlFor="baseCurrencyCode">Base Currency</Label>
                                         <Select
                                             value={formData.baseCurrencyCode}
                                             onValueChange={(value) => setFormData({ ...formData, baseCurrencyCode: value })}
@@ -249,14 +486,12 @@ export default function ExchangeRatesPage() {
                                                 <SelectValue placeholder="Select currency" />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="USD">USD - US Dollar</SelectItem>
-                                                <SelectItem value="EUR">EUR - Euro</SelectItem>
-                                                <SelectItem value="GBP">GBP - British Pound</SelectItem>
+                                                <SelectItem value="GHS">GHS - Ghanaian Cedi</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
                                     <div className="space-y-2">
-                                        <Label htmlFor="targetCurrencyCode">To Currency</Label>
+                                        <Label htmlFor="targetCurrencyCode">Target Currency</Label>
                                         <Select
                                             value={formData.targetCurrencyCode}
                                             onValueChange={(value) =>
@@ -267,7 +502,9 @@ export default function ExchangeRatesPage() {
                                                 <SelectValue placeholder="Select currency" />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="GHS">GHS - Ghanaian Cedi</SelectItem>
+                                                <SelectItem value="USD">USD - US Dollar</SelectItem>
+                                                <SelectItem value="EUR">EUR - Euro</SelectItem>
+                                                <SelectItem value="GBP">GBP - British Pound</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -302,11 +539,11 @@ export default function ExchangeRatesPage() {
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="Daily">Daily</SelectItem>
-                                            <SelectItem value="Spot">Spot</SelectItem>
-                                            <SelectItem value="Official">Official</SelectItem>
-                                            <SelectItem value="Market">Market</SelectItem>
-                                            <SelectItem value="Custom">Custom</SelectItem>
+                                            {EXCHANGE_RATE_TYPE_OPTIONS.map((option) => (
+                                                <SelectItem key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
                                 </div>
@@ -359,7 +596,7 @@ export default function ExchangeRatesPage() {
                 <CardContent>
                     <div className="grid grid-cols-3 gap-4">
                         <div className="space-y-2">
-                            <Label htmlFor="filterFrom">From Currency</Label>
+                            <Label htmlFor="filterFrom">Base Currency</Label>
                             <Select
                                 value={filters.fromCurrency}
                                 onValueChange={(value) => setFilters({ ...filters, fromCurrency: value })}
@@ -376,7 +613,7 @@ export default function ExchangeRatesPage() {
                             </Select>
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="filterTo">To Currency</Label>
+                            <Label htmlFor="filterTo">Target Currency</Label>
                             <Select
                                 value={filters.toCurrency}
                                 onValueChange={(value) => setFilters({ ...filters, toCurrency: value })}
@@ -403,11 +640,11 @@ export default function ExchangeRatesPage() {
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All Types</SelectItem>
-                                    <SelectItem value="Daily">Daily</SelectItem>
-                                    <SelectItem value="Spot">Spot</SelectItem>
-                                    <SelectItem value="Official">Official</SelectItem>
-                                    <SelectItem value="Market">Market</SelectItem>
-                                    <SelectItem value="Custom">Custom</SelectItem>
+                                    {EXCHANGE_RATE_TYPE_OPTIONS.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                            {option.label}
+                                        </SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>
@@ -444,7 +681,7 @@ export default function ExchangeRatesPage() {
                                         <td className="p-4">{formatDate(rate.effectiveDate)}</td>
                                         <td className="p-4">
                                             <Badge variant={rate.rateType === 'Daily' ? 'default' : 'secondary'}>
-                                                {rate.rateType}
+                                                {formatRateType(rate.rateType)}
                                             </Badge>
                                         </td>
                                         <td className="p-4 text-sm text-muted-foreground">{rate.rateSource}</td>
@@ -469,11 +706,11 @@ export default function ExchangeRatesPage() {
                                                     <div className="space-y-4 py-4">
                                                         <div className="grid grid-cols-2 gap-4">
                                                             <div className="space-y-2">
-                                                                <Label>From Currency</Label>
+                                                                <Label>Base Currency</Label>
                                                                 <Input value={formData.baseCurrencyCode} disabled />
                                                             </div>
                                                             <div className="space-y-2">
-                                                                <Label>To Currency</Label>
+                                                                <Label>Target Currency</Label>
                                                                 <Input value={formData.targetCurrencyCode} disabled />
                                                             </div>
                                                         </div>
@@ -500,15 +737,17 @@ export default function ExchangeRatesPage() {
                                                             <Label htmlFor="edit-rateType">Rate Type</Label>
                                                             <Select
                                                                 value={formData.rateType}
-                                                                onValueChange={(value: any) => setFormData({ ...formData, rateType: value })}
+                                                                onValueChange={(value: ExchangeRateType) => setFormData({ ...formData, rateType: value })}
                                                             >
                                                                 <SelectTrigger id="edit-rateType">
                                                                     <SelectValue />
                                                                 </SelectTrigger>
                                                                 <SelectContent>
-                                                                    <SelectItem value="Official">Official</SelectItem>
-                                                                    <SelectItem value="Market">Market</SelectItem>
-                                                                    <SelectItem value="Custom">Custom</SelectItem>
+                                                                    {EXCHANGE_RATE_TYPE_OPTIONS.map((option) => (
+                                                                        <SelectItem key={option.value} value={option.value}>
+                                                                            {option.label}
+                                                                        </SelectItem>
+                                                                    ))}
                                                                 </SelectContent>
                                                             </Select>
                                                         </div>
