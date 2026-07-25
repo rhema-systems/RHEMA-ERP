@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Finance
 {
@@ -22,9 +23,16 @@ namespace ErpSystem.Core.DTOs.Finance
         public string Status { get; set; } = "Draft";
         public string? Notes { get; set; }
         public string? Reference { get; set; }
+        public bool IsOpeningBalance { get; set; }
         public string CurrencyCode { get; set; } = "USD";
         public decimal ExchangeRate { get; set; } = 1.0m;
         public int PaymentTermsDays { get; set; } = 30; // AR-specific
+        public Guid? PaymentTermId { get; set; }
+        public decimal EarlyPaymentDiscountPercentage { get; set; }
+        public DateTime? EarlyPaymentDiscountDueDate { get; set; }
+        public decimal EarlyPaymentDiscountAmount { get; set; }
+        public Guid? TaxGroupId { get; set; }
+        public Guid? JournalEntryId { get; set; }
         public List<InvoiceLineItemDto> LineItems { get; set; } = new();
         public List<PaymentDto> Payments { get; set; } = new();
         public DateTime CreatedAt { get; set; }
@@ -51,6 +59,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime InvoiceDate { get; set; }
 
         public DateTime? DueDate { get; set; }
+        public Guid? PaymentTermId { get; set; }
 
         [MaxLength(500)]
         public string? Notes { get; set; }
@@ -58,10 +67,14 @@ namespace ErpSystem.Core.DTOs.Finance
         [MaxLength(100)]
         public string? Reference { get; set; }
 
+        public bool IsOpeningBalance { get; set; }
+
         [MaxLength(3)]
         public string CurrencyCode { get; set; } = "USD";
 
         public decimal ExchangeRate { get; set; } = 1.0m;
+
+        public Guid? TaxGroupId { get; set; }
 
         public List<CreateInvoiceLineItemDto> LineItems { get; set; } = new();
     }
@@ -73,9 +86,12 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? CustomerAddress { get; set; }
         public DateTime InvoiceDate { get; set; }
         public DateTime? DueDate { get; set; }
+        public Guid? PaymentTermId { get; set; }
         public string Status { get; set; } = "Draft";
         public string? Notes { get; set; }
         public string? Reference { get; set; }
+        public bool IsOpeningBalance { get; set; }
+        public Guid? TaxGroupId { get; set; }
         public List<UpdateInvoiceLineItemDto> LineItems { get; set; } = new();
     }
 
@@ -95,6 +111,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal TaxRate { get; set; }
         public decimal TaxAmount { get; set; }
         public string? TaxCode { get; set; } // AR-specific
+        public Guid? TaxGroupId { get; set; }
+        public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
         public string? Unit { get; set; }
         public decimal DiscountPercentage { get; set; } // AR-specific
         public decimal DiscountAmount { get; set; } // AR-specific
@@ -121,6 +139,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal TaxRate { get; set; } = 0;
 
         public string? TaxCode { get; set; } // AR-specific
+        public Guid? TaxGroupId { get; set; }
+        public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
 
         public decimal DiscountPercentage { get; set; } = 0; // AR-specific
 

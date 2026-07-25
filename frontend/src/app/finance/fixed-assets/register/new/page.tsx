@@ -20,6 +20,7 @@ export default function NewFixedAssetPage() {
     assetCode: '',
     name: '',
     description: '',
+    location: '',
     fixedAssetCategoryId: '',
     purchaseDate: new Date().toISOString().slice(0, 10),
     placedInServiceDate: '',
@@ -63,6 +64,7 @@ export default function NewFixedAssetPage() {
       await fixedAssetsDataService.createAsset({
         ...formData,
         placedInServiceDate: formData.placedInServiceDate || undefined,
+        location: formData.location || undefined,
         maintenanceAssetId: formData.maintenanceAssetId || undefined,
         serialNumber: formData.serialNumber || undefined,
       });
@@ -158,6 +160,14 @@ export default function NewFixedAssetPage() {
               type="date"
               value={formData.placedInServiceDate || ''}
               onChange={(e) => setFormData({ ...formData, placedInServiceDate: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="location">Location</Label>
+            <Input
+              id="location"
+              value={formData.location || ''}
+              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
             />
           </div>
           <div className="space-y-2">

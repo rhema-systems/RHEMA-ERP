@@ -12,7 +12,6 @@ namespace ErpSystem.Core.Services.Sales;
 public class LeadService : ILeadService
 {
     private readonly IGenericRepository<Lead> _leadRepo;
-    private readonly IGenericRepository<Customer> _customerRepo;
     private readonly IGenericRepository<BusinessPartner> _bpRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -20,14 +19,12 @@ public class LeadService : ILeadService
 
     public LeadService(
         IGenericRepository<Lead> leadRepo,
-        IGenericRepository<Customer> customerRepo,
         IGenericRepository<BusinessPartner> bpRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<LeadService> logger)
     {
         _leadRepo = leadRepo;
-        _customerRepo = customerRepo;
         _bpRepo = bpRepo;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
@@ -107,7 +104,6 @@ public class LeadService : ILeadService
     {
         var lead = await _leadRepo.GetByIdAsync(id,
             l => l.AssignedTo!,
-            l => l.ConvertedCustomer!,
             l => l.Activities,
             l => l.Opportunities);
 
@@ -199,45 +195,37 @@ public class LeadService : ILeadService
         // Create a BusinessPartner from the lead
         var bp = new BusinessPartner
         {
+            Id = Guid.NewGuid(),
             PartnerName = lead.CompanyName ?? lead.FullName,
             PartnerCode = $"C-{DateTime.UtcNow:yyyyMMddHHmmss}",
+            CustomerAccountNumber = $"C-{DateTime.UtcNow:yyyyMMddHHmmss}",
             PartnerType = "Customer",
+            CustomerType = lead.CompanyName != null ? "Corporate" : "Individual",
             PrimaryEmail = lead.Email,
             PrimaryPhone = lead.Phone,
             PhysicalAddress = lead.AddressLine1,
+            PhysicalCity = lead.City,
+            PhysicalState = lead.State,
+            PhysicalPostalCode = lead.PostalCode,
+            PhysicalCountry = lead.Country,
+            PrimaryContactName = lead.FullName,
+            RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
+            IsActive = true,
             TenantId = lead.TenantId
         };
 
         await _bpRepo.AddAsync(bp);
 
-        // Create Customer record
-        var customer = new Customer
-        {
-            CustomerName = lead.CompanyName ?? lead.FullName,
-            CustomerCode = bp.PartnerCode,
-            CustomerType = lead.CompanyName != null ? "Corporate" : "Individual",
-            ContactPerson = lead.FullName,
-            Email = lead.Email,
-            Phone = lead.Phone,
-            Address = lead.AddressLine1,
-            City = lead.City,
-            State = lead.State,
-            PostalCode = lead.PostalCode,
-            Country = lead.Country,
-            TenantId = lead.TenantId
-        };
-
-        await _customerRepo.AddAsync(customer);
-
         // Mark lead as converted
         lead.LeadStatus = "Converted";
-        lead.ConvertedCustomerId = customer.Id;
+        lead.ConvertedCustomerId = bp.Id;
         lead.ConvertedDate = DateTime.UtcNow;
 
         await _leadRepo.UpdateAsync(lead);
         await _unitOfWork.SaveChangesAsync();
 
-        _logger.LogInformation("Lead {LeadName} converted to Customer {CustomerId}", lead.FullName, customer.Id);
+        _logger.LogInformation("Lead {LeadName} converted to customer BusinessPartner {BusinessPartnerId}", lead.FullName, bp.Id);
         return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
     }
 
@@ -316,7 +304,7 @@ public class LeadService : ILeadService
         AssignedToId = l.AssignedToId,
         AssignedToName = l.AssignedTo?.UserName,
         ConvertedCustomerId = l.ConvertedCustomerId,
-        ConvertedCustomerName = l.ConvertedCustomer?.CustomerName,
+        ConvertedCustomerName = l.ConvertedCustomerId.HasValue ? (l.CompanyName ?? l.FullName) : null,
         ConvertedDate = l.ConvertedDate,
         Notes = l.Notes,
         IsConverted = l.ConvertedCustomerId.HasValue,

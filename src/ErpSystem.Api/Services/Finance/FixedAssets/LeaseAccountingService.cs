@@ -4,6 +4,8 @@ using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,18 +16,21 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         private readonly ApplicationDbContext _context;
         private readonly ICurrentUserService _currentUser;
         private readonly IFixedAssetService _fixedAssetService;
+        private readonly IDocumentNumberingService _documentNumberingService;
 
         public LeaseAccountingService(
             ApplicationDbContext context,
             ICurrentUserService currentUser,
-            IFixedAssetService fixedAssetService)
+            IFixedAssetService fixedAssetService,
+            IDocumentNumberingService documentNumberingService)
         {
             _context = context;
             _currentUser = currentUser;
             _fixedAssetService = fixedAssetService;
+            _documentNumberingService = documentNumberingService;
         }
 
-        private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
         private string UserName => _currentUser.UserName ?? "system";
 
         // ── Queries ──────────────────────────────────────────────────────
@@ -213,6 +218,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 var journal = new JournalEntry
                 {
                     TenantId = TenantId,
+                    JournalEntryNumber = await _documentNumberingService.GenerateAsync(
+                        DocumentNumberingModules.Finance,
+                        FinanceDocumentTypes.LeaseJournal,
+                        TenantId,
+                        lease.StartDate,
+                        nameof(JournalEntry)),
                     EntryDate = lease.StartDate,
                     ReferenceNumber = $"LEASE-ACT-{lease.ContractNumber}",
                     Description = $"Lease activation — ROU asset recognition: {lease.Description}",
@@ -302,6 +313,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             var journal = new JournalEntry
             {
                 TenantId = TenantId,
+                JournalEntryNumber = await _documentNumberingService.GenerateAsync(
+                    DocumentNumberingModules.Finance,
+                    FinanceDocumentTypes.LeaseJournal,
+                    TenantId,
+                    line.PeriodDate,
+                    nameof(JournalEntry)),
                 EntryDate = line.PeriodDate,
                 ReferenceNumber = $"LEASE-PMT-{lease.ContractNumber}-P{line.PeriodNumber}",
                 Description = $"Lease payment period {line.PeriodNumber}: {lease.ContractNumber}",

@@ -8,6 +8,9 @@ namespace ErpSystem.Core.Entities.Finance;
 public class BankStatement : BaseEntity
 {
     [Required]
+    public Guid TenantId { get; set; }
+
+    [Required]
     public Guid BankAccountId { get; set; }
 
     public DateTime StatementDate { get; set; }
@@ -41,6 +44,9 @@ public class BankStatement : BaseEntity
 /// </summary>
 public class BankStatementLine : BaseEntity
 {
+    [Required]
+    public Guid TenantId { get; set; }
+
     [Required]
     public Guid BankStatementId { get; set; }
 

@@ -62,6 +62,7 @@ interface FormData {
   customerType: string;
   creditLimit: string;
   paymentTerms: string;
+  paymentTermId: string;
   currency: string;
   defaultDiscount: string;
   priceList: string;
@@ -96,6 +97,7 @@ const initialFormData: FormData = {
   customerType: '',
   creditLimit: '',
   paymentTerms: '',
+  paymentTermId: '',
   currency: '',
   defaultDiscount: '',
   priceList: '',
@@ -186,6 +188,12 @@ export default function NewBusinessPartnerPage() {
         console.log('Business Partner New Page: Other data loaded - terms:', terms?.length, 'currencies:', currs?.length, 'partners:', partnersData?.length);
         
         setPaymentTerms(terms || []);
+        const defaultTerm = (terms || []).find((term) => term.isDefault);
+        if (defaultTerm) {
+          setFormData((current) => current.paymentTermId
+            ? current
+            : { ...current, paymentTermId: defaultTerm.id });
+        }
         setCurrencies(currs || []);
         // Show all active price lists
         setPriceLists(priceListsData || []);
@@ -243,14 +251,15 @@ export default function NewBusinessPartnerPage() {
         bankBranchCode: formData.bankBranchCode || undefined,
         notes: formData.notes || undefined,
         parentId: formData.parentId || undefined,
+        currency: formData.currency || undefined,
+        // Procurement/Finance boundary: submit the structured FK; the backend owns the legacy descriptor dual-write.
+        paymentTermId: formData.paymentTermId || undefined,
       };
 
       // Add customer-specific fields if partner type is Customer
       if (formData.partnerType === 'Customer') {
         createData.customerType = formData.customerType || undefined;
         createData.creditLimit = formData.creditLimit ? parseFloat(formData.creditLimit) : undefined;
-        createData.paymentTerms = formData.paymentTerms || undefined;
-        createData.currency = formData.currency || undefined;
         createData.defaultDiscount = formData.defaultDiscount ? parseFloat(formData.defaultDiscount) : undefined;
         createData.priceList = formData.priceList || undefined;
         createData.salesTerritory = formData.salesTerritory || undefined;
@@ -531,6 +540,24 @@ export default function NewBusinessPartnerPage() {
               <TabsContent value="banking" className="space-y-6 mt-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
+                    <Label htmlFor="currency">Default Currency</Label>
+                    <Select
+                      value={formData.currency}
+                      onValueChange={(value) => handleInputChange('currency', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select currency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(currencies || []).map((curr) => (
+                          <SelectItem key={curr.id} value={curr.code}>
+                            {curr.code} - {curr.name} ({curr.symbol})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="bankName" className="flex items-center gap-2">
                       <CreditCard className="w-4 h-4" />
                       Bank Name
@@ -541,6 +568,24 @@ export default function NewBusinessPartnerPage() {
                       onChange={(e) => handleInputChange('bankName', e.target.value)}
                       placeholder="Bank name"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="paymentTermId">Default Payment Terms</Label>
+                    <Select
+                      value={formData.paymentTermId}
+                      onValueChange={(value) => handleInputChange('paymentTermId', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select payment terms" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(paymentTerms || []).map((term) => (
+                          <SelectItem key={term.id} value={term.id}>
+                            {term.code} - {term.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="bankBranchCode">Branch Code</Label>
@@ -657,42 +702,6 @@ export default function NewBusinessPartnerPage() {
                           onChange={(e) => handleInputChange('creditLimit', e.target.value)}
                           placeholder="0.00"
                         />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="paymentTerms">Payment Terms</Label>
-                        <Select
-                          value={formData.paymentTerms}
-                          onValueChange={(value) => handleInputChange('paymentTerms', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select payment terms" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(paymentTerms || []).map((term) => (
-                              <SelectItem key={term.id} value={term.id}>
-                                {term.code} - {term.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="currency">Currency</Label>
-                        <Select
-                          value={formData.currency}
-                          onValueChange={(value) => handleInputChange('currency', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select currency" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(currencies || []).map((curr) => (
-                              <SelectItem key={curr.id} value={curr.id}>
-                                {curr.code} - {curr.name} ({curr.symbol})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="defaultDiscount" className="flex items-center gap-2">

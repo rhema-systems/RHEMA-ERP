@@ -69,6 +69,55 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Retrieves historical exchange rate trend data for a target currency.
+        /// </summary>
+        /// <param name="currencyCode">Target currency code to analyze (e.g., USD)</param>
+        /// <param name="months">Number of months to include, from today backwards</param>
+        /// <param name="baseCurrencyCode">Optional base currency code; defaults to tenant base currency</param>
+        /// <param name="movingAverageWindow">Number of trend points used for moving average and volatility</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Trend points for the requested currency and period</returns>
+        /// <response code="200">Returns exchange rate trend data</response>
+        /// <response code="400">Invalid currency or analysis settings</response>
+        /// <response code="500">Internal server error</response>
+        [HttpGet("trends/{currencyCode}")]
+        public async Task<ActionResult<IReadOnlyList<TrendAnalysisDto>>> GetExchangeRateTrends(
+            string currencyCode,
+            [FromQuery] int months = 6,
+            [FromQuery] string? baseCurrencyCode = null,
+            [FromQuery] int movingAverageWindow = 7,
+            CancellationToken cancellationToken = default)
+        {
+            if (months < 1 || months > 60)
+            {
+                return BadRequest("Months must be between 1 and 60.");
+            }
+
+            try
+            {
+                var endDate = DateTime.UtcNow.Date;
+                var startDate = endDate.AddMonths(-months);
+                var trends = await _exchangeRateService.GetTrendsAsync(
+                    baseCurrencyCode,
+                    currencyCode,
+                    startDate,
+                    endDate,
+                    movingAverageWindow: movingAverageWindow,
+                    cancellationToken: cancellationToken);
+
+                return Ok(trends);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Retrieves a specific exchange rate by ID.
         /// </summary>
         /// <remarks>

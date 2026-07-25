@@ -51,15 +51,24 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid FixedAssetId { get; set; }
         public string? AssetCode { get; set; }
         public string? AssetName { get; set; }
+        public Guid? AccountingBookId { get; set; }
+        public string BookClassification { get; set; } = "IFRS";
+        public Guid? FiscalPeriodId { get; set; }
         public DateTime ValuationDate { get; set; }
+        public DateTime AccountingDate { get; set; }
         public ValuationType ValuationType { get; set; }
         public decimal CarryingAmountBefore { get; set; }
+        public decimal AccumulatedDepreciationBefore { get; set; }
+        public decimal NetBookValueBefore { get; set; }
         public decimal FairValue { get; set; }
         public decimal CarryingAmountAfter { get; set; }
         public decimal RevaluationSurplus { get; set; }
         public decimal RevaluationDeficit { get; set; }
         public decimal ImpairmentLoss { get; set; }
         public decimal ImpairmentReversal { get; set; }
+        public decimal AdjustmentAmount { get; set; }
+        public decimal RevaluationSurplusApplied { get; set; }
+        public decimal RevaluationLossRecognized { get; set; }
         public int? RevisedUsefulLifeMonths { get; set; }
         public string? ValuerName { get; set; }
         public string? ValuationMethod { get; set; }
@@ -68,7 +77,13 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? Notes { get; set; }
         public bool IsPostedToGL { get; set; }
         public Guid? JournalEntryId { get; set; }
+        public Guid? PostingEventId { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public string? IdempotencyKey { get; set; }
         public DateTime? PostedDate { get; set; }
+        public DateTime? PostedAt { get; set; }
+        public DateTime? FailedAt { get; set; }
+        public string? FailureReason { get; set; }
         public DateTime CreatedAt { get; set; }
     }
 

@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, use } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,24 +11,29 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { ChevronRight, ArrowLeft, Lock, Unlock, FileText, CheckCircle, XCircle, Clock, Plus } from 'lucide-react';
+import { ChevronRight, Lock, FileText, CheckCircle, XCircle, Clock, Plus, UserRoundPlus, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { budgetDataService } from '@/services/finance/budget-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { BudgetScenario, BudgetReturn, CreateBudgetReturnDto } from '@/types/budget';
+import { workflowApiService } from '@/services/workflow-api.service';
+import type { BudgetScenario, BudgetReturn, BudgetAssignee, CreateBudgetReturnDto } from '@/types/budget';
 import type { SegmentStructure, SegmentLookupValue } from '@/types/finance';
 
 interface PageProps {
-    params: {
+    params: Promise<{
         id: string;
-    };
+    }>;
 }
 
 export default function ScenarioDetailsPage({ params }: PageProps) {
+    const { id } = use(params);
     const { toast } = useToast();
-    const router = useRouter();
+    const { hasPermission } = useAuth();
+    const canMaintainBudget = hasPermission('Finance.Budgeting.Write');
     const [scenario, setScenario] = useState<BudgetScenario | null>(null);
     const [returns, setReturns] = useState<BudgetReturn[]>([]);
+    const [assignees, setAssignees] = useState<BudgetAssignee[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
     // Create Return Dialog State
@@ -38,15 +42,19 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
     const [segmentValues, setSegmentValues] = useState<SegmentLookupValue[]>([]);
     const [selectedSegmentId, setSelectedSegmentId] = useState<string>('');
     const [newReturnData, setNewReturnData] = useState<CreateBudgetReturnDto>({
-        budgetScenarioId: params.id,
+        budgetScenarioId: id,
         segmentValueId: '',
         notes: ''
     });
+    const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
+    const [returnBeingAssigned, setReturnBeingAssigned] = useState<BudgetReturn | null>(null);
+    const [selectedAssigneeId, setSelectedAssigneeId] = useState('');
+    const [isAssigning, setIsAssigning] = useState(false);
 
     useEffect(() => {
         loadData();
         loadSegments();
-    }, [params.id]);
+    }, [id]);
 
     useEffect(() => {
         if (selectedSegmentId) {
@@ -57,12 +65,18 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
     const loadData = async () => {
         try {
             setIsLoading(true);
-            const [scenarioData, returnsData] = await Promise.all([
-                budgetDataService.getScenarioById(params.id),
-                budgetDataService.getReturns(params.id)
+            const [scenarioData, returnsData, assigneeData] = await Promise.all([
+                budgetDataService.getScenarioById(id),
+                budgetDataService.getReturns(id),
+                workflowApiService.getWorkflowDirectoryUsers().then(users => users.map(user => ({
+                    id: user.id,
+                    displayName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.userName || user.email || 'Unknown user',
+                    email: user.email || '',
+                })))
             ]);
             setScenario(scenarioData);
             setReturns(returnsData);
+            setAssignees(assigneeData);
         } catch (error) {
             console.error('Failed to load scenario details:', error);
             toast({
@@ -112,29 +126,82 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
         try {
             await budgetDataService.createReturn({
                 ...newReturnData,
-                budgetScenarioId: params.id
+                budgetScenarioId: id
             });
             toast({
                 title: 'Success',
                 description: 'Budget return created successfully.',
             });
             setIsCreateDialogOpen(false);
-            setNewReturnData(prev => ({ ...prev, segmentValueId: '', notes: '' }));
+            setNewReturnData(prev => ({ ...prev, segmentValueId: '', assignedToUserId: undefined, notes: '' }));
             loadData();
         } catch (error) {
             console.error('Failed to create return:', error);
             toast({
                 title: 'Error',
-                description: 'Failed to create budget return.',
+                description: error instanceof Error ? error.message : 'Failed to create budget return.',
                 variant: 'destructive',
             });
         }
     };
 
+    const openAssignmentDialog = (budgetReturn: BudgetReturn) => {
+        setReturnBeingAssigned(budgetReturn);
+        setSelectedAssigneeId(budgetReturn.assignedToUserId || '');
+        setIsAssignDialogOpen(true);
+    };
+
+    const handleAssignReturn = async () => {
+        if (!returnBeingAssigned || !selectedAssigneeId) {
+            toast({
+                title: 'Validation Error',
+                description: 'Please select a user.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        try {
+            setIsAssigning(true);
+            await budgetDataService.updateReturn(returnBeingAssigned.id, {
+                assignedToUserId: selectedAssigneeId,
+            });
+            toast({
+                title: 'Return assigned',
+                description: 'The budget worksheet has been assigned successfully.',
+            });
+            setIsAssignDialogOpen(false);
+            setReturnBeingAssigned(null);
+            setSelectedAssigneeId('');
+            await loadData();
+        } catch (error) {
+            toast({
+                title: 'Assignment failed',
+                description: error instanceof Error ? error.message : 'Failed to assign the budget worksheet.',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsAssigning(false);
+        }
+    };
+
+    const formatReturnDate = (budgetReturn: BudgetReturn) => {
+        const value = budgetReturn.updatedAt || budgetReturn.createdAt;
+        if (!value) return '—';
+
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString();
+    };
+
+    const getAssigneeName = (budgetReturn: BudgetReturn) =>
+        budgetReturn.assignedToUserName ||
+        assignees.find(user => user.id === budgetReturn.assignedToUserId)?.displayName ||
+        'Unassigned';
+
     const handleLockScenario = async () => {
         if (!confirm('Are you sure you want to lock this budget? This action cannot be easily undone.')) return;
         try {
-            await budgetDataService.lockScenario(params.id);
+            await budgetDataService.lockScenario(id);
             toast({ title: 'Success', description: 'Budget scenario locked.' });
             loadData();
         } catch (error) {
@@ -204,7 +271,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                                 <Lock className="mr-2 h-4 w-4" />
                                 Lock Budget
                             </Button>
-                            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                            {canMaintainBudget && <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
                                 <DialogTrigger asChild>
                                     <Button>
                                         <Plus className="mr-2 h-4 w-4" />
@@ -249,6 +316,28 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                                             </Select>
                                         </div>
                                         <div className="space-y-2">
+                                            <Label htmlFor="assignee">Assign To</Label>
+                                            <Select
+                                                value={newReturnData.assignedToUserId || 'unassigned'}
+                                                onValueChange={(value) => setNewReturnData(prev => ({
+                                                    ...prev,
+                                                    assignedToUserId: value === 'unassigned' ? undefined : value,
+                                                }))}
+                                            >
+                                                <SelectTrigger id="assignee">
+                                                    <SelectValue placeholder="Select User" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="unassigned">Leave unassigned</SelectItem>
+                                                    {assignees.map(user => (
+                                                        <SelectItem key={user.id} value={user.id}>
+                                                            {user.displayName}{user.email ? ` - ${user.email}` : ''}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
                                             <Label htmlFor="notes">Notes</Label>
                                             <Input
                                                 id="notes"
@@ -263,7 +352,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                                         <Button onClick={handleCreateReturn}>Create</Button>
                                     </DialogFooter>
                                 </DialogContent>
-                            </Dialog>
+                            </Dialog>}
                         </div>
                     )}
                 </div>
@@ -301,16 +390,24 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                                         <TableCell className="font-medium">
                                             {ret.segmentValueName || 'Unknown Segment'}
                                         </TableCell>
-                                        <TableCell>{ret.assignedToUserName || 'Unassigned'}</TableCell>
+                                        <TableCell>{getAssigneeName(ret)}</TableCell>
                                         <TableCell>{getStatusBadge(ret.status)}</TableCell>
-                                        <TableCell>{new Date(ret.updatedAt || ret.createdAt).toLocaleDateString()}</TableCell>
+                                        <TableCell>{formatReturnDate(ret)}</TableCell>
                                         <TableCell className="text-right">
-                                            <Link href={`/finance/budgeting/returns/${ret.id}`}>
-                                                <Button size="sm" variant="outline">
-                                                    Open Worksheet
-                                                    <ChevronRight className="ml-2 h-4 w-4" />
-                                                </Button>
-                                            </Link>
+                                            <div className="flex justify-end gap-2">
+                                                {canMaintainBudget && scenario.status !== 'Locked' && (ret.status === 'Draft' || ret.status === 'Rejected') && (
+                                                    <Button size="sm" variant="outline" onClick={() => openAssignmentDialog(ret)}>
+                                                        <UserRoundPlus className="mr-2 h-4 w-4" />
+                                                        {ret.assignedToUserId ? 'Reassign' : 'Assign'}
+                                                    </Button>
+                                                )}
+                                                <Link href={`/finance/budgeting/returns/${ret.id}`}>
+                                                    <Button size="sm" variant="outline">
+                                                        Open Worksheet
+                                                        <ChevronRight className="ml-2 h-4 w-4" />
+                                                    </Button>
+                                                </Link>
+                                            </div>
                                         </TableCell>
                                     </TableRow>
                                 ))
@@ -319,6 +416,50 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                     </Table>
                 </CardContent>
             </Card>
+
+            <Dialog open={isAssignDialogOpen} onOpenChange={(open) => {
+                setIsAssignDialogOpen(open);
+                if (!open) {
+                    setReturnBeingAssigned(null);
+                    setSelectedAssigneeId('');
+                }
+            }}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Assign Budget Return</DialogTitle>
+                        <DialogDescription>
+                            Select the user responsible for completing the {returnBeingAssigned?.segmentValueName || 'selected'} worksheet.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2 py-4">
+                        <Label htmlFor="return-assignee">Assigned To</Label>
+                        <Select value={selectedAssigneeId} onValueChange={setSelectedAssigneeId}>
+                            <SelectTrigger id="return-assignee">
+                                <SelectValue placeholder="Select User" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {assignees.map(user => (
+                                    <SelectItem key={user.id} value={user.id}>
+                                        {user.displayName}{user.email ? ` - ${user.email}` : ''}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        {assignees.length === 0 && (
+                            <p className="text-sm text-muted-foreground">No active users are available in this tenant.</p>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsAssignDialogOpen(false)} disabled={isAssigning}>
+                            Cancel
+                        </Button>
+                        <Button onClick={handleAssignReturn} disabled={isAssigning || !selectedAssigneeId}>
+                            {isAssigning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Assign Return
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

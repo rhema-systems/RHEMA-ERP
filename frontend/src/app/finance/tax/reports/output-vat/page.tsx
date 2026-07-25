@@ -29,7 +29,7 @@ export default function OutputVATRegisterPage() {
 
     const loadTransactions = async () => {
         try {
-            const data = await taxDataService.getSalesTransactions();
+            const data = await taxDataService.getSalesTransactions(startDate, endDate);
             setTransactions(data);
         } catch (error) {
             console.error('Failed to load transactions:', error);

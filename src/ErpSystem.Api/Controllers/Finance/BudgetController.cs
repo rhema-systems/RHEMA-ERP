@@ -28,9 +28,10 @@ namespace ErpSystem.Api.Controllers.Finance;
 /// - GL account references align with the Chart of Accounts module.
 /// - Approved budgets feed into Budget-vs-Actual variance reporting and commitment control.
 ///
-/// **Authorization:** All endpoints require the "Finance" policy.
+/// **Authorization:** All endpoints require authentication and the action-specific finance
+/// budgeting permission applied by <see cref="ErpSystem.Api.Authorization.FinancePermissionAuthorizationConvention"/>.
 /// </remarks>
-[Authorize(Policy = "Finance")]
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class BudgetController : ControllerBase
@@ -64,13 +65,13 @@ public class BudgetController : ControllerBase
     /// - Returns both locked and unlocked scenarios; the caller should inspect the IsLocked flag
     ///   to determine editability.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="fiscalYearId">The unique identifier of the fiscal year whose scenarios are requested.</param>
     /// <returns>A collection of <see cref="BudgetScenarioDto"/> for the specified fiscal year.</returns>
     /// <response code="200">Budget scenarios returned successfully.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     [HttpGet("scenarios/year/{fiscalYearId}")]
     public async Task<ActionResult<IEnumerable<BudgetScenarioDto>>> GetScenariosForYear(Guid fiscalYearId)
     {
@@ -93,13 +94,13 @@ public class BudgetController : ControllerBase
     /// **Business Rules:**
     /// - Returns 404 if the scenario does not exist or has been deleted.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="id">The unique identifier of the budget scenario.</param>
     /// <returns>The matching <see cref="BudgetScenarioDto"/>.</returns>
     /// <response code="200">Budget scenario returned successfully.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Scenario with the specified ID was not found.</response>
     [HttpGet("scenarios/{id}")]
     public async Task<ActionResult<BudgetScenarioDto>> GetScenario(Guid id)
@@ -132,14 +133,14 @@ public class BudgetController : ControllerBase
     /// - Scenario names should be unique within a fiscal year for clarity, though this may be
     ///   enforced at the service layer.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="dto">The details for the new budget scenario including name, description, and fiscal year reference.</param>
     /// <returns>The newly created <see cref="BudgetScenarioDto"/> with its assigned ID.</returns>
     /// <response code="201">Scenario created successfully. Location header points to the new resource.</response>
     /// <response code="400">Validation failure in the supplied DTO.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     [HttpPost("scenarios")]
     public async Task<ActionResult<BudgetScenarioDto>> CreateScenario(CreateBudgetScenarioDto dto)
     {
@@ -163,7 +164,7 @@ public class BudgetController : ControllerBase
     ///   <see cref="InvalidOperationException"/> resulting in a 400 response.
     /// - The route ID and DTO ID must match.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="id">The unique identifier of the scenario to update (must match <c>dto.Id</c>).</param>
     /// <param name="dto">The updated scenario details.</param>
@@ -171,7 +172,7 @@ public class BudgetController : ControllerBase
     /// <response code="200">Scenario updated successfully.</response>
     /// <response code="400">Route ID / DTO ID mismatch, validation failure, or scenario is locked.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Scenario with the specified ID was not found.</response>
     [HttpPut("scenarios/{id}")]
     public async Task<ActionResult<BudgetScenarioDto>> UpdateScenario(Guid id, UpdateBudgetScenarioDto dto)
@@ -209,14 +210,14 @@ public class BudgetController : ControllerBase
     ///   an <see cref="InvalidOperationException"/> resulting in a 400 response.
     /// - Returns 404 if the scenario does not exist.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="id">The unique identifier of the scenario to delete.</param>
     /// <returns>No content on success.</returns>
     /// <response code="204">Scenario deleted successfully.</response>
     /// <response code="400">Scenario is locked and cannot be deleted.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Scenario with the specified ID was not found.</response>
     [HttpDelete("scenarios/{id}")]
     public async Task<ActionResult> DeleteScenario(Guid id)
@@ -251,13 +252,13 @@ public class BudgetController : ControllerBase
     /// - All child returns should ideally be in an approved state before locking, though enforcement
     ///   depends on service-layer rules.
     ///
-    /// **Authorization:** Requires Finance policy. May require additional Budget.Lock permission in the future.
+    /// **Authorization:** Requires the mapped finance budget-lock permission.
     /// </remarks>
     /// <param name="id">The unique identifier of the scenario to lock.</param>
     /// <returns>The updated <see cref="BudgetScenarioDto"/> reflecting the locked state.</returns>
     /// <response code="200">Scenario locked successfully.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Scenario with the specified ID was not found.</response>
     [HttpPost("scenarios/{id}/lock")]
     public async Task<ActionResult<BudgetScenarioDto>> LockScenario(Guid id)
@@ -296,13 +297,13 @@ public class BudgetController : ControllerBase
     /// **Business Rules:**
     /// - Returns all budget returns regardless of status; the caller can filter by status client-side.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="scenarioId">The unique identifier of the parent budget scenario.</param>
     /// <returns>A collection of <see cref="BudgetReturnDto"/> for the specified scenario.</returns>
     /// <response code="200">Budget returns retrieved successfully.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     [HttpGet("scenarios/{scenarioId}/returns")]
     public async Task<ActionResult<IEnumerable<BudgetReturnDto>>> GetReturns(Guid scenarioId)
     {
@@ -324,13 +325,13 @@ public class BudgetController : ControllerBase
     /// **Business Rules:**
     /// - Returns 404 if the budget return does not exist.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="id">The unique identifier of the budget return.</param>
     /// <returns>The matching <see cref="BudgetReturnDto"/>.</returns>
     /// <response code="200">Budget return retrieved successfully.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Budget return with the specified ID was not found.</response>
     [HttpGet("returns/{id}")]
     public async Task<ActionResult<BudgetReturnDto>> GetReturn(Guid id)
@@ -362,19 +363,54 @@ public class BudgetController : ControllerBase
     /// - A new return is created in Draft status, allowing entries to be added and modified.
     /// - The parent scenario must be unlocked; creating returns under a locked scenario will fail.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="dto">The details for the new budget return including scenario reference and assignee information.</param>
     /// <returns>The newly created <see cref="BudgetReturnDto"/> with its assigned ID.</returns>
     /// <response code="201">Budget return created successfully. Location header points to the new resource.</response>
     /// <response code="400">Validation failure in the supplied DTO.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     [HttpPost("returns")]
     public async Task<ActionResult<BudgetReturnDto>> CreateReturn(CreateBudgetReturnDto dto)
     {
-        var result = await _budgetService.CreateReturnAsync(dto);
-        return CreatedAtAction(nameof(GetReturn), new { id = result.Id }, result);
+        try
+        {
+            var result = await _budgetService.CreateReturnAsync(dto);
+            return CreatedAtAction(nameof(GetReturn), new { id = result.Id }, result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Updates assignment metadata (assignee, approver, notes) on a Draft or Rejected budget return.
+    /// </summary>
+    /// <remarks>
+    /// Amounts change through the entries bulk-save endpoint; status changes through the
+    /// submit/approve/reject workflow endpoints.
+    /// </remarks>
+    /// <response code="200">Budget return updated successfully.</response>
+    /// <response code="400">The return has already been submitted or approved.</response>
+    /// <response code="404">Return with the specified ID was not found.</response>
+    [HttpPut("returns/{id}")]
+    public async Task<ActionResult<BudgetReturnDto>> UpdateReturn(Guid id, UpdateBudgetReturnDto dto)
+    {
+        try
+        {
+            var result = await _budgetService.UpdateReturnAsync(id, dto);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
     }
 
     /// <summary>
@@ -395,14 +431,14 @@ public class BudgetController : ControllerBase
     ///   approved return results in a 400 response.
     /// - The return should contain at least one entry before submission (enforcement may vary).
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="id">The unique identifier of the budget return to submit.</param>
     /// <returns>The updated <see cref="BudgetReturnDto"/> reflecting the Submitted status.</returns>
     /// <response code="200">Budget return submitted successfully.</response>
     /// <response code="400">Return is not in a submittable state (e.g., already submitted or approved).</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Budget return with the specified ID was not found.</response>
     [HttpPost("returns/{id}/submit")]
     public async Task<ActionResult<BudgetReturnDto>> SubmitReturn(Guid id)
@@ -440,14 +476,14 @@ public class BudgetController : ControllerBase
     ///   return results in a 400 response.
     /// - The approver's user ID is recorded for audit trail compliance.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="id">The unique identifier of the budget return to approve.</param>
     /// <returns>The updated <see cref="BudgetReturnDto"/> reflecting the Approved status.</returns>
     /// <response code="200">Budget return approved successfully.</response>
     /// <response code="400">Return is not in a state that can be approved (e.g., still in Draft or already approved).</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Budget return with the specified ID was not found.</response>
     [HttpPost("returns/{id}/approve")]
     public async Task<ActionResult<BudgetReturnDto>> ApproveReturn(Guid id)
@@ -487,7 +523,7 @@ public class BudgetController : ControllerBase
     /// - A rejection reason is required and stored for audit and communication purposes.
     /// - The rejector's user ID is recorded for audit trail compliance.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="id">The unique identifier of the budget return to reject.</param>
     /// <param name="reason">A free-text explanation of why the return is being rejected.</param>
@@ -495,7 +531,7 @@ public class BudgetController : ControllerBase
     /// <response code="200">Budget return rejected successfully.</response>
     /// <response code="400">Return is not in a rejectable state or reason is missing.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Budget return with the specified ID was not found.</response>
     [HttpPost("returns/{id}/reject")]
     public async Task<ActionResult<BudgetReturnDto>> RejectReturn(Guid id, [FromBody] string reason)
@@ -537,13 +573,13 @@ public class BudgetController : ControllerBase
     /// - All entries for the return are returned regardless of whether the return is in Draft,
     ///   Submitted, or Approved status.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="returnId">The unique identifier of the parent budget return.</param>
     /// <returns>A collection of <see cref="BudgetEntryDto"/> for the specified return.</returns>
     /// <response code="200">Budget entries retrieved successfully.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     [HttpGet("returns/{returnId}/entries")]
     public async Task<ActionResult<IEnumerable<BudgetEntryDto>>> GetEntries(Guid returnId)
     {
@@ -570,14 +606,14 @@ public class BudgetController : ControllerBase
     /// - Entry amounts must be non-negative where applicable (enforcement depends on service rules).
     /// - The operation is atomic: either all entries are saved or none are.
     ///
-    /// **Authorization:** Requires Finance policy.
+    /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="dto">The bulk save payload containing the return ID and collection of budget entries to persist.</param>
     /// <returns>No content on success.</returns>
     /// <response code="204">Entries saved successfully.</response>
     /// <response code="400">Validation failure, return is in a non-editable state, or business rule violation.</response>
     /// <response code="401">Not authenticated.</response>
-    /// <response code="403">User does not satisfy the Finance policy.</response>
+    /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">The parent budget return was not found.</response>
     [HttpPost("entries/bulk-save")]
     public async Task<ActionResult> BulkSaveEntries(BulkSaveBudgetEntriesDto dto)
@@ -590,6 +626,29 @@ public class BudgetController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    // ========================================================================
+    // ANALYTICS
+    // ========================================================================
+
+    /// <summary>
+    /// Base-currency revenue/expense totals for a scenario, aggregated from approved returns.
+    /// </summary>
+    /// <response code="200">Scenario summary returned successfully.</response>
+    /// <response code="404">Scenario with the specified ID was not found.</response>
+    [HttpGet("analytics/summary/{scenarioId}")]
+    public async Task<ActionResult<BudgetSummaryDto>> GetScenarioSummary(Guid scenarioId)
+    {
+        try
+        {
+            var result = await _budgetService.GetScenarioSummaryAsync(scenarioId);
+            return Ok(result);
         }
         catch (KeyNotFoundException)
         {

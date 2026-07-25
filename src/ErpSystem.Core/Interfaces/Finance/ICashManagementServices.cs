@@ -24,6 +24,12 @@ public interface ICashTransactionService
     Task<CashTransactionDto> CreateReceiptAsync(CreateCashReceiptDto dto);
     Task<CashTransactionDto> CreatePaymentAsync(CreateCashPaymentDto dto);
     Task<(CashTransactionDto FromTransaction, CashTransactionDto ToTransaction)> CreateTransferAsync(CreateBankTransferDto dto);
+    Task<CashTransactionDto> SubmitAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<CashTransactionDto> ApproveAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default);
+    Task<CashTransactionDto> RejectAsync(Guid id, string? reason = null, CancellationToken cancellationToken = default);
+    Task<CashTransactionDto> ReturnAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default);
+    Task<CashTransactionDto> CancelAsync(Guid id, string reason, CancellationToken cancellationToken = default);
+    Task<CashTransactionDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid id);
     Task MarkAsReconciledAsync(Guid id, Guid reconciliationId);
 }
@@ -34,8 +40,12 @@ public interface IBankReconciliationService
     Task<IEnumerable<BankReconciliationDto>> GetByBankAccountAsync(Guid bankAccountId);
     Task<BankReconciliationDto> StartReconciliationAsync(StartReconciliationDto dto);
     Task<IEnumerable<ReconciliationMatchDto>> AutoMatchAsync(Guid reconciliationId);
+    Task<IEnumerable<ReconciliationMatchDto>> GetMatchesAsync(Guid reconciliationId);
     Task<ReconciliationMatchDto> CreateManualMatchAsync(CreateManualMatchDto dto);
     Task<ReconciliationMatchDto> RemoveMatchAsync(Guid matchId);
+    Task<ReconciliationAdjustmentDto> CreateAndPostAdjustmentAsync(Guid reconciliationId, CreateReconciliationAdjustmentDto dto, CancellationToken cancellationToken = default);
+    Task<BankReconciliationDto> FinalizeReconciliationAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<BankReconciliationDto> CancelReconciliationAsync(Guid id, string reason, CancellationToken cancellationToken = default);
     Task<BankReconciliationDto> ApproveReconciliationAsync(Guid id);
     Task<ReconciliationSummaryDto> GetSummaryAsync(Guid id);
 }

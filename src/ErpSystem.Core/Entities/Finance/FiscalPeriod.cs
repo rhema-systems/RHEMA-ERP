@@ -105,6 +105,12 @@ public class FiscalPeriod : BusinessEntity
     public bool IsLocked { get; set; } = false;
 
     /// <summary>
+    /// True when a global lock has been converted to a partial lock so one or more
+    /// modules can post temporarily. Global lock metadata is retained while suspended.
+    /// </summary>
+    public bool IsGlobalLockSuspended { get; set; } = false;
+
+    /// <summary>
     /// Helper property to distinguish Finance lock from global lock if needed,
     /// but generally IsLocked handles the "Master Lock" (Finance Lock).
     /// </summary>

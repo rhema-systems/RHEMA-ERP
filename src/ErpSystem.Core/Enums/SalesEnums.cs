@@ -122,7 +122,8 @@ public enum CreditNoteStatus
     PendingApproval = 2,
     Approved = 3,
     Applied = 4,
-    Voided = 5
+    Voided = 5,
+    Reversed = 6
 }
 
 /// <summary>

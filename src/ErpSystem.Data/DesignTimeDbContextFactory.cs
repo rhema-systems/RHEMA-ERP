@@ -27,7 +27,8 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Applicatio
                 .SetBasePath(Path.GetDirectoryName(apiAppSettings)!)
                 .AddJsonFile("appsettings.json", optional: false)
                 .AddJsonFile("appsettings.Development.json", optional: true)
-                .AddUserSecrets("10483e62-e5b2-4652-8963-50f9500d3d5d") // Use the API project's user secrets ID
+                // Design-time model generation must not depend on a developer-specific
+                // user-secrets file. Environment variables can still override settings.
                 .AddEnvironmentVariables()
                 .Build();
             connectionString = config.GetConnectionString("DefaultConnection");

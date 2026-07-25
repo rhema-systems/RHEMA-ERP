@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -16,6 +17,7 @@ public class QuoteService : IQuoteService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<QuoteService> _logger;
+    private readonly IDocumentNumberingService _documentNumberingService;
 
     public QuoteService(
         IGenericRepository<Quote> quoteRepo,
@@ -23,7 +25,8 @@ public class QuoteService : IQuoteService
         ISalesOrderService salesOrderService,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
-        ILogger<QuoteService> logger)
+        ILogger<QuoteService> logger,
+        IDocumentNumberingService documentNumberingService)
     {
         _quoteRepo = quoteRepo;
         _lineRepo = lineRepo;
@@ -31,6 +34,7 @@ public class QuoteService : IQuoteService
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+        _documentNumberingService = documentNumberingService;
     }
 
     #region CRUD
@@ -301,8 +305,12 @@ public class QuoteService : IQuoteService
 
     private async Task<string> GenerateQuoteNumberAsync()
     {
-        var count = await _quoteRepo.CountAsync() + 1;
-        return $"QT-{count:D6}";
+        return await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Sales,
+            SalesDocumentTypes.Quote,
+            _currentUserProvider.TenantId,
+            DateTime.UtcNow,
+            nameof(Quote));
     }
 
     private static QuoteSummaryDto MapToSummaryDto(Quote q) => new()

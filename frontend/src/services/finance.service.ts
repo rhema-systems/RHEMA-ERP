@@ -36,7 +36,22 @@ import type {
   PeriodStatus,
   // Response Types
   PaginatedResponse,
+  TrendAnalysisDto,
 } from '@/types/finance';
+
+/**
+ * Returns the exchange-rate snapshot exactly as supplied by the Finance API.
+ * The API's `rate` is the value persisted and later validated by the posting engine;
+ * callers must not infer direction from its magnitude or substitute `inverseRate`.
+ */
+export function resolvePostingExchangeRate(rate: Pick<ExchangeRate, 'rate' | 'currentExchangeRate'>): number {
+  const resolvedRate = Number(rate.rate ?? rate.currentExchangeRate);
+  if (!Number.isFinite(resolvedRate) || resolvedRate <= 0) {
+    throw new Error('Finance API returned an invalid exchange-rate snapshot.');
+  }
+
+  return resolvedRate;
+}
 
 // ============================================
 // REQUEST/RESPONSE INTERFACES
@@ -51,6 +66,8 @@ export interface FinanceSettings {
   unrealizedGainLossAccountId?: string;
   realizedGainLossAccountId?: string;
   suspenseAccountId?: string;
+  discountAllowedAccountId?: string;
+  discountReceivedAccountId?: string;
 }
 
 // --- Currency ---
@@ -69,6 +86,12 @@ export interface CreateCurrencyDto {
   countryName?: string;
   isActive: boolean;
   isBaseCurrency: boolean;
+  createInitialExchangeRate?: boolean;
+  initialExchangeRate?: number;
+  initialExchangeRateDate?: string;
+  initialExchangeRateType?: string;
+  initialExchangeRateSource?: string;
+  initialExchangeRateSourceReference?: string;
 }
 
 export interface UpdateCurrencyDto extends CreateCurrencyDto {}
@@ -79,8 +102,13 @@ export interface CreateExchangeRateDto {
   targetCurrencyCode: string;
   rate: number;
   effectiveDate: string;
+  expiryDate?: string;
   rateType: ExchangeRateType;
   rateSource: string;
+  sourceName?: string;
+  sourceReference?: string;
+  isActive?: boolean;
+  approvalStatus?: string;
   comments?: string;
 }
 
@@ -113,7 +141,7 @@ export interface PeriodCloseRequestDto {
 
 export interface PeriodReopenRequestDto {
   fiscalPeriodId: string;
-  reopenReason: string;
+  reason: string;
 }
 
 export interface PeriodLockRequestDto {
@@ -483,6 +511,13 @@ class FinanceService {
   }
 
   /**
+   * Get exchange rate trends
+   */
+  async getExchangeRateTrends(currencyCode: string, months: number = 6): Promise<TrendAnalysisDto[]> {
+    return apiService.get<TrendAnalysisDto[]>(`${this.baseUrl}/exchange-rates/trends/${currencyCode}?months=${months}`);
+  }
+
+  /**
    * Create new exchange rate
    */
   async createExchangeRate(data: CreateExchangeRateDto): Promise<ExchangeRate> {
@@ -490,12 +525,13 @@ class FinanceService {
   }
 
   /**
-   * Bulk upload exchange rates
+   * Bulk upload exchange rates.
+   *
+   * The Finance API accepts the parsed DTO list as JSON. File parsing stays in the
+   * upload UI so CSV/XLSX validation can report row-level guidance before posting.
    */
-  async bulkUploadExchangeRates(file: File): Promise<{ imported: number; errors: string[] }> {
-    const formData = new FormData();
-    formData.append('file', file);
-    return apiService.post(`${this.baseUrl}/exchange-rates/bulk`, formData);
+  async bulkUploadExchangeRates(rates: CreateExchangeRateDto[]): Promise<ExchangeRate[]> {
+    return apiService.post<ExchangeRate[]>(`${this.baseUrl}/exchange-rates/bulk`, rates);
   }
 
   /**
@@ -545,7 +581,7 @@ class FinanceService {
    * Get fiscal periods (optionally filtered by year)
    */
   async getFiscalPeriods(fiscalYearId?: string): Promise<FiscalPeriod[]> {
-    const query = fiscalYearId ? `?fiscalYearId=${fiscalYearId}` : '';
+    const query = fiscalYearId ? `?yearId=${fiscalYearId}` : '';
     return apiService.get<FiscalPeriod[]>(`${this.baseUrl}/fiscal-periods${query}`);
   }
 
@@ -630,7 +666,11 @@ class FinanceService {
    */
   async getAllAccounts(filters?: AccountFilters): Promise<Account[]> {
     const result = await this.getAccounts({ pageSize: 10000, filters });
-    return result.items;
+    if (Array.isArray(result)) {
+      return result;
+    }
+
+    return result.items || (result as any).data || [];
   }
 
   /**
@@ -871,8 +911,8 @@ class FinanceService {
   /**
    * Reverse posted journal entry
    */
-  async reverseJournalEntry(id: string, reason: string): Promise<JournalEntry> {
-    return apiService.post<JournalEntry>(`${this.baseUrl}/journal-entries/${id}/reverse`, { reason });
+  async reverseJournalEntry(id: string, reason: string, reversalDate?: string): Promise<JournalEntry> {
+    return apiService.post<JournalEntry>(`${this.baseUrl}/journal-entries/${id}/reverse`, { reason, reversalDate });
   }
 
   // ==========================================

@@ -5,14 +5,18 @@
 
 import type {
     Account,
+    AccountingBook,
     Currency,
     ExchangeRate,
     FiscalYear,
     FiscalPeriod,
     JournalEntry,
+    JournalEntryAttachment,
+    FinanceJournalAuditLog,
     FinanceSettings,
     SegmentStructure,
     SegmentLookupValue,
+    ReportingSegmentOptionsResponse,
     AccountCurrencyLink,
     CreateAccountDto,
     UpdateAccountDto,
@@ -20,27 +24,87 @@ import type {
     UpdateCurrencyDto,
     CreateExchangeRateDto,
     CreateJournalEntryDto,
+    CreateOpeningBalanceBatchDto,
+    UpdateOpeningBalanceBatchDto,
+    CreateSubledgerAdjustmentJournalDto,
     UpdateFinanceSettingsDto,
     AddCurrencyLinkDto,
     ModuleDefinition,
+    OpeningBalanceBatch,
+    OpeningBalanceDiagnostic,
+    OpeningBalanceValidationResult,
+    ReverseSubledgerAdjustmentJournalDto,
     CreateFiscalYearDto,
+    BalanceSheetReportDto,
+    BalanceSheetRequestDto,
+    CashFlowStatementReportDto,
+    CashFlowStatementRequestDto,
+    DetailedLedgerReportDto,
+    DetailedLedgerRequestDto,
+    IncomeStatementReportDto,
+    IncomeStatementRequestDto,
+    MultiCurrencyDetailReportDto,
+    MultiCurrencyDetailRequestDto,
+    SubledgerAdjustmentJournal,
+    SubledgerModule,
+    TrialBalanceReportDto,
+    TrialBalanceRequestDto,
 } from '@/types/finance';
+import { appendFinanceSegmentFilters } from '@/lib/finance/report-segment-filters';
+import type { FinanceDashboardData } from '@/types/finance-dashboard';
 
 import { apiService } from '@/services/api.service';
+import { normalizeJournalEntry, normalizeJournalEntries } from '@/lib/finance/journal-entry-normalizer';
+
+// Mirrors the backend PeriodCloseResultDto returned by fiscal year close/reopen.
+export interface FiscalYearCloseResult {
+    success: boolean;
+    message: string;
+    fiscalPeriodId: string;
+    periodName: string;
+    closedDate?: string | null;
+    closedByUserName?: string | null;
+    errors: string[];
+}
 
 // =============================================================================
 // FINANCE DATA SERVICE
 // =============================================================================
 
 class FinanceDataService {
+    private resolveBackendFileUrl(url?: string): string {
+        if (!url) return '';
+        if (/^https?:\/\//i.test(url)) return url;
+
+        // Use the deployed origin when NEXT_PUBLIC_API_URL is not configured.
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || '/api';
+        const backendBase = apiBase.replace(/\/api\/?$/, '');
+        const normalized = url.startsWith('/') ? url : `/${url}`;
+        return `${backendBase}${normalized}`;
+    }
+
+    // ===== DASHBOARD =====
+    async getDashboard(): Promise<FinanceDashboardData> {
+        return apiService.get<FinanceDashboardData>('/finance/dashboard');
+    }
+
     // ===== ACCOUNTS =====
+
+    async getAccountingBooks(includeInactive = false): Promise<AccountingBook[]> {
+        const queryParams = new URLSearchParams();
+        if (includeInactive) queryParams.append('includeInactive', 'true');
+
+        const endpoint = `/finance/accounting-books${queryParams.toString() ? `?${queryParams}` : ''}`;
+        return apiService.get<AccountingBook[]>(endpoint);
+    }
 
     async getAccounts(filters?: {
         accountType?: string;
         status?: string;
         isMultiCurrency?: boolean;
         coaType?: 'Standard' | 'Segmented';
-        search?: string;
+        page?: number;
+        pageSize?: number;
         take?: number;
     }): Promise<Account[]> {
         const queryParams = new URLSearchParams();
@@ -48,7 +112,8 @@ class FinanceDataService {
         if (filters?.status) queryParams.append('status', filters.status);
         if (filters?.isMultiCurrency !== undefined) queryParams.append('isMultiCurrency', String(filters.isMultiCurrency));
         if (filters?.coaType) queryParams.append('coaType', filters.coaType);
-        if (filters?.search) queryParams.append('search', filters.search);
+        if (filters?.page !== undefined) queryParams.append('page', String(filters.page));
+        if (filters?.pageSize !== undefined) queryParams.append('pageSize', String(filters.pageSize));
         if (filters?.take !== undefined) queryParams.append('take', String(filters.take));
 
         const endpoint = `/finance/accounts${queryParams.toString() ? `?${queryParams}` : ''}`;
@@ -147,7 +212,7 @@ class FinanceDataService {
         return apiService.post<FiscalYear>('/finance/fiscal-years', dto);
     }
 
-    async updateFiscalYear(id: string, dto: Partial<FiscalYear>): Promise<FiscalYear> {
+    async updateFiscalYear(id: string, dto: { fiscalYearName?: string; notes?: string }): Promise<FiscalYear> {
         return apiService.put<FiscalYear>(`/finance/fiscal-years/${id}`, dto);
     }
 
@@ -155,19 +220,23 @@ class FinanceDataService {
         return apiService.delete(`/finance/fiscal-years/${id}`);
     }
 
-    async closeFiscalYear(id: string): Promise<FiscalYear> {
-        return apiService.put<FiscalYear>(`/finance/fiscal-years/${id}/close`, {});
+    async closeFiscalYear(
+        id: string,
+        options?: { retainedEarningsAccountId?: string; closingNotes?: string }
+    ): Promise<FiscalYearCloseResult> {
+        // The retained earnings account defaults from Finance Settings when omitted.
+        return apiService.post<FiscalYearCloseResult>(`/finance/fiscal-years/${id}/close`, options ?? {});
     }
 
-    async reopenFiscalYear(id: string): Promise<FiscalYear> {
-        return apiService.put<FiscalYear>(`/finance/fiscal-years/${id}/reopen`, {});
+    async reopenFiscalYear(id: string, reason: string): Promise<FiscalYearCloseResult> {
+        return apiService.post<FiscalYearCloseResult>(`/finance/fiscal-years/${id}/reopen`, { reason });
     }
 
     // ===== FISCAL PERIODS =====
 
     async getFiscalPeriods(fiscalYearId?: string): Promise<FiscalPeriod[]> {
         const endpoint = fiscalYearId
-            ? `/finance/fiscal-periods?fiscalYearId=${fiscalYearId}`
+            ? `/finance/fiscal-periods?yearId=${fiscalYearId}`
             : '/finance/fiscal-periods';
         return apiService.get<FiscalPeriod[]>(endpoint);
     }
@@ -176,8 +245,13 @@ class FinanceDataService {
         return apiService.get<FiscalPeriod>(`/finance/fiscal-periods/${id}`);
     }
 
+    async openFiscalPeriod(id: string, reason: string): Promise<FiscalPeriod> {
+        // The backend models opening a closed period as "reopen" (FiscalPeriodController).
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/reopen`, { reason });
+    }
+
     async closeFiscalPeriod(id: string): Promise<FiscalPeriod> {
-        return apiService.put<FiscalPeriod>(`/finance/fiscal-periods/${id}/close`, {});
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/close`, {});
     }
 
     // ===== MODULE LOCKING =====
@@ -190,12 +264,12 @@ class FinanceDataService {
         return apiService.post(`/finance/periods/${periodId}/lock-module`, { moduleCode, reason });
     }
 
-    async unlockPeriodForModule(periodId: string, moduleCode: string, reason: string): Promise<void> {
-        return apiService.post(`/finance/periods/${periodId}/unlock-module`, { moduleCode, reason });
+    async unlockPeriodForModule(periodId: string, moduleCode: string, reason: string, reopenUntilUtc: string): Promise<void> {
+        return apiService.post(`/finance/periods/${periodId}/unlock-module`, { moduleCode, reason, reopenUntilUtc });
     }
 
-    async reopenFiscalPeriod(id: string): Promise<FiscalPeriod> {
-        return apiService.put<FiscalPeriod>(`/finance/fiscal-periods/${id}/reopen`, {});
+    async reopenFiscalPeriod(id: string, reason: string): Promise<FiscalPeriod> {
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/reopen`, { reason });
     }
 
     // ===== JOURNAL ENTRIES =====
@@ -206,6 +280,7 @@ class FinanceDataService {
         endDate?: string;
         fiscalYearId?: string;
         fiscalPeriodId?: string;
+        sourceModule?: string;
     }): Promise<JournalEntry[]> {
         const queryParams = new URLSearchParams();
         if (filters?.status) queryParams.append('status', filters.status);
@@ -213,33 +288,56 @@ class FinanceDataService {
         if (filters?.endDate) queryParams.append('endDate', filters.endDate);
         if (filters?.fiscalYearId) queryParams.append('fiscalYearId', filters.fiscalYearId);
         if (filters?.fiscalPeriodId) queryParams.append('fiscalPeriodId', filters.fiscalPeriodId);
+        if (filters?.sourceModule) queryParams.append('sourceModule', filters.sourceModule);
 
         const endpoint = `/finance/journal-entries${queryParams.toString() ? `?${queryParams}` : ''}`;
-        return apiService.get<JournalEntry[]>(endpoint);
+        const raw = await apiService.get<any[]>(endpoint);
+        const entries = normalizeJournalEntries(raw);
+        if (!filters?.sourceModule) return entries;
+
+        return entries.filter((entry) =>
+            (entry.sourceModule || '').toUpperCase() === filters.sourceModule?.toUpperCase()
+        );
+    }
+
+    async getPendingJournalApprovals(): Promise<JournalEntry[]> {
+        const raw = await apiService.get<any[]>('/finance/journal-entries/pending-approvals');
+        return normalizeJournalEntries(raw);
     }
 
     async getJournalEntryById(id: string): Promise<JournalEntry> {
-        return apiService.get<JournalEntry>(`/finance/journal-entries/${id}`);
+        const raw = await apiService.get<any>(`/finance/journal-entries/${id}`);
+        return normalizeJournalEntry(raw);
+    }
+
+    async getJournalEntryAuditTrail(id: string): Promise<FinanceJournalAuditLog[]> {
+        return apiService.get<FinanceJournalAuditLog[]>(`/finance/journal-entries/${id}/audit-trail`);
     }
 
     async createJournalEntry(dto: CreateJournalEntryDto): Promise<JournalEntry> {
-        return apiService.post<JournalEntry>('/finance/journal-entries', dto);
+        const raw = await apiService.post<any>('/finance/journal-entries', dto);
+        return normalizeJournalEntry(raw);
     }
 
-    async updateJournalEntry(id: string, dto: Partial<JournalEntry>): Promise<JournalEntry> {
-        return apiService.put<JournalEntry>(`/finance/journal-entries/${id}`, dto);
+    async updateJournalEntry(id: string, dto: Partial<CreateJournalEntryDto>): Promise<JournalEntry> {
+        const raw = await apiService.put<any>(`/finance/journal-entries/${id}`, dto);
+        return normalizeJournalEntry(raw);
     }
 
     async deleteJournalEntry(id: string): Promise<void> {
         return apiService.delete(`/finance/journal-entries/${id}`);
     }
 
-    async postJournalEntry(id: string): Promise<JournalEntry> {
-        return apiService.put<JournalEntry>(`/finance/journal-entries/${id}/post`, {});
+    async postJournalEntry(id: string): Promise<void> {
+        await apiService.post(`/finance/journal-entries/${id}/post`, {});
     }
 
-    async reverseJournalEntry(id: string): Promise<JournalEntry> {
-        return apiService.post<JournalEntry>(`/finance/journal-entries/${id}/reverse`, {});
+    async reverseJournalEntry(id: string, reason: string, reversalDate?: string): Promise<JournalEntry> {
+        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/reverse`, {
+            reason,
+            reversalDate: reversalDate || undefined,
+        });
+        return normalizeJournalEntry(raw);
     }
 
     async getNextJournalNumber(): Promise<string> {
@@ -247,18 +345,121 @@ class FinanceDataService {
         return response.number;
     }
 
+    // ===== SUBLEDGER ADJUSTMENT JOURNALS =====
+
+    async getSubledgerAdjustmentJournals(module?: SubledgerModule): Promise<SubledgerAdjustmentJournal[]> {
+        const queryParams = new URLSearchParams();
+        if (module) queryParams.append('module', module);
+
+        const endpoint = `/finance/subledger-adjustment-journals${queryParams.toString() ? `?${queryParams}` : ''}`;
+        return apiService.get<SubledgerAdjustmentJournal[]>(endpoint);
+    }
+
+    async createSubledgerAdjustmentJournal(dto: CreateSubledgerAdjustmentJournalDto): Promise<SubledgerAdjustmentJournal> {
+        return apiService.post<SubledgerAdjustmentJournal>('/finance/subledger-adjustment-journals', dto);
+    }
+
+    async reverseSubledgerAdjustmentJournal(
+        id: string,
+        dto: ReverseSubledgerAdjustmentJournalDto
+    ): Promise<SubledgerAdjustmentJournal> {
+        return apiService.post<SubledgerAdjustmentJournal>(`/finance/subledger-adjustment-journals/${id}/reverse`, dto);
+    }
+
     // ===== JOURNAL ENTRY APPROVAL WORKFLOW =====
 
     async requestJournalEntryApproval(id: string): Promise<JournalEntry> {
-        return apiService.post<JournalEntry>(`/finance/journal-entries/${id}/request-approval`);
+        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/request-approval`);
+        return normalizeJournalEntry(raw);
+    }
+
+    async withdrawJournalEntryApproval(id: string, reason?: string): Promise<JournalEntry> {
+        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/withdraw-approval`, {
+            reason: reason || 'Approval request withdrawn.',
+        });
+        return normalizeJournalEntry(raw);
     }
 
     async approveJournalEntry(id: string, comments?: string): Promise<JournalEntry> {
-        return apiService.post<JournalEntry>(`/finance/journal-entries/${id}/approve`, { comments });
+        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/approve`, { comments });
+        return normalizeJournalEntry(raw);
     }
 
     async rejectJournalEntry(id: string, reason: string): Promise<JournalEntry> {
-        return apiService.post<JournalEntry>(`/finance/journal-entries/${id}/reject`, { reason });
+        const raw = await apiService.post<any>(`/finance/journal-entries/${id}/reject`, { reason });
+        return normalizeJournalEntry(raw);
+    }
+
+    // ===== CONTROLLED OPENING BALANCES =====
+
+    async createOpeningBalanceBatch(dto: CreateOpeningBalanceBatchDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances', dto);
+    }
+
+    async getOpeningBalanceBatches(): Promise<OpeningBalanceBatch[]> {
+        return apiService.get<OpeningBalanceBatch[]>('/finance/opening-balances');
+    }
+
+    async getOpeningBalanceBatch(batchId: string): Promise<OpeningBalanceBatch> {
+        return apiService.get<OpeningBalanceBatch>(`/finance/opening-balances/${batchId}`);
+    }
+
+    async updateOpeningBalanceBatch(batchId: string, dto: UpdateOpeningBalanceBatchDto): Promise<OpeningBalanceBatch> {
+        return apiService.put<OpeningBalanceBatch>(`/finance/opening-balances/${batchId}`, dto);
+    }
+
+    async validateOpeningBalanceBatch(batchId: string): Promise<OpeningBalanceValidationResult> {
+        return apiService.post<OpeningBalanceValidationResult>(`/finance/opening-balances/${batchId}/validate`, {});
+    }
+
+    async submitOpeningBalanceBatch(batchId: string, comment?: string): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>(`/finance/opening-balances/${batchId}/submit`, { comment });
+    }
+
+    async postOpeningBalanceBatch(batchId: string, comment?: string): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>(`/finance/opening-balances/${batchId}/post`, { comment });
+    }
+
+    async getOpeningBalanceDiagnostics(): Promise<OpeningBalanceDiagnostic[]> {
+        return apiService.get<OpeningBalanceDiagnostic[]>('/finance/opening-balances/diagnostics');
+    }
+
+    // ===== ATTACHMENTS =====
+
+    async uploadAttachment(file: File, referenceType: string, referenceId: string): Promise<{ fileId: string; url: string; name: string }> {
+        const formData = new FormData();
+        formData.append('file', file);
+        // Use the canonical single-file upload endpoint.
+        // Keep a specific category so backend policies/audits can distinguish finance journal attachments.
+        formData.append('category', 'finance-journal-attachments');
+        const response = await apiService.post<any>(`/fileupload/single`, formData);
+
+        const fileId = response.fileId || response.id || response.fileUploadRecordId;
+        if (!fileId) {
+            throw new Error('Upload succeeded but fileId was not returned by server.');
+        }
+
+        return {
+            fileId,
+            url: this.resolveBackendFileUrl(response.url || response.fileUrl || response.publicUrl || ''),
+            name: response.fileName || file.name,
+        };
+    }
+
+    async linkJournalEntryAttachment(journalEntryId: string, fileId: string): Promise<void> {
+        return apiService.post(`/finance/journal-entries/${journalEntryId}/attachments/${fileId}`, {});
+    }
+
+    async unlinkJournalEntryAttachment(journalEntryId: string, fileId: string): Promise<void> {
+        return apiService.delete(`/finance/journal-entries/${journalEntryId}/attachments/${fileId}`);
+    }
+
+    async getJournalEntryAttachments(journalEntryId: string): Promise<JournalEntryAttachment[]> {
+        const attachments = await apiService.get<JournalEntryAttachment[]>(`/finance/journal-entries/${journalEntryId}/attachments`);
+        return (attachments || []).map(a => ({
+            ...a,
+            fileUrl: this.resolveBackendFileUrl(a.fileUrl),
+        }));
     }
 
     // ===== FINANCE SETTINGS =====
@@ -271,10 +472,96 @@ class FinanceDataService {
         return apiService.put<FinanceSettings>('/finance/settings', dto);
     }
 
+    // ===== FINANCIAL STATEMENTS =====
+
+    async getTrialBalance(params: TrialBalanceRequestDto): Promise<TrialBalanceReportDto> {
+        const queryParams = new URLSearchParams();
+        if (params.asAtDate) queryParams.append('asAtDate', params.asAtDate);
+        if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
+        if (params.includeZeroBalances !== undefined) queryParams.append('includeZeroBalances', String(params.includeZeroBalances));
+        appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+
+        return apiService.get<TrialBalanceReportDto>(`/finance/statements/trial-balance?${queryParams}`);
+    }
+
+    async getDetailedLedger(params: DetailedLedgerRequestDto): Promise<DetailedLedgerReportDto> {
+        const queryParams = new URLSearchParams();
+        queryParams.append('startDate', params.startDate);
+        queryParams.append('endDate', params.endDate);
+        if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
+        if (params.includeReversed !== undefined) queryParams.append('includeReversed', String(params.includeReversed));
+        if (params.includeOpeningBalances !== undefined) queryParams.append('includeOpeningBalances', String(params.includeOpeningBalances));
+        if (params.accountIds && params.accountIds.length > 0) {
+            params.accountIds.forEach(accountId => queryParams.append('accountIds', accountId));
+        }
+
+        return apiService.get<DetailedLedgerReportDto>(`/finance/statements/detailed-ledger?${queryParams}`);
+    }
+
+    async getIncomeStatement(params: IncomeStatementRequestDto): Promise<IncomeStatementReportDto> {
+        const queryParams = new URLSearchParams();
+        if (params.periodStart) queryParams.append('periodStart', params.periodStart);
+        if (params.periodEnd) queryParams.append('periodEnd', params.periodEnd);
+        if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
+        if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
+        appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+
+        return apiService.get<IncomeStatementReportDto>(`/finance/statements/income-statement?${queryParams}`);
+    }
+
+    async getBalanceSheet(params: BalanceSheetRequestDto): Promise<BalanceSheetReportDto> {
+        const queryParams = new URLSearchParams();
+        if (params.asAtDate) queryParams.append('asAtDate', params.asAtDate);
+        if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
+        if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
+        appendFinanceSegmentFilters(queryParams, params.segmentFilters);
+
+        return apiService.get<BalanceSheetReportDto>(`/finance/statements/balance-sheet?${queryParams}`);
+    }
+
+    async getCashFlowStatement(params: CashFlowStatementRequestDto): Promise<CashFlowStatementReportDto> {
+        const queryParams = new URLSearchParams();
+        queryParams.append('periodStart', params.periodStart);
+        queryParams.append('periodEnd', params.periodEnd);
+        if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
+        if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
+        if (params.method) queryParams.append('method', params.method);
+
+        return apiService.get<CashFlowStatementReportDto>(`/finance/statements/cash-flow?${queryParams}`);
+    }
+
+    async getMultiCurrencyDetailReport(params: MultiCurrencyDetailRequestDto): Promise<MultiCurrencyDetailReportDto> {
+        const queryParams = new URLSearchParams();
+        queryParams.append('startDate', params.startDate);
+        queryParams.append('endDate', params.endDate);
+        if (params.accountId) queryParams.append('accountId', params.accountId);
+        if (params.currencyCode) queryParams.append('currencyCode', params.currencyCode);
+        if (params.includeRevaluation !== undefined) queryParams.append('includeRevaluation', String(params.includeRevaluation));
+
+        return apiService.get<MultiCurrencyDetailReportDto>(`/finance/statements/multi-currency-detail?${queryParams}`);
+    }
+
     // ===== SEGMENT STRUCTURES =====
 
     async getSegmentStructures(): Promise<SegmentStructure[]> {
         return apiService.get<SegmentStructure[]>('/finance/segments');
+    }
+
+    async getReportingDimensions(): Promise<SegmentStructure[]> {
+        return apiService.get<SegmentStructure[]>('/finance/segments/reporting-dimensions');
+    }
+
+    async getReportingSegmentOptions(
+        segmentId: string,
+        search: string,
+        take = 50,
+        signal?: AbortSignal
+    ): Promise<ReportingSegmentOptionsResponse> {
+        const endpoint = `/finance/segments/${segmentId}/reporting-options`;
+        const query = { search, take };
+        return signal
+            ? apiService.getWithSignal<ReportingSegmentOptionsResponse>(endpoint, query, signal)
+            : apiService.get<ReportingSegmentOptionsResponse>(endpoint, query);
     }
 
     async getSegmentStructureById(id: string): Promise<SegmentStructure> {
@@ -326,7 +613,13 @@ class FinanceDataService {
     }
 
     async addAccountCurrencyLink(accountId: string, dto: AddCurrencyLinkDto): Promise<AccountCurrencyLink> {
-        return apiService.post<AccountCurrencyLink>(`/finance/accounts/${accountId}/currencies`, { ...dto, accountId });
+        const currencyCode = (dto.currencyCode || dto.linkedCurrencyCode || '').trim().toUpperCase();
+        return apiService.post<AccountCurrencyLink>(`/finance/accounts/${accountId}/currencies`, {
+            ...dto,
+            accountId,
+            currencyCode,
+            linkedCurrencyCode: currencyCode,
+        });
     }
 
     async removeAccountCurrencyLink(accountId: string, currencyCode: string): Promise<void> {

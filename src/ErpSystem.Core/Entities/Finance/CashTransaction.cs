@@ -9,6 +9,9 @@ namespace ErpSystem.Core.Entities.Finance;
 public class CashTransaction : BaseEntity
 {
     [Required]
+    public Guid TenantId { get; set; }
+
+    [Required]
     [MaxLength(50)]
     public string TransactionNumber { get; set; } = string.Empty;
 
@@ -73,6 +76,37 @@ public class CashTransaction : BaseEntity
     /// </summary>
     public bool IsPosted { get; set; }
 
+    public CashTransactionApprovalStatus ApprovalStatus { get; set; } = CashTransactionApprovalStatus.Captured;
+
+    public Guid? WorkflowInstanceId { get; set; }
+
+    public DateTime? SubmittedAt { get; set; }
+
+    public Guid? SubmittedById { get; set; }
+
+    public DateTime? ApprovedAt { get; set; }
+
+    public Guid? ApprovedById { get; set; }
+
+    public DateTime? RejectedAt { get; set; }
+
+    public Guid? RejectedById { get; set; }
+
+    [MaxLength(1000)]
+    public string? ApprovalComments { get; set; }
+
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
+
+    public DateTime? CancelledAt { get; set; }
+
+    public Guid? CancelledById { get; set; }
+
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+
+    public Guid? JournalEntryId { get; set; }
+
     public DateTime? PostedDate { get; set; }
 
     public Guid? PostedBy { get; set; }
@@ -83,4 +117,5 @@ public class CashTransaction : BaseEntity
     public virtual PaymentMethod? PaymentMethod { get; set; }
     public virtual Cheque? Cheque { get; set; }
     public virtual BankReconciliation? Reconciliation { get; set; }
+    public virtual JournalEntry? JournalEntry { get; set; }
 }

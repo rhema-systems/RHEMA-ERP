@@ -21,7 +21,8 @@ import { FileSpreadsheet, Save, X, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import type { UnitAccount, UnitType } from '@/types/unit-accounts';
-import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
+import { useDocumentSequence } from '@/hooks/use-document-sequence';
+import { FinanceDocumentTypes } from '@/types/document-numbering';
 
 // MOCK DATA
 const MOCK_UNIT_TYPES: UnitType[] = [
@@ -53,20 +54,7 @@ export default function NewUnitJournalEntryPage() {
         description: '',
         sourceDocument: '',
     });
-    const [entryNumber, setEntryNumber] = useState('Generating...');
-
-    useEffect(() => {
-        const loadNumber = async () => {
-            try {
-                const num = await unitAccountsDataService.getNextEntryNumber();
-                setEntryNumber(num + '*');
-            } catch (e) {
-                console.error("Failed to load entry number", e);
-                setEntryNumber("Unavailable");
-            }
-        };
-        loadNumber();
-    }, []);
+    const entrySequence = useDocumentSequence('Finance', FinanceDocumentTypes.UnitJournalEntry);
     const [lines, setLines] = useState<EntryLine[]>([
         { id: '1', unitAccountId: '', quantity: '', description: '' },
     ]);
@@ -188,10 +176,11 @@ export default function NewUnitJournalEntryPage() {
                                 <Label htmlFor="entryId">Entry ID</Label>
                                 <Input
                                     id="entryId"
-                                    value={entryNumber}
+                                    value={entrySequence.sampleNumber}
                                     disabled
                                     className="bg-muted font-mono"
                                 />
+                                <p className="text-xs text-muted-foreground">Assigned by the configured Unit Journal Entry sequence when saved.</p>
                             </div>
 
                             {/* Entry Date */}

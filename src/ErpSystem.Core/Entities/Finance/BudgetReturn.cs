@@ -23,7 +23,7 @@ public class BudgetReturn : TenantEntity
     public Guid? SegmentValueId { get; set; }
 
     [ForeignKey(nameof(SegmentValueId))]
-    public virtual AccountSegmentValue? SegmentValue { get; set; }
+    public virtual SegmentLookupValue? SegmentValue { get; set; }
 
     /// <summary>
     /// User assigned to prepare this budget return.

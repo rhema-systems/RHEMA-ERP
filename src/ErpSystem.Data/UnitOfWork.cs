@@ -5,6 +5,7 @@ using ErpSystem.Data.Repositories;
 using ErpSystem.Data.Repositories.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using System.Data;
 
 namespace ErpSystem.Data;
 
@@ -13,6 +14,7 @@ public class UnitOfWork : IUnitOfWork
     private readonly ApplicationDbContext _context;
     private readonly Dictionary<Type, object> _repositories;
     private IDbContextTransaction? _transaction;
+    private bool _ownsTransaction;
     private bool _disposed = false;
     private bool _useExecutionStrategy = false;
 
@@ -51,13 +53,28 @@ public class UnitOfWork : IUnitOfWork
     }
 
     public async Task BeginTransactionAsync(CancellationToken cancellationToken = default)
+        => await BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+
+    public async Task BeginTransactionAsync(
+        IsolationLevel isolationLevel,
+        CancellationToken cancellationToken = default)
     {
         if (_transaction != null)
         {
             throw new InvalidOperationException("Transaction is already started");
         }
-        
-        _transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
+        // A Finance posting service may be called inside a controller-owned transaction.
+        // Join it rather than starting or committing a nested transaction that would split the unit of work.
+        if (_context.Database.CurrentTransaction != null)
+        {
+            _transaction = _context.Database.CurrentTransaction;
+            _ownsTransaction = false;
+            return;
+        }
+
+        _transaction = await _context.Database.BeginTransactionAsync(isolationLevel, cancellationToken);
+        _ownsTransaction = true;
     }
 
     public async Task CommitAsync(CancellationToken cancellationToken = default)
@@ -70,25 +87,31 @@ public class UnitOfWork : IUnitOfWork
         try
         {
             await SaveChangesAsync(cancellationToken);
-            await _transaction.CommitAsync(cancellationToken);
+            if (_ownsTransaction)
+            {
+                await _transaction.CommitAsync(cancellationToken);
+            }
         }
         catch
         {
             // Rollback only if transaction is still active
-            if (_transaction != null)
+            if (_transaction != null && _ownsTransaction)
             {
                 await _transaction.RollbackAsync(cancellationToken);
+                _context.ChangeTracker.Clear();
             }
             throw;
         }
         finally
         {
             // Dispose transaction if it still exists
-            if (_transaction != null)
+            if (_transaction != null && _ownsTransaction)
             {
                 await _transaction.DisposeAsync();
-                _transaction = null;
             }
+
+            _transaction = null;
+            _ownsTransaction = false;
         }
     }
 
@@ -101,12 +124,22 @@ public class UnitOfWork : IUnitOfWork
 
         try
         {
-            await _transaction.RollbackAsync(cancellationToken);
+            if (_ownsTransaction)
+            {
+                await _transaction.RollbackAsync(cancellationToken);
+                // Do not allow a later audit save on this DbContext to re-persist entities
+                // that were rolled back from the transactional Finance posting attempt.
+                _context.ChangeTracker.Clear();
+            }
         }
         finally
         {
-            await _transaction.DisposeAsync();
+            if (_ownsTransaction)
+            {
+                await _transaction.DisposeAsync();
+            }
             _transaction = null;
+            _ownsTransaction = false;
         }
     }
 

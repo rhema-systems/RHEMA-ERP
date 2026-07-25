@@ -39,6 +39,8 @@ export interface BusinessPartnerDto {
   approvalStatus?: string; // Pending, Approved, Rejected
   isPreferred: boolean;
   isBlacklisted: boolean;
+  currency?: string;
+  paymentTermId?: string;
   performanceRating?: number;
   createdAt: string;
   updatedAt?: string;
@@ -86,6 +88,7 @@ export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
   geographicCoverage?: string;
   // Other
   paymentTerms?: string;
+  paymentTermId?: string;
   currency?: string;
   creditLimit?: number;
   insuranceCoverageAmount?: number;
@@ -259,6 +262,7 @@ export interface CreateBusinessPartnerDto {
   bankAccountNumber?: string;
   bankBranchCode?: string;
   paymentTerms?: string;
+  paymentTermId?: string;
   currency?: string;
   creditLimit?: number;
   notes?: string;
@@ -300,6 +304,7 @@ export interface UpdateBusinessPartnerDto {
   specializationIds?: string[];
   currency?: string;
   paymentTerms?: string;
+  paymentTermId?: string;
   priceList?: string;
   parentId?: string;
 }

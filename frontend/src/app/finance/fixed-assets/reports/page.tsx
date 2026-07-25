@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
     BarChart3,
     FileText,
@@ -45,13 +46,19 @@ import {
 import { toast } from 'sonner';
 
 const REPORT_TYPES = [
-    { id: 'AssetRegister', title: 'Asset Register', description: 'Comprehensive list of all fixed assets with their current valuation.' },
-    { id: 'DisposalReport', title: 'Disposal Activity', description: 'Summary of all assets disposed of within a period, including gain/loss.' },
-    { id: 'TransferReport', title: 'Transfer History', description: 'Audit trail of movements between locations and departments.' },
+    { id: 'AssetRegister', slug: 'asset-register', title: 'Asset Register', description: 'Comprehensive list of all fixed assets with their current valuation.' },
+    { id: 'DisposalReport', slug: 'disposal-activity', title: 'Disposal Activity', description: 'Summary of all assets disposed of within a period, including gain/loss.' },
+    { id: 'TransferReport', slug: 'transfer-history', title: 'Transfer History', description: 'Audit trail of movements between locations and departments.' },
 ];
 
+function getReportType(reportSlug: string | null) {
+    return REPORT_TYPES.find((report) => report.slug === reportSlug || report.id === reportSlug) ?? REPORT_TYPES[0];
+}
+
 export default function FixedAssetReportsPage() {
-    const [selectedReport, setSelectedReport] = useState(REPORT_TYPES[0]);
+    const searchParams = useSearchParams();
+    const reportParam = searchParams.get('report');
+    const [selectedReport, setSelectedReport] = useState(() => getReportType(reportParam));
     const [loading, setLoading] = useState(false);
     const [exporting, setExporting] = useState<string | null>(null);
     const [reportData, setReportData] = useState<any>(null);
@@ -87,6 +94,10 @@ export default function FixedAssetReportsPage() {
     useEffect(() => {
         fetchReportData();
     }, [selectedReport, filters.status, filters.categoryId]);
+
+    useEffect(() => {
+        setSelectedReport(getReportType(reportParam));
+    }, [reportParam]);
 
     const handleDownload = async (format: 'pdf' | 'excel') => {
         setExporting(format);
@@ -349,7 +360,7 @@ export default function FixedAssetReportsPage() {
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="All">All Status</SelectItem>
-                                            {['Draft', 'Active', 'FullyDepreciated', 'Disposed', 'HeldForSale'].map((s) => (
+                                            {['Draft', 'Active', 'FullyDepreciated', 'Disposed', 'HeldForSale', 'WrittenOff', 'UnderConstruction', 'OnHold'].map((s) => (
                                                 <SelectItem key={s} value={s}>{s}</SelectItem>
                                             ))}
                                         </SelectContent>

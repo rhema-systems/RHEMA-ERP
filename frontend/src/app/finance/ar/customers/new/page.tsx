@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -26,6 +26,7 @@ import {
     SelectValue
 } from '@/components/ui/select';
 import { arService } from '@/services/ar-service';
+import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 import { useToast } from '@/components/ui/use-toast';
 import { CustomerCreateRequest } from '@/types/ar';
 
@@ -39,6 +40,7 @@ const customerSchema = z.object({
     country: z.string().optional(),
     creditLimit: z.coerce.number().min(0, 'Credit limit must be positive'),
     paymentTermsDays: z.coerce.number().min(0, 'Payment terms must be positive'),
+    paymentTermId: z.string().optional(),
     priceGroup: z.string().optional(),
     currencyCode: z.string().min(3, 'Currency is required'),
 });
@@ -51,7 +53,11 @@ export default function NewCustomerPage() {
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
     // In a real app, this would come from a useTenant() hook or similar global state
-    const [baseCurrencySymbol, setBaseCurrencySymbol] = useState('₵');
+    const [baseCurrencySymbol, setBaseCurrencySymbol] = useState('GHS');
+    const { data: paymentTerms = [], isLoading: paymentTermsLoading } = useQuery({
+        queryKey: ['payment-terms', 'Customer'],
+        queryFn: () => paymentTermService.getByApplicableTo('Customer'),
+    });
 
     const form = useForm<CustomerFormValues>({
         resolver: zodResolver(customerSchema) as any,
@@ -65,10 +71,26 @@ export default function NewCustomerPage() {
             country: '',
             creditLimit: 0,
             paymentTermsDays: 30,
+            paymentTermId: 'none',
             priceGroup: 'Standard',
             currencyCode: 'GHS' // Default to GHS or Tenant Base
         },
     });
+
+    const formatPaymentTerm = (term: PaymentTermListDto) => {
+        const discountText = term.discountPercent && term.discountDays
+            ? `, ${term.discountPercent}% if paid in ${term.discountDays} days`
+            : '';
+        return `${term.code} - ${term.name} (${term.dueDays} days${discountText})`;
+    };
+
+    const handlePaymentTermChange = (value: string) => {
+        form.setValue('paymentTermId', value);
+        const selectedTerm = paymentTerms.find(term => term.id === value);
+        if (selectedTerm) {
+            form.setValue('paymentTermsDays', selectedTerm.dueDays);
+        }
+    };
 
     const onSubmit = async (data: CustomerFormValues) => {
         setIsSubmitting(true);
@@ -77,6 +99,7 @@ export default function NewCustomerPage() {
                 ...data,
                 creditLimit: Number(data.creditLimit),
                 paymentTermsDays: Number(data.paymentTermsDays),
+                paymentTermId: data.paymentTermId === 'none' ? null : data.paymentTermId,
             };
 
             await arService.createCustomer(payload);
@@ -242,12 +265,30 @@ export default function NewCustomerPage() {
 
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label htmlFor="paymentTermsDays">Payment Terms (Days)</Label>
+                                <Label htmlFor="paymentTermId">Payment Term</Label>
+                                <Select
+                                    onValueChange={handlePaymentTermChange}
+                                    defaultValue={form.getValues('paymentTermId')}
+                                >
+                                    <SelectTrigger id="paymentTermId">
+                                        <SelectValue placeholder={paymentTermsLoading ? 'Loading terms...' : 'Select payment term'} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">Manual / No configured term</SelectItem>
+                                        {paymentTerms.map(term => (
+                                            <SelectItem key={term.id} value={term.id}>
+                                                {formatPaymentTerm(term)}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <Label htmlFor="paymentTermsDays" className="text-xs text-muted-foreground">Due Days</Label>
                                 <Input
                                     id="paymentTermsDays"
                                     type="number"
                                     {...form.register('paymentTermsDays')}
                                 />
+                                <p className="text-xs text-muted-foreground">The selected finance term controls default due-date behavior for AR invoices.</p>
                                 {form.formState.errors.paymentTermsDays && (
                                     <p className="text-sm text-red-500">{form.formState.errors.paymentTermsDays.message}</p>
                                 )}

@@ -43,6 +43,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime? EffectiveFrom { get; set; }
         public TaxApplicability Applicability { get; set; } = TaxApplicability.Both;
         public TaxCategory Category { get; set; } = TaxCategory.Standard;
+        public bool IsActive { get; set; } = true;
         public bool IsInputTaxDeductible { get; set; } = true;
         public decimal? ThresholdAmount { get; set; }
         public Guid? TaxPayableAccountId { get; set; }
@@ -57,6 +58,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? Name { get; set; }
         public string? Description { get; set; }
         public decimal? Rate { get; set; }
+        public DateTime? EffectiveFrom { get; set; }
         public TaxApplicability? Applicability { get; set; }
         public TaxCategory? Category { get; set; }
         public bool? IsActive { get; set; }
@@ -64,6 +66,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? ThresholdAmount { get; set; }
         public Guid? TaxPayableAccountId { get; set; }
         public Guid? TaxReceivableAccountId { get; set; }
+        public bool ClearTaxPayableAccount { get; set; }
+        public bool ClearTaxReceivableAccount { get; set; }
     }
 
     #endregion
@@ -263,6 +267,10 @@ namespace ErpSystem.Core.DTOs.Finance
         public string TaxCode { get; set; } = string.Empty;
         public string TaxName { get; set; } = string.Empty;
         public TaxCategory TaxCategory { get; set; }
+        public Guid? TaxGroupComponentId { get; set; }
+        public Guid? TaxPayableAccountId { get; set; }
+        public Guid? TaxReceivableAccountId { get; set; }
+        public DateTime EffectiveFrom { get; set; }
         public decimal TaxableAmount { get; set; }
         public decimal TaxRate { get; set; }
         public decimal TaxAmount { get; set; }

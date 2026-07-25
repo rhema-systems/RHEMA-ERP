@@ -42,6 +42,7 @@ export interface VendorInvoice {
     apAccountName?: string;
     notes?: string;
     reference?: string;
+    isOpeningBalance: boolean;
     approvedByUserId?: string;
     approvedAt?: string;
     lineItems: VendorInvoiceLineItem[];
@@ -60,14 +61,17 @@ export interface VendorInvoiceCreateRequest {
     currencyCode?: string;
     exchangeRate?: number;
     paymentTermsDays?: number;
+    paymentTermId?: string;
     earlyPaymentDiscountPercentage?: number;
     earlyPaymentDiscountDueDate?: string;
+    taxGroupId?: string | null;
     withholdingTaxRate?: number;
     matchingType?: InvoiceMatchingType;
     expenseAccountId?: string;
     apAccountId?: string;
     notes?: string;
     reference?: string;
+    isOpeningBalance?: boolean;
     lineItems: VendorInvoiceLineItemCreateRequest[];
 }
 
@@ -89,6 +93,7 @@ export interface VendorInvoiceLineItem {
     taxRate: number;
     taxAmount: number;
     taxCode?: string;
+    taxGroupId?: string | null;
     discountPercentage: number;
     discountAmount: number;
     unit?: string;
@@ -109,6 +114,7 @@ export interface VendorInvoiceLineItemCreateRequest {
     unitPrice: number;
     taxRate?: number;
     taxCode?: string;
+    taxGroupId?: string | null;
     discountPercentage?: number;
     unit?: string;
     inventoryItemId?: string;
@@ -129,6 +135,8 @@ export interface VendorPayment {
     allocatedAmount: number;
     unallocatedAmount: number;
     paymentMethod: VendorPaymentMethod;
+    paymentMethodId?: string;
+    paymentMethodName?: string;
     currencyCode: string;
     exchangeRate: number;
     bankAccountId?: string;
@@ -141,6 +149,7 @@ export interface VendorPayment {
     status: VendorPaymentStatus;
     paymentBatchId?: string;
     paymentBatchNumber?: string;
+    journalEntryId?: string;
     notes?: string;
     createdAt: string;
     allocations: VendorPaymentAllocation[];
@@ -151,12 +160,18 @@ export interface VendorPaymentCreateRequest {
     paymentDate: string;
     totalAmount: number;
     paymentMethod?: VendorPaymentMethod;
+    paymentMethodId?: string;
     currencyCode?: string;
     exchangeRate?: number;
     bankAccountId?: string;
     chequeNumber?: string;
     transactionReference?: string;
     withholdingTaxRate?: number;
+    withholdingTaxAmount?: number;
+    withholdingTaxId?: string;
+    withholdingTaxAccountId?: string | null;
+    withholdingCertificateNumber?: string;
+    withholdingCertificateDate?: string;
     notes?: string;
     allocations?: VendorPaymentAllocationCreateRequest[];
 }
@@ -192,6 +207,8 @@ export interface PaymentBatch {
     totalAmount: number;
     paymentCount: number;
     paymentMethod: VendorPaymentMethod;
+    paymentMethodId?: string;
+    paymentMethodName?: string;
     bankAccountId?: string;
     bankAccountName?: string;
     status: PaymentBatchStatus;
@@ -208,6 +225,7 @@ export interface PaymentBatchCreateRequest {
     dueDateFrom?: string;
     dueDateTo?: string;
     paymentMethod?: VendorPaymentMethod;
+    paymentMethodId?: string;
     bankAccountId?: string;
     notes?: string;
     invoiceIds: string[];
@@ -260,6 +278,46 @@ export interface ApAgingInvoice {
     balanceAmount: number;
     daysOutstanding: number;
     agingBucket: string;
+}
+
+export interface SupplierDetailedLedgerReport {
+    fromDate: string;
+    toDate: string;
+    currencyCode: string;
+    showSupplierCurrency: boolean;
+    totalOpeningBalance: number;
+    totalDebits: number;
+    totalCredits: number;
+    totalClosingBalance: number;
+    warnings: string[];
+    suppliers: SupplierDetailedLedgerAccount[];
+}
+
+export interface SupplierDetailedLedgerAccount {
+    supplierId: string;
+    businessPartnerId?: string;
+    supplierCode: string;
+    supplierName: string;
+    currencyCode: string;
+    openingBalance: number;
+    totalDebits: number;
+    totalCredits: number;
+    closingBalance: number;
+    lines: SupplierDetailedLedgerLine[];
+}
+
+export interface SupplierDetailedLedgerLine {
+    sourceDocumentId: string;
+    transactionDate: string;
+    transactionType: string;
+    documentNumber: string;
+    reference?: string;
+    description: string;
+    transactionCurrencyCode: string;
+    exchangeRate: number;
+    debit: number;
+    credit: number;
+    runningBalance: number;
 }
 
 export interface CashRequirementForecast {

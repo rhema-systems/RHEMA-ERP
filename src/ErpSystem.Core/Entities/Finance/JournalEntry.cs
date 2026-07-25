@@ -67,6 +67,13 @@ public class JournalEntry : BusinessEntity
     public string? SourceModule { get; set; }
 
     /// <summary>
+    /// Top-level application module that originated the posting. This remains stable
+    /// even when the journal is processed by a Finance subledger such as AP or AR.
+    /// </summary>
+    [MaxLength(10)]
+    public string? OriginModuleCode { get; set; }
+
+    /// <summary>
     /// Source document ID from originating module.
     /// Enables drill-down from GL to source transaction.
     /// </summary>
@@ -132,12 +139,12 @@ public class JournalEntry : BusinessEntity
     public string? PrimaryCurrency { get; set; }
 
     // ========================================================================
-    // CLASSIFICATION SUPPORT (IFRS/Base/Local)
+    // CLASSIFICATION SUPPORT (IFRS / LOCAL_STATUTORY / MANAGEMENT)
     // ========================================================================
     
     /// <summary>
     /// Book classification for parallel accounting frameworks.
-    /// Values: "IFRS", "Base", "Local"
+    /// Values: "IFRS", "LOCAL_STATUTORY", "MANAGEMENT"
     /// All transaction lines inherit this classification.
     /// </summary>
     [Required]
@@ -275,6 +282,11 @@ public class JournalEntry : BusinessEntity
     /// </summary>
     public Guid? RecurringTemplateId { get; set; }
 
+    [ForeignKey(nameof(RecurringTemplateId))]
+    public virtual RecurringJournalTemplate? RecurringTemplate { get; set; }
+
+    public virtual RecurringJournalOccurrence? RecurringOccurrence { get; set; }
+
     /// <summary>
     /// Recurrence frequency: "Monthly", "Quarterly", "Annually"
     /// NULL if not recurring.
@@ -378,6 +390,11 @@ public class JournalEntry : BusinessEntity
     public virtual ICollection<AccountTransaction> Transactions { get; set; } = new List<AccountTransaction>();
 
     /// <summary>
+    /// Collection of attachments linked to this journal entry.
+    /// </summary>
+    public virtual ICollection<JournalEntryAttachment> Attachments { get; set; } = new List<JournalEntryAttachment>();
+
+    /// <summary>
     /// The fiscal period this entry belongs to.
     /// Used for period locking and financial reporting.
     /// </summary>
@@ -397,4 +414,21 @@ public class JournalEntry : BusinessEntity
     /// </summary>
     [ForeignKey(nameof(OriginalJournalEntryId))]
     public virtual JournalEntry? OriginalJournalEntry { get; set; }
+}
+
+/// <summary>
+/// Link between a Journal Entry and a FileUploadRecord.
+/// </summary>
+[Table("JournalEntryAttachments")]
+public class JournalEntryAttachment : TenantEntity
+{
+    public Guid JournalEntryId { get; set; }
+    
+    [ForeignKey(nameof(JournalEntryId))]
+    public virtual JournalEntry JournalEntry { get; set; } = null!;
+
+    public Guid FileUploadRecordId { get; set; }
+    
+    [ForeignKey(nameof(FileUploadRecordId))]
+    public virtual FileUploadRecord FileUploadRecord { get; set; } = null!;
 }

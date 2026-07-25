@@ -9,6 +9,9 @@ namespace ErpSystem.Core.Entities.Finance;
 public class BankAccount : BaseEntity
 {
     [Required]
+    public Guid TenantId { get; set; }
+
+    [Required]
     [MaxLength(50)]
     public string AccountNumber { get; set; } = string.Empty;
 

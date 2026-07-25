@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 
@@ -18,6 +19,11 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Required]
         public DateTime TransferDate { get; set; }
 
+        public DateTime? AccountingDate { get; set; }
+
+        public Guid? FiscalPeriodId { get; set; }
+        public virtual FiscalPeriod? FiscalPeriod { get; set; }
+
         [Required]
         public AssetTransferType TransferType { get; set; } = AssetTransferType.Internal;
 
@@ -31,6 +37,12 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public Guid? FromCustodianId { get; set; }
         public virtual Employee? FromCustodian { get; set; }
 
+        [MaxLength(500)]
+        public string? FromSegmentString { get; set; }
+
+        public Guid? FromSegmentLookupValueId { get; set; }
+        public virtual SegmentLookupValue? FromSegmentLookupValue { get; set; }
+
         // --- To Details (Target) ---
         [Required]
         [MaxLength(500)]
@@ -38,6 +50,12 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public Guid? ToCustodianId { get; set; }
         public virtual Employee? ToCustodian { get; set; }
+
+        [MaxLength(500)]
+        public string? ToSegmentString { get; set; }
+
+        public Guid? ToSegmentLookupValueId { get; set; }
+        public virtual SegmentLookupValue? ToSegmentLookupValue { get; set; }
 
         [MaxLength(1000)]
         public string? Reason { get; set; }
@@ -53,10 +71,30 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public DateTime? ApprovedAt { get; set; }
 
+        public DateTime? CompletedAt { get; set; }
+
+        public DateTime? PostedAt { get; set; }
+
+        public DateTime? FailedAt { get; set; }
+
         [MaxLength(2000)]
         public string? Comments { get; set; }
 
+        [MaxLength(1000)]
+        public string? FailureReason { get; set; }
+
         [MaxLength(50)]
         public string? ReferenceNumber { get; set; } // Internal transfer order number
+
+        [MaxLength(150)]
+        public string? IdempotencyKey { get; set; }
+
+        public Guid? WorkflowInstanceId { get; set; }
+
+        public Guid? JournalEntryId { get; set; }
+        public virtual JournalEntry? JournalEntry { get; set; }
+
+        public Guid? PostingEventId { get; set; }
+        public virtual FinancePostingEvent? PostingEvent { get; set; }
     }
 }

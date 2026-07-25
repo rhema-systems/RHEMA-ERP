@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,7 @@ public class DeliveryService : IDeliveryService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<DeliveryService> _logger;
+    private readonly IDocumentNumberingService _documentNumberingService;
 
     public DeliveryService(
         IGenericRepository<DeliveryNote> deliveryRepo,
@@ -28,7 +30,8 @@ public class DeliveryService : IDeliveryService
         IGenericRepository<SalesOrderStatusHistory> historyRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
-        ILogger<DeliveryService> logger)
+        ILogger<DeliveryService> logger,
+        IDocumentNumberingService documentNumberingService)
     {
         _deliveryRepo = deliveryRepo;
         _lineRepo = lineRepo;
@@ -38,6 +41,7 @@ public class DeliveryService : IDeliveryService
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+        _documentNumberingService = documentNumberingService;
     }
 
     #region CRUD
@@ -70,6 +74,8 @@ public class DeliveryService : IDeliveryService
                 InternalNotes = dto.InternalNotes,
                 ExternalNotes = dto.ExternalNotes,
                 Currency = so.Currency,
+                ExchangeRate = so.ExchangeRate,
+                TaxGroupId = so.TaxGroupId,
                 TenantId = so.TenantId,
                 ReferenceNumber = so.DocumentNumber // Reference back to SO
             };
@@ -101,7 +107,13 @@ public class DeliveryService : IDeliveryService
                     SerialNumber = lineDto.SerialNumber ?? soLine.SerialNumber,
                     LotNumber = lineDto.LotNumber ?? soLine.LotNumber,
                     Notes = lineDto.Notes,
-                    TenantId = so.TenantId
+                    TenantId = so.TenantId,
+                    UnitPrice = soLine.UnitPrice,
+                    DiscountPercentage = soLine.DiscountPercentage,
+                    DiscountAmount = soLine.DiscountAmount,
+                    TaxRate = soLine.TaxRate,
+                    TaxAmount = soLine.TaxAmount,
+                    TaxGroupId = soLine.TaxGroupId
                 };
 
                 await _lineRepo.AddAsync(line);
@@ -386,8 +398,12 @@ public class DeliveryService : IDeliveryService
 
     public async Task<string> GenerateDeliveryNumberAsync()
     {
-        var count = await _deliveryRepo.CountAsync() + 1;
-        return $"DN-{count:D6}";
+        return await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Sales,
+            SalesDocumentTypes.DeliveryNote,
+            _currentUserProvider.TenantId,
+            DateTime.UtcNow,
+            nameof(DeliveryNote));
     }
 
     public async Task<List<SalesOrderLineDto>> GetDeliverableLinesAsync(Guid salesOrderId)
@@ -466,6 +482,8 @@ public class DeliveryService : IDeliveryService
         ExternalNotes = dn.ExternalNotes,
         TotalAmount = dn.TotalAmount,
         Currency = dn.Currency,
+        ExchangeRate = dn.ExchangeRate,
+        TaxGroupId = dn.TaxGroupId,
         LineCount = dn.Lines?.Count ?? 0,
         Lines = dn.Lines?.Select(l => new DeliveryNoteLineDto
         {
@@ -486,7 +504,13 @@ public class DeliveryService : IDeliveryService
             LotNumber = l.LotNumber,
             IsStockDeducted = l.IsStockDeducted,
             Notes = l.Notes,
-            DamageNotes = l.DamageNotes
+            DamageNotes = l.DamageNotes,
+            UnitPrice = l.UnitPrice,
+            DiscountPercentage = l.DiscountPercentage,
+            DiscountAmount = l.DiscountAmount,
+            TaxRate = l.TaxRate,
+            TaxAmount = l.TaxAmount,
+            TaxGroupId = l.TaxGroupId
         }).ToList() ?? new()
     };
 

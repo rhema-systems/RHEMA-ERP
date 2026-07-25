@@ -18,6 +18,10 @@ import type {
     CreateCashPaymentDto,
     CreateBankTransferDto,
     StartReconciliationDto,
+    CreateManualMatchDto,
+    CreateReconciliationAdjustmentDto,
+    ReconciliationAdjustment,
+    ReconciliationSummary,
     CashPositionSummary,
     CashFlowSummary,
 } from '@/types/cash-management';
@@ -39,7 +43,7 @@ class CashManagementDataService {
     }
 
     async getActiveBankAccounts(): Promise<BankAccount[]> {
-        return apiService.get<BankAccount[]>('/finance/bank-accounts?isActive=true');
+        return apiService.get<BankAccount[]>('/finance/bank-accounts/active');
     }
 
     async createBankAccount(dto: CreateBankAccountDto): Promise<BankAccount> {
@@ -71,27 +75,27 @@ class CashManagementDataService {
 
     async getTransactionsByBankAccount(bankAccountId: string, fromDate?: string, toDate?: string): Promise<CashTransaction[]> {
         const queryParams = new URLSearchParams();
-        queryParams.append('bankAccountId', bankAccountId);
         if (fromDate) queryParams.append('fromDate', fromDate);
         if (toDate) queryParams.append('toDate', toDate);
 
-        return apiService.get<CashTransaction[]>(`/finance/cash-transactions?${queryParams}`);
+        const endpoint = `/finance/cash-transactions/bank-account/${bankAccountId}${queryParams.toString() ? `?${queryParams}` : ''}`;
+        return apiService.get<CashTransaction[]>(endpoint);
     }
 
     async getUnreconciledTransactions(bankAccountId: string): Promise<CashTransaction[]> {
-        return apiService.get<CashTransaction[]>(`/finance/cash-transactions?bankAccountId=${bankAccountId}&reconciled=false`);
+        return apiService.get<CashTransaction[]>(`/finance/cash-transactions/bank-account/${bankAccountId}/unreconciled`);
     }
 
     async createCashReceipt(dto: CreateCashReceiptDto): Promise<CashTransaction> {
-        return apiService.post<CashTransaction>('/finance/cash-transactions/receipts', dto);
+        return apiService.post<CashTransaction>('/finance/cash-transactions/receipt', dto);
     }
 
     async createCashPayment(dto: CreateCashPaymentDto): Promise<CashTransaction> {
-        return apiService.post<CashTransaction>('/finance/cash-transactions/payments', dto);
+        return apiService.post<CashTransaction>('/finance/cash-transactions/payment', dto);
     }
 
     async createBankTransfer(dto: CreateBankTransferDto): Promise<{ fromTransaction: CashTransaction; toTransaction: CashTransaction }> {
-        return apiService.post<{ fromTransaction: CashTransaction; toTransaction: CashTransaction }>('/finance/cash-transactions/transfers', dto);
+        return apiService.post<{ fromTransaction: CashTransaction; toTransaction: CashTransaction }>('/finance/cash-transactions/transfer', dto);
     }
 
     async deleteCashTransaction(id: string): Promise<void> {
@@ -111,10 +115,17 @@ class CashManagementDataService {
         return apiService.get<BankStatement>(`/finance/bank-statements/${id}`);
     }
 
-    async importBankStatement(bankAccountId: string, file: File): Promise<BankStatement> {
+    async importBankStatement(
+        bankAccountId: string,
+        file: File,
+        statementNumber?: string,
+        notes?: string,
+    ): Promise<BankStatement> {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('bankAccountId', bankAccountId);
+        if (statementNumber?.trim()) formData.append('statementNumber', statementNumber.trim());
+        if (notes?.trim()) formData.append('notes', notes.trim());
         return apiService.post<BankStatement>('/finance/bank-statements/import', formData);
     }
 
@@ -125,30 +136,55 @@ class CashManagementDataService {
     // ===== BANK RECONCILIATION =====
 
     async getBankReconciliations(bankAccountId?: string): Promise<BankReconciliation[]> {
-        const endpoint = bankAccountId
-            ? `/finance/bank-reconciliations?bankAccountId=${bankAccountId}`
-            : '/finance/bank-reconciliations';
-        return apiService.get<BankReconciliation[]>(endpoint);
+        if (!bankAccountId) {
+            return [];
+        }
+
+        return apiService.get<BankReconciliation[]>(`/finance/bank-reconciliation/bank-account/${bankAccountId}`);
     }
 
     async getBankReconciliationById(id: string): Promise<BankReconciliation | null> {
-        return apiService.get<BankReconciliation>(`/finance/bank-reconciliations/${id}`);
+        return apiService.get<BankReconciliation>(`/finance/bank-reconciliation/${id}`);
     }
 
     async startReconciliation(dto: StartReconciliationDto): Promise<BankReconciliation> {
-        return apiService.post<BankReconciliation>('/finance/bank-reconciliations', dto);
+        return apiService.post<BankReconciliation>('/finance/bank-reconciliation/start', dto);
     }
 
     async getReconciliationMatches(reconciliationId: string): Promise<ReconciliationMatch[]> {
-        return apiService.get<ReconciliationMatch[]>(`/finance/bank-reconciliations/${reconciliationId}/matches`);
+        return apiService.get<ReconciliationMatch[]>(`/finance/bank-reconciliation/${reconciliationId}/matches`);
     }
 
-    async createReconciliationMatch(reconciliationId: string, match: Partial<ReconciliationMatch>): Promise<ReconciliationMatch> {
-        return apiService.post<ReconciliationMatch>(`/finance/bank-reconciliations/${reconciliationId}/matches`, match);
+    async getReconciliationSummary(reconciliationId: string): Promise<ReconciliationSummary> {
+        return apiService.get<ReconciliationSummary>(`/finance/bank-reconciliation/${reconciliationId}/summary`);
+    }
+
+    async autoMatchReconciliation(reconciliationId: string): Promise<ReconciliationMatch[]> {
+        return apiService.post<ReconciliationMatch[]>(`/finance/bank-reconciliation/${reconciliationId}/auto-match`, {});
+    }
+
+    async createReconciliationMatch(reconciliationId: string, match: CreateManualMatchDto): Promise<ReconciliationMatch> {
+        return apiService.post<ReconciliationMatch>(`/finance/bank-reconciliation/${reconciliationId}/manual-match`, match);
+    }
+
+    async removeReconciliationMatch(matchId: string): Promise<ReconciliationMatch> {
+        return apiService.delete<ReconciliationMatch>(`/finance/bank-reconciliation/match/${matchId}`);
+    }
+
+    async postReconciliationAdjustment(reconciliationId: string, dto: CreateReconciliationAdjustmentDto): Promise<ReconciliationAdjustment> {
+        return apiService.post<ReconciliationAdjustment>(`/finance/bank-reconciliation/${reconciliationId}/adjustments/post`, dto);
     }
 
     async completeReconciliation(id: string): Promise<BankReconciliation> {
-        return apiService.put<BankReconciliation>(`/finance/bank-reconciliations/${id}/complete`, {});
+        return apiService.post<BankReconciliation>(`/finance/bank-reconciliation/${id}/finalize`, {});
+    }
+
+    async approveReconciliation(id: string): Promise<BankReconciliation> {
+        return apiService.post<BankReconciliation>(`/finance/bank-reconciliation/${id}/approve`, {});
+    }
+
+    async cancelReconciliation(id: string, reason: string): Promise<BankReconciliation> {
+        return apiService.post<BankReconciliation>(`/finance/bank-reconciliation/${id}/cancel`, { reason });
     }
 
     // ===== CHEQUES =====

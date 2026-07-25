@@ -19,7 +19,7 @@ public class PaymentTermRepository : GenericRepository<PaymentTerm>, IPaymentTer
     public async Task<PaymentTerm?> GetByCodeAsync(string code)
     {
         return await _dbSet
-            .Where(pt => pt.Code == code && pt.TenantId == TenantId && !pt.IsDeleted)
+            .Where(pt => pt.Code.ToUpper() == code.Trim().ToUpper() && pt.TenantId == TenantId && !pt.IsDeleted)
             .FirstOrDefaultAsync();
     }
 
@@ -34,8 +34,18 @@ public class PaymentTermRepository : GenericRepository<PaymentTerm>, IPaymentTer
 
     public async Task<IEnumerable<PaymentTerm>> GetByApplicableToAsync(string applicableTo)
     {
+        var normalizedApplicableTo = string.IsNullOrWhiteSpace(applicableTo)
+            ? "All"
+            : applicableTo.Trim();
+        var applicableAliases = normalizedApplicableTo.Equals("Supplier", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "Supplier", "Vendor", "All" }
+            : normalizedApplicableTo.Equals("Customer", StringComparison.OrdinalIgnoreCase)
+                ? new[] { "Customer", "Client", "All" }
+                : new[] { normalizedApplicableTo, "All" };
+        var normalizedAliases = applicableAliases.Select(alias => alias.ToUpper()).ToArray();
+
         return await _dbSet
-            .Where(pt => (pt.ApplicableTo == applicableTo || pt.ApplicableTo == "All") && pt.IsActive && pt.TenantId == TenantId && !pt.IsDeleted)
+            .Where(pt => normalizedAliases.Contains(pt.ApplicableTo.ToUpper()) && pt.IsActive && pt.TenantId == TenantId && !pt.IsDeleted)
             .OrderBy(pt => pt.DisplayOrder)
             .ThenBy(pt => pt.Name)
             .ToListAsync();
@@ -50,12 +60,17 @@ public class PaymentTermRepository : GenericRepository<PaymentTerm>, IPaymentTer
             query = query.Where(pt => pt.ApplicableTo == applicableTo || pt.ApplicableTo == "All");
         }
 
-        return await query.FirstOrDefaultAsync();
+        return await query
+            .OrderBy(pt => pt.ApplicableTo == applicableTo ? 0 : 1)
+            .ThenBy(pt => pt.DisplayOrder)
+            .ThenBy(pt => pt.Id)
+            .FirstOrDefaultAsync();
     }
 
     public async Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null)
     {
-        var query = _dbSet.Where(pt => pt.Code == code && pt.TenantId == TenantId && !pt.IsDeleted);
+        var normalizedCode = code.Trim().ToUpper();
+        var query = _dbSet.Where(pt => pt.Code.ToUpper() == normalizedCode && pt.TenantId == TenantId && !pt.IsDeleted);
         
         if (excludeId.HasValue)
         {

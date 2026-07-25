@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
     Plus,
     Search,
@@ -10,8 +10,6 @@ import {
     MoreHorizontal,
     FileText,
     DollarSign,
-    AlertCircle,
-    CreditCard,
     Send,
     Ban
 } from 'lucide-react';
@@ -41,24 +39,29 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useDebounce } from '@/hooks/use-debounce';
 import { format } from 'date-fns';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function InvoicesPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { toast } = useToast();
     const queryClient = useQueryClient();
+    const openingBalanceOnly = searchParams.get('isOpeningBalance') === 'true';
     const [searchTerm, setSearchTerm] = useState('');
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
     const [page, setPage] = useState(1);
     const [pageSize] = useState(10);
     const [statusFilter, setStatusFilter] = useState<string>('');
+    const { hasPermission, hasAnyPermission } = useAuth();
 
     const { data: invoicesData, isLoading } = useQuery({
-        queryKey: ['invoices', page, pageSize, debouncedSearchTerm, statusFilter],
+        queryKey: ['invoices', page, pageSize, debouncedSearchTerm, statusFilter, openingBalanceOnly],
         queryFn: () => arService.getInvoices({
             page,
             pageSize,
             searchTerm: debouncedSearchTerm,
-            status: statusFilter
+            status: statusFilter,
+            isOpeningBalance: openingBalanceOnly ? true : undefined,
         }),
     });
 
@@ -80,6 +83,24 @@ export default function InvoicesPage() {
         },
     });
 
+    const issueInvoiceMutation = useMutation({
+        mutationFn: (id: string) => arService.sendInvoice(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['invoices'] });
+            toast({
+                title: 'Success',
+                description: 'Invoice issued and posted successfully',
+            });
+        },
+        onError: (error: any) => {
+            toast({
+                title: 'Error',
+                description: error.message || 'Failed to issue invoice',
+                variant: 'destructive',
+            });
+        },
+    });
+
     const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
         setSearchTerm(e.target.value);
         setPage(1);
@@ -88,6 +109,7 @@ export default function InvoicesPage() {
     const getStatusBadge = (status: string) => {
         switch (status) {
             case 'Draft': return <Badge variant="secondary">Draft</Badge>;
+            case 'Sent': return <Badge className="bg-blue-600">Sent</Badge>;
             case 'Posted': return <Badge className="bg-blue-600">Posted</Badge>;
             case 'Paid': return <Badge className="bg-green-600">Paid</Badge>;
             case 'Overdue': return <Badge variant="destructive">Overdue</Badge>;
@@ -105,9 +127,11 @@ export default function InvoicesPage() {
                         Create and manage customer invoices.
                     </p>
                 </div>
+                {hasAnyPermission(['Finance.AR.Invoices.Create', 'Finance.AR.Invoices.Write']) && (
                 <Button onClick={() => router.push('/finance/ar/invoices/new')}>
                     <Plus className="mr-2 h-4 w-4" /> New Invoice
                 </Button>
+                )}
             </div>
 
             <Card>
@@ -135,6 +159,7 @@ export default function InvoicesPage() {
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem onClick={() => setStatusFilter('')}>All</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setStatusFilter('Draft')}>Draft</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => setStatusFilter('Sent')}>Sent</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setStatusFilter('Posted')}>Posted</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setStatusFilter('Paid')}>Paid</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setStatusFilter('Overdue')}>Overdue</DropdownMenuItem>
@@ -189,8 +214,8 @@ export default function InvoicesPage() {
                                                     {format(new Date(invoice.dueDate), 'MMM dd, yyyy')}
                                                 </span>
                                             </TableCell>
-                                            <TableCell className="text-right">{formatCurrency(invoice.totalAmount)}</TableCell>
-                                            <TableCell className="text-right font-medium">{formatCurrency(invoice.balanceAmount)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(invoice.totalAmount, invoice.currencyCode)}</TableCell>
+                                            <TableCell className="text-right font-medium">{formatCurrency(invoice.balanceAmount, invoice.currencyCode)}</TableCell>
                                             <TableCell>{getStatusBadge(invoice.status)}</TableCell>
                                             <TableCell>
                                                 <DropdownMenu>
@@ -205,21 +230,23 @@ export default function InvoicesPage() {
                                                         <DropdownMenuItem onClick={() => router.push(`/finance/ar/invoices/${invoice.id}`)}>
                                                             View Details
                                                         </DropdownMenuItem>
-                                                        {invoice.status === 'Draft' && (
+                                                        {invoice.status === 'Draft' && hasAnyPermission(['Finance.AR.Invoices.Edit', 'Finance.AR.Invoices.Write']) && (
                                                             <DropdownMenuItem onClick={() => router.push(`/finance/ar/invoices/${invoice.id}/edit`)}>
                                                                 <FileText className="mr-2 h-4 w-4" /> Edit Invoice
                                                             </DropdownMenuItem>
                                                         )}
-                                                        {invoice.status === 'Posted' && invoice.balanceAmount > 0 && (
-                                                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/payments/new?customerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
+                                                        {(invoice.status === 'Sent' || invoice.status === 'Posted') && invoice.balanceAmount > 0 && (
+                                                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/new?customerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
                                                                 <DollarSign className="mr-2 h-4 w-4" /> Receive Payment
                                                             </DropdownMenuItem>
                                                         )}
                                                         <DropdownMenuSeparator />
-                                                        <DropdownMenuItem onClick={() => arService.sendInvoice(invoice.id)}>
-                                                            <Send className="mr-2 h-4 w-4" /> Send Email
+                                                        {invoice.status === 'Draft' && hasPermission('Finance.AR.Invoices.Send') && (
+                                                        <DropdownMenuItem onClick={() => issueInvoiceMutation.mutate(invoice.id)}>
+                                                            <Send className="mr-2 h-4 w-4" /> Issue / Post
                                                         </DropdownMenuItem>
-                                                        {(invoice.status === 'Posted' || invoice.status === 'Overdue') && (
+                                                        )}
+                                                        {(invoice.status === 'Sent' || invoice.status === 'Posted' || invoice.status === 'Overdue') && hasPermission('Finance.AR.Invoices.Void') && (
                                                             <DropdownMenuItem
                                                                 className="text-red-600"
                                                                 onClick={() => voidInvoiceMutation.mutate(invoice.id)}

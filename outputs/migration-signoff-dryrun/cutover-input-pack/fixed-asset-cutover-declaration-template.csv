@@ -1,0 +1,7 @@
+TenantName,TenantId,ApprovedCutoverDate,ApprovedFiscalPeriod,BookClassification,CutoverItem,YesNo,DataFilePath,RecordCount,FunctionalAmount,Currency,RequiresRegisterEvidence,Owner,ApprovalStatus,Notes
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Fixed asset opening register required,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Asset cost opening balances,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Accumulated depreciation opening balances,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Impairment opening balances,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Revaluation reserve balances,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Asset location/custodian/segment details,,,"",,,Yes,,,

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -10,6 +11,8 @@ using ErpSystem.Data;
 
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Services.Finance.GL
 {
@@ -20,20 +23,31 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly ICurrentUserService _currentUserService;
         private readonly ITenantSettingsService _tenantSettings;
         private readonly IFiscalPeriodService _fiscalPeriodService;
+        private readonly IDocumentNumberingService _documentNumberingService;
+        private readonly IAccountingBookService _accountingBookService;
+        private readonly IFinancePostingEngine _financePostingEngine;
 
         public GeneralLedgerService(
             ApplicationDbContext context,
             ReportingDbContext reportingContext,
             ICurrentUserService currentUserService,
             ITenantSettingsService tenantSettings,
-            IFiscalPeriodService fiscalPeriodService)
+            IFiscalPeriodService fiscalPeriodService,
+            IDocumentNumberingService documentNumberingService,
+            IAccountingBookService accountingBookService,
+            IFinancePostingEngine financePostingEngine)
         {
             _context = context;
             _reportingContext = reportingContext;
             _currentUserService = currentUserService;
             _tenantSettings = tenantSettings;
             _fiscalPeriodService = fiscalPeriodService;
+            _documentNumberingService = documentNumberingService;
+            _accountingBookService = accountingBookService;
+            _financePostingEngine = financePostingEngine;
         }
+
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
         #region Account Management
 
@@ -55,16 +69,16 @@ namespace ErpSystem.Api.Services.Finance.GL
                     throw new ArgumentException("Account type is required", nameof(accountDto.AccountType));
 
                 // Get tenant ID - throw if not available
-                var tenantId = _currentUserService.TenantId;
+                var tenantId = TenantId;
                 Console.WriteLine($"DEBUG: TenantId from CurrentUserService: {tenantId}");
-                Console.WriteLine($"DEBUG: TenantId is null: {tenantId == null}");
                 Console.WriteLine($"DEBUG: TenantId is Guid.Empty: {tenantId == Guid.Empty}");
                 
-                if (tenantId == null || tenantId == Guid.Empty)
+                if (tenantId == Guid.Empty)
                     throw new InvalidOperationException("Tenant context is required for account creation. User must be authenticated with a valid tenant.");
 
                 // 1. Validate Account Structure
                 await ValidateAccountStructureAsync(accountDto.AccountNumber);
+                await _accountingBookService.EnsureTenantDefaultsAsync();
 
                 // 2. Parse AccountType safely
                 if (!Enum.TryParse<AccountType>(accountDto.AccountType, true, out var accountType))
@@ -87,11 +101,13 @@ namespace ErpSystem.Api.Services.Finance.GL
                     CurrencyCode = string.IsNullOrWhiteSpace(accountDto.CurrencyCode) ? baseCurrencyCode : accountDto.CurrencyCode.Trim().ToUpperInvariant(),
                     IsMultiCurrency = accountDto.IsMultiCurrency,
                     IsSegmented = true,
-                    IsIFRSClassified = true,
-                    IsBaseClassified = true,
-                    IsLocalClassified = false,
+                    IsIFRSClassified = accountDto.IsIFRSClassified,
+                    IsBaseClassified = accountDto.IsBaseFrameworkClassified,
+                    IsLocalClassified = accountDto.IsLocalFrameworkClassified,
+                    IsControlAccount = accountDto.IsControlAccount,
+                    AllowDirectPosting = accountDto.IsPostingAllowed,
                     Status = AccountStatus.Active,
-                    TenantId = tenantId.Value,
+                    TenantId = tenantId,
                     CreatedAt = now,
                     CreatedBy = userName
                 };
@@ -104,7 +120,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         var segmentEntity = new AccountSegmentValue
                         {
                             Id = Guid.NewGuid(),
-                            TenantId = tenantId.Value,
+                            TenantId = tenantId,
                             AccountId = account.Id,
                             SegmentStructureId = segmentValue.SegmentStructureId,
                             SegmentValue = segmentValue.SegmentValue,
@@ -128,6 +144,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 // 5. Save to Database
                 _context.Accounts.Add(account);
                 await _context.SaveChangesAsync();
+                await _accountingBookService.SyncAccountMappingsAsync(account);
 
                 return account;
             }
@@ -148,8 +165,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (string.IsNullOrWhiteSpace(accountNumber))
                 throw new ArgumentException("Account number cannot be empty.");
 
-            var tenantId = _currentUserService.TenantId;
-            if (tenantId == null) throw new InvalidOperationException("Tenant context is required for validation.");
+            var tenantId = TenantId;
 
             // 1. Fetch Active Segment Structure
             var segments = await _context.AccountSegmentStructures
@@ -194,6 +210,13 @@ namespace ErpSystem.Api.Services.Finance.GL
                 var segmentDef = segments[i];
                 var segmentValue = parts[i];
 
+                // Optional segments can be intentionally left blank in UI; we represent
+                // this as all-zero placeholder (e.g., "000") to preserve segment count.
+                if (!segmentDef.IsMandatory && (string.IsNullOrWhiteSpace(segmentValue) || IsAllZeros(segmentValue)))
+                {
+                    continue;
+                }
+
                 // A. Length Check
                 if (segmentValue.Length != segmentDef.SegmentLength)
                 {
@@ -225,208 +248,62 @@ namespace ErpSystem.Api.Services.Finance.GL
             return true;
         }
 
+        private static bool IsAllZeros(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            foreach (var ch in value)
+            {
+                if (ch != '0')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         public async Task<Account?> GetAccountByIdAsync(Guid accountId)
         {
+            var tenantId = TenantId;
             return await _context.Accounts
                 .Include(a => a.SegmentValues)
                 .Include(a => a.CurrencyLinks)
-                .FirstOrDefaultAsync(a => a.Id == accountId);
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == accountId && !a.IsDeleted);
         }
 
         public async Task<Account?> GetAccountByCodeAsync(string accountCode)
         {
+            var tenantId = TenantId;
             return await _context.Accounts
-                .FirstOrDefaultAsync(a => a.AccountCode == accountCode);
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.AccountCode == accountCode && !a.IsDeleted);
         }
 
         public async Task<IEnumerable<Account>> GetAllAccountsAsync()
         {
-            return await _context.Accounts.ToListAsync();
+            var tenantId = TenantId;
+            return await _context.Accounts
+                .Where(a => a.TenantId == tenantId && !a.IsDeleted)
+                .ToListAsync();
         }
 
         #endregion
 
         #region Transaction Processing
 
-        public async Task<JournalEntry> PostJournalEntryAsync(CreateJournalEntryDto entryDto)
-        {
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
-            {
-                // 1. Validate Debits = Credits
-                var totalDebit = entryDto.Transactions.Where(t => t.TransactionType == "Debit").Sum(t => t.Amount);
-                var totalCredit = entryDto.Transactions.Where(t => t.TransactionType == "Credit").Sum(t => t.Amount);
-
-                if (totalDebit != totalCredit)
-                {
-                    throw new InvalidOperationException("Journal Entry must balance (Debits != Credits).");
-                }
-
-                // 2. Get Open Fiscal Period
-                var fiscalPeriod = await _context.FiscalPeriods
-                    .FirstOrDefaultAsync(p => p.StartDate <= entryDto.TransactionDate && p.EndDate >= entryDto.TransactionDate);
-                
-                if (fiscalPeriod == null)
-                {
-                    throw new InvalidOperationException(
-                        $"No fiscal period is configured for transaction date {entryDto.TransactionDate:yyyy-MM-dd}. " +
-                        $"Please create the appropriate fiscal year and period in Finance > Setup > Fiscal Periods before posting.");
-                }
-
-                // 2.1 Validate Module/Period Lock
-                if (!string.IsNullOrEmpty(entryDto.SourceModule))
-                {
-                    var isLocked = await _fiscalPeriodService.IsPeriodLockedForModuleAsync(fiscalPeriod.Id, entryDto.SourceModule);
-                    if (isLocked)
-                    {
-                        throw new InvalidOperationException($"Fiscal period '{fiscalPeriod.PeriodName}' is closed or locked for module '{entryDto.SourceModule}'. Transaction Date: {entryDto.TransactionDate:d}");
-                    }
-                }
-                else
-                {
-                    // Fallback: Check Global Finance Lock if no module specified
-                    if (fiscalPeriod.IsLocked)
-                    {
-                         throw new InvalidOperationException($"Fiscal period '{fiscalPeriod.PeriodName}' is closed for Finance/General Ledger. Transaction Date: {entryDto.TransactionDate:d}");
-                    }
-                }
-
-                // 3. Create Journal Entry Header
-                var journalEntry = new JournalEntry
-                {
-                    Id = Guid.NewGuid(),
-                    JournalEntryNumber = entryDto.JournalNumber,
-                    EntryDate = entryDto.TransactionDate,
-                    Description = entryDto.Description ?? string.Empty,
-                    ReferenceNumber = entryDto.Reference,
-                    TotalDebitAmount = totalDebit,
-                    TotalCreditAmount = totalCredit,
-                    PostingStatus = "Posted",
-                    PostingDate = DateTime.UtcNow,
-                    FiscalPeriodId = fiscalPeriod.Id,
-                    IsBalanced = true,
-                    BookClassification = "IFRS"
-                };
-
-                _context.JournalEntries.Add(journalEntry);
-
-                // 4. Process Lines and Update Balances
-                var baseCurrencyCode = await _tenantSettings.GetBaseCurrencyAsync();
-                int lineNum = 1;
-                foreach (var lineDto in entryDto.Transactions)
-                {
-                    var account = await _context.Accounts.FindAsync(lineDto.AccountId);
-                    if (account == null) throw new InvalidOperationException($"Account not found: {lineDto.AccountId}");
-
-                    // Validation: Prevent Direct Posting to Control Accounts
-                    if (account.IsControlAccount)
-                    {
-                        var allowedModules = new[] { "AP", "AR", "INVENTORY", "TAX", "BANK", "SYSTEM", "POS" };
-                        bool isSystemPosting = !string.IsNullOrEmpty(entryDto.SourceModule) && allowedModules.Contains(entryDto.SourceModule.ToUpper());
-                        
-                        if (!isSystemPosting)
-                        {
-                            throw new InvalidOperationException($"Direct manual posting to Control Account '{account.AccountName}' is not allowed. Usage of Control Accounts is restricted to sub-ledger transactions.");
-                        }
-                    }
-
-                    decimal debitAmount = 0;
-                    decimal creditAmount = 0;
-
-                    // Update Account Balance
-                    if (lineDto.TransactionType == "Debit")
-                    {
-                        debitAmount = lineDto.Amount;
-                        if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
-                            account.Balance += lineDto.Amount;
-                        else
-                            account.Balance -= lineDto.Amount;
-                    }
-                    else // Credit
-                    {
-                        creditAmount = lineDto.Amount;
-                        if (account.AccountType == AccountType.Liability || account.AccountType == AccountType.Equity || account.AccountType == AccountType.Revenue)
-                            account.Balance += lineDto.Amount;
-                        else
-                            account.Balance -= lineDto.Amount;
-                    }
-
-                    // Create Transaction Record
-                    var transactionRecord = new AccountTransaction
-                    {
-                        Id = Guid.NewGuid(),
-                        AccountId = account.Id,
-                        JournalEntryId = journalEntry.Id,
-                        DebitAmount = debitAmount,
-                        CreditAmount = creditAmount,
-                        TransactionDate = entryDto.TransactionDate,
-                        Description = lineDto.Description,
-                        SourceReferenceNumber = lineDto.Reference,
-                        FiscalPeriodId = fiscalPeriod.Id,
-                        LineNumber = lineNum++,
-                        BookClassification = "IFRS",
-                        // Multi-Currency Mapping
-                        TransactionCurrency = lineDto.CurrencyCode,
-                        ForeignCurrencyAmount = lineDto.ForeignAmount,
-                        ExchangeRate = lineDto.ExchangeRate
-                    };
-
-                    // Update Foreign Currency Balance if applicable
-                    if (!string.IsNullOrWhiteSpace(lineDto.CurrencyCode)
-                        && !string.Equals(lineDto.CurrencyCode, baseCurrencyCode, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var currencyLink = await _context.AccountCurrencyLinks
-                            .FirstOrDefaultAsync(l => l.AccountId == account.Id && l.LinkedCurrencyCode == lineDto.CurrencyCode);
-                        
-                        if (currencyLink != null)
-                        {
-                            // Determine sign based on account type and transaction type
-                            decimal foreignChange = lineDto.ForeignAmount ?? 0;
-                            
-                            // Adjust sign for Credit transactions
-                            if (lineDto.TransactionType == "Credit")
-                            {
-                                // For Assets/Expenses, Credit decreases balance
-                                if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
-                                    foreignChange = -foreignChange;
-                                // For Liabilities/Equity/Revenue, Credit increases balance
-                                else
-                                    foreignChange = foreignChange; 
-                            }
-                            else // Debit
-                            {
-                                // For Assets/Expenses, Debit increases balance
-                                if (account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense)
-                                    foreignChange = foreignChange;
-                                // For Liabilities/Equity/Revenue, Debit decreases balance
-                                else
-                                    foreignChange = -foreignChange;
-                            }
-
-                            currencyLink.ForeignCurrencyBalance += foreignChange;
-                            currencyLink.LastTransactionDate = entryDto.TransactionDate;
-                            _context.Update(currencyLink);
-                        }
-                    }
-
-                    _context.AccountTransactions.Add(transactionRecord);
-                }
-
-                await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
-
-                return journalEntry;
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
-        }
+        [Obsolete("Legacy direct GL posting is disabled. Use IJournalEntryService for manual journals or IFinancePostingEngine through the owning Finance module.")]
+        public Task<JournalEntry> PostJournalEntryAsync(CreateJournalEntryDto entryDto)
+            => throw new InvalidOperationException(
+                "Legacy direct GL posting is disabled. Use the journal entry lifecycle for manual journals or the owning Finance module service through IFinancePostingEngine.");
 
         public async Task<decimal> GetAccountBalanceAsync(Guid accountId, string? currencyCode = null)
         {
-            var account = await _context.Accounts.FindAsync(accountId);
+            var tenantId = TenantId;
+            var account = await _context.Accounts
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == accountId && !a.IsDeleted);
             if (account == null) throw new ArgumentException("Account not found");
             var requestedCurrency = string.IsNullOrWhiteSpace(currencyCode)
                 ? await _tenantSettings.GetBaseCurrencyAsync()
@@ -439,29 +316,13 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<string> GenerateJournalEntryNumberAsync(CancellationToken cancellationToken = default)
         {
-            var tenantId = _currentUserService.TenantId;
-            var year = DateTime.UtcNow.Year;
-            var prefix = $"JE-{year}-";
-
-            // Find the last number with this prefix
-            var lastEntry = await _context.JournalEntries
-                .Where(j => j.TenantId == tenantId && j.JournalEntryNumber.StartsWith(prefix))
-                .OrderByDescending(j => j.JournalEntryNumber)
-                .Select(j => j.JournalEntryNumber)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            int nextNumber = 1;
-            if (!string.IsNullOrEmpty(lastEntry))
-            {
-                var numberPart = lastEntry.Replace(prefix, "");
-                if (int.TryParse(numberPart, out int lastNum))
-                {
-                    nextNumber = lastNum + 1;
-                }
-            }
-
-            // Return formatted number: JE-2026-000001
-            return $"{prefix}{nextNumber:D6}";
+            return await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.JournalEntry,
+                TenantId,
+                DateTime.UtcNow,
+                nameof(JournalEntry),
+                cancellationToken: cancellationToken);
         }
 
         #endregion
@@ -477,20 +338,15 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<JournalEntry> RunCurrencyRevaluationAsync(RevaluationRequestDto request)
         {
-            var strategy = _context.Database.CreateExecutionStrategy();
-            return await strategy.ExecuteAsync(async () =>
-            {
-                return await RunCurrencyRevaluationCoreAsync(request);
-            });
+            _ = request;
+            await Task.CompletedTask;
+            throw new InvalidOperationException(
+                "Legacy GeneralLedgerService currency revaluation is disabled. Use ICurrencyRevaluationService/IFxAccountingService so FX journals post through IFinancePostingEngine.");
         }
 
         private async Task<JournalEntry> RunCurrencyRevaluationCoreAsync(RevaluationRequestDto request)
         {
-            var tenantId = _currentUserService.TenantId;
-            if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
-
-            // Extract to local non-nullable variable to avoid EF Core Guid? translation issues
-            Guid tenantIdValue = tenantId.Value;
+            var tenantIdValue = TenantId;
             var revaluationDate = request.RevaluationDate.Date;
 
             // 1. Get Accounts to Revalue
@@ -506,7 +362,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var accountIds = allAccounts.Select(a => a.Id).ToList();
             var currencyLinks = await _context.AccountCurrencyLinks
                 .IgnoreQueryFilters()
-                .Where(cl => accountIds.Contains(cl.AccountId) && cl.IsActive && !cl.IsDeleted)
+                .Where(cl => cl.TenantId == tenantIdValue && accountIds.Contains(cl.AccountId) && cl.IsActive && !cl.IsDeleted)
                 .ToListAsync();
 
             // Manually attach currency links to accounts (in-memory)
@@ -539,7 +395,12 @@ namespace ErpSystem.Api.Services.Finance.GL
             var journalEntry = new JournalEntry
             {
                 Id = Guid.NewGuid(),
-                JournalEntryNumber = $"REV-{revaluationDate:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 8)}",
+                JournalEntryNumber = await _documentNumberingService.GenerateAsync(
+                    DocumentNumberingModules.Finance,
+                    FinanceDocumentTypes.CurrencyRevaluation,
+                    tenantIdValue,
+                    revaluationDate,
+                    nameof(JournalEntry)),
                 EntryDate = revaluationDate,
                 Description = $"Currency Revaluation - {request.RevaluationType} - {revaluationDate:d}",
                 ReferenceNumber = request.RevaluationType,
@@ -716,7 +577,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         private async Task<Guid> GetOpenFiscalPeriodIdAsync(DateTime date)
         {
-            var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context required");
+            var tenantId = TenantId;
             
             var period = await _context.FiscalPeriods
                 .FirstOrDefaultAsync(p => p.StartDate <= date && p.EndDate >= date && p.TenantId == tenantId);
@@ -737,28 +598,25 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<BalanceSheetDto> GenerateBalanceSheetAsync(BalanceSheetRequestDto request)
         {
-            var tenantId = _currentUserService.TenantId;
-            if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
+            var bookClassification = NormalizeBookClassification(request.BookClassification);
 
-            // 1. Get all accounts with balances as of the specified date
-            var accounts = await _context.Accounts
-                .Where(a => a.TenantId == tenantId && !a.IsDeleted)
-                .ToListAsync();
+            var accounts = await GetReportingAccountsAsync(
+                bookClassification,
+                request.AccountIds,
+                request.SegmentFilters,
+                new[] { AccountType.Asset, AccountType.Liability, AccountType.Equity });
 
-            // Filter by book classification
-            var lineItemProperty = request.BookClassification switch
-            {
-                "IFRS" => "IFRSLineItem",
-                "Base" => "BaseLineItem",
-                "Local" => "LocalLineItem",
-                _ => "IFRSLineItem"
-            };
-
-            // 2. Calculate balances as of the specified date
+            var rawBalances = await CalculatePostedRawBalancesAsOfAsync(
+                tenantId,
+                accounts.Select(a => a.Id).ToArray(),
+                request.AsAtDate,
+                bookClassification);
             var accountBalances = new Dictionary<Guid, decimal>();
             foreach (var account in accounts)
             {
-                var balance = await CalculateAccountBalanceAsOf(account.Id, request.AsAtDate);
+                var rawBalance = rawBalances.GetValueOrDefault(account.Id);
+                var balance = ToStatementNormalBalance(account.AccountType, rawBalance);
                 if (balance != 0)
                 {
                     accountBalances[account.Id] = balance;
@@ -770,7 +628,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             {
                 CompanyName = await _tenantSettings.GetCompanyNameAsync(),
                 AsAtDate = request.AsAtDate,
-                BookClassification = request.BookClassification,
+                BookClassification = bookClassification,
                 CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
             };
 
@@ -882,40 +740,371 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         private string? GetLineItem(Account account, string bookClassification)
         {
-            return bookClassification switch
+            return NormalizeBookClassification(bookClassification) switch
             {
                 "IFRS" => account.IFRSLineItem,
-                "Base" => account.BaseLineItem,
-                "Local" => account.LocalLineItem,
+                "LOCAL_STATUTORY" => account.BaseLineItem,
+                "MANAGEMENT" => account.LocalLineItem,
                 _ => account.IFRSLineItem
             };
         }
 
-        private async Task<decimal> CalculateAccountBalanceAsOf(Guid accountId, DateTime asAtDate)
-        {
-            var transactions = await _context.AccountTransactions
-                .Where(t => t.AccountId == accountId && t.TransactionDate <= asAtDate && !t.IsDeleted)
-                .ToListAsync();
+        private sealed record NormalizedSegmentFilter(Guid SegmentStructureId, string SegmentValue);
 
-            return transactions.Sum(t => t.DebitAmount - t.CreditAmount);
+        private static string NormalizeBookClassification(string? bookClassification)
+        {
+            var normalized = (bookClassification ?? "IFRS").Trim().ToUpperInvariant();
+            return normalized switch
+            {
+                "BASE" or "LOCAL" => "LOCAL_STATUTORY",
+                "MANAGEMENT" => "MANAGEMENT",
+                _ => normalized
+            };
+        }
+
+        private async Task<List<Account>> GetReportingAccountsAsync(
+            string? bookClassification,
+            IEnumerable<Guid>? accountIds,
+            IEnumerable<FinanceSegmentFilterDto>? segmentFilters,
+            IEnumerable<AccountType>? accountTypes = null)
+        {
+            var tenantId = TenantId;
+            var selectedAccountIds = accountIds?
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .ToArray() ?? Array.Empty<Guid>();
+            var resolvedSegmentFilters = await ResolveSegmentFiltersAsync(tenantId, segmentFilters);
+
+            IQueryable<Account> accountQuery = _context.Accounts
+                .AsNoTracking()
+                .Where(a => a.TenantId == tenantId && !a.IsDeleted);
+
+            if (accountTypes != null)
+            {
+                var typeArray = accountTypes.Distinct().ToArray();
+                if (typeArray.Length > 0)
+                {
+                    accountQuery = accountQuery.Where(a => typeArray.Contains(a.AccountType));
+                }
+            }
+
+            if (selectedAccountIds.Length > 0)
+            {
+                var ownedCount = await accountQuery.CountAsync(a => selectedAccountIds.Contains(a.Id));
+                if (ownedCount != selectedAccountIds.Length)
+                {
+                    throw new InvalidOperationException("One or more report account filters do not belong to the current tenant.");
+                }
+
+                accountQuery = accountQuery.Where(a => selectedAccountIds.Contains(a.Id));
+            }
+
+            foreach (var filter in resolvedSegmentFilters)
+            {
+                accountQuery = accountQuery.Where(a => a.SegmentValues.Any(sv =>
+                    sv.TenantId == tenantId &&
+                    sv.SegmentStructureId == filter.SegmentStructureId &&
+                    sv.SegmentValue == filter.SegmentValue));
+            }
+
+            return await accountQuery
+                .OrderBy(a => a.AccountNumber)
+                .ToListAsync();
+        }
+
+        private async Task<List<NormalizedSegmentFilter>> ResolveSegmentFiltersAsync(
+            Guid tenantId,
+            IEnumerable<FinanceSegmentFilterDto>? segmentFilters)
+        {
+            var requestedFilters = segmentFilters?
+                .Where(filter => filter != null && !string.IsNullOrWhiteSpace(filter.SegmentValue))
+                .ToList() ?? new List<FinanceSegmentFilterDto>();
+
+            var resolved = new List<NormalizedSegmentFilter>();
+            foreach (var filter in requestedFilters)
+            {
+                var value = filter.SegmentValue.Trim();
+                IQueryable<AccountSegmentStructure> structureQuery = _context.AccountSegmentStructures
+                    .AsNoTracking()
+                    .Where(s => s.TenantId == tenantId && s.IsActive && s.IsReportingDimension);
+
+                if (filter.SegmentStructureId.HasValue && filter.SegmentStructureId.Value != Guid.Empty)
+                {
+                    var segmentId = filter.SegmentStructureId.Value;
+                    structureQuery = structureQuery.Where(s => s.Id == segmentId);
+                }
+                else if (!string.IsNullOrWhiteSpace(filter.SegmentCode))
+                {
+                    var segmentCode = filter.SegmentCode.Trim();
+                    structureQuery = structureQuery.Where(s => s.SegmentCode == segmentCode);
+                }
+                else if (filter.SegmentPosition.HasValue)
+                {
+                    var position = filter.SegmentPosition.Value;
+                    structureQuery = structureQuery.Where(s => s.SegmentPosition == position);
+                }
+                else
+                {
+                    throw new InvalidOperationException("Segment report filters require a tenant-owned segment id, code, or position.");
+                }
+
+                var structure = await structureQuery.SingleOrDefaultAsync();
+                if (structure == null)
+                {
+                    throw new InvalidOperationException("One or more report segment filters do not belong to the current tenant or are not reporting dimensions.");
+                }
+
+                if (structure.LookupTableRequired)
+                {
+                    var valueExists = await _context.SegmentLookupValues
+                        .AsNoTracking()
+                        .AnyAsync(v =>
+                            v.TenantId == tenantId &&
+                            v.SegmentStructureId == structure.Id &&
+                            v.SegmentValue == value &&
+                            v.IsActive);
+
+                    if (!valueExists)
+                    {
+                        throw new InvalidOperationException($"Segment value '{value}' is not valid for reporting dimension '{structure.SegmentName}'.");
+                    }
+                }
+                else
+                {
+                    if (value.Length != structure.SegmentLength)
+                    {
+                        throw new InvalidOperationException(
+                            $"Segment value '{value}' must be exactly {structure.SegmentLength} characters for reporting dimension '{structure.SegmentName}'.");
+                    }
+
+                    if (structure.DataType.Equals("Numeric", StringComparison.OrdinalIgnoreCase) &&
+                        value.Any(character => !char.IsDigit(character)))
+                    {
+                        throw new InvalidOperationException(
+                            $"Segment value '{value}' must contain only numbers for reporting dimension '{structure.SegmentName}'.");
+                    }
+
+                    if (structure.DataType.Equals("Alphanumeric", StringComparison.OrdinalIgnoreCase) &&
+                        value.Any(character => !char.IsLetterOrDigit(character)))
+                    {
+                        throw new InvalidOperationException(
+                            $"Segment value '{value}' must contain only letters and numbers for reporting dimension '{structure.SegmentName}'.");
+                    }
+
+                    var now = DateTime.UtcNow;
+                    var valueExistsOnActiveAccount = await _context.AccountSegmentValues
+                        .AsNoTracking()
+                        .AnyAsync(segmentValue =>
+                            segmentValue.TenantId == tenantId &&
+                            segmentValue.SegmentStructureId == structure.Id &&
+                            segmentValue.SegmentValue == value &&
+                            !segmentValue.IsDeleted &&
+                            segmentValue.EffectiveDate <= now &&
+                            (segmentValue.EndDate == null || segmentValue.EndDate > now) &&
+                            segmentValue.Account.TenantId == tenantId &&
+                            !segmentValue.Account.IsDeleted &&
+                            segmentValue.Account.Status == AccountStatus.Active &&
+                            (segmentValue.Account.EffectiveDate == null || segmentValue.Account.EffectiveDate <= now) &&
+                            (segmentValue.Account.ExpirationDate == null || segmentValue.Account.ExpirationDate > now));
+
+                    if (!valueExistsOnActiveAccount)
+                    {
+                        throw new InvalidOperationException(
+                            $"Segment value '{value}' is not used by an active GL account for reporting dimension '{structure.SegmentName}'.");
+                    }
+                }
+
+                resolved.Add(new NormalizedSegmentFilter(structure.Id, value));
+            }
+
+            return resolved;
+        }
+
+        private IQueryable<AccountTransaction> BuildPostedLedgerQuery(
+            Guid tenantId,
+            string? bookClassification,
+            bool includeReversed = true)
+        {
+            var normalizedBook = NormalizeBookClassification(bookClassification);
+            var statuses = includeReversed
+                ? new[] { "Posted", "Reversed" }
+                : new[] { "Posted" };
+
+            return _context.AccountTransactions
+                .AsNoTracking()
+                .Include(t => t.JournalEntry)
+                .Where(t =>
+                    t.TenantId == tenantId &&
+                    !t.IsDeleted &&
+                    t.BookClassification == normalizedBook &&
+                    t.JournalEntry.TenantId == tenantId &&
+                    !t.JournalEntry.IsDeleted &&
+                    statuses.Contains(t.PostingStatus) &&
+                    statuses.Contains(t.JournalEntry.PostingStatus));
+        }
+
+        private async Task<Dictionary<Guid, decimal>> CalculatePostedRawBalancesAsOfAsync(
+            Guid tenantId,
+            IReadOnlyCollection<Guid> accountIds,
+            DateTime asAtDate,
+            string? bookClassification)
+        {
+            if (accountIds.Count == 0)
+            {
+                return new Dictionary<Guid, decimal>();
+            }
+
+            var endExclusive = asAtDate.Date.AddDays(1);
+            return await BuildPostedLedgerQuery(tenantId, bookClassification)
+                .Where(t => accountIds.Contains(t.AccountId) && t.TransactionDate < endExclusive)
+                .GroupBy(t => t.AccountId)
+                .Select(g => new { AccountId = g.Key, Balance = g.Sum(t => t.DebitAmount - t.CreditAmount) })
+                .ToDictionaryAsync(x => x.AccountId, x => x.Balance);
+        }
+
+        private async Task<Dictionary<Guid, AccountPeriodMovement>> CalculatePostedPeriodMovementAsync(
+            Guid tenantId,
+            IReadOnlyCollection<Guid> accountIds,
+            DateTime startDate,
+            DateTime endDate,
+            string? bookClassification)
+        {
+            if (accountIds.Count == 0)
+            {
+                return new Dictionary<Guid, AccountPeriodMovement>();
+            }
+
+            var start = startDate.Date;
+            var endExclusive = endDate.Date.AddDays(1);
+            return await BuildPostedLedgerQuery(tenantId, bookClassification)
+                .Where(t =>
+                    accountIds.Contains(t.AccountId) &&
+                    t.TransactionDate >= start &&
+                    t.TransactionDate < endExclusive)
+                .GroupBy(t => t.AccountId)
+                .Select(g => new AccountPeriodMovement
+                {
+                    AccountId = g.Key,
+                    Debits = g.Sum(t => t.DebitAmount),
+                    Credits = g.Sum(t => t.CreditAmount)
+                })
+                .ToDictionaryAsync(x => x.AccountId, x => x);
+        }
+
+        private sealed class AccountPeriodMovement
+        {
+            public Guid AccountId { get; set; }
+            public decimal Debits { get; set; }
+            public decimal Credits { get; set; }
+            public decimal RawMovement => Debits - Credits;
+        }
+
+        private static decimal ToStatementNormalBalance(AccountType accountType, decimal rawDebitMinusCredit)
+        {
+            return accountType == AccountType.Asset || accountType == AccountType.Expense
+                ? rawDebitMinusCredit
+                : -rawDebitMinusCredit;
+        }
+
+        private static void ApplyRawBalanceToTrialBalanceLine(TrialBalanceLineDto line, decimal rawDebitMinusCredit)
+        {
+            if (rawDebitMinusCredit > 0)
+            {
+                line.DebitBalance = rawDebitMinusCredit;
+                line.CreditBalance = 0;
+            }
+            else if (rawDebitMinusCredit < 0)
+            {
+                line.DebitBalance = 0;
+                line.CreditBalance = Math.Abs(rawDebitMinusCredit);
+            }
+            else
+            {
+                line.DebitBalance = 0;
+                line.CreditBalance = 0;
+            }
+        }
+
+        private static void ApplyRawOpeningBalanceToTrialBalanceLine(TrialBalanceLineDto line, decimal rawDebitMinusCredit)
+        {
+            if (rawDebitMinusCredit > 0)
+            {
+                line.OpeningDebitBalance = rawDebitMinusCredit;
+                line.OpeningCreditBalance = 0;
+            }
+            else if (rawDebitMinusCredit < 0)
+            {
+                line.OpeningDebitBalance = 0;
+                line.OpeningCreditBalance = Math.Abs(rawDebitMinusCredit);
+            }
+            else
+            {
+                line.OpeningDebitBalance = 0;
+                line.OpeningCreditBalance = 0;
+            }
+        }
+
+        private async Task<decimal> CalculateAccountBalanceAsOf(
+            Guid tenantId,
+            Guid accountId,
+            DateTime asAtDate,
+            string bookClassification)
+        {
+            var balances = await CalculatePostedRawBalancesAsOfAsync(
+                tenantId,
+                new[] { accountId },
+                asAtDate,
+                bookClassification);
+
+            return balances.GetValueOrDefault(accountId);
+        }
+
+        private async Task<decimal> CalculatePostedAccountNetBalanceAsOf(Guid tenantId, Guid accountId, DateTime asAtDate, string bookClassification)
+        {
+            var balances = await CalculatePostedRawBalancesAsOfAsync(
+                tenantId,
+                new[] { accountId },
+                asAtDate,
+                bookClassification);
+
+            return balances.GetValueOrDefault(accountId);
         }
 
         public async Task<IncomeStatementDto> GenerateIncomeStatementAsync(IncomeStatementRequestDto request)
         {
-            var tenantId = _currentUserService.TenantId;
-            if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
+            if (request.PeriodEnd.Date < request.PeriodStart.Date)
+            {
+                throw new ArgumentException("Period end must be on or after period start.");
+            }
 
-            // 1. Get all Revenue and Expense accounts
-            var accounts = await _context.Accounts
-                .Where(a => a.TenantId == tenantId && !a.IsDeleted 
-                    && (a.AccountType == AccountType.Revenue || a.AccountType == AccountType.Expense))
-                .ToListAsync();
+            var bookClassification = NormalizeBookClassification(request.BookClassification);
 
-            // 2. Calculate activity for each account during the period
+            var accounts = await GetReportingAccountsAsync(
+                bookClassification,
+                request.AccountIds,
+                request.SegmentFilters,
+                new[] { AccountType.Revenue, AccountType.Expense });
+
+            var rawMovements = await CalculatePostedPeriodMovementAsync(
+                tenantId,
+                accounts.Select(a => a.Id).ToArray(),
+                request.PeriodStart,
+                request.PeriodEnd,
+                bookClassification);
+            var disposalGainAccountIds = await GetTenantDisposalGainAccountIdsAsync(tenantId);
             var accountActivity = new Dictionary<Guid, decimal>();
             foreach (var account in accounts)
             {
-                var activity = await CalculateAccountActivityForPeriod(account.Id, request.PeriodStart, request.PeriodEnd);
+                var movement = rawMovements.GetValueOrDefault(account.Id);
+                var activity = movement == null
+                    ? 0
+                    : ToStatementNormalBalance(account.AccountType, movement.RawMovement);
+                if (disposalGainAccountIds.Contains(account.Id) && account.AccountType == AccountType.Expense && activity < 0)
+                {
+                    activity = Math.Abs(activity);
+                }
+
                 if (activity != 0)
                 {
                     accountActivity[account.Id] = activity;
@@ -928,13 +1117,26 @@ namespace ErpSystem.Api.Services.Finance.GL
                 CompanyName = await _tenantSettings.GetCompanyNameAsync(),
                 PeriodStart = request.PeriodStart,
                 PeriodEnd = request.PeriodEnd,
-                BookClassification = request.BookClassification,
+                BookClassification = bookClassification,
                 CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
             };
 
             // 4. Separate Revenue and Expense accounts
             var revenueAccounts = accounts.Where(a => a.AccountType == AccountType.Revenue && accountActivity.ContainsKey(a.Id)).ToList();
             var expenseAccounts = accounts.Where(a => a.AccountType == AccountType.Expense && accountActivity.ContainsKey(a.Id)).ToList();
+            var disposalGainPresentationAccounts = accounts
+                .Where(a => disposalGainAccountIds.Contains(a.Id) && accountActivity.ContainsKey(a.Id))
+                .ToList();
+
+            var otherIncomeAccounts = revenueAccounts
+                .Where(a => (a.AccountCategory ?? "").Contains("Other", StringComparison.OrdinalIgnoreCase)
+                    || (a.AccountSubCategory ?? "").Contains("Other", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            otherIncomeAccounts = otherIncomeAccounts
+                .Concat(disposalGainPresentationAccounts)
+                .DistinctBy(a => a.Id)
+                .ToList();
+            revenueAccounts = revenueAccounts.Except(otherIncomeAccounts).ToList();
 
             // 5. Build Revenue section
             var revenueSection = BuildIncomeStatementSection(
@@ -942,13 +1144,22 @@ namespace ErpSystem.Api.Services.Finance.GL
                 1,
                 revenueAccounts,
                 accountActivity,
-                request.BookClassification,
+                bookClassification,
                 request.IncludeAccountDetails);
 
             // 6. Build Expense sections (categorized)
             var costOfSalesAccounts = expenseAccounts.Where(a => (a.AccountCategory ?? "").Contains("Cost of Sales", StringComparison.OrdinalIgnoreCase)).ToList();
+            var disposalGainExpenseAccounts = disposalGainPresentationAccounts
+                .Where(a => a.AccountType == AccountType.Expense)
+                .ToList();
+            expenseAccounts = expenseAccounts.Except(disposalGainExpenseAccounts).ToList();
+            var otherExpenseAccounts = expenseAccounts
+                .Where(a => (a.AccountCategory ?? "").Contains("Other", StringComparison.OrdinalIgnoreCase)
+                    || (a.AccountSubCategory ?? "").Contains("Other", StringComparison.OrdinalIgnoreCase))
+                .ToList();
             var operatingExpenseAccounts = expenseAccounts.Where(a => !(a.AccountCategory ?? "").Contains("Cost of Sales", StringComparison.OrdinalIgnoreCase) 
-                && !(a.AccountCategory ?? "").Contains("Tax", StringComparison.OrdinalIgnoreCase)).ToList();
+                && !(a.AccountCategory ?? "").Contains("Tax", StringComparison.OrdinalIgnoreCase)
+                && !otherExpenseAccounts.Contains(a)).ToList();
             var taxExpenseAccounts = expenseAccounts.Where(a => (a.AccountCategory ?? "").Contains("Tax", StringComparison.OrdinalIgnoreCase)).ToList();
 
             var costOfSalesSection = BuildIncomeStatementSection(
@@ -956,7 +1167,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 2,
                 costOfSalesAccounts,
                 accountActivity,
-                request.BookClassification,
+                bookClassification,
                 request.IncludeAccountDetails);
 
             var operatingExpensesSection = BuildIncomeStatementSection(
@@ -964,15 +1175,31 @@ namespace ErpSystem.Api.Services.Finance.GL
                 3,
                 operatingExpenseAccounts,
                 accountActivity,
-                request.BookClassification,
+                bookClassification,
+                request.IncludeAccountDetails);
+
+            var otherIncomeSection = BuildIncomeStatementSection(
+                "Other Income",
+                4,
+                otherIncomeAccounts,
+                accountActivity,
+                bookClassification,
+                request.IncludeAccountDetails);
+
+            var otherExpensesSection = BuildIncomeStatementSection(
+                "Other Expenses",
+                5,
+                otherExpenseAccounts,
+                accountActivity,
+                bookClassification,
                 request.IncludeAccountDetails);
 
             var taxExpenseSection = BuildIncomeStatementSection(
                 "Tax Expense",
-                4,
+                6,
                 taxExpenseAccounts,
                 accountActivity,
-                request.BookClassification,
+                bookClassification,
                 request.IncludeAccountDetails);
 
             incomeStatement.Sections = new List<IncomeStatementSectionDto>
@@ -980,27 +1207,65 @@ namespace ErpSystem.Api.Services.Finance.GL
                 revenueSection,
                 costOfSalesSection,
                 operatingExpensesSection,
+                otherIncomeSection,
+                otherExpensesSection,
                 taxExpenseSection
             };
 
             // 7. Calculate totals and profit metrics
-            // Revenue is credit-normal, so positive activity means credit > debit
             incomeStatement.TotalRevenue = revenueSection.SectionTotal;
-            incomeStatement.TotalCostOfSales = Math.Abs(costOfSalesSection.SectionTotal);
+            incomeStatement.TotalCostOfSales = costOfSalesSection.SectionTotal;
             incomeStatement.GrossProfit = incomeStatement.TotalRevenue - incomeStatement.TotalCostOfSales;
-            incomeStatement.TotalOperatingExpenses = Math.Abs(operatingExpensesSection.SectionTotal);
+            incomeStatement.TotalOperatingExpenses = operatingExpensesSection.SectionTotal;
             incomeStatement.OperatingProfit = incomeStatement.GrossProfit - incomeStatement.TotalOperatingExpenses;
-            incomeStatement.TaxExpense = Math.Abs(taxExpenseSection.SectionTotal);
-            incomeStatement.ProfitBeforeTax = incomeStatement.OperatingProfit;
+            incomeStatement.TotalOtherIncome = otherIncomeSection.SectionTotal;
+            incomeStatement.TotalOtherExpenses = otherExpensesSection.SectionTotal;
+            incomeStatement.TaxExpense = taxExpenseSection.SectionTotal;
+            incomeStatement.ProfitBeforeTax = incomeStatement.OperatingProfit
+                + incomeStatement.TotalOtherIncome
+                - incomeStatement.TotalOtherExpenses;
             incomeStatement.NetProfit = incomeStatement.ProfitBeforeTax - incomeStatement.TaxExpense;
+            incomeStatement.PresentationWarnings = BuildDisposalGainPresentationWarnings(disposalGainPresentationAccounts);
 
             return incomeStatement;
         }
 
+        private async Task<HashSet<Guid>> GetTenantDisposalGainAccountIdsAsync(Guid tenantId)
+        {
+            var accountIds = await _context.FixedAssetCategories
+                .AsNoTracking()
+                .Where(category =>
+                    category.TenantId == tenantId &&
+                    !category.IsDeleted &&
+                    category.GainOnDisposalAccountId.HasValue)
+                .Select(category => category.GainOnDisposalAccountId!.Value)
+                .Distinct()
+                .ToListAsync();
+
+            return accountIds.ToHashSet();
+        }
+
+        private static List<string> BuildDisposalGainPresentationWarnings(IEnumerable<Account> disposalGainAccounts)
+        {
+            return disposalGainAccounts
+                .Where(account => account.AccountType is AccountType.Expense or AccountType.Revenue)
+                .Select(account =>
+                {
+                    var accountLabel = string.IsNullOrWhiteSpace(account.AccountNumber)
+                        ? account.AccountName
+                        : $"{account.AccountNumber} {account.AccountName}";
+
+                    return account.AccountType == AccountType.Expense
+                        ? $"Fixed asset disposal gain account '{accountLabel}' is expense-class; it is presented as non-operating disposal gain, not ordinary operating expense."
+                        : $"Fixed asset disposal gain account '{accountLabel}' is revenue-class; it is presented as non-operating disposal gain unless statutory mapping intentionally presents it as revenue.";
+                })
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         public async Task<MultiCurrencyDetailReportDto> GenerateMultiCurrencyDetailReportAsync(MultiCurrencyDetailRequestDto request)
         {
-            var tenantId = _currentUserService.TenantId;
-            if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
 
             var baseCurrency = await _tenantSettings.GetBaseCurrencyAsync();
             var companyName = await _tenantSettings.GetCompanyNameAsync();
@@ -1221,13 +1486,18 @@ namespace ErpSystem.Api.Services.Finance.GL
             return section;
         }
 
-        private async Task<decimal> CalculateAccountActivityForPeriod(Guid accountId, DateTime periodStart, DateTime periodEnd)
+        private async Task<decimal> CalculateAccountActivityForPeriod(
+            Guid tenantId,
+            Guid accountId,
+            DateTime periodStart,
+            DateTime periodEnd,
+            string bookClassification)
         {
-            var transactions = await _context.AccountTransactions
-                .Where(t => t.AccountId == accountId 
-                    && t.TransactionDate >= periodStart 
-                    && t.TransactionDate <= periodEnd 
-                    && !t.IsDeleted)
+            var endExclusive = periodEnd.Date.AddDays(1);
+            var transactions = await BuildPostedLedgerQuery(tenantId, bookClassification)
+                .Where(t => t.AccountId == accountId
+                    && t.TransactionDate >= periodStart.Date
+                    && t.TransactionDate < endExclusive)
                 .ToListAsync();
 
             // For Revenue (credit-normal): Credit - Debit gives positive revenue
@@ -1236,88 +1506,385 @@ namespace ErpSystem.Api.Services.Finance.GL
             return transactions.Sum(t => t.CreditAmount - t.DebitAmount);
         }
 
+        public async Task<DetailedLedgerReportDto> GenerateDetailedLedgerAsync(DetailedLedgerRequestDto request)
+        {
+            var tenantId = TenantId;
+
+            if (request.EndDate.Date < request.StartDate.Date)
+            {
+                throw new ArgumentException("End date must be on or after start date.");
+            }
+
+            var startDate = request.StartDate.Date;
+            var endExclusive = request.EndDate.Date.AddDays(1);
+            var selectedAccountIds = request.AccountIds?.Where(id => id != Guid.Empty).Distinct().ToList() ?? new List<Guid>();
+            var bookClassification = NormalizeBookClassification(request.BookClassification);
+
+            var accounts = await GetReportingAccountsAsync(
+                bookClassification,
+                selectedAccountIds,
+                request.SegmentFilters);
+
+            var report = new DetailedLedgerReportDto
+            {
+                CompanyName = await _tenantSettings.GetCompanyNameAsync(),
+                ReportDate = DateTime.UtcNow,
+                StartDate = startDate,
+                EndDate = request.EndDate.Date,
+                BookClassification = bookClassification,
+                CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
+            };
+
+            foreach (var account in accounts)
+            {
+                var transactionBaseQuery = BuildPostedLedgerQuery(tenantId, bookClassification, request.IncludeReversed)
+                    .Where(t => t.AccountId == account.Id);
+
+                if (!request.IncludeReversed)
+                {
+                    transactionBaseQuery = transactionBaseQuery.Where(t => !t.IsReversed);
+                }
+
+                var openingBalance = 0m;
+                if (request.IncludeOpeningBalances)
+                {
+                    var openingMovements = await transactionBaseQuery
+                        .Where(t => t.TransactionDate < startDate)
+                        .Select(t => new { t.DebitAmount, t.CreditAmount })
+                        .ToListAsync();
+
+                    openingBalance = openingMovements.Sum(t => GetNormalBalanceMovement(account.AccountType, t.DebitAmount, t.CreditAmount));
+                }
+
+                var ledgerAccount = new DetailedLedgerAccountDto
+                {
+                    AccountId = account.Id,
+                    AccountCode = account.AccountCode,
+                    AccountNumber = account.AccountNumber,
+                    AccountName = account.AccountName,
+                    AccountType = account.AccountType.ToString(),
+                    OpeningBalance = Math.Abs(openingBalance),
+                    OpeningBalanceType = GetBalanceType(account.AccountType, openingBalance)
+                };
+
+                var runningBalance = openingBalance;
+                var periodTransactions = await transactionBaseQuery
+                    .Where(t => t.TransactionDate >= startDate && t.TransactionDate < endExclusive)
+                    .OrderBy(t => t.TransactionDate)
+                    .ThenBy(t => t.JournalEntry.JournalEntryNumber)
+                    .ThenBy(t => t.LineNumber)
+                    .ToListAsync();
+
+                foreach (var transaction in periodTransactions)
+                {
+                    runningBalance += GetNormalBalanceMovement(account.AccountType, transaction.DebitAmount, transaction.CreditAmount);
+
+                    ledgerAccount.Lines.Add(new DetailedLedgerLineDto
+                    {
+                        TransactionId = transaction.Id,
+                        JournalEntryId = transaction.JournalEntryId,
+                        JournalEntryNumber = transaction.JournalEntry?.JournalEntryNumber ?? string.Empty,
+                        TransactionDate = transaction.TransactionDate,
+                        LineNumber = transaction.LineNumber,
+                        Description = transaction.Description ?? transaction.JournalEntry?.Description ?? string.Empty,
+                        Reference = transaction.SourceReferenceNumber
+                            ?? transaction.JournalEntry?.ReferenceNumber
+                            ?? transaction.ReferenceNumber
+                            ?? string.Empty,
+                        SourceModule = transaction.SourceModule ?? transaction.JournalEntry?.SourceModule ?? "GL",
+                        PostingStatus = transaction.JournalEntry?.PostingStatus ?? transaction.PostingStatus,
+                        DebitAmount = transaction.DebitAmount,
+                        CreditAmount = transaction.CreditAmount,
+                        RunningBalance = Math.Abs(runningBalance),
+                        RunningBalanceType = GetBalanceType(account.AccountType, runningBalance),
+                        CurrencyCode = transaction.TransactionCurrency,
+                        ForeignAmount = transaction.ForeignCurrencyAmount,
+                        ExchangeRate = transaction.ExchangeRate,
+                        IsReversed = transaction.IsReversed,
+                        SegmentString = transaction.SegmentString
+                    });
+                }
+
+                ledgerAccount.TotalDebits = ledgerAccount.Lines.Sum(l => l.DebitAmount);
+                ledgerAccount.TotalCredits = ledgerAccount.Lines.Sum(l => l.CreditAmount);
+                ledgerAccount.ClosingBalance = Math.Abs(runningBalance);
+                ledgerAccount.ClosingBalanceType = GetBalanceType(account.AccountType, runningBalance);
+
+                report.TotalDebits += ledgerAccount.TotalDebits;
+                report.TotalCredits += ledgerAccount.TotalCredits;
+                report.Accounts.Add(ledgerAccount);
+            }
+
+            return report;
+        }
+
+        private static decimal GetNormalBalanceMovement(AccountType accountType, decimal debitAmount, decimal creditAmount)
+        {
+            var isDebitNormal = accountType == AccountType.Asset || accountType == AccountType.Expense;
+            return isDebitNormal ? debitAmount - creditAmount : creditAmount - debitAmount;
+        }
+
+        private static string GetBalanceType(AccountType accountType, decimal normalBalance)
+        {
+            if (normalBalance == 0)
+            {
+                return string.Empty;
+            }
+
+            var isDebitNormal = accountType == AccountType.Asset || accountType == AccountType.Expense;
+            var isNormalBalance = normalBalance > 0;
+            return isDebitNormal == isNormalBalance ? "Debit" : "Credit";
+        }
+
+        public async Task<CashBankLedgerReportDto> GenerateCashBankLedgerAsync(CashBankLedgerRequestDto request)
+        {
+            var tenantId = TenantId;
+            if (request.EndDate.Date < request.StartDate.Date)
+            {
+                throw new ArgumentException("End date must be on or after start date.");
+            }
+
+            var startDate = request.StartDate.Date;
+            var endDate = request.EndDate.Date;
+            var endExclusive = endDate.AddDays(1);
+            var bookClassification = NormalizeBookClassification(request.BookClassification);
+            var requestedBankAccountIds = request.BankAccountIds?
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .ToArray() ?? Array.Empty<Guid>();
+            var requestedGlAccountIds = request.GlAccountIds?
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .ToArray() ?? Array.Empty<Guid>();
+
+            IQueryable<BankAccount> bankQuery = _context.BankAccounts
+                .AsNoTracking()
+                .Where(b => b.TenantId == tenantId && !b.IsDeleted && b.GLAccountId.HasValue);
+
+            if (requestedBankAccountIds.Length > 0)
+            {
+                var ownedBankCount = await bankQuery.CountAsync(b => requestedBankAccountIds.Contains(b.Id));
+                if (ownedBankCount != requestedBankAccountIds.Length)
+                {
+                    throw new InvalidOperationException("One or more cash/bank report bank-account filters do not belong to the current tenant.");
+                }
+
+                bankQuery = bankQuery.Where(b => requestedBankAccountIds.Contains(b.Id));
+            }
+
+            if (requestedGlAccountIds.Length > 0)
+            {
+                bankQuery = bankQuery.Where(b => requestedGlAccountIds.Contains(b.GLAccountId!.Value));
+            }
+
+            var bankAccounts = await bankQuery
+                .OrderBy(b => b.AccountNumber)
+                .ToListAsync();
+            var glAccountIds = bankAccounts
+                .Select(b => b.GLAccountId!.Value)
+                .Distinct()
+                .ToArray();
+
+            if (requestedGlAccountIds.Length > 0)
+            {
+                var requestedWithoutBankMapping = requestedGlAccountIds.Except(glAccountIds).ToArray();
+                if (requestedWithoutBankMapping.Length > 0)
+                {
+                    await GetReportingAccountsAsync(bookClassification, requestedGlAccountIds, request.SegmentFilters, new[] { AccountType.Asset });
+                    throw new InvalidOperationException("One or more GL account filters are not mapped to a tenant-owned cash/bank account.");
+                }
+            }
+
+            var glAccounts = await GetReportingAccountsAsync(
+                bookClassification,
+                glAccountIds,
+                request.SegmentFilters,
+                new[] { AccountType.Asset });
+            var glAccountsById = glAccounts.ToDictionary(a => a.Id);
+            bankAccounts = bankAccounts
+                .Where(b => b.GLAccountId.HasValue && glAccountsById.ContainsKey(b.GLAccountId.Value))
+                .ToList();
+            glAccountIds = bankAccounts.Select(b => b.GLAccountId!.Value).Distinct().ToArray();
+
+            var openingBalances = request.IncludeOpeningBalances
+                ? await CalculatePostedRawBalancesAsOfAsync(
+                    tenantId,
+                    glAccountIds,
+                    startDate.AddDays(-1),
+                    bookClassification)
+                : new Dictionary<Guid, decimal>();
+
+            var report = new CashBankLedgerReportDto
+            {
+                CompanyName = await _tenantSettings.GetCompanyNameAsync(),
+                StartDate = startDate,
+                EndDate = endDate,
+                BookClassification = bookClassification,
+                CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
+            };
+
+            foreach (var bankAccount in bankAccounts)
+            {
+                var glAccountId = bankAccount.GLAccountId!.Value;
+                var glAccount = glAccountsById[glAccountId];
+                var rawOpening = openingBalances.GetValueOrDefault(glAccountId);
+                var opening = ToStatementNormalBalance(glAccount.AccountType, rawOpening);
+                var runningBalance = opening;
+                var ledgerAccount = new CashBankLedgerAccountDto
+                {
+                    BankAccountId = bankAccount.Id,
+                    BankAccountNumber = bankAccount.AccountNumber,
+                    BankAccountName = bankAccount.AccountName,
+                    GlAccountId = glAccount.Id,
+                    GlAccountNumber = glAccount.AccountNumber,
+                    GlAccountName = glAccount.AccountName,
+                    OpeningBalance = opening,
+                    StoredSnapshotBalance = bankAccount.CurrentBalance
+                };
+
+                var periodTransactions = await BuildPostedLedgerQuery(tenantId, bookClassification)
+                    .Where(t =>
+                        t.AccountId == glAccountId &&
+                        t.TransactionDate >= startDate &&
+                        t.TransactionDate < endExclusive)
+                    .OrderBy(t => t.TransactionDate)
+                    .ThenBy(t => t.JournalEntry.JournalEntryNumber)
+                    .ThenBy(t => t.LineNumber)
+                    .ToListAsync();
+
+                foreach (var transaction in periodTransactions)
+                {
+                    runningBalance += ToStatementNormalBalance(
+                        glAccount.AccountType,
+                        transaction.DebitAmount - transaction.CreditAmount);
+
+                    ledgerAccount.Lines.Add(new CashBankLedgerLineDto
+                    {
+                        TransactionId = transaction.Id,
+                        JournalEntryId = transaction.JournalEntryId,
+                        TransactionDate = transaction.TransactionDate,
+                        JournalEntryNumber = transaction.JournalEntry?.JournalEntryNumber ?? string.Empty,
+                        Description = transaction.Description ?? transaction.JournalEntry?.Description ?? string.Empty,
+                        Reference = transaction.SourceReferenceNumber
+                            ?? transaction.JournalEntry?.ReferenceNumber
+                            ?? string.Empty,
+                        SourceModule = transaction.SourceModule ?? transaction.JournalEntry?.SourceModule ?? "GL",
+                        SourceDocumentType = transaction.SourceDocumentType
+                            ?? transaction.JournalEntry?.SourceDocumentType
+                            ?? string.Empty,
+                        SourceDocumentId = transaction.SourceDocumentId ?? transaction.JournalEntry?.SourceDocumentId,
+                        DebitAmount = transaction.DebitAmount,
+                        CreditAmount = transaction.CreditAmount,
+                        RunningBalance = runningBalance,
+                        SegmentString = transaction.SegmentString
+                    });
+                }
+
+                ledgerAccount.Receipts = ledgerAccount.Lines.Sum(l => l.DebitAmount);
+                ledgerAccount.Payments = ledgerAccount.Lines.Sum(l => l.CreditAmount);
+                ledgerAccount.ClosingBalance = runningBalance;
+                report.Accounts.Add(ledgerAccount);
+            }
+
+            report.TotalOpeningBalance = report.Accounts.Sum(a => a.OpeningBalance);
+            report.TotalReceipts = report.Accounts.Sum(a => a.Receipts);
+            report.TotalPayments = report.Accounts.Sum(a => a.Payments);
+            report.TotalClosingBalance = report.Accounts.Sum(a => a.ClosingBalance);
+
+            return report;
+        }
+
         public async Task<TrialBalanceDto> GenerateTrialBalanceAsync(TrialBalanceRequestDto request)
         {
-            var tenantId = _currentUserService.TenantId;
-            if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
+            var bookClassification = NormalizeBookClassification(request.BookClassification);
 
-            // 1. Get all accounts for the tenant
-            var accounts = await _context.Accounts
-                .Where(a => a.TenantId == tenantId && !a.IsDeleted)
-                .OrderBy(a => a.AccountNumber)
-                .ToListAsync();
+            var accounts = await GetReportingAccountsAsync(
+                bookClassification,
+                request.AccountIds,
+                request.SegmentFilters);
 
-            // 2. Build Trial Balance
+            var accountIds = accounts.Select(a => a.Id).ToArray();
+            var asAtDate = request.AsAtDate.Date;
+            var periodStart = request.PeriodStart?.Date
+                ?? await _context.FiscalPeriods
+                    .AsNoTracking()
+                    .Where(p => p.TenantId == tenantId
+                        && p.StartDate <= asAtDate
+                        && p.EndDate >= asAtDate)
+                    .OrderByDescending(p => p.StartDate)
+                    .Select(p => (DateTime?)p.StartDate.Date)
+                    .FirstOrDefaultAsync();
+
+            var openingBalances = periodStart.HasValue
+                ? await CalculatePostedRawBalancesAsOfAsync(
+                    tenantId,
+                    accountIds,
+                    periodStart.Value.AddDays(-1),
+                    bookClassification)
+                : new Dictionary<Guid, decimal>();
+
+            var periodMovements = periodStart.HasValue
+                ? await CalculatePostedPeriodMovementAsync(
+                    tenantId,
+                    accountIds,
+                    periodStart.Value,
+                    asAtDate,
+                    bookClassification)
+                : await CalculatePostedPeriodMovementAsync(
+                    tenantId,
+                    accountIds,
+                    DateTime.MinValue,
+                    asAtDate,
+                    bookClassification);
+
             var trialBalance = new TrialBalanceDto
             {
                 CompanyName = await _tenantSettings.GetCompanyNameAsync(),
-                AsAtDate = request.AsAtDate,
+                AsAtDate = asAtDate,
+                PeriodStart = periodStart,
+                BookClassification = bookClassification,
                 CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
             };
 
             var lines = new List<TrialBalanceLineDto>();
 
-            // 3. Calculate balance for each account
             foreach (var account in accounts)
             {
-                var balance = await CalculateAccountBalanceAsOf(account.Id, request.AsAtDate);
+                var openingBalance = openingBalances.GetValueOrDefault(account.Id);
+                var movement = periodMovements.GetValueOrDefault(account.Id);
+                var periodDebits = movement?.Debits ?? 0m;
+                var periodCredits = movement?.Credits ?? 0m;
+                var closingBalance = openingBalance + periodDebits - periodCredits;
 
-                // Skip zero balances if requested
-                if (!request.IncludeZeroBalances && balance == 0)
+                if (!request.IncludeZeroBalances
+                    && openingBalance == 0
+                    && periodDebits == 0
+                    && periodCredits == 0
+                    && closingBalance == 0)
+                {
                     continue;
+                }
 
                 var line = new TrialBalanceLineDto
                 {
+                    AccountId = account.Id,
                     AccountCode = account.AccountCode,
                     AccountNumber = account.AccountNumber,
                     AccountName = account.AccountName,
-                    AccountType = account.AccountType.ToString()
+                    AccountType = account.AccountType.ToString(),
+                    PeriodDebits = periodDebits,
+                    PeriodCredits = periodCredits
                 };
 
-                // Determine debit or credit balance based on account type and balance
-                // Assets, Expenses: Debit-normal (positive balance = debit)
-                // Liabilities, Equity, Revenue: Credit-normal (positive balance = credit)
-                bool isDebitNormal = account.AccountType == AccountType.Asset || account.AccountType == AccountType.Expense;
-
-                if (balance > 0)
-                {
-                    if (isDebitNormal)
-                    {
-                        line.DebitBalance = balance;
-                        line.CreditBalance = 0;
-                    }
-                    else
-                    {
-                        line.DebitBalance = 0;
-                        line.CreditBalance = balance;
-                    }
-                }
-                else if (balance < 0)
-                {
-                    // Negative balance - reverse the normal side
-                    if (isDebitNormal)
-                    {
-                        line.DebitBalance = 0;
-                        line.CreditBalance = Math.Abs(balance);
-                    }
-                    else
-                    {
-                        line.DebitBalance = Math.Abs(balance);
-                        line.CreditBalance = 0;
-                    }
-                }
-                else
-                {
-                    line.DebitBalance = 0;
-                    line.CreditBalance = 0;
-                }
+                ApplyRawOpeningBalanceToTrialBalanceLine(line, openingBalance);
+                ApplyRawBalanceToTrialBalanceLine(line, closingBalance);
 
                 lines.Add(line);
             }
 
             trialBalance.Lines = lines;
 
-            // 4. Calculate totals
             trialBalance.TotalDebits = lines.Sum(l => l.DebitBalance);
             trialBalance.TotalCredits = lines.Sum(l => l.CreditBalance);
 
@@ -1326,8 +1893,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<CashFlowStatementDto> GenerateCashFlowStatementAsync(CashFlowStatementRequestDto request)
         {
-            var tenantId = _currentUserService.TenantId;
-            if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
 
             var cashFlowStatement = new CashFlowStatementDto
             {
@@ -1347,7 +1913,12 @@ namespace ErpSystem.Api.Services.Finance.GL
             var accountActivity = new Dictionary<Guid, decimal>();
             foreach (var account in accounts)
             {
-                var activity = await CalculateAccountActivityForPeriod(account.Id, request.PeriodStart, request.PeriodEnd);
+                var activity = await CalculateAccountActivityForPeriod(
+                    tenantId,
+                    account.Id,
+                    request.PeriodStart,
+                    request.PeriodEnd,
+                    request.BookClassification);
                 if (Math.Abs(activity) > 0.01m)
                 {
                     accountActivity[account.Id] = activity;
@@ -1398,7 +1969,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var cashAccounts = await _context.Accounts
                 .Where(a => a.TenantId == tenantId 
                     && !a.IsDeleted 
-                    && (a.AccountCategory == "Cash" || a.AccountName.Contains("Cash", StringComparison.OrdinalIgnoreCase)))
+                    && (a.AccountCategory == "Cash" || EF.Functions.Like(a.AccountName, "%Cash%")))
                 .ToListAsync();
 
             decimal cashAtBeginning = 0;
@@ -1406,8 +1977,16 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             foreach (var cashAccount in cashAccounts)
             {
-                cashAtBeginning += await CalculateAccountBalanceAsOf(cashAccount.Id, request.PeriodStart.AddDays(-1));
-                cashAtEnd += await CalculateAccountBalanceAsOf(cashAccount.Id, request.PeriodEnd);
+                cashAtBeginning += await CalculateAccountBalanceAsOf(
+                    tenantId,
+                    cashAccount.Id,
+                    request.PeriodStart.AddDays(-1),
+                    request.BookClassification);
+                cashAtEnd += await CalculateAccountBalanceAsOf(
+                    tenantId,
+                    cashAccount.Id,
+                    request.PeriodEnd,
+                    request.BookClassification);
             }
 
             cashFlowStatement.CashAtBeginning = cashAtBeginning;
@@ -1467,8 +2046,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<PeriodCloseValidationDto> ValidatePeriodCloseAsync(Guid fiscalPeriodId)
         {
-            var tenantId = _currentUserService.TenantId;
-            if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
 
             var period = await _context.FiscalPeriods
                 .FirstOrDefaultAsync(p => p.Id == fiscalPeriodId && p.TenantId == tenantId);
@@ -1501,14 +2079,14 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             // Validate Trial Balance
             var transactions = await _context.AccountTransactions
-                .Where(t => t.FiscalPeriodId == fiscalPeriodId && !t.IsDeleted)
+                .Where(t => t.TenantId == tenantId && t.FiscalPeriodId == fiscalPeriodId && !t.IsDeleted)
                 .ToListAsync();
 
             validation.TotalDebits = transactions.Sum(t => t.DebitAmount);
             validation.TotalCredits = transactions.Sum(t => t.CreditAmount);
             validation.Difference = validation.TotalDebits - validation.TotalCredits;
             validation.TotalJournalEntries = await _context.JournalEntries
-                .CountAsync(j => j.FiscalPeriodId == fiscalPeriodId && !j.IsDeleted);
+                .CountAsync(j => j.TenantId == tenantId && j.FiscalPeriodId == fiscalPeriodId && !j.IsDeleted);
             validation.TotalTransactionLines = transactions.Count;
 
             if (!validation.IsBalanced)
@@ -1540,9 +2118,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<PeriodCloseResultDto> CloseFiscalPeriodAsync(PeriodCloseRequestDto request)
         {
-            var tenantId = _currentUserService.TenantId;
+            var tenantId = TenantId;
             var userId = _currentUserService.UserId;
-            if (tenantId == null || userId == null) 
+            if (userId == null)
                 throw new InvalidOperationException("User context is required.");
 
             // Run validation unless skipped
@@ -1569,7 +2147,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             // Calculate and cache statistics
             var transactions = await _context.AccountTransactions
-                .Where(t => t.FiscalPeriodId == request.FiscalPeriodId && !t.IsDeleted)
+                .Where(t => t.TenantId == tenantId && t.FiscalPeriodId == request.FiscalPeriodId && !t.IsDeleted)
                 .ToListAsync();
 
             period.TotalDebits = transactions.Sum(t => t.DebitAmount);
@@ -1577,7 +2155,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             period.BalanceDifference = period.TotalDebits - period.TotalCredits;
             period.TotalTransactionLines = transactions.Count;
             period.TotalJournalEntries = await _context.JournalEntries
-                .CountAsync(j => j.FiscalPeriodId == request.FiscalPeriodId && !j.IsDeleted);
+                .CountAsync(j => j.TenantId == tenantId && j.FiscalPeriodId == request.FiscalPeriodId && !j.IsDeleted);
 
             // Update period status
             period.IsClosed = true;
@@ -1603,9 +2181,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<PeriodCloseResultDto> ReopenFiscalPeriodAsync(PeriodReopenRequestDto request)
         {
-            var tenantId = _currentUserService.TenantId;
+            var tenantId = TenantId;
             var userId = _currentUserService.UserId;
-            if (tenantId == null || userId == null) 
+            if (userId == null)
                 throw new InvalidOperationException("User context is required.");
 
             var period = await _context.FiscalPeriods
@@ -1662,9 +2240,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task LockFiscalPeriodAsync(Guid fiscalPeriodId, string lockReason)
         {
-            var tenantId = _currentUserService.TenantId;
+            var tenantId = TenantId;
             var userId = _currentUserService.UserId;
-            if (tenantId == null || userId == null) 
+            if (userId == null)
                 throw new InvalidOperationException("User context is required.");
 
             var period = await _context.FiscalPeriods
@@ -1686,8 +2264,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task UnlockFiscalPeriodAsync(Guid fiscalPeriodId, string unlockReason)
         {
-            var tenantId = _currentUserService.TenantId;
-            if (tenantId == null) throw new InvalidOperationException("Tenant context is required.");
+            var tenantId = TenantId;
 
             var period = await _context.FiscalPeriods
                 .FirstOrDefaultAsync(p => p.Id == fiscalPeriodId && p.TenantId == tenantId);
@@ -1703,9 +2280,9 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<PeriodCloseResultDto> CloseFiscalYearAsync(YearEndCloseRequestDto request)
         {
-            var tenantId = _currentUserService.TenantId;
+            var tenantId = TenantId;
             var userId = _currentUserService.UserId;
-            if (tenantId == null || userId == null) 
+            if (userId == null)
                 throw new InvalidOperationException("User context is required.");
 
             var fiscalYear = await _context.FiscalYears
@@ -1714,6 +2291,16 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             if (fiscalYear == null)
                 throw new ArgumentException($"Fiscal year {request.FiscalYearId} not found");
+
+            if (fiscalYear.IsClosed)
+            {
+                return new PeriodCloseResultDto
+                {
+                    Success = false,
+                    Message = $"Fiscal year '{fiscalYear.FiscalYearName}' is already closed.",
+                    Errors = new List<string> { "Reopen the fiscal year before closing it again." }
+                };
+            }
 
             // Validate all periods are closed
             var openPeriods = fiscalYear.FiscalPeriods.Where(p => !p.IsClosed).ToList();
@@ -1727,8 +2314,52 @@ namespace ErpSystem.Api.Services.Finance.GL
                 };
             }
 
-            // Transfer retained earnings
-            var closingEntry = await TransferRetainedEarningsAsync(request.FiscalYearId, request.RetainedEarningsAccountId);
+            var periodIds = fiscalYear.FiscalPeriods.Select(p => p.Id).ToList();
+            var unpostedJournalEntries = await _context.JournalEntries
+                .CountAsync(je => je.TenantId == tenantId
+                    && periodIds.Contains(je.FiscalPeriodId)
+                    && !je.IsDeleted
+                    && je.PostingStatus != "Posted"
+                    && je.PostingStatus != "Reversed");
+
+            if (unpostedJournalEntries > 0)
+            {
+                return new PeriodCloseResultDto
+                {
+                    Success = false,
+                    Message = "Cannot close fiscal year - unposted journal entries remain",
+                    Errors = new List<string>
+                    {
+                        $"{unpostedJournalEntries} journal entr{(unpostedJournalEntries == 1 ? "y is" : "ies are")} not posted. Post or remove all draft, submitted, and approved entries before closing the year."
+                    }
+                };
+            }
+
+            var unpostedTransactionLines = await _context.AccountTransactions
+                .CountAsync(t => t.TenantId == tenantId
+                    && periodIds.Contains(t.FiscalPeriodId)
+                    && !t.IsDeleted
+                    && t.PostingStatus != "Posted"
+                    && t.PostingStatus != "Reversed");
+
+            if (unpostedTransactionLines > 0)
+            {
+                return new PeriodCloseResultDto
+                {
+                    Success = false,
+                    Message = "Cannot close fiscal year - unposted transaction lines remain",
+                    Errors = new List<string>
+                    {
+                        $"{unpostedTransactionLines} account transaction line{(unpostedTransactionLines == 1 ? " is" : "s are")} not posted. Resolve the ledger data before closing the year."
+                    }
+                };
+            }
+
+            // Keep the closing journal posting and the fiscal-year state flip in one commit so a
+            // failure between them cannot leave a posted closing entry on an open year.
+            await using var dbTransaction = await _context.Database.BeginTransactionAsync();
+
+            var (closingJournalEntryId, netIncome) = await TransferRetainedEarningsAsync(fiscalYear, request.RetainedEarningsAccountId);
 
             // Update fiscal year
             fiscalYear.IsClosed = true;
@@ -1738,11 +2369,12 @@ namespace ErpSystem.Api.Services.Finance.GL
             fiscalYear.ClosedByUserId = Guid.Parse(userId);
             fiscalYear.RetainedEarningsTransferComplete = true;
             fiscalYear.RetainedEarningsTransferDate = DateTime.UtcNow;
-            fiscalYear.ClosingJournalEntryId = closingEntry.Id;
-            fiscalYear.NetIncomeTransferred = closingEntry.Transactions.Sum(t => t.CreditAmount - t.DebitAmount);
+            fiscalYear.ClosingJournalEntryId = closingJournalEntryId;
+            fiscalYear.NetIncomeTransferred = netIncome;
             fiscalYear.YearEndClosingNotes = request.ClosingNotes;
 
             await _context.SaveChangesAsync();
+            await dbTransaction.CommitAsync();
 
             return new PeriodCloseResultDto
             {
@@ -1754,27 +2386,206 @@ namespace ErpSystem.Api.Services.Finance.GL
             };
         }
 
-        private async Task<JournalEntry> TransferRetainedEarningsAsync(Guid fiscalYearId, Guid retainedEarningsAccountId)
+        public async Task<PeriodCloseResultDto> ReopenFiscalYearAsync(Guid fiscalYearId, string reason)
         {
-            var tenantId = _currentUserService.TenantId;
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new ArgumentException("A reason is required to reopen a fiscal year.");
+
+            var tenantId = TenantId;
             var userId = _currentUserService.UserId;
-            if (tenantId == null || userId == null) 
+            if (userId == null)
                 throw new InvalidOperationException("User context is required.");
 
             var fiscalYear = await _context.FiscalYears
                 .Include(fy => fy.FiscalPeriods)
-                .FirstOrDefaultAsync(fy => fy.Id == fiscalYearId);
+                .FirstOrDefaultAsync(fy => fy.Id == fiscalYearId && fy.TenantId == tenantId);
 
             if (fiscalYear == null)
                 throw new ArgumentException($"Fiscal year {fiscalYearId} not found");
 
+            if (!fiscalYear.IsClosed)
+                throw new InvalidOperationException($"Fiscal year '{fiscalYear.FiscalYearName}' is not closed.");
+
+            await using var dbTransaction = await _context.Database.BeginTransactionAsync();
+
+            // Reverse the closing entry through the posting engine so account balance
+            // snapshots and posting-event back-references stay correct.
+            if (fiscalYear.ClosingJournalEntryId.HasValue)
+            {
+                var closingEntry = await _context.JournalEntries
+                    .Include(je => je.Transactions)
+                    .FirstOrDefaultAsync(je => je.Id == fiscalYear.ClosingJournalEntryId.Value && je.TenantId == tenantId);
+
+                if (closingEntry == null)
+                    throw new InvalidOperationException("The fiscal year's closing journal entry could not be found.");
+
+                var reversalRequest = new FinancePostingRequestDto
+                {
+                    SourceModule = "GL",
+                    SourceDocumentType = "YearEndCloseReversal",
+                    SourceDocumentId = fiscalYear.Id,
+                    SourceDocumentTenantId = tenantId,
+                    ReversalOfJournalEntryId = closingEntry.Id,
+                    ReversalReason = reason.Trim(),
+                    ReversalType = "Manual",
+                    PostingAction = "Reverse",
+                    SourceDocumentReference = fiscalYear.FiscalYearCode,
+                    Description = $"Reopen fiscal year - reversal of year-end close for {fiscalYear.FiscalYearName}",
+                    PostingDate = closingEntry.EntryDate,
+                    FiscalPeriodId = closingEntry.FiscalPeriodId,
+                    JournalType = "Year-End Close Reversal",
+                    FunctionalCurrencyCode = await _tenantSettings.GetBaseCurrencyAsync(),
+                    IdempotencyKey = $"GL:YearEndCloseReversal:{tenantId:N}:{fiscalYear.Id:N}:{closingEntry.Id:N}",
+                    AllowPostingToClosedPeriod = true,
+                    Lines = closingEntry.Transactions
+                        .Where(t => !t.IsDeleted)
+                        .Select(t => new FinancePostingLineDto
+                        {
+                            AccountId = t.AccountId,
+                            Description = $"Reversal: {t.Description}",
+                            DebitAmount = t.CreditAmount,
+                            CreditAmount = t.DebitAmount,
+                            Notes = reason.Trim(),
+                            TransactionTag = "YearEndCloseReversal"
+                        })
+                        .ToList()
+                };
+
+                await _financePostingEngine.PostAsync(reversalRequest);
+            }
+
+            fiscalYear.IsClosed = false;
+            fiscalYear.IsActive = true;
+            fiscalYear.Status = "Open";
+            fiscalYear.ClosedDate = null;
+            fiscalYear.ClosedByUserId = null;
+            fiscalYear.RetainedEarningsTransferComplete = false;
+            fiscalYear.RetainedEarningsTransferDate = null;
+            fiscalYear.ClosingJournalEntryId = null;
+            fiscalYear.NetIncomeTransferred = 0m;
+            fiscalYear.YearEndClosingNotes = string.IsNullOrWhiteSpace(fiscalYear.YearEndClosingNotes)
+                ? $"Reopened {DateTime.UtcNow:u}: {reason.Trim()}"
+                : $"{fiscalYear.YearEndClosingNotes}\nReopened {DateTime.UtcNow:u}: {reason.Trim()}";
+
+            await _context.SaveChangesAsync();
+            await dbTransaction.CommitAsync();
+
+            return new PeriodCloseResultDto
+            {
+                Success = true,
+                Message = $"Fiscal year '{fiscalYear.FiscalYearName}' reopened. The year-end closing entry was reversed.",
+                FiscalPeriodId = fiscalYear.Id,
+                PeriodName = fiscalYear.FiscalYearName
+            };
+        }
+
+        public async Task<FinanceDashboardDto> GetFinanceDashboardAsync()
+        {
+            var tenantId = TenantId;
+            var today = DateTime.UtcNow.Date;
+
+            var fiscalYear = await _context.FiscalYears
+                .Where(fy => fy.TenantId == tenantId && !fy.IsDeleted && fy.StartDate <= today && fy.EndDate >= today)
+                .OrderByDescending(fy => fy.StartDate)
+                .FirstOrDefaultAsync();
+
+            var startDate = fiscalYear?.StartDate.Date ?? new DateTime(today.Year, 1, 1);
+            var endDate = fiscalYear?.EndDate.Date ?? new DateTime(today.Year, 12, 31);
+
+            var activity = await _context.AccountTransactions
+                .Where(t => t.TenantId == tenantId
+                    && !t.IsDeleted
+                    && t.TransactionDate >= startDate
+                    && t.TransactionDate <= endDate
+                    && (t.Account.AccountType == AccountType.Revenue || t.Account.AccountType == AccountType.Expense))
+                .Select(t => new
+                {
+                    t.Account.AccountType,
+                    t.Account.AccountName,
+                    t.TransactionDate,
+                    t.DebitAmount,
+                    t.CreditAmount
+                })
+                .ToListAsync();
+
+            var revenue = activity
+                .Where(t => t.AccountType == AccountType.Revenue)
+                .Sum(t => t.CreditAmount - t.DebitAmount);
+            var expenses = activity
+                .Where(t => t.AccountType == AccountType.Expense)
+                .Sum(t => t.DebitAmount - t.CreditAmount);
+
+            var monthly = new List<FinanceDashboardMonthlyPointDto>();
+            var monthCursor = new DateTime(startDate.Year, startDate.Month, 1);
+            var lastMonth = new DateTime(endDate.Year, endDate.Month, 1);
+            while (monthCursor <= lastMonth && monthly.Count < 12)
+            {
+                var monthEnd = monthCursor.AddMonths(1);
+                var monthRows = activity.Where(t => t.TransactionDate >= monthCursor && t.TransactionDate < monthEnd).ToList();
+                monthly.Add(new FinanceDashboardMonthlyPointDto
+                {
+                    Name = monthCursor.ToString("MMM"),
+                    Revenue = monthRows.Where(t => t.AccountType == AccountType.Revenue).Sum(t => t.CreditAmount - t.DebitAmount),
+                    Expenses = monthRows.Where(t => t.AccountType == AccountType.Expense).Sum(t => t.DebitAmount - t.CreditAmount)
+                });
+                monthCursor = monthEnd;
+            }
+
+            var expenseChart = activity
+                .Where(t => t.AccountType == AccountType.Expense)
+                .GroupBy(t => t.AccountName)
+                .Select(g => new FinanceDashboardBreakdownPointDto
+                {
+                    Name = g.Key,
+                    Value = g.Sum(t => t.DebitAmount - t.CreditAmount)
+                })
+                .Where(p => p.Value > 0)
+                .OrderByDescending(p => p.Value)
+                .Take(8)
+                .ToList();
+
+            // Cash on hand comes from the posted cash/bank ledger (source of truth), matching
+            // the cash position report rather than stored snapshots.
+            var cashLedger = await GenerateCashBankLedgerAsync(new CashBankLedgerRequestDto
+            {
+                StartDate = today,
+                EndDate = today
+            });
+
+            return new FinanceDashboardDto
+            {
+                Kpis = new FinanceDashboardKpisDto
+                {
+                    Revenue = revenue,
+                    Expenses = expenses,
+                    NetProfit = revenue - expenses,
+                    CashOnHand = cashLedger.TotalClosingBalance
+                },
+                Monthly = monthly,
+                ExpenseChart = expenseChart
+            };
+        }
+
+        private async Task<(Guid? ClosingJournalEntryId, decimal NetIncome)> TransferRetainedEarningsAsync(
+            FiscalYear fiscalYear,
+            Guid retainedEarningsAccountId)
+        {
+            var tenantId = TenantId;
+
+            var retainedEarningsAccountExists = await _context.Accounts
+                .AnyAsync(a => a.TenantId == tenantId && a.Id == retainedEarningsAccountId && !a.IsDeleted);
+            if (!retainedEarningsAccountExists)
+                throw new ArgumentException($"Retained earnings account {retainedEarningsAccountId} not found");
+
             // Get all revenue and expense accounts with balances for the year
             var periodIds = fiscalYear.FiscalPeriods.Select(p => p.Id).ToList();
-            
+
             var revenueExpenseTransactions = await _context.AccountTransactions
                 .Include(t => t.Account)
-                .Where(t => periodIds.Contains(t.FiscalPeriodId) 
+                .Where(t => t.TenantId == tenantId
+                    && periodIds.Contains(t.FiscalPeriodId)
                     && !t.IsDeleted
+                    && (t.PostingStatus == "Posted" || t.PostingStatus == "Reversed")
                     && (t.Account.AccountType == AccountType.Revenue || t.Account.AccountType == AccountType.Expense))
                 .ToListAsync();
 
@@ -1792,79 +2603,62 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             decimal netIncome = accountBalances.Sum(b => b.Balance);
 
-            // Get last period of fiscal year for posting
+            // A year with no revenue/expense activity closes without a closing journal.
+            if (accountBalances.Count == 0)
+            {
+                return (null, 0m);
+            }
+
             var lastPeriod = fiscalYear.FiscalPeriods.OrderByDescending(p => p.EndDate).First();
 
-            // Create closing journal entry
-            var journalEntry = new JournalEntry
+            // Zero each account against its actual net balance rather than by account type so
+            // contra balances (e.g. negative revenue) never produce negative posting amounts.
+            var lines = new List<FinancePostingLineDto>();
+            foreach (var acctBalance in accountBalances)
             {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId.Value,
-                JournalEntryNumber = $"YE-CLOSE-{fiscalYear.FiscalYearCode}",
-                Description = $"Year-end close - Transfer to Retained Earnings for {fiscalYear.FiscalYearName}",
-                EntryDate = fiscalYear.EndDate,
-                PostingDate = DateTime.UtcNow,
-                FiscalPeriodId = lastPeriod.Id,
-                PostingStatus = "Posted"
-            };
-
-            var transactions = new List<AccountTransaction>();
-
-            // Close revenue accounts (debit to zero them out)
-            foreach (var acctBalance in accountBalances.Where(b => b.Account.AccountType == AccountType.Revenue))
-            {
-                transactions.Add(new AccountTransaction
+                lines.Add(new FinancePostingLineDto
                 {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId.Value,
-                    JournalEntryId = journalEntry.Id,
                     AccountId = acctBalance.AccountId,
-                    FiscalPeriodId = lastPeriod.Id,
-                    TransactionDate = fiscalYear.EndDate,
-                    Description = "Year-end close - Revenue account",
-                    DebitAmount = acctBalance.Balance, // Debit to close
-                    CreditAmount = 0
+                    Description = acctBalance.Account.AccountType == AccountType.Revenue
+                        ? "Year-end close - Revenue account"
+                        : "Year-end close - Expense account",
+                    DebitAmount = acctBalance.Balance > 0 ? acctBalance.Balance : 0m,
+                    CreditAmount = acctBalance.Balance < 0 ? Math.Abs(acctBalance.Balance) : 0m,
+                    TransactionTag = "YearEndClose"
                 });
             }
 
-            // Close expense accounts (credit to zero them out)
-            foreach (var acctBalance in accountBalances.Where(b => b.Account.AccountType == AccountType.Expense))
+            lines.Add(new FinancePostingLineDto
             {
-                transactions.Add(new AccountTransaction
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId.Value,
-                    JournalEntryId = journalEntry.Id,
-                    AccountId = acctBalance.AccountId,
-                    FiscalPeriodId = lastPeriod.Id,
-                    TransactionDate = fiscalYear.EndDate,
-                    Description = "Year-end close - Expense account",
-                    DebitAmount = 0,
-                    CreditAmount = Math.Abs(acctBalance.Balance) // Credit to close (balance is negative)
-                });
-            }
-
-            // Transfer to retained earnings
-            transactions.Add(new AccountTransaction
-            {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId.Value,
-                JournalEntryId = journalEntry.Id,
                 AccountId = retainedEarningsAccountId,
-                FiscalPeriodId = lastPeriod.Id,
-                TransactionDate = fiscalYear.EndDate,
                 Description = $"Year-end close - Net Income transfer: {netIncome:N2}",
-                DebitAmount = netIncome < 0 ? Math.Abs(netIncome) : 0, // Net loss = debit
-                CreditAmount = netIncome > 0 ? netIncome : 0 // Net income = credit
+                DebitAmount = netIncome < 0 ? Math.Abs(netIncome) : 0m, // Net loss = debit
+                CreditAmount = netIncome > 0 ? netIncome : 0m, // Net income = credit
+                TransactionTag = "YearEndClose"
             });
 
-            journalEntry.Transactions = transactions;
+            // Post through the finance posting engine so the closing entry gets a posting
+            // event, idempotency protection, and correct Account.Balance snapshot movements.
+            var postingRequest = new FinancePostingRequestDto
+            {
+                SourceModule = "GL",
+                SourceDocumentType = "YearEndClose",
+                SourceDocumentId = fiscalYear.Id,
+                SourceDocumentTenantId = tenantId,
+                SourceDocumentReference = fiscalYear.FiscalYearCode,
+                Description = $"Year-end close - Transfer to Retained Earnings for {fiscalYear.FiscalYearName}",
+                PostingDate = fiscalYear.EndDate.Date,
+                FiscalPeriodId = lastPeriod.Id,
+                JournalType = "Year-End Close",
+                FunctionalCurrencyCode = await _tenantSettings.GetBaseCurrencyAsync(),
+                IdempotencyKey = $"GL:YearEndClose:{tenantId:N}:{fiscalYear.Id:N}",
+                AllowPostingToClosedPeriod = true,
+                Lines = lines
+            };
 
-            _context.JournalEntries.Add(journalEntry);
-            _context.AccountTransactions.AddRange(transactions);
-            await _context.SaveChangesAsync();
+            var postingResult = await _financePostingEngine.PostAsync(postingRequest);
 
-            return journalEntry;
+            return (postingResult.JournalEntryId, netIncome);
         }
 
         #endregion

@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Entities.Base;
 
 namespace ErpSystem.Core.Entities.Finance
@@ -30,6 +31,23 @@ namespace ErpSystem.Core.Entities.Finance
         public string BaseCurrency { get; set; } = "GHS";
 
         /// <summary>
+        /// Indicates the tenant functional currency is locked because accounting activity exists.
+        /// Functional currency changes after this point require a controlled migration process.
+        /// </summary>
+        public bool FunctionalCurrencyLocked { get; set; } = false;
+
+        /// <summary>
+        /// Timestamp when the functional currency was locked.
+        /// </summary>
+        public DateTime? FunctionalCurrencyLockedAt { get; set; }
+
+        /// <summary>
+        /// Operational reason why the functional currency was locked.
+        /// </summary>
+        [MaxLength(500)]
+        public string? FunctionalCurrencyLockedReason { get; set; }
+
+        /// <summary>
         /// Character used to separate segments in the account number (e.g. "-", ".", "/")
         /// </summary>
         public string AccountSeparator { get; set; } = "-";
@@ -45,19 +63,56 @@ namespace ErpSystem.Core.Entities.Finance
         public Guid? UnrealizedGainLossAccountId { get; set; }
 
         /// <summary>
-        /// Default Realized Gain/Loss account for settled transactions
+        /// Default Unrealized FX Gain account for period-end revaluation postings.
+        /// </summary>
+        public Guid? UnrealizedFxGainAccountId { get; set; }
+
+        /// <summary>
+        /// Default Unrealized FX Loss account for period-end revaluation postings.
+        /// </summary>
+        public Guid? UnrealizedFxLossAccountId { get; set; }
+        
+        /// <summary>
+        /// Account for realized FX gain/loss postings.
         /// </summary>
         public Guid? RealizedGainLossAccountId { get; set; }
+
+        /// <summary>
+        /// Default Realized FX Gain account for settled transactions
+        /// </summary>
+        public Guid? RealizedFxGainAccountId { get; set; }
+
+        /// <summary>
+        /// Default Realized FX Loss account for settled transactions
+        /// </summary>
+        public Guid? RealizedFxLossAccountId { get; set; }
 
         /// <summary>
         /// Default Suspense account for unbalanced entries
         /// </summary>
         public Guid? SuspenseAccountId { get; set; }
 
+        /// <summary>
+        /// Default Zero-Balance Clearing Account / Inter-segment Due-To/Due-From Account
+        /// Used by the Document Splitting Engine to balance trial balances per segment.
+        /// </summary>
+        public Guid? SegmentClearingAccountId { get; set; }
+
+        /// <summary>
+        /// Controls which books automated subledger postings target.
+        /// Values: "IFRS", "Management", "Local", "AllClassifiedBooks"
+        /// Default: "IFRS"
+        /// </summary>
+        [MaxLength(30)]
+        public string SubledgerPostingMode { get; set; } = "IFRS";
+
         // Navigation properties
         public virtual Account? RetainedEarningsAccount { get; set; }
         public virtual Account? UnrealizedGainLossAccount { get; set; }
-        public virtual Account? RealizedGainLossAccount { get; set; }
+        public virtual Account? UnrealizedFxGainAccount { get; set; }
+        public virtual Account? UnrealizedFxLossAccount { get; set; }
+        public virtual Account? RealizedFxGainAccount { get; set; }
+        public virtual Account? RealizedFxLossAccount { get; set; }
         public virtual Account? SuspenseAccount { get; set; }
 
         /// <summary>
@@ -71,6 +126,20 @@ namespace ErpSystem.Core.Entities.Finance
         /// </summary>
         public Guid? ControlAccountApId { get; set; }
         public virtual Account? ControlAccountAp { get; set; }
+
+        /// <summary>
+        /// Asset account used when a posted vendor payment is not yet applied to a supplier invoice.
+        /// Applying the advance later reclassifies it to AP control through the Finance posting engine.
+        /// </summary>
+        public Guid? SupplierAdvanceAccountId { get; set; }
+        public virtual Account? SupplierAdvanceAccount { get; set; }
+
+        /// <summary>
+        /// Liability account used when a posted customer receipt is not yet applied to an AR invoice.
+        /// Applying the advance later reclassifies it to AR control through the Finance posting engine.
+        /// </summary>
+        public Guid? CustomerAdvanceAccountId { get; set; }
+        public virtual Account? CustomerAdvanceAccount { get; set; }
 
         /// <summary>
         /// Default Control Account for Inventory
@@ -98,6 +167,33 @@ namespace ErpSystem.Core.Entities.Finance
 
         public Guid? DefaultBankAccountId { get; set; }
 
+        /// <summary>
+        /// Contra-revenue / expense account debited when customer settlement discounts are allowed.
+        /// </summary>
+        public Guid? DiscountAllowedAccountId { get; set; }
+        public virtual Account? DiscountAllowedAccount { get; set; }
+
+        /// <summary>
+        /// Other-income / contra-expense account credited when supplier settlement discounts are taken.
+        /// </summary>
+        public Guid? DiscountReceivedAccountId { get; set; }
+        public virtual Account? DiscountReceivedAccount { get; set; }
+
+        /// <summary>
+        /// Migration/Opening Balance Clearing Account.
+        /// Used during go-live to offset subledger opening balance entries.
+        /// The balance of this account should be zero after migration is complete.
+        /// This is distinct from SuspenseAccountId, which handles operational exceptions.
+        /// </summary>
+        public Guid? MigrationClearingAccountId { get; set; }
+        public virtual Account? MigrationClearingAccount { get; set; }
+
+        /// <summary>
+        /// When enabled, opening balance postings auto-route balancing/offset lines
+        /// to the Migration Clearing Account.
+        /// </summary>
+        public bool OpeningBalanceAutoRoutingEnabled { get; set; } = true;
+
         // ── Lease Accounting (IFRS 16) GL Defaults ──────────────────────
 
         /// <summary>
@@ -117,5 +213,24 @@ namespace ErpSystem.Core.Entities.Finance
         /// </summary>
         public Guid? LeaseInterestExpenseAccountId { get; set; }
         public virtual Account? LeaseInterestExpenseAccount { get; set; }
+
+        // ── Subledger Journals Defaults ─────────────────────────────────
+        
+        /// <summary>
+        /// Default expense account for bad debt / write-offs (AR)
+        /// </summary>
+        public Guid? WriteOffExpenseAccountId { get; set; }
+        public virtual Account? WriteOffExpenseAccount { get; set; }
+
+        /// <summary>
+        /// Default income/recovery account for vendor write-offs (AP)
+        /// </summary>
+        public Guid? WriteOffRecoveryAccountId { get; set; }
+        public virtual Account? WriteOffRecoveryAccount { get; set; }
+
+        /// <summary>
+        /// If true, subledger journals must go through the approval workflow before posting
+        /// </summary>
+        public bool RequireSubledgerJournalApproval { get; set; } = false;
     }
 }

@@ -10,6 +10,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Services.Finance.Segments
 {
@@ -33,7 +34,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
             _logger = logger;
         }
 
-        private Guid TenantId => _currentUserService.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
         private string UserName => _currentUserService.UserName ?? "system";
 
         public async Task<IReadOnlyList<AccountSegmentStructureDto>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -459,7 +460,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
                         DisplayOrder = v.DisplayOrder
                     })
                     .ToList() ?? new List<SegmentLookupValueSummaryDto>(),
-                CreatedBy = segment.CreatedBy,
+                CreatedBy = segment.CreatedBy ?? "system",
                 CreatedAt = segment.CreatedAt,
                 UpdatedBy = segment.UpdatedBy,
                 UpdatedAt = segment.UpdatedAt

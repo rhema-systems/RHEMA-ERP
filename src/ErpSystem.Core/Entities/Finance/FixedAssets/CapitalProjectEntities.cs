@@ -21,7 +21,16 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         Completed = 4,
 
         [Display(Name = "Cancelled")]
-        Cancelled = 5
+        Cancelled = 5,
+
+        [Display(Name = "Pending Approval")]
+        PendingApproval = 6,
+
+        [Display(Name = "Approved")]
+        Approved = 7,
+
+        [Display(Name = "Rejected")]
+        Rejected = 8
     }
 
     public enum ProjectCostSourceType

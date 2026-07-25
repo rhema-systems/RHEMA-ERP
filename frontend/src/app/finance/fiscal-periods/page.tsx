@@ -4,23 +4,31 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { CalendarDays, Lock, Unlock, LockKeyhole, AlertTriangle, CheckCircle2, RotateCw } from 'lucide-react';
 import type { FiscalPeriod, ModuleDefinition } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { ModuleLockManager } from '@/components/finance/fiscal-periods/ModuleLockManager';
 
 export default function FiscalPeriodsPage() {
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canAdminister = hasPermission('Finance.Admin');
+    const canClose = hasPermission('Finance.PeriodClose');
+    const canReopen = hasPermission('Finance.PeriodReopen');
     const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
     const [modules, setModules] = useState<ModuleDefinition[]>([]);
     const [loading, setLoading] = useState(true);
     const [filterYear, setFilterYear] = useState('all');
     const [filterStatus, setFilterStatus] = useState('all');
     const [selectedPeriod, setSelectedPeriod] = useState<FiscalPeriod | null>(null);
+    const [reopenReason, setReopenReason] = useState('');
     const [processing, setProcessing] = useState(false);
 
     const loadData = useCallback(async () => {
@@ -48,8 +56,16 @@ export default function FiscalPeriodsPage() {
         loadData();
     }, [loadData]);
 
+    const getPeriodStatus = (period: FiscalPeriod): string => {
+        const legacyPeriod = period as FiscalPeriod & { status?: string; isOpen?: boolean };
+
+        return period.periodStatus
+            || legacyPeriod.status
+            || (period.isLocked ? 'Locked' : period.isClosed ? 'Closed' : legacyPeriod.isOpen ? 'Open' : 'Future');
+    };
+
     const filteredPeriods = periods.filter((period) => {
-        if (filterStatus !== 'all' && period.status !== filterStatus) return false;
+        if (filterStatus !== 'all' && getPeriodStatus(period) !== filterStatus) return false;
         // Simple year filter logic - in real app might need more robust date parsing
         if (filterYear !== 'all' && !period.periodName.includes(filterYear) && !period.startDate.startsWith(filterYear)) return false;
         return true;
@@ -74,11 +90,23 @@ export default function FiscalPeriodsPage() {
     };
 
     const handleReopenPeriod = async (periodId: string) => {
+        const reason = reopenReason.trim();
+
+        if (!reason) {
+            toast({
+                title: 'Reason required',
+                description: 'Enter a reason before reopening this fiscal period.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
         try {
             setProcessing(true);
-            await financeDataService.reopenFiscalPeriod(periodId);
+            await financeDataService.reopenFiscalPeriod(periodId, reason);
             toast({ title: "Success", description: "Fiscal period reopened successfully" });
-            loadData();
+            setReopenReason('');
+            await loadData();
         } catch (error: any) {
             toast({
                 title: 'Error',
@@ -239,7 +267,10 @@ export default function FiscalPeriodsPage() {
                                             <td colSpan={6} className="p-4 text-center text-muted-foreground">No periods found matching filters</td>
                                         </tr>
                                     ) : (
-                                        filteredPeriods.map((period) => (
+                                        filteredPeriods.map((period) => {
+                                            const status = getPeriodStatus(period);
+
+                                            return (
                                             <tr key={period.id} className="border-b hover:bg-muted/50">
                                                 <td className="p-4 font-mono font-semibold">{period.periodNumber}</td>
                                                 <td className="p-4 font-medium">{period.periodName}</td>
@@ -247,8 +278,8 @@ export default function FiscalPeriodsPage() {
                                                 <td className="p-4">{formatDate(period.endDate)}</td>
                                                 <td className="p-4">
                                                     <div className="flex flex-col gap-1">
-                                                        {getStatusBadge(period.status)}
-                                                        {period.moduleLocks && period.moduleLocks.some(l => l.isLocked) && (
+                                                        {getStatusBadge(status)}
+                                                        {period.isPartiallyLocked && (
                                                             <Badge variant="outline" className="text-xs w-fit border-orange-200 text-orange-700 bg-orange-50">
                                                                 <Lock className="h-3 w-3 mr-1" />
                                                                 Partial Lock
@@ -259,14 +290,18 @@ export default function FiscalPeriodsPage() {
                                                 <td className="p-4 text-right">
                                                     <div className="flex justify-end gap-2">
                                                         {/* Module Lock Manager */}
-                                                        <ModuleLockManager
-                                                            period={period}
-                                                            modules={modules}
-                                                            onUpdate={loadData}
-                                                        />
+                                                        {(canAdminister || canClose || canReopen) && (
+                                                            <ModuleLockManager
+                                                                period={period}
+                                                                modules={modules}
+                                                                canLock={canClose || canAdminister}
+                                                                canReopen={canReopen || canAdminister}
+                                                                onUpdate={loadData}
+                                                            />
+                                                        )}
 
                                                         {/* Period Actions */}
-                                                        {period.status === 'Open' && (
+                                                        {canClose && status === 'Open' && (
                                                             <Dialog>
                                                                 <DialogTrigger asChild>
                                                                     <Button
@@ -324,10 +359,14 @@ export default function FiscalPeriodsPage() {
                                                                 </DialogContent>
                                                             </Dialog>
                                                         )}
-                                                        {period.status === 'Closed' && (
+                                                        {canReopen && status === 'Closed' && (
                                                             <Dialog>
                                                                 <DialogTrigger asChild>
-                                                                    <Button variant="outline" size="sm">
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        onClick={() => setReopenReason('')}
+                                                                    >
                                                                         <Unlock className="h-4 w-4 mr-1" />
                                                                         Reopen
                                                                     </Button>
@@ -339,7 +378,7 @@ export default function FiscalPeriodsPage() {
                                                                             This will allow new transactions to be posted to this period
                                                                         </DialogDescription>
                                                                     </DialogHeader>
-                                                                    <div className="py-4">
+                                                                    <div className="space-y-4 py-4">
                                                                         <div className="bg-yellow-50 p-3 rounded text-sm">
                                                                             <p className="font-semibold mb-1 flex items-center gap-2">
                                                                                 <AlertTriangle className="h-4 w-4" />
@@ -347,9 +386,24 @@ export default function FiscalPeriodsPage() {
                                                                             </p>
                                                                             <p>Reopening a period will allow modifications to financial data for this period. Ensure this is necessary and authorized.</p>
                                                                         </div>
+                                                                        <div className="space-y-2">
+                                                                            <Label htmlFor={`reopen-reason-${period.id}`}>Reason</Label>
+                                                                            <Textarea
+                                                                                id={`reopen-reason-${period.id}`}
+                                                                                value={reopenReason}
+                                                                                onChange={(event) => setReopenReason(event.target.value)}
+                                                                                placeholder="Why is this period being reopened?"
+                                                                                maxLength={1000}
+                                                                                rows={3}
+                                                                            />
+                                                                        </div>
                                                                     </div>
                                                                     <DialogFooter>
-                                                                        <Button variant="outline">Cancel</Button>
+                                                                        <DialogClose asChild>
+                                                                            <Button variant="outline" onClick={() => setReopenReason('')}>
+                                                                                Cancel
+                                                                            </Button>
+                                                                        </DialogClose>
                                                                         <Button onClick={() => handleReopenPeriod(period.id)} disabled={processing}>
                                                                             {processing ? 'Reopening...' : 'Reopen Period'}
                                                                         </Button>
@@ -360,7 +414,8 @@ export default function FiscalPeriodsPage() {
                                                     </div>
                                                 </td>
                                             </tr>
-                                        ))
+                                            );
+                                        })
                                     )}
                                 </tbody>
                             </table>

@@ -3043,11 +3043,11 @@ public class PayrollService : IPayrollService
     private static IReadOnlyList<PayrollFinanceAccountSeed> BuildPayrollFinanceAccountSeeds()
         =>
         [
-            new("001-000-1010", "1010", "Cash and Bank - Payroll Clearing", AccountType.Asset, "Current Assets", "Cash and Bank", "Default bank and cash clearing account used by payroll net pay journals."),
-            new("001-000-1120", "1120", "Staff Loans and Salary Advances", AccountType.Asset, "Current Assets", "Employee Receivables", "Receivable account for staff loan repayments, salary advances, and related payroll recoveries."),
-            new("001-000-2120", "2120", "Accrued Payroll Payables", AccountType.Liability, "Current Liabilities", "Payroll Payables", "Default liability account for accrued payroll deductions, taxes, pensions, and contribution payables."),
-            new("001-000-4920", "4920", "Payroll Recoveries and Interest Income", AccountType.Revenue, "Other Income", "Payroll Recoveries", "Income account for payroll loan interest and recoveries credited from payroll runs."),
-            new("001-000-6020", "6020", "Salaries, Wages and Payroll Costs", AccountType.Expense, "Operating Expenses", "Payroll Costs", "Default payroll expense account for basic salary, allowances, overtime, employer contributions, and arrears.")
+            new("000-1010-0000", "1010", "Cash and Bank - Payroll Clearing", AccountType.Asset, "Current Assets", "Cash and Bank", "Default bank and cash clearing account used by payroll net pay journals."),
+            new("000-1120-0000", "1120", "Staff Loans and Salary Advances", AccountType.Asset, "Current Assets", "Employee Receivables", "Receivable account for staff loan repayments, salary advances, and related payroll recoveries."),
+            new("000-2120-0000", "2120", "Accrued Payroll Payables", AccountType.Liability, "Current Liabilities", "Payroll Payables", "Default liability account for accrued payroll deductions, taxes, pensions, and contribution payables."),
+            new("000-4920-0000", "4920", "Payroll Recoveries and Interest Income", AccountType.Revenue, "Other Income", "Payroll Recoveries", "Income account for payroll loan interest and recoveries credited from payroll runs."),
+            new("000-6020-0000", "6020", "Salaries, Wages and Payroll Costs", AccountType.Expense, "Operating Expenses", "Payroll Costs", "Default payroll expense account for basic salary, allowances, overtime, employer contributions, and arrears.")
         ];
 
     private async Task<int> NextPayrollJournalMappingSequenceAsync(Guid tenantId, CancellationToken cancellationToken)

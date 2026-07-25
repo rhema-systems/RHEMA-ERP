@@ -107,7 +107,7 @@ export default function CurrencyRevaluationPage() {
 
             {/* Step 1: Parameters */}
             {step === 1 && (
-                <Card className="max-w-2xl mx-auto">
+                <Card className="max-w-4xl mx-auto">
                     <CardHeader>
                         <CardTitle>Revaluation Parameters</CardTitle>
                         <CardDescription>Select criteria for currency revaluation</CardDescription>
@@ -134,8 +134,8 @@ export default function CurrencyRevaluationPage() {
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="MonthEnd">Month End</SelectItem>
-                                        <SelectItem value="Average">Average</SelectItem>
-                                        <SelectItem value="Daily">Daily Spot</SelectItem>
+                                        <SelectItem value="QuarterEnd">Quarter End</SelectItem>
+                                        <SelectItem value="YearEnd">Year End</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>

@@ -1,12 +1,16 @@
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Api.Services.Finance;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
@@ -22,27 +26,33 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ITaxCalculationEngine _taxEngine;
-        private readonly ISubledgerPostingService _subledgerPostingService;
         private readonly IInventoryValuationService _inventoryValuationService;
         private readonly ILogger<InvoiceService> _logger;
+        private readonly IDocumentNumberingService _documentNumberingService;
+        private readonly IFinancePostingEngine? _financePostingEngine;
+        private readonly IFinanceAuditService? _financeAuditService;
 
         public InvoiceService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
             ITaxCalculationEngine taxEngine,
-            ISubledgerPostingService subledgerPostingService,
             IInventoryValuationService inventoryValuationService,
-            ILogger<InvoiceService> logger)
+            ILogger<InvoiceService> logger,
+            IDocumentNumberingService documentNumberingService,
+            IFinancePostingEngine? financePostingEngine = null,
+            IFinanceAuditService? financeAuditService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _taxEngine = taxEngine;
-            _subledgerPostingService = subledgerPostingService;
             _inventoryValuationService = inventoryValuationService;
             _logger = logger;
+            _documentNumberingService = documentNumberingService;
+            _financePostingEngine = financePostingEngine;
+            _financeAuditService = financeAuditService;
         }
 
-        private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
         private string UserName => _currentUser.UserName ?? "system";
 
         public async Task<InvoiceDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -51,7 +61,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
                 .Include(i => i.LineItems)
                     .ThenInclude(li => li.GLAccount)
-                .Include(i => i.Customer)
                 .FirstOrDefaultAsync(cancellationToken);
 
             return invoice == null ? null : MapToDto(invoice);
@@ -63,7 +72,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(i => i.TenantId == TenantId && i.InvoiceNumber == invoiceNumber)
                 .Include(i => i.LineItems)
                     .ThenInclude(li => li.GLAccount)
-                .Include(i => i.Customer)
                 .FirstOrDefaultAsync(cancellationToken);
 
             return invoice == null ? null : MapToDto(invoice);
@@ -84,7 +92,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
 
             if (query.CustomerId.HasValue)
-                queryable = queryable.Where(i => i.CustomerId == query.CustomerId.Value);
+                queryable = queryable.Where(i => i.BusinessPartnerId == query.CustomerId.Value);
 
             if (!string.IsNullOrWhiteSpace(query.Status))
             {
@@ -106,6 +114,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                     i.DueDate.Value < now &&
                     (i.TotalAmount - i.PaidAmount) > 0);
             }
+
+            if (query.IsOpeningBalance.HasValue)
+                queryable = queryable.Where(i => i.IsOpeningBalance == query.IsOpeningBalance.Value);
 
             // Get total count
             var totalCount = await queryable.CountAsync(cancellationToken);
@@ -147,12 +158,25 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task<InvoiceDto> CreateAsync(InvoiceCreateDto dto, CancellationToken cancellationToken = default)
         {
-            // Validate customer exists
-            var customer = await _unitOfWork.Repository<Customer>()
-                .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.Id == dto.CustomerId);
+            // Validate customer business partner exists
+            var customer = await _unitOfWork.Repository<BusinessPartner>()
+                .FirstOrDefaultAsync(c =>
+                    c.TenantId == TenantId &&
+                    c.Id == dto.CustomerId &&
+                    !c.IsDeleted &&
+                    (c.PartnerType == "Customer" || c.PartnerType == "Both"));
 
             if (customer == null)
                 throw new KeyNotFoundException($"Customer with Id '{dto.CustomerId}' not found.");
+
+            var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? customer.PaymentTermId, cancellationToken);
+            var paymentTermsDays = paymentTerm?.DueDays ?? TryParsePaymentTermsDays(customer.PaymentTerms) ?? 30;
+            var earlyPaymentDiscountPercentage = paymentTerm?.DiscountPercent ?? 0m;
+            DateTime? earlyPaymentDiscountDueDate = null;
+            if (paymentTerm != null && paymentTerm.DiscountPercent > 0 && paymentTerm.DiscountDays > 0)
+            {
+                earlyPaymentDiscountDueDate = dto.InvoiceDate.AddDays(paymentTerm.DiscountDays);
+            }
 
             // Check for duplicate invoice
             if (!string.IsNullOrWhiteSpace(dto.Reference))
@@ -171,16 +195,21 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
                 InvoiceNumber = invoiceNumber,
-                CustomerId = dto.CustomerId,
-                CustomerName = customer.CustomerName,
-                CustomerAddress = customer.Address,
+                BusinessPartnerId = dto.CustomerId,
+                CustomerName = customer.PartnerName,
+                CustomerAddress = customer.PhysicalAddress ?? customer.MailingAddress,
                 InvoiceDate = dto.InvoiceDate,
-                DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(customer.PaymentTermsDays),
+                DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays),
                 Reference = dto.Reference,
                 Notes = dto.Notes,
+                IsOpeningBalance = dto.IsOpeningBalance,
                 CurrencyCode = dto.CurrencyCode,
                 ExchangeRate = dto.ExchangeRate,
-                PaymentTermsDays = customer.PaymentTermsDays,
+                PaymentTermsDays = paymentTermsDays,
+                PaymentTermId = paymentTerm?.Id ?? customer.PaymentTermId,
+                EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage,
+                EarlyPaymentDiscountDueDate = earlyPaymentDiscountDueDate,
+                TaxGroupId = dto.IsOpeningBalance ? null : dto.TaxGroupId,
                 Status = InvoiceStatus.Draft,
                 CreatedAt = now,
                 CreatedBy = UserName
@@ -195,15 +224,18 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var lineTotal = lineDto.Quantity * lineDto.UnitPrice;
                 var lineDiscount = lineTotal * (lineDto.DiscountPercentage / 100);
                 var lineNetAmount = lineTotal - lineDiscount;
+                var effectiveTaxGroupId = dto.IsOpeningBalance ? null : (lineDto.TaxGroupId ?? dto.TaxGroupId);
 
                 // Calculate tax for this line if tax code provided
                 decimal lineTax = 0;
-                if (!string.IsNullOrWhiteSpace(lineDto.TaxCode))
+                if (lineDto.TaxTreatment == TaxTreatment.Standard &&
+                    (effectiveTaxGroupId.HasValue || !string.IsNullOrWhiteSpace(lineDto.TaxCode)))
                 {
                     var taxRequest = new TaxCalculationRequestDto
                     {
                         TransactionType = TaxTransactionType.SaleOfGoods,
                         BaseAmount = lineNetAmount,
+                        TaxGroupId = effectiveTaxGroupId,
                         CustomerId = dto.CustomerId
                     };
 
@@ -228,7 +260,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                     Quantity = lineDto.Quantity,
                     UnitPrice = lineDto.UnitPrice,
                     TaxCode = lineDto.TaxCode,
+                    TaxGroupId = effectiveTaxGroupId,
+                    TaxTreatment = lineDto.TaxTreatment,
                     TaxRate = lineTax > 0 ? (lineTax / lineNetAmount * 100) : 0,
+                    TaxAmount = lineTax,
                     Unit = lineDto.Unit,
                     DiscountPercentage = lineDto.DiscountPercentage,
                     DiscountAmount = lineDiscount,
@@ -269,6 +304,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.TaxAmount = totalTax;
             invoice.DiscountAmount = dto.DiscountAmount;
             invoice.TotalAmount = subtotal + totalTax - dto.DiscountAmount;
+            invoice.EarlyPaymentDiscountAmount = CalculateEarlyPaymentDiscountAmount(
+                invoice.TotalAmount,
+                invoice.EarlyPaymentDiscountPercentage);
             invoice.PaidAmount = 0;
             
             // Set Multicurrency fields
@@ -288,7 +326,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             await _unitOfWork.Repository<Invoice>().AddAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Created invoice {InvoiceNumber} for customer {CustomerId}", invoiceNumber, customer.Id);
+            _logger.LogInformation("Created invoice {InvoiceNumber} for customer business partner {CustomerId}", invoiceNumber, customer.Id);
 
             return MapToDto(invoice);
         }
@@ -302,6 +340,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             if (invoice == null)
                 throw new KeyNotFoundException($"Invoice with Id '{dto.Id}' not found.");
+
+            if (invoice.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Posted customer invoices cannot be updated. Use a reversal, credit note, or adjustment.");
 
             // Only allow updates if invoice is in Draft status
             if (invoice.Status != InvoiceStatus.Draft)
@@ -319,7 +360,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.DueDate = dto.DueDate;
             invoice.Reference = dto.Reference;
             invoice.Notes = dto.Notes;
+            invoice.IsOpeningBalance = dto.IsOpeningBalance;
             invoice.DiscountAmount = dto.DiscountAmount;
+            invoice.TaxGroupId = dto.IsOpeningBalance ? null : dto.TaxGroupId;
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
@@ -339,14 +382,17 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var lineTotal = lineDto.Quantity * lineDto.UnitPrice;
                 var lineDiscount = lineTotal * (lineDto.DiscountPercentage / 100);
                 var lineNetAmount = lineTotal - lineDiscount;
+                var effectiveTaxGroupId = dto.IsOpeningBalance ? null : (lineDto.TaxGroupId ?? dto.TaxGroupId);
 
                 decimal lineTax = 0;
-                if (!string.IsNullOrWhiteSpace(lineDto.TaxCode))
+                if (lineDto.TaxTreatment == TaxTreatment.Standard &&
+                    (effectiveTaxGroupId.HasValue || !string.IsNullOrWhiteSpace(lineDto.TaxCode)))
                 {
                     var taxRequest = new TaxCalculationRequestDto
                     {
                         TransactionType = TaxTransactionType.SaleOfGoods,
                         BaseAmount = lineNetAmount,
+                        TaxGroupId = effectiveTaxGroupId,
                         CustomerId = invoice.CustomerId
                     };
 
@@ -371,7 +417,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                     Quantity = lineDto.Quantity,
                     UnitPrice = lineDto.UnitPrice,
                     TaxCode = lineDto.TaxCode,
+                    TaxGroupId = effectiveTaxGroupId,
+                    TaxTreatment = lineDto.TaxTreatment,
                     TaxRate = lineTax > 0 ? (lineTax / lineNetAmount * 100) : 0,
+                    TaxAmount = lineTax,
                     Unit = lineDto.Unit,
                     DiscountPercentage = lineDto.DiscountPercentage,
                     DiscountAmount = lineDiscount,
@@ -387,6 +436,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.SubTotal = subtotal;
             invoice.TaxAmount = totalTax;
             invoice.TotalAmount = subtotal + totalTax - dto.DiscountAmount;
+            invoice.EarlyPaymentDiscountAmount = CalculateEarlyPaymentDiscountAmount(
+                invoice.TotalAmount,
+                invoice.EarlyPaymentDiscountPercentage);
             
             // Recalculate BaseCurrencyAmount
             if (string.Equals(invoice.CurrencyCode, tenant.BaseCurrency, StringComparison.OrdinalIgnoreCase))
@@ -417,6 +469,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (invoice == null)
                 throw new KeyNotFoundException($"Invoice with Id '{id}' not found.");
 
+            if (invoice.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Posted customer invoices cannot be deleted. Use a reversal, credit note, or adjustment.");
+
             // Only allow deletion if invoice is in Draft status
             if (invoice.Status != InvoiceStatus.Draft)
                 throw new InvalidOperationException("Only draft invoices can be deleted.");
@@ -431,7 +486,6 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             var invoice = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
-                .Include(i => i.Customer)
                 .Include(i => i.LineItems)
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -447,7 +501,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.UpdatedBy = UserName;
 
             // Process Inventory Issues for Inventory-type line items
-            foreach (var line in invoice.LineItems.Where(l => l.LineItemType == LineItemType.Inventory))
+            foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == LineItemType.Inventory))
             {
                 if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
                 {
@@ -471,33 +525,122 @@ namespace ErpSystem.Api.Services.Finance.AR
                 }
             }
 
-            // Update customer's outstanding balance
-            if (invoice.Customer != null)
+            FinancePostingRequestDto postingRequest;
+            try
             {
-                // Use BaseCurrencyAmount for standardized balance
-                invoice.Customer.OutstandingBalance += invoice.BaseCurrencyAmount;
-                invoice.Customer.LastOrderDate = invoice.InvoiceDate;
-                invoice.Customer.UpdatedAt = now;
-                invoice.Customer.UpdatedBy = UserName;
-                await _unitOfWork.Repository<Customer>().UpdateAsync(invoice.Customer);
+                postingRequest = await BuildArInvoicePostingRequestAsync(
+                    invoice,
+                    allowDraftTransition: true,
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                await RecordArInvoiceAuditAsync(
+                    FinanceAuditEvents.ArInvoicePostingFailed,
+                    invoice,
+                    afterValues: new
+                    {
+                        invoice.JournalEntryId,
+                        error = ex.Message
+                    },
+                    reason: ex.Message,
+                    cancellationToken: cancellationToken);
+
+                _logger.LogError(ex, "Failed to build AR invoice posting request while sending invoice {InvoiceNumber}", invoice.InvoiceNumber);
+                throw;
             }
 
-            await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            // Update customer's outstanding balance as an operational read model. The posted GL remains the source of truth.
+            var customerPartner = await GetCustomerPartnerAsync(invoice.CustomerId, cancellationToken);
+            var previousOutstandingBalance = customerPartner?.OutstandingBalance;
+            if (customerPartner != null)
+            {
+                // Use BaseCurrencyAmount for standardized balance
+                customerPartner.OutstandingBalance = (customerPartner.OutstandingBalance ?? 0m) + invoice.BaseCurrencyAmount;
+                customerPartner.UpdatedAt = now;
+                customerPartner.UpdatedBy = UserName;
+                await _unitOfWork.Repository<BusinessPartner>().UpdateAsync(customerPartner);
+            }
 
-            // Post to GL
-            await _subledgerPostingService.PostArInvoiceAsync(invoice.Id, cancellationToken);
+            try
+            {
+                var result = await CompleteArInvoicePostingAsync(
+                    invoice,
+                    postingRequest,
+                    wasAlreadyLinked: false,
+                    rollbackBeforeFailureAudit: () =>
+                    {
+                        invoice.Status = InvoiceStatus.Draft;
+                        invoice.UpdatedAt = null;
+                        invoice.UpdatedBy = null;
 
-            _logger.LogInformation("Sent invoice {InvoiceNumber}", invoice.InvoiceNumber);
+                        if (customerPartner != null)
+                        {
+                            customerPartner.OutstandingBalance = previousOutstandingBalance;
+                            customerPartner.UpdatedAt = null;
+                            customerPartner.UpdatedBy = null;
+                        }
 
-            return MapToDto(invoice);
+                        return Task.CompletedTask;
+                    },
+                    cancellationToken);
+
+                _logger.LogInformation("Sent invoice {InvoiceNumber} and posted to GL through the finance posting engine", invoice.InvoiceNumber);
+
+                return result;
+            }
+            catch
+            {
+                _logger.LogWarning("Invoice {InvoiceNumber} was not sent because AR posting failed.", invoice.InvoiceNumber);
+                throw;
+            }
+        }
+
+        public async Task<InvoiceDto> PostAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Central finance posting engine is not configured for AR invoice posting.");
+
+            var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
+            var wasAlreadyLinked = invoice.JournalEntryId.HasValue;
+
+            FinancePostingRequestDto postingRequest;
+            try
+            {
+                postingRequest = await BuildArInvoicePostingRequestAsync(
+                    invoice,
+                    allowDraftTransition: false,
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                await RecordArInvoiceAuditAsync(
+                    FinanceAuditEvents.ArInvoicePostingFailed,
+                    invoice,
+                    afterValues: new
+                    {
+                        invoice.JournalEntryId,
+                        error = ex.Message
+                    },
+                    reason: ex.Message,
+                    cancellationToken: cancellationToken);
+
+                _logger.LogError(ex, "Failed to build AR invoice posting request for {InvoiceNumber}", invoice.InvoiceNumber);
+                throw;
+            }
+
+            return await CompleteArInvoicePostingAsync(
+                invoice,
+                postingRequest,
+                wasAlreadyLinked,
+                rollbackBeforeFailureAudit: null,
+                cancellationToken);
         }
 
         public async Task<InvoiceDto> VoidInvoiceAsync(Guid id, string reason, CancellationToken cancellationToken = default)
         {
             var invoice = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
-                .Include(i => i.Customer)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (invoice == null)
@@ -515,15 +658,16 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Reverse the unpaid portion of the invoice from customer's outstanding balance.
             // If partially paid, only the remaining outstanding (BaseCurrencyAmount - PaidAmount) 
             // should be reversed. The paid allocations will be reversed separately via payment reversal.
-            if (invoice.Customer != null)
+            var customerPartner = await GetCustomerPartnerAsync(invoice.CustomerId, cancellationToken);
+            if (customerPartner != null)
             {
                 var unpaidPortion = invoice.BaseCurrencyAmount - invoice.PaidAmount;
                 if (unpaidPortion > 0)
                 {
-                    invoice.Customer.OutstandingBalance -= unpaidPortion;
-                    invoice.Customer.UpdatedAt = now;
-                    invoice.Customer.UpdatedBy = UserName;
-                    await _unitOfWork.Repository<Customer>().UpdateAsync(invoice.Customer);
+                    customerPartner.OutstandingBalance = (customerPartner.OutstandingBalance ?? 0m) - unpaidPortion;
+                    customerPartner.UpdatedAt = now;
+                    customerPartner.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<BusinessPartner>().UpdateAsync(customerPartner);
                 }
             }
 
@@ -571,7 +715,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var duplicate = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
-                    i.CustomerId == customerId &&
+                    i.BusinessPartnerId == customerId &&
                     i.Reference == reference &&
                     i.InvoiceDate >= dateTolerance &&
                     i.Status != InvoiceStatus.Cancelled)
@@ -582,29 +726,893 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         private async Task<string> GenerateInvoiceNumberAsync(CancellationToken cancellationToken)
         {
-            var prefix = "INV";
-            var currentYear = DateTime.UtcNow.Year;
-            var currentMonth = DateTime.UtcNow.Month;
+            return await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.ARInvoice,
+                TenantId,
+                DateTime.UtcNow,
+                nameof(Invoice),
+                cancellationToken: cancellationToken);
+        }
 
-            // Get the last invoice for this month
-            var lastInvoice = await _unitOfWork.Repository<Invoice>()
-                .GetQueryable(i =>
-                    i.TenantId == TenantId &&
-                    i.InvoiceNumber.StartsWith($"{prefix}-{currentYear}{currentMonth:00}"))
-                .OrderByDescending(i => i.InvoiceNumber)
+        private async Task<Invoice> LoadInvoiceForPostingAsync(Guid id, CancellationToken cancellationToken)
+        {
+            var invoice = await _unitOfWork.Repository<Invoice>()
+                .GetQueryable(i => i.TenantId == TenantId && i.Id == id && !i.IsDeleted)
+                .Include(i => i.BusinessPartner)
+                .Include(i => i.LineItems)
                 .FirstOrDefaultAsync(cancellationToken);
 
-            if (lastInvoice == null)
-                return $"{prefix}-{currentYear}{currentMonth:00}-0001";
+            if (invoice == null)
+                throw new KeyNotFoundException($"Invoice with Id '{id}' not found.");
 
-            // Extract sequence number and increment
-            var parts = lastInvoice.InvoiceNumber.Split('-');
-            if (parts.Length >= 3 && int.TryParse(parts[2], out var lastSeq))
+            return invoice;
+        }
+
+        private async Task<FinancePostingRequestDto> BuildArInvoicePostingRequestAsync(
+            Invoice invoice,
+            bool allowDraftTransition,
+            CancellationToken cancellationToken)
+        {
+            var tenantId = TenantId;
+            if (invoice.TenantId != tenantId)
+                throw new InvalidOperationException("AR invoice belongs to another tenant.");
+
+            if (!allowDraftTransition && invoice.Status != InvoiceStatus.Sent)
+                throw new InvalidOperationException("Only sent AR invoices can be posted.");
+
+            if (allowDraftTransition && invoice.Status != InvoiceStatus.Draft && invoice.Status != InvoiceStatus.Sent)
+                throw new InvalidOperationException("Only draft AR invoices can be sent and posted.");
+
+            var activeLines = invoice.LineItems
+                .Where(l => !l.IsDeleted)
+                .OrderBy(l => l.CreatedAt)
+                .ThenBy(l => l.Id)
+                .ToList();
+
+            if (activeLines.Count == 0)
+                throw new InvalidOperationException("AR invoice has no lines to post.");
+
+            foreach (var line in activeLines)
             {
-                return $"{prefix}-{currentYear}{currentMonth:00}-{(lastSeq + 1):0000}";
+                if (line.TenantId != tenantId || line.InvoiceId != invoice.Id)
+                    throw new InvalidOperationException("AR invoice line belongs to another tenant or document.");
             }
 
-            return $"{prefix}-{currentYear}{currentMonth:00}-0001";
+            var customer = await ResolveCustomerForPostingAsync(invoice, cancellationToken);
+            var settings = await GetFinanceSettingsAsync(cancellationToken);
+            var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+            var invoiceCurrency = NormalizeCurrency(invoice.CurrencyCode, functionalCurrency);
+            var exchangeRate = NormalizeExchangeRate(invoice.ExchangeRate);
+            var accountCache = new Dictionary<Guid, Account>();
+
+            var arAccountId = customer.DefaultArAccountId
+                ?? settings.ControlAccountArId
+                ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
+            await ResolvePostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+            if (invoice.IsOpeningBalance)
+            {
+                return await BuildArOpeningBalancePostingRequestAsync(
+                    invoice,
+                    settings,
+                    arAccountId,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    accountCache,
+                    cancellationToken);
+            }
+
+            var postingLines = new List<FinancePostingLineDto>();
+            var documentDiscountAmount = RoundMoney(activeLines.Sum(l => l.DiscountAmount) + invoice.DiscountAmount);
+            var lineNumber = 1;
+
+            foreach (var line in activeLines)
+            {
+                if (line.DiscountAmount < 0m || line.TaxAmount < 0m)
+                    throw new InvalidOperationException("AR invoice line discount and tax amounts cannot be negative.");
+
+                var grossAmount = RoundMoney(line.Quantity * line.UnitPrice);
+                if (grossAmount <= 0m)
+                {
+                    continue;
+                }
+
+                var revenueAccountId = line.GLAccountId
+                    ?? throw new InvalidOperationException($"No revenue account specified for AR line '{line.Description}'.");
+                await ResolvePostingAccountAsync(revenueAccountId, "revenue account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
+
+                postingLines.Add(BuildPostingLine(
+                    revenueAccountId,
+                    $"Revenue - {invoice.InvoiceNumber} - {line.Description}",
+                    debitTransactionAmount: 0m,
+                    creditTransactionAmount: grossAmount,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    invoice.InvoiceDate,
+                    invoice.InvoiceNumber,
+                    lineNumber++,
+                    ResolveLineTag(line)));
+
+                if (line.LineItemType == LineItemType.Inventory && line.CostTotal.HasValue && line.CostTotal.Value > 0m)
+                {
+                    var cogsAccountId = settings.ControlAccountCOGSId
+                        ?? throw new InvalidOperationException("COGS account is not configured for AR inventory invoice posting.");
+                    var inventoryAccountId = settings.ControlAccountInventoryId
+                        ?? throw new InvalidOperationException("Inventory control account is not configured for AR inventory invoice posting.");
+
+                    await ResolvePostingAccountAsync(cogsAccountId, "COGS account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
+                    await ResolvePostingAccountAsync(inventoryAccountId, "inventory control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+
+                    var costAmount = RoundMoney(line.CostTotal.Value);
+                    postingLines.Add(BuildPostingLine(
+                        cogsAccountId,
+                        $"COGS - {invoice.InvoiceNumber} - {line.Description}",
+                        debitTransactionAmount: costAmount,
+                        creditTransactionAmount: 0m,
+                        functionalCurrency,
+                        functionalCurrency,
+                        1m,
+                        invoice.InvoiceDate,
+                        invoice.InvoiceNumber,
+                        lineNumber++,
+                        "AR-COGS"));
+
+                    postingLines.Add(BuildPostingLine(
+                        inventoryAccountId,
+                        $"Inventory issue - {invoice.InvoiceNumber} - {line.Description}",
+                        debitTransactionAmount: 0m,
+                        creditTransactionAmount: costAmount,
+                        functionalCurrency,
+                        functionalCurrency,
+                        1m,
+                        invoice.InvoiceDate,
+                        invoice.InvoiceNumber,
+                        lineNumber++,
+                        "AR-Inventory"));
+                }
+            }
+
+            if (documentDiscountAmount > 0m)
+            {
+                var discountAccountId = settings.DiscountAllowedAccountId
+                    ?? throw new InvalidOperationException("Sales discounts allowed account is not configured for this tenant.");
+                await ResolvePostingAccountAsync(discountAccountId, "sales discounts allowed account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
+
+                postingLines.Add(BuildPostingLine(
+                    discountAccountId,
+                    $"Sales discount - {invoice.InvoiceNumber}",
+                    debitTransactionAmount: documentDiscountAmount,
+                    creditTransactionAmount: 0m,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    invoice.InvoiceDate,
+                    invoice.InvoiceNumber,
+                    lineNumber++,
+                    "AR-Discount"));
+            }
+
+            var taxSnapshotLines = new List<FinanceTaxCalculationSnapshotDto>();
+            if (invoice.TaxAmount > 0m)
+            {
+                var taxBuild = await BuildArInvoiceTaxPostingLinesAsync(
+                    invoice,
+                    settings,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    accountCache,
+                    lineNumber,
+                    cancellationToken);
+
+                postingLines.AddRange(taxBuild.Lines);
+                taxSnapshotLines.AddRange(taxBuild.Snapshots);
+                lineNumber += taxBuild.Lines.Count;
+            }
+
+            var debitFunctionalTotal = RoundMoney(postingLines.Sum(l => l.DebitAmount));
+            var creditFunctionalTotal = RoundMoney(postingLines.Sum(l => l.CreditAmount));
+            var arFunctionalAmount = RoundMoney(creditFunctionalTotal - debitFunctionalTotal);
+            var expectedFunctionalTotal = ToFunctionalAmount(invoice.TotalAmount, invoiceCurrency, functionalCurrency, exchangeRate);
+            if (arFunctionalAmount <= 0m)
+            {
+                throw new InvalidOperationException($"Customer invoice {invoice.InvoiceNumber} has no positive AR amount to post.");
+            }
+
+            if (arFunctionalAmount != expectedFunctionalTotal)
+            {
+                throw new InvalidOperationException("AR invoice amount does not match posting line totals.");
+            }
+
+            postingLines.Insert(0, BuildPostingLine(
+                arAccountId,
+                $"AR invoice {invoice.InvoiceNumber}",
+                debitTransactionAmount: invoice.TotalAmount,
+                creditTransactionAmount: 0m,
+                invoiceCurrency,
+                functionalCurrency,
+                exchangeRate,
+                invoice.InvoiceDate,
+                invoice.InvoiceNumber,
+                1,
+                "AR-Control"));
+
+            for (var i = 0; i < postingLines.Count; i++)
+            {
+                postingLines[i].LineNumber = i + 1;
+            }
+
+            return new FinancePostingRequestDto
+            {
+                SourceModule = "AR",
+                SourceDocumentType = "CustomerInvoice",
+                SourceDocumentId = invoice.Id,
+                SourceDocumentTenantId = invoice.TenantId,
+                PostingAction = "Post",
+                SourceDocumentReference = invoice.InvoiceNumber,
+                Description = $"Customer invoice {invoice.InvoiceNumber} - {invoice.CustomerName}",
+                PostingDate = invoice.InvoiceDate,
+                JournalType = "AR Invoice",
+                BookClassification = "IFRS",
+                FunctionalCurrencyCode = functionalCurrency,
+                IdempotencyKey = $"AR:CustomerInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
+                ReturnExistingOnDuplicate = true,
+                Lines = postingLines,
+                TaxCalculationSnapshots = taxSnapshotLines
+            };
+        }
+
+        private async Task<FinancePostingRequestDto> BuildArOpeningBalancePostingRequestAsync(
+            Invoice invoice,
+            FinanceSettings settings,
+            Guid arAccountId,
+            string invoiceCurrency,
+            string functionalCurrency,
+            decimal exchangeRate,
+            Dictionary<Guid, Account> accountCache,
+            CancellationToken cancellationToken)
+        {
+            var migrationClearingAccountId = settings.MigrationClearingAccountId
+                ?? throw new InvalidOperationException("Migration Clearing Account is not configured for AR opening balance posting.");
+            await ResolvePostingAccountAsync(
+                migrationClearingAccountId,
+                "migration clearing account",
+                accountCache,
+                allowControlAccount: false,
+                requireDirectPosting: true,
+                cancellationToken);
+
+            var openingAmount = RoundMoney(invoice.TotalAmount);
+            if (openingAmount <= 0m)
+            {
+                throw new InvalidOperationException($"Opening-balance customer invoice {invoice.InvoiceNumber} has no positive AR amount to post.");
+            }
+
+            var postingLines = new List<FinancePostingLineDto>
+            {
+                BuildPostingLine(
+                    arAccountId,
+                    $"AR opening balance {invoice.InvoiceNumber}",
+                    debitTransactionAmount: openingAmount,
+                    creditTransactionAmount: 0m,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    invoice.InvoiceDate,
+                    invoice.InvoiceNumber,
+                    1,
+                    "AR-Control"),
+                BuildPostingLine(
+                    migrationClearingAccountId,
+                    $"Migration clearing - AR opening balance {invoice.InvoiceNumber}",
+                    debitTransactionAmount: 0m,
+                    creditTransactionAmount: openingAmount,
+                    invoiceCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    invoice.InvoiceDate,
+                    invoice.InvoiceNumber,
+                    2,
+                    "AR-MigrationClearing")
+            };
+
+            return new FinancePostingRequestDto
+            {
+                SourceModule = "AR",
+                SourceDocumentType = "CustomerInvoice",
+                SourceDocumentId = invoice.Id,
+                SourceDocumentTenantId = invoice.TenantId,
+                PostingAction = "Post",
+                SourceDocumentReference = invoice.InvoiceNumber,
+                Description = $"AR opening balance {invoice.InvoiceNumber} - {invoice.CustomerName}",
+                PostingDate = invoice.InvoiceDate,
+                JournalType = "AR Opening Balance",
+                BookClassification = "IFRS",
+                FunctionalCurrencyCode = functionalCurrency,
+                IdempotencyKey = $"AR:CustomerInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
+                ReturnExistingOnDuplicate = true,
+                Lines = postingLines,
+                TaxCalculationSnapshots = Array.Empty<FinanceTaxCalculationSnapshotDto>()
+            };
+        }
+
+        private async Task<InvoiceDto> CompleteArInvoicePostingAsync(
+            Invoice invoice,
+            FinancePostingRequestDto postingRequest,
+            bool wasAlreadyLinked,
+            Func<Task>? rollbackBeforeFailureAudit,
+            CancellationToken cancellationToken)
+        {
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Central finance posting engine is not configured for AR invoice posting.");
+
+            FinancePostingResultDto postingResult;
+            try
+            {
+                postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                if (rollbackBeforeFailureAudit != null)
+                {
+                    await rollbackBeforeFailureAudit();
+                }
+
+                if (invoice.TaxAmount > 0m)
+                {
+                    await RecordArInvoiceAuditAsync(
+                        FinanceAuditEvents.TaxPostingFailed,
+                        invoice,
+                        afterValues: new
+                        {
+                            invoice.JournalEntryId,
+                            invoice.TaxAmount,
+                            error = ex.Message
+                        },
+                        reason: ex.Message,
+                        cancellationToken: cancellationToken);
+                }
+
+                await RecordArInvoiceAuditAsync(
+                    FinanceAuditEvents.ArInvoicePostingFailed,
+                    invoice,
+                    afterValues: new
+                    {
+                        invoice.JournalEntryId,
+                        error = ex.Message
+                    },
+                    reason: ex.Message,
+                    cancellationToken: cancellationToken);
+
+                _logger.LogError(ex, "Failed to post AR invoice {InvoiceNumber}", invoice.InvoiceNumber);
+                throw;
+            }
+
+            if (invoice.JournalEntryId.HasValue && invoice.JournalEntryId.Value != postingResult.JournalEntryId)
+            {
+                throw new InvalidOperationException("Customer invoice is linked to a different journal entry than the posting engine result.");
+            }
+
+            if (!invoice.JournalEntryId.HasValue)
+            {
+                invoice.JournalEntryId = postingResult.JournalEntryId;
+                invoice.UpdatedAt = DateTime.UtcNow;
+                invoice.UpdatedBy = UserName;
+                await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
+            if (!postingResult.WasDuplicate)
+            {
+                await RecordTaxCalculationSnapshotsAsync(postingRequest.TaxCalculationSnapshots, cancellationToken);
+                if (postingRequest.TaxCalculationSnapshots.Count > 0)
+                {
+                    await RecordArInvoiceAuditAsync(
+                        FinanceAuditEvents.TaxCalculatedOnArInvoice,
+                        invoice,
+                        postingEventId: postingResult.PostingEventId,
+                        journalEntryId: postingResult.JournalEntryId,
+                        afterValues: new
+                        {
+                            snapshotCount = postingRequest.TaxCalculationSnapshots.Count,
+                            totalTax = postingRequest.TaxCalculationSnapshots.Sum(s => s.TaxAmount)
+                        },
+                        comment: "AR invoice tax calculated from effective-dated tenant tax configuration.",
+                        cancellationToken: cancellationToken);
+
+                    await RecordArInvoiceAuditAsync(
+                        FinanceAuditEvents.TaxPosted,
+                        invoice,
+                        postingEventId: postingResult.PostingEventId,
+                        journalEntryId: postingResult.JournalEntryId,
+                        afterValues: new
+                        {
+                            postingResult.PostingEventId,
+                            postingResult.JournalEntryId,
+                            taxLineCount = postingRequest.Lines.Count(l => l.TransactionTag != null && l.TransactionTag.StartsWith("AR-Tax-", StringComparison.OrdinalIgnoreCase))
+                        },
+                        comment: "AR invoice tax posted through the central finance posting engine.",
+                        cancellationToken: cancellationToken);
+                }
+
+                await RecordArInvoiceAuditAsync(
+                    FinanceAuditEvents.TaxConfigurationUsedInPosting,
+                    invoice,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: new
+                    {
+                        snapshotCount = postingRequest.TaxCalculationSnapshots.Count,
+                        taxIds = postingRequest.TaxCalculationSnapshots.Select(s => s.TaxId).Distinct().ToArray()
+                    },
+                    comment: "Effective-dated tax configuration used for AR invoice posting where available.",
+                    cancellationToken: cancellationToken);
+            }
+
+            if (postingResult.WasDuplicate || wasAlreadyLinked)
+            {
+                await RecordArInvoiceAuditAsync(
+                    FinanceAuditEvents.ArInvoiceDuplicatePostingAttempt,
+                    invoice,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: new
+                    {
+                        postingResult.PostingEventId,
+                        postingResult.JournalEntryId,
+                        postingResult.PostingAction,
+                        postingResult.WasDuplicate
+                    },
+                    comment: "Duplicate AR invoice posting request returned the existing posting.",
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                await RecordArInvoiceAuditAsync(
+                    FinanceAuditEvents.ArInvoicePosted,
+                    invoice,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: new
+                    {
+                        postingResult.PostingEventId,
+                        postingResult.JournalEntryId,
+                        postingResult.JournalEntryNumber,
+                        postingResult.TotalDebitAmount,
+                        postingResult.TotalCreditAmount,
+                        postingResult.FunctionalCurrencyCode,
+                        postingResult.PostingDate
+                    },
+                    comment: "AR invoice posted through the central finance posting engine.",
+                    cancellationToken: cancellationToken);
+            }
+
+            _logger.LogInformation(
+                "Posted AR invoice {InvoiceNumber} through finance posting engine with journal {JournalEntryId}. Duplicate={WasDuplicate}",
+                invoice.InvoiceNumber,
+                postingResult.JournalEntryId,
+                postingResult.WasDuplicate);
+
+            return await GetByIdAsync(invoice.Id, cancellationToken) ?? MapToDto(invoice);
+        }
+
+        private async Task<BusinessPartner> ResolveCustomerForPostingAsync(Invoice invoice, CancellationToken cancellationToken)
+        {
+            var customer = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryable(p =>
+                    p.TenantId == TenantId &&
+                    p.Id == invoice.CustomerId &&
+                    !p.IsDeleted &&
+                    (p.PartnerType == "Customer" || p.PartnerType == "Both"))
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (customer == null)
+                throw new InvalidOperationException("AR invoice customer was not found for this tenant.");
+
+            if (!customer.IsActive || customer.IsBlacklisted)
+                throw new InvalidOperationException($"Customer '{customer.PartnerName}' is not active for AR posting.");
+
+            return customer;
+        }
+
+        private async Task<FinanceSettings> GetFinanceSettingsAsync(CancellationToken cancellationToken)
+        {
+            var settings = await _unitOfWork.Repository<FinanceSettings>()
+                .FirstOrDefaultAsync(s => s.TenantId == TenantId && !s.IsDeleted);
+
+            return settings ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
+        }
+
+        private async Task<Account> ResolvePostingAccountAsync(
+            Guid accountId,
+            string role,
+            Dictionary<Guid, Account> accountCache,
+            bool allowControlAccount,
+            bool requireDirectPosting,
+            CancellationToken cancellationToken)
+        {
+            if (accountCache.TryGetValue(accountId, out var cached))
+            {
+                return cached;
+            }
+
+            var account = await _unitOfWork.Repository<Account>()
+                .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == accountId && !a.IsDeleted);
+
+            if (account == null)
+                throw new InvalidOperationException($"AR posting {role} was not found for this tenant.");
+
+            if (account.Status != AccountStatus.Active)
+                throw new InvalidOperationException($"AR posting {role} account '{account.AccountNumber}' is not active.");
+
+            if (account.IsControlAccount && !allowControlAccount)
+                throw new InvalidOperationException($"AR posting {role} account '{account.AccountNumber}' is a control account and cannot be used for this line.");
+
+            if (requireDirectPosting && !account.AllowDirectPosting)
+                throw new InvalidOperationException($"AR posting {role} account '{account.AccountNumber}' does not allow direct posting.");
+
+            accountCache[accountId] = account;
+            return account;
+        }
+
+        private async Task<TaxPostingBuildResult> BuildArInvoiceTaxPostingLinesAsync(
+            Invoice invoice,
+            FinanceSettings settings,
+            string invoiceCurrency,
+            string functionalCurrency,
+            decimal exchangeRate,
+            Dictionary<Guid, Account> accountCache,
+            int startingLineNumber,
+            CancellationToken cancellationToken)
+        {
+            var calculatedLines = new List<FinancePostingLineDto>();
+            var snapshots = new List<FinanceTaxCalculationSnapshotDto>();
+
+            foreach (var line in invoice.LineItems.Where(l => !l.IsDeleted).OrderBy(l => l.CreatedAt).ThenBy(l => l.Id))
+            {
+                var lineBase = RoundMoney((line.Quantity * line.UnitPrice) - line.DiscountAmount);
+                if (lineBase <= 0m)
+                {
+                    continue;
+                }
+
+                if (IsNoTaxTreatment(line.TaxTreatment))
+                {
+                    if (RoundMoney(line.TaxAmount) != 0m || RoundMoney(line.TaxRate) != 0m)
+                    {
+                        throw new InvalidOperationException($"AR invoice line '{line.Description}' is {line.TaxTreatment} but carries a tax amount or rate.");
+                    }
+
+                    continue;
+                }
+
+                TaxCalculationResultDto taxResult;
+                taxResult = await _taxEngine.CalculateTaxesAsync(new TaxCalculationRequestDto
+                {
+                    BaseAmount = lineBase,
+                    TaxGroupId = line.TaxGroupId,
+                    TransactionDate = invoice.InvoiceDate,
+                    TransactionType = line.LineItemType == LineItemType.GLAccount
+                        ? TaxTransactionType.SaleOfServices
+                        : TaxTransactionType.SaleOfGoods,
+                    CustomerId = invoice.CustomerId
+                }, cancellationToken);
+
+                foreach (var breakdown in taxResult.TaxBreakdowns.Where(t => t.TaxAmount > 0m))
+                {
+                    var accountId = breakdown.TaxPayableAccountId;
+                    if (!accountId.HasValue)
+                    {
+                        throw new InvalidOperationException($"AR invoice tax account is not configured for tax '{breakdown.TaxCode}'.");
+                    }
+
+                    await ResolvePostingAccountAsync(
+                        accountId.Value,
+                        $"output tax account for {breakdown.TaxCode}",
+                        accountCache,
+                        allowControlAccount: true,
+                        requireDirectPosting: false,
+                        cancellationToken);
+
+                    var postingLine = BuildPostingLine(
+                        accountId.Value,
+                        $"{breakdown.TaxName} - {invoice.InvoiceNumber}",
+                        debitTransactionAmount: 0m,
+                        creditTransactionAmount: breakdown.TaxAmount,
+                        invoiceCurrency,
+                        functionalCurrency,
+                        exchangeRate,
+                        invoice.InvoiceDate,
+                        invoice.InvoiceNumber,
+                        startingLineNumber + calculatedLines.Count,
+                        $"AR-Tax-{breakdown.TaxCode}");
+                    postingLine.Notes = $"TaxId={breakdown.TaxId};TaxGroupId={taxResult.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount}";
+                    calculatedLines.Add(postingLine);
+
+                    snapshots.Add(ToTaxSnapshot(
+                        "CustomerInvoice",
+                        invoice.Id,
+                        taxResult.TaxGroupId,
+                        lineBase,
+                        breakdown,
+                        invoice.InvoiceDate));
+                }
+            }
+
+            if (calculatedLines.Count > 0 && RoundMoney(calculatedLines.Sum(l => l.CreditAmount)) == ToFunctionalAmount(invoice.TaxAmount, invoiceCurrency, functionalCurrency, exchangeRate))
+            {
+                return new TaxPostingBuildResult(calculatedLines, snapshots);
+            }
+
+            throw new InvalidOperationException("AR invoice configured tax calculation does not reconcile to the invoice tax total.");
+        }
+
+        private static FinanceTaxCalculationSnapshotDto ToTaxSnapshot(
+            string documentType,
+            Guid documentId,
+            Guid? taxGroupId,
+            decimal baseAmount,
+            TaxBreakdownDto breakdown,
+            DateTime calculationDate)
+        {
+            return new FinanceTaxCalculationSnapshotDto
+            {
+                DocumentType = documentType,
+                DocumentId = documentId,
+                TaxId = breakdown.TaxId,
+                TaxGroupId = taxGroupId,
+                BaseAmount = baseAmount,
+                TaxableAmount = breakdown.TaxableAmount,
+                TaxRate = breakdown.TaxRate,
+                TaxAmount = breakdown.TaxAmount,
+                CompoundBasis = breakdown.CompoundBasis,
+                CalculationOrder = breakdown.CalculationOrder,
+                CalculationDate = calculationDate,
+                IsManualOverride = breakdown.IsManualOverride
+            };
+        }
+
+        private static FinancePostingLineDto BuildPostingLine(
+            Guid accountId,
+            string description,
+            decimal debitTransactionAmount,
+            decimal creditTransactionAmount,
+            string transactionCurrency,
+            string functionalCurrency,
+            decimal exchangeRate,
+            DateTime exchangeRateDate,
+            string reference,
+            int lineNumber,
+            string transactionTag)
+        {
+            var isForeign = !string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
+            var debitAmount = ToFunctionalAmount(debitTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
+            var creditAmount = ToFunctionalAmount(creditTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
+
+            return new FinancePostingLineDto
+            {
+                AccountId = accountId,
+                Description = description,
+                DebitAmount = debitAmount,
+                CreditAmount = creditAmount,
+                TransactionCurrency = transactionCurrency,
+                ForeignCurrencyAmount = isForeign
+                    ? debitTransactionAmount > 0m ? debitTransactionAmount : creditTransactionAmount
+                    : null,
+                ExchangeRate = isForeign ? exchangeRate : null,
+                ExchangeRateSource = isForeign ? "AR invoice exchange-rate snapshot" : null,
+                ExchangeRateDate = isForeign ? exchangeRateDate.Date : null,
+                SourceReferenceNumber = reference,
+                LineNumber = lineNumber,
+                TransactionTag = transactionTag
+            };
+        }
+
+        private async Task RecordArInvoiceAuditAsync(
+            string eventType,
+            Invoice invoice,
+            Guid? postingEventId = null,
+            Guid? journalEntryId = null,
+            object? beforeValues = null,
+            object? afterValues = null,
+            string? reason = null,
+            string? comment = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (_financeAuditService == null)
+            {
+                return;
+            }
+
+            await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = eventType,
+                TenantId = invoice.TenantId,
+                SourceModule = "AR",
+                SourceDocumentType = "CustomerInvoice",
+                SourceDocumentId = invoice.Id,
+                JournalEntryId = journalEntryId ?? invoice.JournalEntryId,
+                PostingEventId = postingEventId,
+                BeforeValues = beforeValues,
+                AfterValues = afterValues,
+                Reason = reason,
+                Comment = comment,
+                Resource = "Finance.ARInvoice",
+                ResourceId = invoice.Id.ToString()
+            }, cancellationToken);
+        }
+
+        private async Task RecordTaxCalculationSnapshotsAsync(
+            IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
+            CancellationToken cancellationToken)
+        {
+            if (snapshots.Count == 0)
+            {
+                return;
+            }
+
+            var repository = _unitOfWork.Repository<TaxCalculation>();
+            var newRows = new List<TaxCalculation>();
+
+            foreach (var snapshot in snapshots)
+            {
+                var exists = await repository.ExistsAsync(c =>
+                    c.TenantId == TenantId &&
+                    c.DocumentType == snapshot.DocumentType &&
+                    c.DocumentId == snapshot.DocumentId &&
+                    c.TaxId == snapshot.TaxId &&
+                    c.TaxGroupId == snapshot.TaxGroupId &&
+                    !c.IsDeleted);
+
+                if (exists)
+                {
+                    continue;
+                }
+
+                newRows.Add(new TaxCalculation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    DocumentType = snapshot.DocumentType,
+                    DocumentId = snapshot.DocumentId,
+                    TaxId = snapshot.TaxId,
+                    TaxGroupId = snapshot.TaxGroupId,
+                    BaseAmount = snapshot.BaseAmount,
+                    TaxableAmount = snapshot.TaxableAmount,
+                    TaxRate = snapshot.TaxRate,
+                    TaxAmount = snapshot.TaxAmount,
+                    CompoundBasis = snapshot.CompoundBasis,
+                    CalculationOrder = snapshot.CalculationOrder,
+                    CalculationDate = snapshot.CalculationDate,
+                    IsManualOverride = snapshot.IsManualOverride,
+                    OverrideReason = snapshot.OverrideReason,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = UserName
+                });
+            }
+
+            if (newRows.Count > 0)
+            {
+                await repository.AddRangeAsync(newRows);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+        }
+
+        private static string ResolveLineTag(InvoiceLineItem line)
+            => line.LineItemType == LineItemType.Inventory
+                ? "AR-InventoryRevenue"
+                : "AR-Revenue";
+
+        private static bool IsNoTaxTreatment(TaxTreatment treatment)
+            => treatment == TaxTreatment.Exempt
+                || treatment == TaxTreatment.ZeroRated
+                || treatment == TaxTreatment.OutOfScope;
+
+        private static decimal ToFunctionalAmount(
+            decimal transactionAmount,
+            string transactionCurrency,
+            string functionalCurrency,
+            decimal exchangeRate)
+        {
+            if (transactionAmount == 0m)
+            {
+                return 0m;
+            }
+
+            var normalizedRate = NormalizeExchangeRate(exchangeRate);
+            return string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+                ? RoundMoney(transactionAmount)
+                : RoundMoney(transactionAmount * normalizedRate);
+        }
+
+        private static decimal NormalizeExchangeRate(decimal exchangeRate)
+            => exchangeRate <= 0m ? 1m : exchangeRate;
+
+        private static string NormalizeCurrency(string? currencyCode, string defaultValue)
+            => string.IsNullOrWhiteSpace(currencyCode)
+                ? defaultValue.Trim().ToUpperInvariant()
+                : currencyCode.Trim().ToUpperInvariant();
+
+        private static decimal RoundMoney(decimal amount)
+            => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+
+        private async Task<PaymentTerm?> ResolvePaymentTermAsync(Guid? paymentTermId, CancellationToken cancellationToken)
+        {
+            if (!paymentTermId.HasValue || paymentTermId.Value == Guid.Empty)
+            {
+                return await _unitOfWork.Repository<PaymentTerm>()
+                    .GetQueryable(pt =>
+                        pt.TenantId == TenantId &&
+                        pt.IsActive &&
+                        pt.IsDefault &&
+                        !pt.IsDeleted &&
+                        (pt.ApplicableTo == "All" || pt.ApplicableTo == "Customer" || pt.ApplicableTo == "Client"))
+                    .OrderBy(pt => pt.ApplicableTo == "Customer" ? 0 : 1)
+                    .ThenBy(pt => pt.DisplayOrder)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+
+            var paymentTerm = await _unitOfWork.Repository<PaymentTerm>()
+                .FirstOrDefaultAsync(pt =>
+                    pt.TenantId == TenantId &&
+                    pt.Id == paymentTermId.Value &&
+                    pt.IsActive &&
+                    !pt.IsDeleted);
+
+            if (paymentTerm == null)
+            {
+                throw new InvalidOperationException($"Active payment term with Id '{paymentTermId.Value}' was not found.");
+            }
+
+            if (!IsCustomerPaymentTerm(paymentTerm.ApplicableTo))
+            {
+                throw new InvalidOperationException($"Payment term '{paymentTerm.Code}' is not applicable to customer invoices.");
+            }
+
+            return paymentTerm;
+        }
+
+        private async Task<BusinessPartner?> GetCustomerPartnerAsync(Guid customerId, CancellationToken cancellationToken)
+        {
+            return await _unitOfWork.Repository<BusinessPartner>()
+                .FirstOrDefaultAsync(p =>
+                    p.TenantId == TenantId &&
+                    p.Id == customerId &&
+                    !p.IsDeleted &&
+                    (p.PartnerType == "Customer" || p.PartnerType == "Both"));
+        }
+
+        private static int? TryParsePaymentTermsDays(string? paymentTerms)
+        {
+            if (string.IsNullOrWhiteSpace(paymentTerms))
+            {
+                return null;
+            }
+
+            if (paymentTerms.Equals("COD", StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+
+            var digits = new string(paymentTerms.Where(char.IsDigit).ToArray());
+            return int.TryParse(digits, out var days) ? days : null;
+        }
+
+        private static bool IsCustomerPaymentTerm(string applicableTo)
+        {
+            return string.Equals(applicableTo, "All", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(applicableTo, "Customer", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(applicableTo, "Client", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static decimal CalculateEarlyPaymentDiscountAmount(decimal totalAmount, decimal discountPercentage)
+        {
+            return discountPercentage > 0
+                ? Math.Round(totalAmount * (discountPercentage / 100m), 2, MidpointRounding.AwayFromZero)
+                : 0m;
         }
 
         private InvoiceDto MapToDto(Invoice invoice)
@@ -627,9 +1635,16 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Status = invoice.Status.ToString(),
                 Notes = invoice.Notes,
                 Reference = invoice.Reference,
+                IsOpeningBalance = invoice.IsOpeningBalance,
                 CurrencyCode = invoice.CurrencyCode,
                 ExchangeRate = invoice.ExchangeRate,
                 PaymentTermsDays = invoice.PaymentTermsDays,
+                PaymentTermId = invoice.PaymentTermId,
+                EarlyPaymentDiscountPercentage = invoice.EarlyPaymentDiscountPercentage,
+                EarlyPaymentDiscountDueDate = invoice.EarlyPaymentDiscountDueDate,
+                EarlyPaymentDiscountAmount = invoice.EarlyPaymentDiscountAmount,
+                TaxGroupId = invoice.TaxGroupId,
+                JournalEntryId = invoice.JournalEntryId,
                 LineItems = invoice.LineItems.Select(li => new InvoiceLineItemDto
                 {
                     Id = li.Id,
@@ -645,6 +1660,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     TaxRate = li.TaxRate,
                     TaxAmount = li.TaxAmount,
                     TaxCode = li.TaxCode,
+                    TaxGroupId = li.TaxGroupId,
+                    TaxTreatment = li.TaxTreatment,
                     Unit = li.Unit,
                     DiscountPercentage = li.DiscountPercentage,
                     DiscountAmount = li.DiscountAmount
@@ -652,5 +1669,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                 CreatedAt = invoice.CreatedAt
             };
         }
+
+        private sealed record TaxPostingBuildResult(
+            List<FinancePostingLineDto> Lines,
+            List<FinanceTaxCalculationSnapshotDto> Snapshots);
     }
 }
