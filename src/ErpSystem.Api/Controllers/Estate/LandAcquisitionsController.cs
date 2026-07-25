@@ -45,6 +45,15 @@ public class LandAcquisitionsController : ControllerBase
         [15] = ["assetCode", "assetNumber", "parcelIdentifier", "registrationNumber", "ownerName", "assetLocation", "assetCategory", "size", "sizeUnit", "assetStatus", "purpose", "zoningClassification", "ownershipVerification", "capitalizationValue", "glAccount", "custodian", "assetNotes"]
     };
     private static readonly ISet<int> StagesRequiringDocuments = new HashSet<int>(RequiredStageInputs.Keys);
+    private static readonly ISet<int> ApprovalStageOrders = new HashSet<int>
+    {
+        (int)AcquisitionProcedure.SuitabilityApproval,
+        (int)AcquisitionProcedure.SurveyVerification,
+        (int)AcquisitionProcedure.OwnershipVerification,
+        (int)AcquisitionProcedure.AgreementApproval,
+        (int)AcquisitionProcedure.StatutoryConsentApproval,
+        (int)AcquisitionProcedure.StampDutyAssessmentApproval
+    };
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
