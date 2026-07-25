@@ -7,6 +7,7 @@ using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
 
 namespace ErpSystem.Core.Services.Sales
@@ -17,17 +18,23 @@ namespace ErpSystem.Core.Services.Sales
         private readonly IGenericRepository<CommissionStatement> _statementRepo;
         private readonly IGenericRepository<CommissionStatementLine> _lineRepo;
         private readonly IGenericRepository<SalesOrder> _salesOrderRepo;
+        private readonly ICurrentUserProvider _currentUserProvider;
+        private readonly IDocumentNumberingService _documentNumberingService;
 
         public CommissionService(
             IGenericRepository<CommissionRule> ruleRepo,
             IGenericRepository<CommissionStatement> statementRepo,
             IGenericRepository<CommissionStatementLine> lineRepo,
-            IGenericRepository<SalesOrder> salesOrderRepo)
+            IGenericRepository<SalesOrder> salesOrderRepo,
+            ICurrentUserProvider currentUserProvider,
+            IDocumentNumberingService documentNumberingService)
         {
             _ruleRepo = ruleRepo;
             _statementRepo = statementRepo;
             _lineRepo = lineRepo;
             _salesOrderRepo = salesOrderRepo;
+            _currentUserProvider = currentUserProvider;
+            _documentNumberingService = documentNumberingService;
         }
 
         // ── Rules ──
@@ -175,7 +182,12 @@ namespace ErpSystem.Core.Services.Sales
 
             var statement = new CommissionStatement
             {
-                StatementNumber = $"COM-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..4].ToUpper()}",
+                StatementNumber = await _documentNumberingService.GenerateAsync(
+                    DocumentNumberingModules.Sales,
+                    SalesDocumentTypes.CommissionStatement,
+                    _currentUserProvider.TenantId,
+                    dto.PeriodEnd,
+                    nameof(CommissionStatement)),
                 SalesRepId = dto.SalesRepId, SalesRepName = dto.SalesRepId,
                 PeriodStart = dto.PeriodStart, PeriodEnd = dto.PeriodEnd,
                 Status = CommissionStatementStatus.Calculated

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -217,6 +218,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="400">Invalid request data, such as duplicate code or missing required fields.</response>
         /// <response code="500">Internal server error occurred while creating the ratio definition.</response>
         [HttpPost]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<ActionResult<RatioDefinitionDto>> CreateRatioDefinition([FromBody] CreateRatioDefinitionDto dto)
         {
             if (!ModelState.IsValid)
@@ -268,6 +270,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No ratio definition was found with the specified ID.</response>
         /// <response code="500">Internal server error occurred while updating the ratio definition.</response>
         [HttpPut("{id:guid}")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<ActionResult<RatioDefinitionDto>> UpdateRatioDefinition(Guid id, [FromBody] UpdateRatioDefinitionDto dto)
         {
             if (!ModelState.IsValid)
@@ -316,6 +319,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No ratio definition was found with the specified ID.</response>
         /// <response code="500">Internal server error occurred while deleting the ratio definition.</response>
         [HttpDelete("{id:guid}")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<ActionResult> DeleteRatioDefinition(Guid id)
         {
             try
@@ -361,6 +365,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No ratio definition was found with the specified ID.</response>
         /// <response code="500">Internal server error occurred while activating the ratio definition.</response>
         [HttpPatch("{id:guid}/activate")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<ActionResult> ActivateRatioDefinition(Guid id)
         {
             try
@@ -408,6 +413,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No ratio definition was found with the specified ID.</response>
         /// <response code="500">Internal server error occurred while deactivating the ratio definition.</response>
         [HttpPatch("{id:guid}/deactivate")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<ActionResult> DeactivateRatioDefinition(Guid id)
         {
             try

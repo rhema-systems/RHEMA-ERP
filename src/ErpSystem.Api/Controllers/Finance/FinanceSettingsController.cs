@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Shared;
+using Microsoft.AspNetCore.Authorization;
 using System;
 using System.Threading.Tasks;
 
@@ -28,6 +30,7 @@ namespace ErpSystem.Api.Controllers.Finance
     /// **Authorization:** Requires authenticated access. Write operations typically require Finance Admin permissions.
     /// </remarks>
     [ApiController]
+    [Authorize]
     [Route("api/finance")]
     public class FinanceSettingsController : ControllerBase
     {
@@ -114,6 +117,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="401">Not authenticated or session has expired.</response>
         /// <response code="500">An unexpected error occurred while updating settings.</response>
         [HttpPut("settings")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<IActionResult> UpdateSettings([FromBody] UpdateFinanceSettingsDto dto)
         {
             try

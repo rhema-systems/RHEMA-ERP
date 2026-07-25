@@ -429,7 +429,7 @@ export default function FixedAssetsDashboard() {
                     </CardHeader>
                     <CardContent>
                         <div className="flex flex-wrap gap-2">
-                            {['Active', 'Draft', 'FullyDepreciated', 'Disposed', 'HeldForSale', 'UnderConstruction'].map(status => {
+                            {['Active', 'Draft', 'FullyDepreciated', 'Disposed', 'HeldForSale', 'UnderConstruction', 'OnHold'].map(status => {
                                 const count = assets.filter(a => a.status === status).length;
                                 if (count === 0) return null;
                                 return (

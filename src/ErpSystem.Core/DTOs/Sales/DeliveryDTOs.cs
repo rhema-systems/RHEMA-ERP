@@ -47,6 +47,8 @@ public class DeliveryNoteDetailDto : DeliveryNoteSummaryDto
     public string? ExternalNotes { get; set; }
     public decimal TotalAmount { get; set; }
     public string Currency { get; set; } = "GHS";
+    public decimal ExchangeRate { get; set; }
+    public Guid? TaxGroupId { get; set; }
 
     public List<DeliveryNoteLineDto> Lines { get; set; } = new();
 }
@@ -75,6 +77,12 @@ public class DeliveryNoteLineDto
     public bool IsStockDeducted { get; set; }
     public string? Notes { get; set; }
     public string? DamageNotes { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal DiscountPercentage { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal TaxRate { get; set; }
+    public decimal TaxAmount { get; set; }
+    public Guid? TaxGroupId { get; set; }
     public string? ItemCode { get; set; }
     public string? ItemName { get; set; }
 }

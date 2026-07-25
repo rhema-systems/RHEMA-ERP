@@ -14,6 +14,7 @@ public interface IBudgetService
 
     // Returns (Worksheets/Proposals)
     Task<BudgetReturnDto> CreateReturnAsync(CreateBudgetReturnDto dto);
+    Task<BudgetReturnDto> UpdateReturnAsync(Guid id, UpdateBudgetReturnDto dto);
     Task<BudgetReturnDto> GetReturnAsync(Guid id);
     Task<IEnumerable<BudgetReturnDto>> GetReturnsForScenarioAsync(Guid scenarioId);
     Task<BudgetReturnDto> SubmitReturnAsync(Guid id);
@@ -24,4 +25,7 @@ public interface IBudgetService
     Task<IEnumerable<BudgetEntryDto>> GetEntriesAsync(Guid returnId);
     Task BulkSaveEntriesAsync(BulkSaveBudgetEntriesDto dto);
     Task<IEnumerable<BudgetEntryDto>> GetConsolidatedBudgetAsync(Guid scenarioId, Guid? accountId = null);
+
+    // Analytics
+    Task<BudgetSummaryDto> GetScenarioSummaryAsync(Guid scenarioId);
 }

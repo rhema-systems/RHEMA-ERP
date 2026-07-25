@@ -7,10 +7,11 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 // Helper function to get auth headers
 function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+  const token =
+    localStorage.getItem('token') || localStorage.getItem('authToken');
   return {
     'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 
@@ -32,6 +33,7 @@ async function getFriendlyErrorMessage(response: Response): Promise<string> {
       message =
         parsed?.error ||
         parsed?.message ||
+        parsed?.detail ||
         parsed?.title ||
         (typeof parsed === 'string' ? parsed : message);
     } catch {
@@ -43,17 +45,21 @@ async function getFriendlyErrorMessage(response: Response): Promise<string> {
   if (
     response.status === 400 &&
     message &&
-    message.includes("No active workflow definition found for entity type 'PurchaseRequisition'")
+    message.includes(
+      "No active workflow definition found for entity type 'PurchaseRequisition'"
+    )
   ) {
-    return "No approval workflow is active for Purchase Requisitions. Please ask an administrator to activate one under Administration → Workflow, then try again.";
+    return 'No approval workflow is active for Purchase Requisitions. Please ask an administrator to activate one under Administration → Workflow, then try again.';
   }
 
   if (
     response.status === 400 &&
     message &&
-    message.includes("No active workflow definition found for entity type 'PurchaseOrder'")
+    message.includes(
+      "No active workflow definition found for entity type 'PurchaseOrder'"
+    )
   ) {
-    return "No approval workflow is active for Purchase Orders. Please ask an administrator to activate one under Administration → Workflow, then try again.";
+    return 'No approval workflow is active for Purchase Orders. Please ask an administrator to activate one under Administration → Workflow, then try again.';
   }
 
   if (message) return message;
@@ -76,16 +82,360 @@ export interface PurchaseRequisitionSummaryDto {
   totalAmount: number;
   itemCount: number;
   currentWorkflowStepName?: string;
+  sourcePlanNumber?: string;
+  sourcePlanItemDescription?: string;
+  budgetCode?: string;
+  procurementCategory?: ProcurementCategoryClass;
+  projectCode?: string;
+  requisitionType: PurchaseRequisitionType;
+  specificationTemplateReference?: string;
+  approvedExceptionReference?: string;
 }
 
-export interface PurchaseRequisitionDetailDto extends PurchaseRequisitionSummaryDto {
+export interface PurchaseRequisitionDetailDto
+  extends PurchaseRequisitionSummaryDto {
   costCenter?: string;
   justification?: string;
   notes?: string;
   approvedByName?: string;
   approvedAt?: string;
   rejectionReason?: string;
+  linkage: PurchaseRequisitionLinkageDto;
+  rowVersion: string;
   items: PurchaseRequisitionItemDto[];
+}
+
+export type ProcurementCategoryClass =
+  | 'Goods'
+  | 'Works'
+  | 'TechnicalServices'
+  | 'ConsultancyServices'
+  | 'GeneralServices';
+
+export type PurchaseRequisitionType =
+  | 'StockReplenishment'
+  | 'CapitalPurchase'
+  | 'EmergencyPurchase'
+  | 'ProjectPurchase'
+  | 'ServiceProcurement';
+
+export interface SavePurchaseRequisitionLinkageRequest {
+  sourcePlanItemId?: string;
+  budgetId?: string;
+  procurementCategory?: ProcurementCategoryClass;
+  costCenter?: string;
+  projectId?: string;
+  requisitionType: PurchaseRequisitionType;
+  specificationTemplateId?: string;
+  approvedExceptionRuleId?: string;
+  exceptionWorkflowInstanceId?: string;
+  exceptionApprovalReference?: string;
+  exceptionEvidenceReference?: string;
+}
+
+export interface PurchaseRequisitionLinkageDto
+  extends SavePurchaseRequisitionLinkageRequest {
+  sourcePlanId?: string;
+  sourcePlanNumber?: string;
+  sourcePlanTitle?: string;
+  sourcePlanItemDescription?: string;
+  budgetCode?: string;
+  budgetAllocated?: number;
+  budgetRemaining?: number;
+  projectCode?: string;
+  projectName?: string;
+  specificationTemplateCode?: string;
+  specificationTemplateName?: string;
+  specificationTemplateVersion?: number;
+  approvedExceptionRuleCode?: string;
+  approvedExceptionName?: string;
+  exceptionApprovedById?: string;
+  exceptionApprovedByName?: string;
+  exceptionApprovedAtUtc?: string;
+  revision: number;
+  lastUpdatedAtUtc?: string;
+  lastUpdatedById?: string;
+  lastUpdatedByName?: string;
+}
+
+export interface PurchaseRequisitionLinkageOptionDto {
+  id: string;
+  code: string;
+  name: string;
+  status?: string;
+  parentId?: string;
+  parentReference?: string;
+  category?: string;
+  amount?: number;
+  currency?: string;
+}
+
+export interface PurchaseRequisitionNamedOptionDto {
+  value: number;
+  name: string;
+  label: string;
+}
+
+export interface PurchaseRequisitionLinkageOptionsDto {
+  planItems: PurchaseRequisitionLinkageOptionDto[];
+  budgets: PurchaseRequisitionLinkageOptionDto[];
+  projects: PurchaseRequisitionLinkageOptionDto[];
+  specificationTemplates: PurchaseRequisitionLinkageOptionDto[];
+  approvedExceptionRules: PurchaseRequisitionLinkageOptionDto[];
+  approvedExceptionWorkflows: PurchaseRequisitionLinkageOptionDto[];
+  categories: PurchaseRequisitionNamedOptionDto[];
+  requestTypes: PurchaseRequisitionNamedOptionDto[];
+  costCenters: string[];
+}
+
+export interface PurchaseRequisitionLinkageHistoryDto {
+  id: string;
+  action: string;
+  result: string;
+  actorName: string;
+  reason?: string;
+  occurredAtUtc: string;
+  integrityHash: string;
+}
+
+export interface PurchaseRequisitionSubmissionReadinessDto {
+  requisitionId: string;
+  requisitionNumber: string;
+  status: string;
+  isCompliant: boolean;
+  canSubmit: boolean;
+  decisionCode: string;
+  message: string;
+  basis?: 'AcknowledgedAPP' | 'ApprovedException';
+  sourcePlanId?: string;
+  sourcePlanItemId?: string;
+  sourcePlanNumber?: string;
+  sourcePlanItemDescription?: string;
+  appSubmissionId?: string;
+  appSubmissionNumber?: string;
+  appSubmissionAttemptNumber?: number;
+  appSubmissionStatus?: string;
+  appAcknowledgementReference?: string;
+  appAcknowledgedAtUtc?: string;
+  approvedExceptionRuleId?: string;
+  approvedExceptionRuleCode?: string;
+  exceptionWorkflowInstanceId?: string;
+  exceptionApprovalReference?: string;
+  exceptionEvidenceReference?: string;
+  exceptionApprovedAtUtc?: string;
+  requiredActions: string[];
+}
+
+export interface PurchaseRequisitionSubmissionControlHistoryDto {
+  id: string;
+  action: string;
+  result: string;
+  actorName: string;
+  ruleCode: string;
+  reason?: string;
+  occurredAtUtc: string;
+  integrityHash: string;
+}
+
+export interface PurchaseRequisitionBudgetReadinessDto {
+  requisitionId: string;
+  requisitionNumber: string;
+  status: string;
+  isCompliant: boolean;
+  canReserve: boolean;
+  decisionCode: string;
+  message: string;
+  basis?:
+    | 'ApprovedBudget'
+    | 'AuthorizedOverride'
+    | 'ExistingCommitment'
+    | 'ReleasedCommitment';
+  budgetId?: string;
+  budgetCode?: string;
+  budgetStatus?: string;
+  currency?: string;
+  requestedAmount: number;
+  allocatedAmount: number;
+  utilizedAmount: number;
+  committedAmount: number;
+  availableAmount: number;
+  shortfallAmount: number;
+  commitmentId?: string;
+  commitmentReference?: string;
+  commitmentStatus?: string;
+  reservationSequence?: number;
+  reservedAtUtc?: string;
+  isOverride: boolean;
+  overrideRuleId?: string;
+  overrideRuleCode?: string;
+  overrideWorkflowInstanceId?: string;
+  overrideApprovalReference?: string;
+  overrideEvidenceReference?: string;
+  overrideApprovedAtUtc?: string;
+  requiredActions: string[];
+}
+
+export interface PurchaseRequisitionBudgetControlHistoryDto {
+  id: string;
+  action: string;
+  result: string;
+  actorName: string;
+  ruleCode?: string;
+  reason?: string;
+  occurredAtUtc: string;
+  integrityHash: string;
+}
+
+export interface PurchaseRequisitionAuthorityStepDto {
+  sequence: number;
+  ruleId: string;
+  ruleCode: string;
+  rulePolicyCode: string;
+  rulePolicyVersion: number;
+  sourceDecisionKey: string;
+  authorityName: string;
+  authorityRole: string;
+  quorum: number;
+  isObserver: boolean;
+  escalationAuthority?: string;
+  currencyCode: string;
+  lowerBound: number;
+  upperBound?: number;
+  lowerInclusive: boolean;
+  upperInclusive: boolean;
+  workflowStepId: string;
+  workflowStepName: string;
+  workflowStepOrder: number;
+}
+
+export interface PurchaseRequisitionAuthorityFindingDto {
+  code: string;
+  message: string;
+  severity: string | number;
+  ruleId?: string;
+  ruleCode?: string;
+  sourceDecisionKey?: string;
+}
+
+export interface PurchaseRequisitionAuthorityReadinessDto {
+  requisitionId: string;
+  requisitionNumber: string;
+  status: string;
+  isCompliant: boolean;
+  canSubmit: boolean;
+  decisionCode: string;
+  message: string;
+  category?: string;
+  amount: number;
+  currencyCode: string;
+  policySetId?: string;
+  policyCode?: string;
+  policyName?: string;
+  policyVersion?: number;
+  workflowDefinitionId?: string;
+  workflowName?: string;
+  workflowVersion?: number;
+  authorityRouteId?: string;
+  routeReference?: string;
+  attemptNumber?: number;
+  capturedAtUtc?: string;
+  integrityHash?: string;
+  currentWorkflowStage?: string;
+  currentWorkflowStageStatus?: string;
+  steps: PurchaseRequisitionAuthorityStepDto[];
+  findings: PurchaseRequisitionAuthorityFindingDto[];
+  requiredActions: string[];
+}
+
+export interface PurchaseRequisitionAuthorityRouteHistoryDto {
+  id: string;
+  routeReference: string;
+  attemptNumber: number;
+  policyCode: string;
+  policyName: string;
+  policyVersion: number;
+  workflowName: string;
+  workflowVersion: number;
+  category: string;
+  amount: number;
+  currencyCode: string;
+  capturedAtUtc: string;
+  capturedByName: string;
+  correlationId: string;
+  integrityHash: string;
+  steps: PurchaseRequisitionAuthorityStepDto[];
+}
+
+export interface PurchaseRequisitionSourcingRequirementDto {
+  key: string;
+  label: string;
+  satisfied: boolean;
+  code: string;
+  message: string;
+  evidenceReference?: string;
+}
+
+export interface PurchaseRequisitionSourcingReleaseDto {
+  id: string;
+  requisitionId: string;
+  requisitionNumber: string;
+  attemptNumber: number;
+  releaseReference: string;
+  sourcePlanId: string;
+  sourcePlanItemId: string;
+  appSubmissionId?: string;
+  appSubmissionAttemptNumber?: number;
+  appAcknowledgementReference?: string;
+  approvedExceptionRuleId?: string;
+  exceptionApprovalReference?: string;
+  specificationTemplateId: string;
+  specificationTemplateCode: string;
+  specificationTemplateVersion: number;
+  budgetCommitmentId: string;
+  budgetCommitmentReference: string;
+  authorityRouteId: string;
+  authorityRouteReference: string;
+  workflowInstanceId: string;
+  releasedAtUtc: string;
+  releasedById: string;
+  releasedByName: string;
+  releaseReason: string;
+  correlationId: string;
+  controlFingerprint: string;
+  integrityHash: string;
+}
+
+export interface PurchaseRequisitionSourcingReadinessDto {
+  requisitionId: string;
+  requisitionNumber: string;
+  status: string;
+  isCompliant: boolean;
+  canRelease: boolean;
+  isReleased: boolean;
+  hasStaleRelease: boolean;
+  decisionCode: string;
+  message: string;
+  evaluatedAtUtc: string;
+  controlFingerprint: string;
+  sourcePlanId?: string;
+  sourcePlanItemId?: string;
+  appSubmissionId?: string;
+  appSubmissionAttemptNumber?: number;
+  appAcknowledgementReference?: string;
+  approvedExceptionRuleId?: string;
+  exceptionWorkflowInstanceId?: string;
+  exceptionApprovalReference?: string;
+  specificationTemplateId?: string;
+  specificationTemplateCode?: string;
+  specificationTemplateVersion?: number;
+  budgetCommitmentId?: string;
+  budgetCommitmentReference?: string;
+  authorityRouteId?: string;
+  authorityRouteReference?: string;
+  workflowInstanceId?: string;
+  currentRelease?: PurchaseRequisitionSourcingReleaseDto;
+  requirements: PurchaseRequisitionSourcingRequirementDto[];
+  requiredActions: string[];
 }
 
 export interface PurchaseRequisitionItemDto {
@@ -128,7 +478,13 @@ export interface CreatePurchaseRequisitionDto {
   costCenter?: string;
   justification?: string;
   notes?: string;
+  linkage: SavePurchaseRequisitionLinkageRequest;
   items: CreatePurchaseRequisitionItemDto[];
+}
+
+export interface UpdatePurchaseRequisitionDto
+  extends CreatePurchaseRequisitionDto {
+  rowVersion: string;
 }
 
 export interface CreatePurchaseRequisitionItemDto {
@@ -279,31 +635,34 @@ const LANDED_COST_TYPE_NAME_TO_VALUE: Record<string, number> = {
   Handling: 4,
   Brokerage: 5,
   Storage: 6,
-  Other: 7
+  Other: 7,
 };
 
 const normalizeLandedCostType = (value: unknown): number => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    if (trimmed in LANDED_COST_TYPE_NAME_TO_VALUE) return LANDED_COST_TYPE_NAME_TO_VALUE[trimmed];
+    if (trimmed in LANDED_COST_TYPE_NAME_TO_VALUE)
+      return LANDED_COST_TYPE_NAME_TO_VALUE[trimmed];
     const numeric = parseInt(trimmed, 10);
     if (Number.isFinite(numeric)) return numeric;
   }
   return 7;
 };
 
-const normalizePurchaseOrderLandedCostPlanDto = (plan: any): PurchaseOrderLandedCostPlanDto => {
+const normalizePurchaseOrderLandedCostPlanDto = (
+  plan: any
+): PurchaseOrderLandedCostPlanDto => {
   const items: PurchaseOrderLandedCostPlanItemDto[] = Array.isArray(plan?.items)
     ? plan.items.map((i: any) => ({
         ...i,
-        costType: normalizeLandedCostType(i?.costType)
+        costType: normalizeLandedCostType(i?.costType),
       }))
     : [];
 
   return {
     ...plan,
-    items
+    items,
   } as PurchaseOrderLandedCostPlanDto;
 };
 
@@ -468,7 +827,8 @@ export const purchasingService = {
   }): Promise<PagedResult<PurchaseRequisitionSummaryDto>> {
     const queryParams = new URLSearchParams();
     if (params?.page) queryParams.append('page', params.page.toString());
-    if (params?.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+    if (params?.pageSize)
+      queryParams.append('pageSize', params.pageSize.toString());
     if (params?.search) queryParams.append('search', params.search);
     if (params?.status) queryParams.append('status', params.status);
     if (params?.priority) queryParams.append('priority', params.priority);
@@ -476,9 +836,12 @@ export const purchasingService = {
     if (params?.endDate) queryParams.append('endDate', params.endDate);
     if (params?.department) queryParams.append('department', params.department);
 
-    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions?${queryParams}`, {
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions?${queryParams}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch purchase requisitions');
     return response.json();
@@ -487,9 +850,11 @@ export const purchasingService = {
   /**
    * Get purchase requisition by ID
    */
-  async getPurchaseRequisitionById(id: string): Promise<PurchaseRequisitionDetailDto> {
+  async getPurchaseRequisitionById(
+    id: string
+  ): Promise<PurchaseRequisitionDetailDto> {
     const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}`, {
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) throw new Error('Failed to fetch purchase requisition');
@@ -499,24 +864,26 @@ export const purchasingService = {
   /**
    * Create a new purchase requisition
    */
-  async createPurchaseRequisition(data: CreatePurchaseRequisitionDto): Promise<PurchaseRequisitionDetailDto> {
+  async createPurchaseRequisition(
+    data: CreatePurchaseRequisitionDto
+  ): Promise<PurchaseRequisitionDetailDto> {
     const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(errorText || 'Failed to create purchase requisition');
     }
-    
+
     // Handle empty response body (201 Created with no content)
     const text = await response.text();
     if (!text) {
       throw new Error('Server returned empty response');
     }
-    
+
     try {
       return JSON.parse(text);
     } catch (e) {
@@ -527,86 +894,127 @@ export const purchasingService = {
   /**
    * Update purchase requisition status
    */
-  async updatePurchaseRequisitionStatus(id: string, status: string, notes?: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/status`, {
-      method: 'PATCH',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ status, notes })
-    });
+  async updatePurchaseRequisitionStatus(
+    id: string,
+    status: string,
+    notes?: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/status`,
+      {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ status, notes }),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to update purchase requisition status');
+    if (!response.ok)
+      throw new Error('Failed to update purchase requisition status');
   },
 
   /**
    * Submit purchase requisition for approval
    */
   async submitPurchaseRequisition(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/submit`, {
-      method: 'POST',
-      headers: getAuthHeaders()
-    });
-  
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/submit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
+
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
   },
 
   /**
    * Approve or reject purchase requisition
    */
-  async approvePurchaseRequisition(id: string, approval: ApprovalDto): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/approve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(approval)
-    });
-  
+  async approvePurchaseRequisition(
+    id: string,
+    approval: ApprovalDto
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/approve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(approval),
+      }
+    );
+
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
   },
 
   /**
    * Get purchase requisitions by status
    */
-  async getPurchaseRequisitionsByStatus(status: string): Promise<PurchaseRequisitionSummaryDto[]> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/by-status/${status}`, {
-      headers: getAuthHeaders()
-    });
+  async getPurchaseRequisitionsByStatus(
+    status: string
+  ): Promise<PurchaseRequisitionSummaryDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/by-status/${status}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch purchase requisitions by status');
+    if (!response.ok)
+      throw new Error('Failed to fetch purchase requisitions by status');
     return response.json();
   },
 
   /**
    * Get purchase requisitions by priority
    */
-  async getPurchaseRequisitionsByPriority(priority: string): Promise<PurchaseRequisitionSummaryDto[]> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/by-priority/${priority}`, {
-      headers: getAuthHeaders()
-    });
+  async getPurchaseRequisitionsByPriority(
+    priority: string
+  ): Promise<PurchaseRequisitionSummaryDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/by-priority/${priority}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch purchase requisitions by priority');
+    if (!response.ok)
+      throw new Error('Failed to fetch purchase requisitions by priority');
     return response.json();
   },
 
   /**
    * Get purchase requisitions by department
    */
-  async getPurchaseRequisitionsByDepartment(department: string): Promise<PurchaseRequisitionSummaryDto[]> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/by-department/${department}`, {
-      headers: getAuthHeaders()
-    });
+  async getPurchaseRequisitionsByDepartment(
+    department: string
+  ): Promise<PurchaseRequisitionSummaryDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/by-department/${department}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch purchase requisitions by department');
+    if (!response.ok)
+      throw new Error('Failed to fetch purchase requisitions by department');
     return response.json();
   },
 
   /**
    * Get pending approval purchase requisitions
    */
-  async getPendingApprovalRequisitions(): Promise<PurchaseRequisitionSummaryDto[]> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/pending-approval`, {
-      headers: getAuthHeaders()
-    });
+  async getPendingApprovalRequisitions(): Promise<
+    PurchaseRequisitionSummaryDto[]
+  > {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/pending-approval`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch pending approval requisitions');
+    if (!response.ok)
+      throw new Error('Failed to fetch pending approval requisitions');
     return response.json();
   },
 
@@ -614,22 +1022,31 @@ export const purchasingService = {
    * Convert purchase requisition to purchase order
    */
   async convertToPurchaseOrder(id: string): Promise<CreatePurchaseOrderDto> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/convert-to-po`, {
-      method: 'POST',
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/convert-to-po`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to convert requisition to purchase order');
+    if (!response.ok)
+      throw new Error('Failed to convert requisition to purchase order');
     return response.json();
   },
 
   /**
    * Get suggested suppliers for an RFQ based on a purchase requisition
    */
-  async getSuggestedSuppliersForRequisition(id: string): Promise<SuggestedSupplierDto[]> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/suggested-suppliers`, {
-      headers: getAuthHeaders()
-    });
+  async getSuggestedSuppliersForRequisition(
+    id: string
+  ): Promise<SuggestedSupplierDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/suggested-suppliers`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch suggested suppliers');
     return response.json();
@@ -638,13 +1055,19 @@ export const purchasingService = {
   /**
    * Create a Draft RFQ from an approved purchase requisition
    */
-  async createRfqFromPurchaseRequisition(id: string): Promise<CreateRfqFromPurchaseRequisitionResponseDto> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}/create-rfq`, {
-      method: 'POST',
-      headers: getAuthHeaders()
-    });
+  async createRfqFromPurchaseRequisition(
+    id: string
+  ): Promise<CreateRfqFromPurchaseRequisitionResponseDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/create-rfq`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to create RFQ from purchase requisition');
+    if (!response.ok)
+      throw new Error('Failed to create RFQ from purchase requisition');
     return response.json();
   },
 
@@ -666,16 +1089,20 @@ export const purchasingService = {
   }): Promise<PagedResult<PurchaseOrderSummaryDto>> {
     const queryParams = new URLSearchParams();
     if (params?.page) queryParams.append('page', params.page.toString());
-    if (params?.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+    if (params?.pageSize)
+      queryParams.append('pageSize', params.pageSize.toString());
     if (params?.search) queryParams.append('search', params.search);
     if (params?.status) queryParams.append('status', params.status);
     if (params?.supplierId) queryParams.append('supplierId', params.supplierId);
     if (params?.startDate) queryParams.append('startDate', params.startDate);
     if (params?.endDate) queryParams.append('endDate', params.endDate);
 
-    const response = await fetch(`${API_BASE_URL}/PurchaseOrders?${queryParams}`, {
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrders?${queryParams}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch purchase orders');
     return response.json();
@@ -686,7 +1113,7 @@ export const purchasingService = {
    */
   async getPurchaseOrderById(id: string): Promise<PurchaseOrderDetailDto> {
     const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}`, {
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) throw new Error('Failed to fetch purchase order');
@@ -696,11 +1123,13 @@ export const purchasingService = {
   /**
    * Create a new purchase order
    */
-  async createPurchaseOrder(data: CreatePurchaseOrderDto): Promise<PurchaseOrderDetailDto> {
+  async createPurchaseOrder(
+    data: CreatePurchaseOrderDto
+  ): Promise<PurchaseOrderDetailDto> {
     const response = await fetch(`${API_BASE_URL}/PurchaseOrders`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
 
     if (!response.ok) {
@@ -713,11 +1142,14 @@ export const purchasingService = {
   /**
    * Update an existing purchase order (only Draft status)
    */
-  async updatePurchaseOrder(id: string, data: CreatePurchaseOrderDto): Promise<PurchaseOrderDetailDto> {
+  async updatePurchaseOrder(
+    id: string,
+    data: CreatePurchaseOrderDto
+  ): Promise<PurchaseOrderDetailDto> {
     const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
 
     if (!response.ok) {
@@ -730,23 +1162,205 @@ export const purchasingService = {
   /**
    * Update purchase order status
    */
-  async updatePurchaseOrderStatus(id: string, status: string, notes?: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}/status`, {
-      method: 'PATCH',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ status, notes })
-    });
+  async updatePurchaseOrderStatus(
+    id: string,
+    status: string,
+    notes?: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrders/${id}/status`,
+      {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ status, notes }),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to update purchase order status');
+  },
+
+  async updatePurchaseRequisition(
+    id: string,
+    data: UpdatePurchaseRequisitionDto
+  ): Promise<PurchaseRequisitionDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/PurchaseRequisitions/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getPurchaseRequisitionLinkageOptions(): Promise<PurchaseRequisitionLinkageOptionsDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/linkage-options`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getPurchaseRequisitionLinkageHistory(
+    id: string
+  ): Promise<PurchaseRequisitionLinkageHistoryDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/linkage-history`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getPurchaseRequisitionSubmissionReadiness(
+    id: string
+  ): Promise<PurchaseRequisitionSubmissionReadinessDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/submission-readiness`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getPurchaseRequisitionSubmissionControlHistory(
+    id: string
+  ): Promise<PurchaseRequisitionSubmissionControlHistoryDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/submission-control-history`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getPurchaseRequisitionBudgetReadiness(
+    id: string
+  ): Promise<PurchaseRequisitionBudgetReadinessDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/budget-readiness`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getPurchaseRequisitionBudgetControlHistory(
+    id: string
+  ): Promise<PurchaseRequisitionBudgetControlHistoryDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/budget-control-history`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getPurchaseRequisitionAuthorityReadiness(
+    id: string
+  ): Promise<PurchaseRequisitionAuthorityReadinessDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/authority-readiness`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getPurchaseRequisitionAuthorityRouteHistory(
+    id: string
+  ): Promise<PurchaseRequisitionAuthorityRouteHistoryDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/authority-route-history`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getPurchaseRequisitionSourcingReadiness(
+    id: string
+  ): Promise<PurchaseRequisitionSourcingReadinessDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/sourcing-readiness`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getPurchaseRequisitionSourcingReleaseHistory(
+    id: string
+  ): Promise<PurchaseRequisitionSourcingReleaseDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/sourcing-release-history`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async releasePurchaseRequisitionForSourcing(
+    id: string,
+    reason: string
+  ): Promise<PurchaseRequisitionSourcingReleaseDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/sourcing-release`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ reason }),
+      }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async exportPurchaseRequisitionLinkage(id: string): Promise<Blob> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseRequisitions/${id}/export`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.blob();
   },
 
   /**
    * Get planned landed cost plan for a purchase order (optional)
    */
-  async getPurchaseOrderLandedCostPlan(purchaseOrderId: string): Promise<PurchaseOrderLandedCostPlanDto | null> {
-    const response = await fetch(`${API_BASE_URL}/procurement/purchase-orders/${purchaseOrderId}/landed-cost-plan`, {
-      headers: getAuthHeaders()
-    });
+  async getPurchaseOrderLandedCostPlan(
+    purchaseOrderId: string
+  ): Promise<PurchaseOrderLandedCostPlanDto | null> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/purchase-orders/${purchaseOrderId}/landed-cost-plan`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const msg = await getFriendlyErrorMessage(response);
@@ -767,11 +1381,14 @@ export const purchasingService = {
     purchaseOrderId: string,
     data: UpsertPurchaseOrderLandedCostPlanDto
   ): Promise<PurchaseOrderLandedCostPlanDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/purchase-orders/${purchaseOrderId}/landed-cost-plan`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data)
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/purchase-orders/${purchaseOrderId}/landed-cost-plan`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const msg = await getFriendlyErrorMessage(response);
@@ -786,10 +1403,13 @@ export const purchasingService = {
    * Submit purchase order for approval
    */
   async submitPurchaseOrder(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}/submit`, {
-      method: 'POST',
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrders/${id}/submit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to submit purchase order');
   },
@@ -798,48 +1418,70 @@ export const purchasingService = {
    * Approve or reject purchase order
    */
   async approvePurchaseOrder(id: string, approval: ApprovalDto): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}/approve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(approval)
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrders/${id}/approve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(approval),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to approve/reject purchase order');
+    if (!response.ok)
+      throw new Error('Failed to approve/reject purchase order');
   },
 
   /**
    * Get purchase orders by business partner (supplier)
    */
-  async getPurchaseOrdersBySupplier(supplierId: string): Promise<PurchaseOrderSummaryDto[]> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/by-supplier/${supplierId}`, {
-      headers: getAuthHeaders()
-    });
+  async getPurchaseOrdersBySupplier(
+    supplierId: string
+  ): Promise<PurchaseOrderSummaryDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrders/by-supplier/${supplierId}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch purchase orders by supplier');
+    if (!response.ok)
+      throw new Error('Failed to fetch purchase orders by supplier');
     return response.json();
   },
 
   /**
    * Get purchase orders by status
    */
-  async getPurchaseOrdersByStatus(status: string): Promise<PurchaseOrderSummaryDto[]> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/by-status/${status}`, {
-      headers: getAuthHeaders()
-    });
+  async getPurchaseOrdersByStatus(
+    status: string
+  ): Promise<PurchaseOrderSummaryDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrders/by-status/${status}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch purchase orders by status');
+    if (!response.ok)
+      throw new Error('Failed to fetch purchase orders by status');
     return response.json();
   },
 
   /**
    * Receive purchase order (create GRN)
    */
-  async receivePurchaseOrder(id: string, receiptData: ReceivePurchaseOrderDto): Promise<PurchaseOrderReceiptDto> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${id}/receive`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(receiptData)
-    });
+  async receivePurchaseOrder(
+    id: string,
+    receiptData: ReceivePurchaseOrderDto
+  ): Promise<PurchaseOrderReceiptDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrders/${id}/receive`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(receiptData),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to receive purchase order');
     return response.json();
@@ -862,16 +1504,20 @@ export const purchasingService = {
   }): Promise<PagedResult<PurchaseOrderReceiptDto>> {
     const queryParams = new URLSearchParams();
     if (params?.page) queryParams.append('page', params.page.toString());
-    if (params?.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+    if (params?.pageSize)
+      queryParams.append('pageSize', params.pageSize.toString());
     if (params?.search) queryParams.append('search', params.search);
     if (params?.status) queryParams.append('status', params.status);
     if (params?.startDate) queryParams.append('startDate', params.startDate);
     if (params?.endDate) queryParams.append('endDate', params.endDate);
 
     // Note: This endpoint may need to be created on the backend
-    const response = await fetch(`${API_BASE_URL}/PurchaseOrderReceipts?${queryParams}`, {
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts?${queryParams}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch purchase receipts');
     return response.json();
@@ -881,9 +1527,12 @@ export const purchasingService = {
    * Get purchase receipt by ID
    */
   async getPurchaseReceiptById(id: string): Promise<PurchaseOrderReceiptDto> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseOrderReceipts/${id}`, {
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/${id}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch purchase receipt');
     return response.json();
@@ -892,10 +1541,15 @@ export const purchasingService = {
   /**
    * Get receipts by purchase order ID
    */
-  async getReceiptsByPurchaseOrderId(purchaseOrderId: string): Promise<PurchaseOrderReceiptDto[]> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseOrderReceipts/by-purchase-order/${purchaseOrderId}`, {
-      headers: getAuthHeaders()
-    });
+  async getReceiptsByPurchaseOrderId(
+    purchaseOrderId: string
+  ): Promise<PurchaseOrderReceiptDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/by-purchase-order/${purchaseOrderId}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch receipts');
     return response.json();
@@ -905,13 +1559,16 @@ export const purchasingService = {
    * Generate a GRN PDF for a purchase receipt (opens in a new tab in the UI).
    */
   async getPurchaseReceiptGrnPdf(id: string): Promise<Blob> {
-    const response = await fetch(`${API_BASE_URL}/PurchaseOrderReceipts/${id}/grn`, {
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/${id}/grn`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to generate GRN PDF');
     return response.blob();
-  }
+  },
 };
 
 // Export individual functions for easier imports
@@ -920,6 +1577,17 @@ export const {
   getPurchaseRequisitions,
   getPurchaseRequisitionById,
   createPurchaseRequisition,
+  updatePurchaseRequisition,
+  getPurchaseRequisitionLinkageOptions,
+  getPurchaseRequisitionLinkageHistory,
+  getPurchaseRequisitionSubmissionReadiness,
+  getPurchaseRequisitionSubmissionControlHistory,
+  getPurchaseRequisitionBudgetReadiness,
+  getPurchaseRequisitionBudgetControlHistory,
+  getPurchaseRequisitionSourcingReadiness,
+  getPurchaseRequisitionSourcingReleaseHistory,
+  releasePurchaseRequisitionForSourcing,
+  exportPurchaseRequisitionLinkage,
   updatePurchaseRequisitionStatus,
   submitPurchaseRequisition,
   approvePurchaseRequisition,
@@ -930,7 +1598,7 @@ export const {
   convertToPurchaseOrder,
   getSuggestedSuppliersForRequisition,
   createRfqFromPurchaseRequisition,
-  
+
   // Purchase Orders
   getPurchaseOrders,
   getPurchaseOrderById,
@@ -942,12 +1610,12 @@ export const {
   getPurchaseOrdersBySupplier,
   getPurchaseOrdersByStatus,
   receivePurchaseOrder,
-  
+
   // Purchase Receipts
   getPurchaseReceipts,
   getPurchaseReceiptById,
   getReceiptsByPurchaseOrderId,
-  getPurchaseReceiptGrnPdf
+  getPurchaseReceiptGrnPdf,
 } = purchasingService;
 
 export default purchasingService;

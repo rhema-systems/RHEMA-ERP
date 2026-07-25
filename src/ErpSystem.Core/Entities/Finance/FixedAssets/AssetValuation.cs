@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Finance.FixedAssets
@@ -15,8 +16,19 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public Guid FixedAssetId { get; set; }
         public virtual FixedAsset FixedAsset { get; set; } = null!;
 
+        public Guid? AccountingBookId { get; set; }
+        public virtual AccountingBook? AccountingBook { get; set; }
+
+        [MaxLength(20)]
+        public string BookClassification { get; set; } = "IFRS";
+
+        public Guid? FiscalPeriodId { get; set; }
+        public virtual FiscalPeriod? FiscalPeriod { get; set; }
+
         [Required]
         public DateTime ValuationDate { get; set; }
+
+        public DateTime AccountingDate { get; set; }
 
         [Required]
         public ValuationType ValuationType { get; set; }
@@ -27,6 +39,12 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Required]
         [Column(TypeName = "decimal(18,2)")]
         public decimal CarryingAmountBefore { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal AccumulatedDepreciationBefore { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal NetBookValueBefore { get; set; }
 
         /// <summary>
         /// Assessed fair value / recoverable amount
@@ -56,6 +74,15 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Column(TypeName = "decimal(18,2)")]
         public decimal ImpairmentReversal { get; set; } = 0;
 
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal AdjustmentAmount { get; set; } = 0;
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal RevaluationSurplusApplied { get; set; } = 0;
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal RevaluationLossRecognized { get; set; } = 0;
+
         /// <summary>
         /// Revised useful life in months (optional — allows adjusting remaining life on revaluation)
         /// </summary>
@@ -82,7 +109,23 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public bool IsPostedToGL { get; set; } = false;
         public DateTime? PostedDate { get; set; }
+        public DateTime? PostedAt { get; set; }
         public Guid? JournalEntryId { get; set; }
+        public virtual JournalEntry? JournalEntry { get; set; }
+
+        public Guid? PostingEventId { get; set; }
+        public virtual FinancePostingEvent? PostingEvent { get; set; }
+
+        [MaxLength(30)]
+        public string Status { get; set; } = "Calculated";
+
+        [MaxLength(150)]
+        public string? IdempotencyKey { get; set; }
+
+        public DateTime? FailedAt { get; set; }
+
+        [MaxLength(1000)]
+        public string? FailureReason { get; set; }
 
         // --- Audit ---
 

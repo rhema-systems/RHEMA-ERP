@@ -70,6 +70,10 @@ public class Supplier : TenantEntity
     [MaxLength(50)]
     public string? TaxId { get; set; }
 
+    public bool IsWithholdingTaxApplicable { get; set; }
+
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
+
     [MaxLength(100)]
     public string? PaymentTerms { get; set; } = "Net 30";
 
@@ -684,6 +688,61 @@ public class PurchaseRequisition : TenantEntity
 
     public Guid? SourcePlanId { get; set; }
 
+    public Guid? SourcePlanItemId { get; set; }
+
+    [MaxLength(50)]
+    public string? SourcePlanNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? SourcePlanTitle { get; set; }
+
+    [MaxLength(200)]
+    public string? SourcePlanItemDescription { get; set; }
+
+    public ProcurementCategoryClass? ProcurementCategory { get; set; }
+
+    public Guid? SpecificationTemplateId { get; set; }
+
+    [MaxLength(50)]
+    public string? SpecificationTemplateCode { get; set; }
+
+    [MaxLength(200)]
+    public string? SpecificationTemplateName { get; set; }
+
+    public int? SpecificationTemplateVersion { get; set; }
+
+    public Guid? ApprovedExceptionRuleId { get; set; }
+
+    [MaxLength(50)]
+    public string? ApprovedExceptionRuleCode { get; set; }
+
+    [MaxLength(200)]
+    public string? ApprovedExceptionName { get; set; }
+
+    public Guid? ExceptionWorkflowInstanceId { get; set; }
+
+    [MaxLength(200)]
+    public string? ExceptionApprovalReference { get; set; }
+
+    [MaxLength(500)]
+    public string? ExceptionEvidenceReference { get; set; }
+
+    public Guid? ExceptionApprovedById { get; set; }
+
+    [MaxLength(300)]
+    public string? ExceptionApprovedByName { get; set; }
+
+    public DateTime? ExceptionApprovedAtUtc { get; set; }
+
+    public int LinkageRevision { get; set; }
+
+    public DateTime? LinkageLastUpdatedAtUtc { get; set; }
+
+    public Guid? LinkageLastUpdatedById { get; set; }
+
+    [MaxLength(300)]
+    public string? LinkageLastUpdatedByName { get; set; }
+
     // Multi-Level Approval Support
     public int ApprovalLevel { get; set; } = 0; // Current approval level
     public int RequiredApprovalLevel { get; set; } = 1; // Required approval level based on amount
@@ -726,7 +785,18 @@ public class PurchaseRequisition : TenantEntity
     public virtual ApplicationUser? ApprovedBy { get; set; }
     public virtual ApplicationUser? CurrentApprover { get; set; }
     public virtual ApplicationUser? LastAmendedBy { get; set; }
+    public virtual ProcurementPlan? SourcePlan { get; set; }
+    public virtual ProcurementPlanItem? SourcePlanItem { get; set; }
+    public virtual ProcurementBudget? Budget { get; set; }
+    public virtual ProcurementSpecificationTemplate? SpecificationTemplate { get; set; }
+    public virtual ProcurementPolicyExceptionRule? ApprovedExceptionRule { get; set; }
+    public virtual ProcurementBudgetCommitment? BudgetCommitment { get; set; }
+    public virtual ICollection<ProcurementRequisitionSourcingRelease> SourcingReleases { get; set; } = new List<ProcurementRequisitionSourcingRelease>();
+    public virtual ICollection<ProcurementSourcingCase> SourcingCases { get; set; } = new List<ProcurementSourcingCase>();
     public virtual ICollection<PurchaseRequisitionItem> Items { get; set; } = new List<PurchaseRequisitionItem>();
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 }
 
 /// <summary>

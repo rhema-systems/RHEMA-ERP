@@ -1,8 +1,12 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -20,10 +24,33 @@ namespace ErpSystem.Api.Controllers.Finance
     public class VendorInvoiceController : ControllerBase
     {
         private readonly IVendorInvoiceService _invoiceService;
+        private readonly ICurrentUserService _currentUserService;
+        private readonly ApplicationDbContext _dbContext;
 
-        public VendorInvoiceController(IVendorInvoiceService invoiceService)
+        public VendorInvoiceController(
+            IVendorInvoiceService invoiceService,
+            ICurrentUserService currentUserService,
+            ApplicationDbContext dbContext)
         {
             _invoiceService = invoiceService;
+            _currentUserService = currentUserService;
+            _dbContext = dbContext;
+        }
+
+        private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
+
+        private async Task<bool> HasAnyPermissionAsync(params string[] requiredPermissions)
+        {
+            if (requiredPermissions.Length == 0) return true;
+            if (PrivilegedRoles.Any(_currentUserService.IsInRole)) return true;
+            if (!Guid.TryParse(_currentUserService.UserId, out var userId)) return false;
+
+            var userPermissions = await _dbContext.UserRoles
+                .Where(ur => ur.UserId == userId)
+                .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Name))
+                .ToListAsync();
+
+            return userPermissions.Any(p => requiredPermissions.Contains(p, StringComparer.OrdinalIgnoreCase));
         }
 
         /// <summary>Retrieves a paginated list of vendor invoices filtered by query parameters.</summary>
@@ -51,6 +78,9 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost]
         public async Task<ActionResult<VendorInvoiceDto>> Create([FromBody] VendorInvoiceCreateDto dto)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Create", "Finance.AP.Invoices.Write"))
+                return Forbid();
+
             try
             {
                 var invoice = await _invoiceService.CreateAsync(dto);
@@ -64,6 +94,8 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<VendorInvoiceDto>> Update(Guid id, [FromBody] VendorInvoiceUpdateDto dto)
         {
             if (id != dto.Id) return BadRequest("ID mismatch");
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Edit", "Finance.AP.Invoices.Write"))
+                return Forbid();
             try { return Ok(await _invoiceService.UpdateAsync(dto)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -72,6 +104,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(Guid id)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Delete", "Finance.AP.Invoices.Write"))
+                return Forbid();
             try { await _invoiceService.DeleteAsync(id); return NoContent(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -82,6 +116,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/submit")]
         public async Task<ActionResult<VendorInvoiceDto>> SubmitForApproval(Guid id)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.SubmitForApproval", "Finance.AP.Invoices.Approve"))
+                return Forbid();
             try { return Ok(await _invoiceService.SubmitForApprovalAsync(id)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -90,7 +126,19 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/approve")]
         public async Task<ActionResult<VendorInvoiceDto>> Approve(Guid id, [FromBody] string? comments = null)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Approve"))
+                return Forbid();
             try { return Ok(await _invoiceService.ApproveAsync(id, comments)); }
+            catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>Posts an approved vendor invoice to the general ledger through the central finance posting engine.</summary>
+        [HttpPost("{id}/post")]
+        public async Task<ActionResult<VendorInvoiceDto>> Post(Guid id)
+        {
+            if (!await HasAnyPermissionAsync(FinancePermissions.PostApInvoices))
+                return Forbid();
+            try { return Ok(await _invoiceService.PostAsync(id)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -98,6 +146,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/reject")]
         public async Task<ActionResult<VendorInvoiceDto>> Reject(Guid id, [FromBody] string comments)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Approve"))
+                return Forbid();
             try { return Ok(await _invoiceService.RejectAsync(id, comments)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -106,6 +156,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/void")]
         public async Task<ActionResult<VendorInvoiceDto>> Void(Guid id, [FromBody] string reason)
         {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Void"))
+                return Forbid();
             try { return Ok(await _invoiceService.VoidAsync(id, reason)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -208,6 +260,14 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpGet("{id}/allocations")]
         public async Task<ActionResult<List<VendorPaymentAllocationDto>>> GetAllocations(Guid id)
             => Ok(await _paymentService.GetPaymentAllocationsAsync(id));
+
+        /// <summary>Posts an authorized vendor payment to the general ledger through the central finance posting engine.</summary>
+        [HttpPost("{id}/post")]
+        public async Task<ActionResult<VendorPaymentDto>> Post(Guid id)
+        {
+            try { return Ok(await _paymentService.PostAsync(id)); }
+            catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
 
         /// <summary>Reverses a specific payment allocation with a mandatory reason.</summary>
         [HttpPost("allocations/{allocationId}/reverse")]
@@ -340,6 +400,27 @@ namespace ErpSystem.Api.Controllers.Finance
             [FromQuery] DateTime? asOfDate = null, [FromQuery] Guid? supplierId = null)
             => Ok(await _reportsService.GetAgingReportAsync(asOfDate, supplierId));
 
+        /// <summary>Rebuilds the AP settlement read model from posted AP source documents and posting events.</summary>
+        [HttpPost("settlements/rebuild")]
+        public async Task<ActionResult<SubledgerSettlementRebuildResultDto>> RebuildSettlementReadModel([FromQuery] DateTime? asOfDate = null)
+            => Ok(await _reportsService.RebuildSettlementReadModelAsync(asOfDate));
+
+        /// <summary>Reconciles the AP settlement read model to the posted AP control account balance.</summary>
+        [HttpGet("control-reconciliation")]
+        public async Task<ActionResult<SubledgerControlReconciliationDto>> GetControlReconciliation([FromQuery] DateTime? asOfDate = null)
+            => Ok(await _reportsService.GetControlReconciliationAsync(asOfDate));
+
+        /// <summary>
+        /// Shows supplier advances and other posted but unapplied vendor payments. These balances are
+        /// intentionally not included in invoice aging because they have no invoice due date.
+        /// </summary>
+        [HttpGet("unapplied-settlements")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<SubledgerUnappliedSettlementReportDto>> GetUnappliedSettlements(
+            [FromQuery] DateTime? asOfDate = null,
+            [FromQuery] Guid? supplierId = null)
+            => Ok(await _reportsService.GetUnappliedSettlementsAsync(asOfDate, supplierId));
+
         /// <summary>Generates a detailed AP aging report with per-supplier, per-invoice breakdown.</summary>
         [HttpGet("aging/detailed")]
         public async Task<ActionResult<ApAgingReportDto>> GetDetailedAgingReport(
@@ -358,6 +439,24 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try { return Ok(await _reportsService.GetSupplierStatementAsync(supplierId, fromDate, toDate)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>Generates a detailed supplier ledger for one or more suppliers/business partners.</summary>
+        [HttpGet("supplier-detailed-ledger")]
+        public async Task<ActionResult<SupplierDetailedLedgerReportDto>> GetSupplierDetailedLedger(
+            [FromQuery] DateTime fromDate,
+            [FromQuery] DateTime toDate,
+            [FromQuery] List<Guid>? supplierIds = null,
+            [FromQuery] bool showSupplierCurrency = false)
+        {
+            try
+            {
+                return Ok(await _reportsService.GetSupplierDetailedLedgerAsync(fromDate, toDate, supplierIds, showSupplierCurrency));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
         }
 
         /// <summary>Generates a withholding tax summary grouped by supplier for a date range.</summary>

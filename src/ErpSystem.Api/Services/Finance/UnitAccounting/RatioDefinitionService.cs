@@ -9,6 +9,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting
 {
@@ -32,7 +33,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             _logger = logger;
         }
 
-        private Guid TenantId => _currentUserService.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
         private string UserName => _currentUserService.UserName ?? "system";
 
         public async Task<IReadOnlyList<RatioDefinitionDto>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -199,7 +200,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 throw new ArgumentException($"Ratio definition with ID '{ratioId}' not found.");
 
             var period = await _unitOfWork.Repository<FiscalPeriod>()
-                .FirstOrDefaultAsync(p => p.Id == fiscalPeriodId && !p.IsDeleted);
+                .FirstOrDefaultAsync(p => p.Id == fiscalPeriodId && p.TenantId == TenantId && !p.IsDeleted);
 
             if (period == null)
                 throw new ArgumentException($"Fiscal period with ID '{fiscalPeriodId}' not found.");
@@ -296,7 +297,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 throw new ArgumentException($"Ratio definition with ID '{ratioId}' not found.");
 
             var periods = await _unitOfWork.Repository<FiscalPeriod>()
-                .GetQueryable(p => p.FiscalYearId == fiscalYearId && !p.IsDeleted)
+                .GetQueryable(p => p.TenantId == TenantId && p.FiscalYearId == fiscalYearId && !p.IsDeleted)
                 .OrderBy(p => p.PeriodNumber)
                 .ToListAsync(cancellationToken);
 
@@ -343,13 +344,13 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 case RatioComponentType.FinancialAccount:
                     if (!accountId.HasValue) return 0;
                     var glBalance = await _unitOfWork.Repository<AccountBalance>()
-                        .FirstOrDefaultAsync(b => b.AccountId == accountId.Value && b.FiscalPeriodId == fiscalPeriodId);
+                        .FirstOrDefaultAsync(b => b.TenantId == TenantId && b.AccountId == accountId.Value && b.FiscalPeriodId == fiscalPeriodId);
                     return glBalance?.ClosingBalance ?? 0;
 
                 case RatioComponentType.UnitAccount:
                     if (!accountId.HasValue) return 0;
                     var unitBalance = await _unitOfWork.Repository<UnitAccountBalance>()
-                        .FirstOrDefaultAsync(b => b.UnitAccountId == accountId.Value && b.FiscalPeriodId == fiscalPeriodId);
+                        .FirstOrDefaultAsync(b => b.TenantId == TenantId && b.UnitAccountId == accountId.Value && b.FiscalPeriodId == fiscalPeriodId);
                     return unitBalance?.ClosingBalance ?? 0;
 
                 case RatioComponentType.Constant:
@@ -369,9 +370,10 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 case RatioComponentType.FinancialAccount:
                     if (!accountId.HasValue) return 0;
                     var transactions = await _unitOfWork.Repository<AccountTransaction>()
-                        .GetQueryable(t => t.AccountId == accountId.Value 
-                            && t.TransactionDate >= startDate 
-                            && t.TransactionDate <= endDate 
+                        .GetQueryable(t => t.TenantId == TenantId
+                            && t.AccountId == accountId.Value
+                            && t.TransactionDate >= startDate
+                            && t.TransactionDate <= endDate
                             && !t.IsDeleted)
                         .SumAsync(t => t.DebitAmount - t.CreditAmount, cancellationToken);
                     return transactions;
@@ -379,7 +381,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 case RatioComponentType.UnitAccount:
                     if (!accountId.HasValue) return 0;
                     var account = await _unitOfWork.Repository<UnitAccount>()
-                        .FirstOrDefaultAsync(a => a.Id == accountId.Value && !a.IsDeleted);
+                        .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == accountId.Value && !a.IsDeleted);
                     return account?.CurrentBalance ?? 0;
 
                 case RatioComponentType.Constant:

@@ -9,24 +9,44 @@ import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { FileText, Plus, Search, Eye, Filter, Calendar as CalendarIcon, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import type { JournalEntry, JournalType, PostingStatus } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 
 export default function JournalEntriesPage() {
+    const searchParams = useSearchParams();
+    const routeSourceModule = searchParams.get('sourceModule')?.trim().toUpperCase();
     const [entries, setEntries] = useState<JournalEntry[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [filters, setFilters] = useState({
         status: 'all',
         type: 'all',
+        sourceModule: routeSourceModule || 'all',
         period: 'all',
     });
+    const activeSourceModule = filters.sourceModule === 'all' ? null : filters.sourceModule;
+    const adjustmentModule = activeSourceModule === 'AP' || activeSourceModule === 'AR' ? activeSourceModule : null;
+    const newJournalHref = adjustmentModule
+        ? `/finance/subledger-adjustments/new?module=${adjustmentModule}`
+        : '/finance/journal-entries/new';
+    const newJournalLabel = adjustmentModule
+        ? `New ${adjustmentModule} Adjustment`
+        : 'New Journal Entry';
+
+    useEffect(() => {
+        setFilters((current) => ({
+            ...current,
+            sourceModule: routeSourceModule || 'all',
+        }));
+    }, [routeSourceModule]);
 
     const loadEntries = useCallback(async () => {
         try {
             setLoading(true);
             const apiFilters: Record<string, string> = {};
             if (filters.status !== 'all') apiFilters.status = filters.status;
+            if (filters.sourceModule !== 'all') apiFilters.sourceModule = filters.sourceModule;
             const data = await financeDataService.getJournalEntries(apiFilters);
             setEntries(data);
         } catch (err) {
@@ -34,7 +54,7 @@ export default function JournalEntriesPage() {
         } finally {
             setLoading(false);
         }
-    }, [filters.status]);
+    }, [filters.status, filters.sourceModule]);
 
     useEffect(() => {
         loadEntries();
@@ -46,7 +66,9 @@ export default function JournalEntriesPage() {
             entry.journalEntryNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
             entry.description.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesType = filters.type === 'all' || entry.journalType === filters.type;
-        return matchesSearch && matchesType;
+        const matchesSource = filters.sourceModule === 'all' ||
+            (entry.sourceModule || '').toUpperCase() === filters.sourceModule.toUpperCase();
+        return matchesSearch && matchesType && matchesSource;
     });
 
     const getStatusBadge = (status: PostingStatus) => {
@@ -65,8 +87,8 @@ export default function JournalEntriesPage() {
         return <Badge variant={variants[status]} className={className}>{status}</Badge>;
     };
 
-    const getTypeBadge = (type: JournalType) => {
-        return <Badge variant="outline">{type}</Badge>;
+    const getTypeBadge = (type?: JournalType) => {
+        return <Badge variant="outline">{type || 'General'}</Badge>;
     };
 
     const formatCurrency = (amount: number, currency: string) => {
@@ -91,16 +113,18 @@ export default function JournalEntriesPage() {
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
                         <FileText className="h-8 w-8" />
-                        Journal Entries
+                        {activeSourceModule ? `${activeSourceModule} Journal Entries` : 'Journal Entries'}
                     </h1>
                     <p className="text-muted-foreground">
-                        View and manage general ledger journal entries
+                        {activeSourceModule
+                            ? `View ${activeSourceModule} source journals posted to the general ledger`
+                            : 'View and manage general ledger journal entries'}
                     </p>
                 </div>
-                <Link href="/finance/journal-entries/new">
+                <Link href={newJournalHref}>
                     <Button>
                         <Plus className="mr-2 h-4 w-4" />
-                        New Journal Entry
+                        {newJournalLabel}
                     </Button>
                 </Link>
             </div>
@@ -117,13 +141,13 @@ export default function JournalEntriesPage() {
                     </BreadcrumbItem>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
-                        <BreadcrumbPage>Journal Entries</BreadcrumbPage>
+                        <BreadcrumbPage>{activeSourceModule ? `${activeSourceModule} Journal Entries` : 'Journal Entries'}</BreadcrumbPage>
                     </BreadcrumbItem>
                 </BreadcrumbList>
             </Breadcrumb>
 
             {/* Search and Filters */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <Card className="md:col-span-2">
                     <CardHeader className="pb-3">
                         <CardTitle className="text-base">Search</CardTitle>
@@ -140,7 +164,7 @@ export default function JournalEntriesPage() {
                         </div>
                     </CardContent>
                 </Card>
-                <Card className="md:col-span-2">
+                <Card className="md:col-span-3">
                     <CardHeader className="pb-3">
                         <CardTitle className="text-base flex items-center gap-2">
                             <Filter className="h-4 w-4" />
@@ -148,7 +172,7 @@ export default function JournalEntriesPage() {
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                             <Select
                                 value={filters.status}
                                 onValueChange={(value) => setFilters({ ...filters, status: value })}
@@ -176,6 +200,21 @@ export default function JournalEntriesPage() {
                                     <SelectItem value="Reversing">Reversing</SelectItem>
                                 </SelectContent>
                             </Select>
+                            <Select
+                                value={filters.sourceModule}
+                                onValueChange={(value) => setFilters({ ...filters, sourceModule: value })}
+                            >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Sources</SelectItem>
+                                    <SelectItem value="AP">Accounts Payable</SelectItem>
+                                    <SelectItem value="AR">Accounts Receivable</SelectItem>
+                                    <SelectItem value="GL">General Ledger</SelectItem>
+                                    <SelectItem value="BANK">Cash/Bank</SelectItem>
+                                    <SelectItem value="FixedAssets">Fixed Assets</SelectItem>
+                                    <SelectItem value="PAYROLL">Payroll</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
                     </CardContent>
                 </Card>
@@ -184,7 +223,7 @@ export default function JournalEntriesPage() {
             {/* Journal Entries Table */}
             <Card>
                 <CardHeader>
-                    <CardTitle>Journal Entries ({filteredEntries.length})</CardTitle>
+                    <CardTitle>{activeSourceModule ? `${activeSourceModule} Journal Entries` : 'Journal Entries'} ({filteredEntries.length})</CardTitle>
                     <CardDescription>List of all journal entries in the system</CardDescription>
                 </CardHeader>
                 <CardContent>

@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Sales;
@@ -78,6 +79,10 @@ public class DeliveryNote : DocumentEntity
 
     [MaxLength(1000)]
     public string? DeliveryNotes { get; set; }
+
+    public Guid? TaxGroupId { get; set; }
+    [ForeignKey(nameof(TaxGroupId))]
+    public virtual TaxGroup? TaxGroup { get; set; }
 
     // ── Multi-tenant ────────────────────────────────────────────────────
 
@@ -163,6 +168,26 @@ public class DeliveryNoteLine : BaseEntity
 
     [MaxLength(500)]
     public string? DamageNotes { get; set; }
+
+    // ── Financial ───────────────────────────────────────────────────────
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal UnitPrice { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal DiscountPercentage { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal DiscountAmount { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal TaxRate { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal TaxAmount { get; set; }
+
+    public Guid? TaxGroupId { get; set; }
+    [ForeignKey(nameof(TaxGroupId))]
+    public virtual TaxGroup? TaxGroup { get; set; }
 
     // ── Multi-tenant ────────────────────────────────────────────────────
 

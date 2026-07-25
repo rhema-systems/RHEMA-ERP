@@ -35,6 +35,13 @@ public class PaymentAllocation : BaseEntity
     public bool IsReversal { get; set; } = false;
     public Guid? OriginalAllocationId { get; set; }
 
+    /// <summary>
+    /// Present only when a previously posted customer advance is applied. This records the
+    /// engine-created advance-to-AR-control reclassification without altering the cash receipt.
+    /// </summary>
+    public Guid? ApplicationJournalEntryId { get; set; }
+    public Guid? ApplicationPostingEventId { get; set; }
+
     // Multi-tenant
     public Guid TenantId { get; set; }
     public virtual Tenant Tenant { get; set; } = null!;

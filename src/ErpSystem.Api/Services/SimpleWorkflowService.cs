@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.Maintenance;
@@ -94,13 +96,27 @@ public class SimpleWorkflowService : IWorkflowService
         _logger = logger;
     }
 
-    public async Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId)
+    public Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId) =>
+        StartApprovalWorkflowAsync(entityType, entityId, null);
+
+    public Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(
+        string entityType,
+        Guid entityId,
+        Guid workflowDefinitionId) =>
+        StartApprovalWorkflowAsync(entityType, entityId, (Guid?)workflowDefinitionId);
+
+    private async Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(
+        string entityType,
+        Guid entityId,
+        Guid? workflowDefinitionId)
     {
         var initiatedById = GetCurrentUserId();
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
 
         var entityTypeRecord = await ResolveEntityTypeAsync(entityType, tenantId);
-        var definition = await ResolveActiveDefinitionAsync(entityTypeRecord, tenantId);
+        var definition = workflowDefinitionId.HasValue
+            ? await ResolveSelectedDefinitionAsync(entityTypeRecord, tenantId, workflowDefinitionId.Value)
+            : await ResolveActiveDefinitionAsync(entityTypeRecord, tenantId);
 
         // Idempotency/consistency: prevent multiple active workflow instances for the same entity.
         // If an instance is already running, return it instead of starting a duplicate.
@@ -127,13 +143,31 @@ public class SimpleWorkflowService : IWorkflowService
 
         if (existingActiveInstance != null)
         {
+            if (existingActiveInstance.WorkflowDefinitionId != definition.Id)
+            {
+                return new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Message = "The active workflow instance uses a different definition from the selected authority route.",
+                    Status = existingActiveInstance.Status,
+                    WorkflowInstanceId = existingActiveInstance.Id,
+                    CurrentStepId = existingActiveInstance.CurrentStepId ?? currentStepInstance?.WorkflowStepId
+                };
+            }
+
             // Self-heal: if the active step is an approval step and approvals are missing, materialize them.
             currentStepInstance ??= await EnsureCurrentStepInstanceAsync(existingActiveInstance, entityTypeRecord, entityId);
+            var existingDataContext = await BuildEntityContextAsync(entityTypeRecord, entityId);
+            var startAdvanceResult = await AdvanceStartStepIfNeededAsync(existingActiveInstance, currentStepInstance, initiatedById, existingDataContext);
+            if (startAdvanceResult != null)
+            {
+                return startAdvanceResult;
+            }
+
             if (currentStepInstance?.WorkflowStep?.StepType == WorkflowStepType.Approval)
             {
                 try
                 {
-                    var existingDataContext = await BuildEntityContextAsync(entityTypeRecord, entityId);
                     await _workflowEngine.EnsureApprovalsForStepAsync(currentStepInstance.Id, existingDataContext);
                 }
                 catch (Exception ex)
@@ -155,12 +189,19 @@ public class SimpleWorkflowService : IWorkflowService
         var dataContext = await BuildEntityContextAsync(entityTypeRecord, entityId);
 
         var workflowInstance = await _workflowEngine.StartWorkflowAsync(
-            definition.Name,
+            definition.Id,
             entityId,
             initiatedById,
             dataContext);
 
         await AttachWorkflowInstanceAsync(entityTypeRecord, entityId, workflowInstance.Id);
+
+        var currentStepInstanceAfterStart = await _stepInstanceRepository.GetCurrentStepAsync(workflowInstance.Id);
+        var advanceResult = await AdvanceStartStepIfNeededAsync(workflowInstance, currentStepInstanceAfterStart, initiatedById, dataContext);
+        if (advanceResult != null)
+        {
+            return advanceResult;
+        }
 
         return new WorkflowExecutionResult
         {
@@ -170,6 +211,44 @@ public class SimpleWorkflowService : IWorkflowService
             WorkflowInstanceId = workflowInstance.Id,
             CurrentStepId = workflowInstance.CurrentStepId
         };
+    }
+
+    private async Task<WorkflowExecutionResult?> AdvanceStartStepIfNeededAsync(
+        WorkflowInstance instance,
+        WorkflowStepInstance? currentStepInstance,
+        Guid userId,
+        object? dataContext)
+    {
+        var currentStep = currentStepInstance?.WorkflowStep;
+        if (currentStepInstance == null ||
+            currentStep == null ||
+            !currentStep.IsStartStep ||
+            currentStep.StepType == WorkflowStepType.Approval ||
+            instance.Status is not (WorkflowInstanceStatus.Created or WorkflowInstanceStatus.InProgress or WorkflowInstanceStatus.Waiting or WorkflowInstanceStatus.Suspended))
+        {
+            return null;
+        }
+
+        var result = await _workflowEngine.ExecuteNextStepAsync(instance.Id, userId, dataContext);
+        if (!result.Success)
+        {
+            return result;
+        }
+
+        var advancedStepInstance = await _stepInstanceRepository.GetCurrentStepAsync(instance.Id);
+        if (advancedStepInstance?.WorkflowStep?.StepType == WorkflowStepType.Approval)
+        {
+            try
+            {
+                await _workflowEngine.EnsureApprovalsForStepAsync(advancedStepInstance.Id, dataContext);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to ensure approvals after advancing workflow instance {WorkflowInstanceId}", instance.Id);
+            }
+        }
+
+        return result;
     }
 
     public async Task<bool> CanUserApproveAsync(string entityType, Guid entityId, Guid userId)
@@ -664,6 +743,20 @@ public class SimpleWorkflowService : IWorkflowService
         return definition;
     }
 
+    private async Task<WorkflowDefinition> ResolveSelectedDefinitionAsync(
+        WorkflowEntityType entityTypeRecord,
+        Guid tenantId,
+        Guid workflowDefinitionId)
+    {
+        var definition = await _definitionRepository.GetWithDetailsAsync(workflowDefinitionId);
+        if (definition is null || definition.TenantId != tenantId || definition.EntityTypeId != entityTypeRecord.Id)
+            throw new InvalidOperationException(
+                "The selected workflow definition is missing, belongs to another tenant, or targets another entity type.");
+        if (!WorkflowDefinitionLifecyclePolicy.IsRuntimeEligible(definition))
+            throw new InvalidOperationException("The selected workflow definition is not Published and active.");
+        return definition;
+    }
+
     private async Task<WorkflowInstance?> ResolveActiveWorkflowInstanceAsync(string entityType, Guid entityId)
     {
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
@@ -803,6 +896,84 @@ public class SimpleWorkflowService : IWorkflowService
             ["entityId"] = entityId,
             ["entityType"] = entityTypeRecord.Code ?? entityTypeRecord.Name
         };
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+
+        if (IsEntityType(entityTypeRecord, "ExchangeRate", "Exchange Rate"))
+        {
+            var rate = await _unitOfWork.Repository<ExchangeRate>()
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == entityId)
+                ?? throw new InvalidOperationException("Exchange rate not found");
+            context["baseCurrencyCode"] = rate.BaseCurrencyCode;
+            context["targetCurrencyCode"] = rate.TargetCurrencyCode;
+            context["rate"] = rate.Rate;
+            context["effectiveDate"] = rate.EffectiveDate;
+            context["rateType"] = rate.RateType.ToString();
+            context["rateSource"] = rate.RateSource;
+            context["approvalStatus"] = rate.ApprovalStatus.ToString();
+            context["isManualEntry"] = rate.IsManualEntry;
+        }
+
+        if (IsEntityType(entityTypeRecord, "FixedAsset", "Fixed Asset"))
+        {
+            var asset = await _unitOfWork.Repository<FixedAsset>()
+                .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == entityId, a => a.Category)
+                ?? throw new InvalidOperationException("Fixed asset not found");
+            context["assetCode"] = asset.AssetCode;
+            context["assetName"] = asset.Name;
+            context["assetStatus"] = asset.Status.ToString();
+            context["categoryId"] = asset.FixedAssetCategoryId;
+            context["categoryCode"] = asset.Category?.Code ?? string.Empty;
+            context["acquisitionCost"] = asset.AcquisitionCost;
+            context["netBookValue"] = asset.NetBookValue;
+            context["purchaseDate"] = asset.PurchaseDate;
+            context["capitalizationDate"] = asset.CapitalizationDate;
+        }
+
+        if (IsEntityType(entityTypeRecord, "FixedAssetDepreciationRun", "AssetDepreciationSchedule", "Asset Depreciation", "Depreciation Run"))
+        {
+            var run = await _unitOfWork.Repository<FixedAssetDepreciationRun>()
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == entityId, r => r.FiscalPeriod)
+                ?? throw new InvalidOperationException("Fixed asset depreciation run not found");
+            context["status"] = run.Status;
+            context["postingDate"] = run.PostingDate;
+            context["fiscalPeriodId"] = run.FiscalPeriodId;
+            context["periodCode"] = run.FiscalPeriod?.PeriodCode ?? string.Empty;
+            context["bookClassification"] = run.BookClassification;
+            context["totalDepreciationAmount"] = run.TotalDepreciationAmount;
+            context["fixedAssetId"] = run.FixedAssetId;
+        }
+
+        if (IsEntityType(entityTypeRecord, "OpeningBalanceBatch", "Opening Balance Batch"))
+        {
+            var batch = await _unitOfWork.Repository<OpeningBalanceBatch>()
+                .FirstOrDefaultAsync(b => b.TenantId == tenantId && b.Id == entityId, b => b.FiscalPeriod)
+                ?? throw new InvalidOperationException("Opening balance batch not found");
+            context["status"] = batch.Status;
+            context["batchNumber"] = batch.BatchNumber;
+            context["openingDate"] = batch.OpeningDate;
+            context["fiscalPeriodId"] = batch.FiscalPeriodId;
+            context["periodCode"] = batch.FiscalPeriod?.PeriodCode ?? string.Empty;
+            context["bookClassification"] = batch.BookClassification;
+            context["totalDebit"] = batch.TotalDebit;
+            context["totalCredit"] = batch.TotalCredit;
+            context["difference"] = batch.Difference;
+        }
+
+        if (IsEntityType(entityTypeRecord, "AssetValuation", "Asset Valuation"))
+        {
+            var valuation = await _unitOfWork.Repository<AssetValuation>()
+                .FirstOrDefaultAsync(v => v.TenantId == tenantId && v.Id == entityId, v => v.FixedAsset)
+                ?? throw new InvalidOperationException("Asset valuation not found");
+            context["status"] = valuation.Status;
+            context["fixedAssetId"] = valuation.FixedAssetId;
+            context["assetCode"] = valuation.FixedAsset?.AssetCode ?? string.Empty;
+            context["valuationDate"] = valuation.ValuationDate;
+            context["valuationType"] = valuation.ValuationType.ToString();
+            context["carryingAmountBefore"] = valuation.CarryingAmountBefore;
+            context["carryingAmountAfter"] = valuation.CarryingAmountAfter;
+            context["adjustmentAmount"] = valuation.AdjustmentAmount;
+            context["reason"] = valuation.Reason ?? string.Empty;
+        }
 
         if (IsEntityType(entityTypeRecord, "JOB_CARD", "JobCard", "Job Card"))
         {

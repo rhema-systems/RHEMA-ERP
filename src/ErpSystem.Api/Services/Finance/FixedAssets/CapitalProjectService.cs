@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,7 +26,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             _fixedAssetService = fixedAssetService;
         }
 
-        private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
         private string UserName => _currentUser.UserName ?? "system";
 
         // ── Queries ──────────────────────────────────────────────────────

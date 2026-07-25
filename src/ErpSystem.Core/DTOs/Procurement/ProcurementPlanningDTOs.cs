@@ -580,6 +580,9 @@ public class ConvertPlanItemToTenderDto
     public Guid PlanItemId { get; set; }
 
     [Required]
+    public Guid PurchaseRequisitionId { get; set; }
+
+    [Required]
     [MaxLength(200)]
     public string TenderTitle { get; set; } = string.Empty;
 

@@ -1,14 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
-    BarChart3,
     Calendar as CalendarIcon,
     Download,
-    Search,
-    FileText,
-    Filter
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,13 +17,6 @@ import {
 } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
-import {
     Popover,
     PopoverContent,
     PopoverTrigger,
@@ -36,6 +26,11 @@ import { arService } from '@/services/ar-service';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PartnerStatementReport } from '@/components/finance/PartnerStatementReport';
+import type {
+    DetailedLedgerReport,
+    LedgerPartnerOption,
+} from '@/components/finance/PartnerDetailedLedgerReport';
 import {
     Table,
     TableBody,
@@ -45,8 +40,20 @@ import {
     TableRow,
 } from '@/components/ui/table';
 
+const REPORT_TABS = ['aging', 'statements'] as const;
+
+function getReportTab(tab: string | null) {
+    return REPORT_TABS.find((reportTab) => reportTab === tab) ?? 'aging';
+}
+
 export default function ArReportsPage() {
-    const [activeTab, setActiveTab] = useState('aging');
+    const searchParams = useSearchParams();
+    const tabParam = searchParams.get('tab');
+    const [activeTab, setActiveTab] = useState(() => getReportTab(tabParam));
+
+    useEffect(() => {
+        setActiveTab(getReportTab(tabParam));
+    }, [tabParam]);
 
     return (
         <div className="space-y-8 p-8 max-w-[1600px] mx-auto">
@@ -57,7 +64,7 @@ export default function ArReportsPage() {
                 </p>
             </div>
 
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'aging' | 'statements')} className="space-y-4">
                 <TabsList>
                     <TabsTrigger value="aging">Aging Analysis</TabsTrigger>
                     <TabsTrigger value="statements">Customer Statements</TabsTrigger>
@@ -177,20 +184,89 @@ function AgingReportView() {
 }
 
 function CustomerStatementsView() {
-    // Placeholder for future implementation
+    const [partners, setPartners] = useState<LedgerPartnerOption[]>([]);
+    const [partnersLoading, setPartnersLoading] = useState(true);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadCustomers = async () => {
+            setPartnersLoading(true);
+            try {
+                const result = await arService.getCustomers({ page: 1, pageSize: 500, includeBalances: false });
+                if (!isMounted) return;
+
+                setPartners(
+                    result.items
+                        .map((customer) => ({
+                            id: customer.id,
+                            code: customer.customerCode,
+                            name: customer.customerName,
+                            currencyCode: customer.currencyCode,
+                        }))
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                );
+            } catch (error) {
+                console.error('Failed to load customer statement partners', error);
+                if (isMounted) setPartners([]);
+            } finally {
+                if (isMounted) setPartnersLoading(false);
+            }
+        };
+
+        loadCustomers();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Customer Statements</CardTitle>
-                <CardDescription>Generate and download account statements</CardDescription>
-            </CardHeader>
-            <CardContent className="text-center py-12 text-muted-foreground">
-                <FileText className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                <p>Select a customer and date range to generate a statement.</p>
-                <div className="max-w-md mx-auto mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900 rounded-lg text-sm text-yellow-800 dark:text-yellow-200">
-                    Feature coming soon. Please use individual Customer Details page to view history.
-                </div>
-            </CardContent>
-        </Card>
+        <PartnerStatementReport
+            title="Customer Statements"
+            description="Generate receivable statements of account with opening balance, period movements, and closing balance."
+            partnerLabel="Customer"
+            partnerPluralLabel="Customers"
+            currencyToggleLabel="Show transactions in customer currency where available"
+            exportFilePrefix="customer-statement"
+            partners={partners}
+            partnersLoading={partnersLoading}
+            loadReport={async (params): Promise<DetailedLedgerReport> => {
+                const report = await arService.getCustomerDetailedLedger({
+                    fromDate: params.fromDate,
+                    toDate: params.toDate,
+                    customerIds: params.partnerIds,
+                    showCustomerCurrency: params.showPartnerCurrency,
+                });
+
+                return {
+                    fromDate: report.fromDate,
+                    toDate: report.toDate,
+                    currencyCode: report.currencyCode,
+                    totalOpeningBalance: report.totalOpeningBalance,
+                    totalDebits: report.totalDebits,
+                    totalCredits: report.totalCredits,
+                    totalClosingBalance: report.totalClosingBalance,
+                    warnings: report.warnings ?? [],
+                    accounts: report.customers.map((customer) => ({
+                        id: customer.customerId,
+                        code: customer.customerCode,
+                        name: customer.customerName,
+                        currencyCode: customer.currencyCode,
+                        openingBalance: customer.openingBalance,
+                        totalDebits: customer.totalDebits,
+                        totalCredits: customer.totalCredits,
+                        closingBalance: customer.closingBalance,
+                        lines: customer.lines,
+                    })),
+                };
+            }}
+            downloadCsv={(params) => arService.downloadCustomerStatementCsv({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                customerIds: params.partnerIds,
+                showCustomerCurrency: params.showPartnerCurrency,
+            })}
+        />
     )
 }

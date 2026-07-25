@@ -11,8 +11,14 @@ import { FolderTree, Plus, Search, Eye, Edit, Filter, Loader2 } from 'lucide-rea
 import Link from 'next/link';
 import type { Account, AccountType, AccountStatus } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
+import { useAuth } from '@/hooks/use-auth';
+import { usePathname } from 'next/navigation';
 
 export default function AccountsPage() {
+    const pathname = usePathname() ?? '';
+    const administrationMode = pathname.startsWith('/administration/finance');
+    const { hasAnyPermission } = useAuth();
+    const canManage = hasAnyPermission(['Finance.Admin', 'Finance.ChartOfAccounts.Manage']);
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [coaType, setCoaType] = useState<'Standard' | 'Segmented'>('Standard');
     const [loading, setLoading] = useState(true);
@@ -117,15 +123,19 @@ export default function AccountsPage() {
                         </Badge>
                     </h1>
                     <p className="text-muted-foreground">
-                        Manage your organization's chart of accounts
+                        {administrationMode
+                            ? "Configure and maintain the organization's chart of accounts"
+                            : "Review the organization's chart of accounts and balances"}
                     </p>
                 </div>
+                {canManage && (
                 <Link href="/finance/accounts/new">
                     <Button>
                         <Plus className="mr-2 h-4 w-4" />
                         New Account
                     </Button>
                 </Link>
+                )}
             </div>
 
             {/* Breadcrumbs */}
@@ -136,7 +146,9 @@ export default function AccountsPage() {
                     </BreadcrumbItem>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
-                        <BreadcrumbLink href="/finance">Finance</BreadcrumbLink>
+                        <BreadcrumbLink href={administrationMode ? '/administration' : '/finance'}>
+                            {administrationMode ? 'Administration' : 'Finance'}
+                        </BreadcrumbLink>
                     </BreadcrumbItem>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
@@ -287,11 +299,13 @@ export default function AccountsPage() {
                                                         <Eye className="h-4 w-4" />
                                                     </Button>
                                                 </Link>
+                                                {canManage && (
                                                 <Link href={`/finance/accounts/${account.id}/edit`}>
                                                     <Button variant="ghost" size="sm">
                                                         <Edit className="h-4 w-4" />
                                                     </Button>
                                                 </Link>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>

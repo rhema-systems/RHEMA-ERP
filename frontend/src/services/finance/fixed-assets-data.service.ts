@@ -44,6 +44,7 @@ class FixedAssetsDataService {
     if (query.categoryId) params.append('categoryId', query.categoryId);
     if (query.status !== undefined) params.append('status', query.status.toString());
     if (query.searchTerm) params.append('searchTerm', query.searchTerm);
+    if (query.bookClassification) params.append('bookClassification', query.bookClassification);
     const qs = params.toString();
     return qs ? `?${qs}` : '';
   }
@@ -224,13 +225,31 @@ class FixedAssetsDataService {
     return { fileName, blob };
   }
 
+  async downloadPdf(reportType: string, query: FixedAssetReportQuery): Promise<{ fileName: string; blob: Blob }> {
+    const qs = this.buildQueryString(query);
+    const connector = qs ? '&' : '?';
+    const url = `${process.env.NEXT_PUBLIC_API_URL || '/api'}/finance/fixed-assets/reports/export/pdf${qs}${connector}reportType=${reportType}`;
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+    const response = await fetch(url, {
+      headers: {
+        ...(token && { 'Authorization': `Bearer ${token}` })
+      }
+    });
+
+    if (!response.ok) throw new Error('Export failed');
+    const blob = await response.blob();
+    const fileName = `${reportType}_${new Date().toISOString().split('T')[0]}.pdf`;
+    return { fileName, blob };
+  }
+
   // Bulk Import
-  async bulkImportAssets(file: File): Promise<import('@/types/fixed-assets').BulkImportResult> {
+  async bulkImportAssets(file: File, dryRun = false): Promise<import('@/types/fixed-assets').BulkImportResult> {
     const formData = new FormData();
     formData.append('file', file);
 
     const response = await apiService.post<import('@/types/fixed-assets').BulkImportResult>(
-      '/finance/fixed-assets/bulk-import',
+      `/finance/fixed-assets/bulk-import?dryRun=${dryRun}`,
       formData
     );
     return response;

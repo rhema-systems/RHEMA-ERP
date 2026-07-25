@@ -47,6 +47,8 @@ namespace ErpSystem.Core.DTOs.Finance
         
         /// <summary>TRUE if rate has been used in transactions</summary>
         public bool HasBeenUsed { get; set; }
+        public bool UsageLocked { get; set; }
+        public string ApprovalStatus { get; set; } = "Approved";
         
         /// <summary>Count of transactions using this rate</summary>
         public int UsageCount { get; set; }
@@ -100,6 +102,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? SourceReference { get; set; }
         
         public bool IsActive { get; set; } = true;
+        public string ApprovalStatus { get; set; } = "Approved";
     }
 
     /// <summary>
@@ -126,5 +129,24 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? SourceReference { get; set; }
         
         public bool IsActive { get; set; } = true;
+        public string ApprovalStatus { get; set; } = "Approved";
+    }
+
+    /// <summary>
+    /// READ DTO: Represents exchange rate trend analysis data over a specific period.
+    /// </summary>
+    public class TrendAnalysisDto
+    {
+        public DateTime Date { get; set; }
+        public string SourceCurrency { get; set; } = string.Empty;
+        public string TargetCurrency { get; set; } = string.Empty;
+        public decimal Rate { get; set; }
+        public decimal? PreviousRate { get; set; }
+        public decimal? ChangeAmount { get; set; }
+        public decimal? ChangePercentage { get; set; }
+        public decimal? MovingAverage { get; set; }
+        public decimal? Volatility { get; set; }
+        public decimal? MinRate { get; set; }
+        public decimal? MaxRate { get; set; }
     }
 }

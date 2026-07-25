@@ -1,6 +1,8 @@
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -45,6 +47,10 @@ public class FinanceDataSeeder
             await SeedExchangeRatesAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
+            // 2.5 Seed Payment Terms
+            await SeedPaymentTermsAsync(tenantId, baseDate);
+            await _context.SaveChangesAsync();
+
             // 3. Seed Fiscal Years
             await SeedFiscalYearsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
@@ -59,6 +65,10 @@ public class FinanceDataSeeder
 
             // 6. Seed Standard Chart of Accounts
             await SeedAccountsAsync(tenantId, baseDate);
+            await _context.SaveChangesAsync();
+
+            // 6.25 Seed unit-accounting demo drivers used by statistical ledger screens
+            await SeedUnitAccountingDemoDataAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
             // 6.5 Seed Payroll GL accounts used by HR payroll posting
@@ -239,6 +249,17 @@ public class FinanceDataSeeder
 
     #endregion
 
+    #region Payment Term Seeding
+
+    private async Task SeedPaymentTermsAsync(Guid tenantId, DateTime baseDate)
+    {
+        await PaymentTermBaselineSeeder.SeedTenantBaselineAsync(_context, tenantId);
+
+        _logger.LogInformation("Payment terms seeded");
+    }
+
+    #endregion
+
     #region Exchange Rate Seeding
 
     private async Task SeedExchangeRatesAsync(Guid tenantId, DateTime baseDate)
@@ -327,55 +348,83 @@ public class FinanceDataSeeder
 
     private async Task SeedFiscalYearsAsync(Guid tenantId, DateTime baseDate)
     {
-        // FY2023 (Closed)
-        var fy2023Id = Guid.Parse("00000003-0001-0001-0001-000000000001");
-        if (!await _context.FiscalYears.AnyAsync(fy => fy.FiscalYearCode == "FY2023" && fy.TenantId == tenantId))
-        {
-            await _context.FiscalYears.AddAsync(new FiscalYear
-            {
-                Id = fy2023Id,
-                TenantId = tenantId,
-                FiscalYearCode = "FY2023",
-                FiscalYearName = "Fiscal Year 2023",
-                Year = 2023,
-                StartDate = new DateTime(2023, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-                EndDate = new DateTime(2023, 12, 31, 23, 59, 59, DateTimeKind.Utc),
-                FiscalYearType = "Calendar",
-                Status = "Closed",
-                NumberOfPeriods = 12,
-                BaseCurrency = "GHS",
-                IsClosed = true,
-                IsLocked = true,
-                CreatedAt = new DateTime(2023, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-                CreatedBy = "System"
-            });
-        }
+        await EnsureFiscalYearAsync(
+            tenantId,
+            Guid.Parse("00000003-0001-0001-0001-000000000003"),
+            2025,
+            status: "Closed",
+            isClosed: true,
+            isLocked: true,
+            baseDate);
 
-        // FY2024 (Open)
-        var fy2024Id = Guid.Parse("00000003-0001-0001-0001-000000000002");
-        if (!await _context.FiscalYears.AnyAsync(fy => fy.FiscalYearCode == "FY2024" && fy.TenantId == tenantId))
-        {
-            await _context.FiscalYears.AddAsync(new FiscalYear
-            {
-                Id = fy2024Id,
-                TenantId = tenantId,
-                FiscalYearCode = "FY2024",
-                FiscalYearName = "Fiscal Year 2024",
-                Year = 2024,
-                StartDate = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-                EndDate = new DateTime(2024, 12, 31, 23, 59, 59, DateTimeKind.Utc),
-                FiscalYearType = "Calendar",
-                Status = "Open",
-                NumberOfPeriods = 12,
-                BaseCurrency = "GHS",
-                IsClosed = false,
-                IsLocked = false,
-                CreatedAt = baseDate,
-                CreatedBy = "System"
-            });
-        }
+        await EnsureFiscalYearAsync(
+            tenantId,
+            Guid.Parse("00000003-0001-0001-0001-000000000004"),
+            2026,
+            status: "Open",
+            isClosed: false,
+            isLocked: false,
+            baseDate);
 
         _logger.LogInformation("Fiscal years seeded");
+    }
+
+    private async Task EnsureFiscalYearAsync(
+        Guid tenantId,
+        Guid preferredId,
+        int year,
+        string status,
+        bool isClosed,
+        bool isLocked,
+        DateTime createdAt)
+    {
+        var code = $"FY{year}";
+        var startDate = new DateTime(year, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var endDate = new DateTime(year, 12, 31, 23, 59, 59, DateTimeKind.Utc);
+
+        var existing = await _context.FiscalYears
+            .FirstOrDefaultAsync(fy => fy.FiscalYearCode == code && fy.TenantId == tenantId);
+
+        if (existing != null)
+        {
+            existing.FiscalYearName = $"Fiscal Year {year}";
+            existing.Year = year;
+            existing.StartDate = startDate;
+            existing.EndDate = endDate;
+            existing.TotalDays = DateTime.IsLeapYear(year) ? 366 : 365;
+            existing.FiscalYearType = "Calendar";
+            existing.Status = status;
+            existing.IsActive = !isClosed;
+            existing.NumberOfPeriods = 12;
+            existing.BaseCurrency = "GHS";
+            existing.IsClosed = isClosed;
+            existing.IsLocked = isLocked;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedBy = "System";
+            return;
+        }
+
+        var idInUse = await _context.FiscalYears.AnyAsync(fy => fy.Id == preferredId);
+        await _context.FiscalYears.AddAsync(new FiscalYear
+        {
+            Id = idInUse ? Guid.NewGuid() : preferredId,
+            TenantId = tenantId,
+            FiscalYearCode = code,
+            FiscalYearName = $"Fiscal Year {year}",
+            Year = year,
+            StartDate = startDate,
+            EndDate = endDate,
+            TotalDays = DateTime.IsLeapYear(year) ? 366 : 365,
+            FiscalYearType = "Calendar",
+            Status = status,
+            IsActive = !isClosed,
+            NumberOfPeriods = 12,
+            BaseCurrency = "GHS",
+            IsClosed = isClosed,
+            IsLocked = isLocked,
+            CreatedAt = createdAt,
+            CreatedBy = "System"
+        });
     }
 
     #endregion
@@ -384,69 +433,114 @@ public class FinanceDataSeeder
 
     private async Task SeedFiscalPeriodsAsync(Guid tenantId, DateTime baseDate)
     {
-        var fy2024Id = Guid.Parse("00000003-0001-0001-0001-000000000002");
+        var fy2025Id = Guid.Parse("00000003-0001-0001-0001-000000000003");
+        var fy2026Id = Guid.Parse("00000003-0001-0001-0001-000000000004");
 
-        // January 2024 (Closed)
-        if (!await _context.FiscalPeriods.AnyAsync(fp => fp.PeriodNumber == 1 && fp.FiscalYearId == fy2024Id))
+        for (var month = 1; month <= 12; month++)
         {
-            await _context.FiscalPeriods.AddAsync(new FiscalPeriod
-            {
-                Id = Guid.Parse("00000004-0001-0001-0001-000000000001"),
-                TenantId = tenantId,
-                FiscalYearId = fy2024Id,
-                PeriodNumber = 1,
-                PeriodName = "January 2024",
-                StartDate = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-                EndDate = new DateTime(2024, 1, 31, 23, 59, 59, DateTimeKind.Utc),
-                Status = "Closed",
-                IsClosed = true,
-                IsLocked = false,
-                CreatedAt = baseDate,
-                CreatedBy = "System"
-            });
-        }
+            await EnsureCalendarMonthPeriodAsync(tenantId, fy2025Id, 2025, month, "Closed", true, true, baseDate);
 
-        // November 2024 (Closed)
-        if (!await _context.FiscalPeriods.AnyAsync(fp => fp.PeriodNumber == 11 && fp.FiscalYearId == fy2024Id))
-        {
-            await _context.FiscalPeriods.AddAsync(new FiscalPeriod
-            {
-                Id = Guid.Parse("00000004-0001-0001-0001-000000000011"),
-                TenantId = tenantId,
-                FiscalYearId = fy2024Id,
-                PeriodNumber = 11,
-                PeriodName = "November 2024",
-                StartDate = new DateTime(2024, 11, 1, 0, 0, 0, DateTimeKind.Utc),
-                EndDate = new DateTime(2024, 11, 30, 23, 59, 59, DateTimeKind.Utc),
-                Status = "Closed",
-                IsClosed = true,
-                IsLocked = true,
-                CreatedAt = new DateTime(2024, 11, 1, 0, 0, 0, DateTimeKind.Utc),
-                CreatedBy = "System"
-            });
-        }
-
-        // December 2024 (Open)
-        if (!await _context.FiscalPeriods.AnyAsync(fp => fp.PeriodNumber == 12 && fp.FiscalYearId == fy2024Id))
-        {
-            await _context.FiscalPeriods.AddAsync(new FiscalPeriod
-            {
-                Id = Guid.Parse("00000004-0001-0001-0001-000000000012"),
-                TenantId = tenantId,
-                FiscalYearId = fy2024Id,
-                PeriodNumber = 12,
-                PeriodName = "December 2024",
-                StartDate = new DateTime(2024, 12, 1, 0, 0, 0, DateTimeKind.Utc),
-                EndDate = new DateTime(2024, 12, 31, 23, 59, 59, DateTimeKind.Utc),
-                Status = "Open",
-                IsClosed = false,
-                IsLocked = false,
-                CreatedAt = new DateTime(2024, 12, 1, 0, 0, 0, DateTimeKind.Utc),
-                CreatedBy = "System"
-            });
+            var status = month < 6 ? "Closed" : month == 6 ? "Open" : "Future";
+            await EnsureCalendarMonthPeriodAsync(
+                tenantId,
+                fy2026Id,
+                2026,
+                month,
+                status,
+                isClosed: month < 6,
+                isLocked: false,
+                createdAt: baseDate);
         }
 
         _logger.LogInformation("Fiscal periods seeded");
+    }
+
+    private Task EnsureCalendarMonthPeriodAsync(
+        Guid tenantId,
+        Guid fiscalYearId,
+        int year,
+        int month,
+        string status,
+        bool isClosed,
+        bool isLocked,
+        DateTime createdAt)
+    {
+        var startDate = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var endDate = startDate.AddMonths(1).AddTicks(-1);
+        var preferredId = Guid.Parse($"00000004-0001-0001-{year}-0000000000{month:D2}");
+
+        return EnsureFiscalPeriodAsync(
+            tenantId,
+            fiscalYearId,
+            preferredId,
+            month,
+            startDate.ToString("MMMM yyyy"),
+            startDate,
+            endDate,
+            status,
+            isClosed,
+            isLocked,
+            createdAt);
+    }
+
+    private async Task EnsureFiscalPeriodAsync(
+        Guid tenantId,
+        Guid fiscalYearId,
+        Guid preferredId,
+        int periodNumber,
+        string periodName,
+        DateTime startDate,
+        DateTime endDate,
+        string status,
+        bool isClosed,
+        bool isLocked,
+        DateTime createdAt)
+    {
+        var existing = await _context.FiscalPeriods
+            .FirstOrDefaultAsync(fp =>
+                fp.TenantId == tenantId
+                && fp.FiscalYearId == fiscalYearId
+                && fp.PeriodNumber == periodNumber);
+
+        if (existing != null)
+        {
+            existing.PeriodName = periodName;
+            existing.PeriodCode = $"{startDate:yyyy-MM}";
+            existing.StartDate = startDate;
+            existing.EndDate = endDate;
+            existing.Status = status;
+            existing.PeriodStatus = status;
+            existing.IsOpen = string.Equals(status, "Open", StringComparison.OrdinalIgnoreCase);
+            existing.IsClosed = isClosed;
+            existing.IsLocked = isLocked;
+            existing.PeriodDays = (endDate.Date - startDate.Date).Days + 1;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedBy = "System";
+            return;
+        }
+
+        var idInUse = await _context.FiscalPeriods.AnyAsync(fp => fp.Id == preferredId);
+        var insertId = idInUse ? Guid.NewGuid() : preferredId;
+
+        await _context.FiscalPeriods.AddAsync(new FiscalPeriod
+        {
+            Id = insertId,
+            TenantId = tenantId,
+            FiscalYearId = fiscalYearId,
+            PeriodNumber = periodNumber,
+            PeriodName = periodName,
+            PeriodCode = $"{startDate:yyyy-MM}",
+            StartDate = startDate,
+            EndDate = endDate,
+            Status = status,
+            PeriodStatus = status,
+            IsOpen = string.Equals(status, "Open", StringComparison.OrdinalIgnoreCase),
+            IsClosed = isClosed,
+            IsLocked = isLocked,
+            PeriodDays = (endDate.Date - startDate.Date).Days + 1,
+            CreatedAt = createdAt,
+            CreatedBy = "System"
+        });
     }
 
     #endregion
@@ -455,271 +549,227 @@ public class FinanceDataSeeder
 
     private async Task SeedAccountSegmentsAsync(Guid tenantId, DateTime baseDate)
     {
-        // 1. Fund Segment (Pos 1)
-        var fundSegmentId = Guid.Parse("00000004-0001-0001-0001-000000000001");
-        if (!await _context.AccountSegmentStructures.AnyAsync(s => s.SegmentName == "Fund" && s.TenantId == tenantId))
+        // Target client COA shape restored from historical seed: DEPT-ACCT-PROJ.
+        var deptSegment = await EnsureSegmentStructureAsync(
+            tenantId,
+            preferredId: Guid.Parse("00000004-0001-0001-0001-000000000002"),
+            segmentName: "Department",
+            segmentCode: "DEPT",
+            segmentPosition: 1,
+            segmentLength: 3,
+            dataType: "Alphanumeric",
+            separatorCharacter: "-",
+            lookupTableRequired: true,
+            isMandatory: true,
+            isReportingDimension: true,
+            isNaturalAccount: false,
+            description: "Functional Department",
+            baseDate: baseDate);
+
+        var depts = new[]
         {
-            await _context.AccountSegmentStructures.AddAsync(new AccountSegmentStructure
-            {
-                Id = fundSegmentId,
-                TenantId = tenantId,
-                SegmentName = "Fund",
-                SegmentCode = "FUND",
-                SegmentPosition = 1,
-                SegmentLength = 3,
-                DataType = "Alphanumeric",
-                SeparatorCharacter = "-",
-                LookupTableRequired = true,
-                IsMandatory = true,
-                IsReportingDimension = true,
-                IsNaturalAccount = false,
-                IsActive = true,
-                Description = "Fund/Entity Identifier",
-                CreatedAt = baseDate,
-                CreatedBy = "System"
-            });
-            
-            // Seed Fund Lookup Values
-            await _context.SegmentLookupValues.AddAsync(new SegmentLookupValue
-            {
-                Id = Guid.Parse("00000004-0002-0001-0001-000000000001"),
-                TenantId = tenantId,
-                SegmentStructureId = fundSegmentId,
-                SegmentValue = "001",
-                Description = "General Fund",
-                DisplayOrder = 1,
-                EffectiveDate = baseDate,
-                IsActive = true,
-                CreatedAt = baseDate,
-                CreatedBy = "System"
-            });
+            new { Val = "000", Desc = "General / No Department" },
+            new { Val = "100", Desc = "Finance & Administration" },
+            new { Val = "200", Desc = "Estates Management" },
+            new { Val = "300", Desc = "Development & Engineering" },
+            new { Val = "400", Desc = "Legal" },
+            new { Val = "500", Desc = "Corporate Planning & Communication" },
+            new { Val = "600", Desc = "Internal Audit" }
+        };
+
+        var order = 1;
+        foreach (var dept in depts)
+        {
+            await EnsureSegmentLookupValueAsync(tenantId, deptSegment.Id, dept.Val, dept.Desc, order++, baseDate);
         }
 
-        // 2. Department Segment (Pos 2)
-        var deptSegmentId = Guid.Parse("00000004-0001-0001-0001-000000000002");
-        if (!await _context.AccountSegmentStructures.AnyAsync(s => s.SegmentName == "Department" && s.TenantId == tenantId))
+        var accountSegment = await EnsureSegmentStructureAsync(
+            tenantId,
+            preferredId: Guid.Parse("00000004-0001-0001-0001-000000000003"),
+            segmentName: "Natural Account",
+            segmentCode: "ACCT",
+            segmentPosition: 2,
+            segmentLength: 4,
+            dataType: "Numeric",
+            separatorCharacter: "-",
+            lookupTableRequired: false,
+            isMandatory: true,
+            isReportingDimension: true,
+            isNaturalAccount: true,
+            description: "Natural GL Account",
+            baseDate: baseDate);
+
+        var projectSegment = await EnsureSegmentStructureAsync(
+            tenantId,
+            preferredId: Guid.Parse("00000004-0001-0001-0001-000000000004"),
+            segmentName: "Project",
+            segmentCode: "PROJ",
+            segmentPosition: 3,
+            segmentLength: 4,
+            dataType: "Alphanumeric",
+            separatorCharacter: null,
+            lookupTableRequired: true,
+            isMandatory: true,
+            isReportingDimension: true,
+            isNaturalAccount: false,
+            description: "Capital/Construction Project",
+            baseDate: baseDate);
+
+        var projects = new[]
         {
-            await _context.AccountSegmentStructures.AddAsync(new AccountSegmentStructure
-            {
-                Id = deptSegmentId,
-                TenantId = tenantId,
-                SegmentName = "Department",
-                SegmentCode = "DEPT",
-                SegmentPosition = 2,
-                SegmentLength = 3,
-                DataType = "Alphanumeric",
-                SeparatorCharacter = "-",
-                LookupTableRequired = true,
-                IsMandatory = true,
-                IsReportingDimension = true,
-                IsNaturalAccount = false,
-                IsActive = true,
-                Description = "Cost Center/Department",
-                CreatedAt = baseDate,
-                CreatedBy = "System"
-            });
+            new { Val = "0000", Desc = "No Project" },
+            new { Val = "P101", Desc = "Community 26 Kpone Affordable Housing" },
+            new { Val = "P102", Desc = "Oxygen City Housing Project (Ho)" },
+            new { Val = "P103", Desc = "Kaiser Flats Redevelopment" },
+            new { Val = "P104", Desc = "Tema 5,000-Capacity Event Center" }
+        };
 
-            // Seed Department Lookup Values
-            var depts = new[]
-            {
-                new { Val = "000", Desc = "No Department" },
-                new { Val = "100", Desc = "Administration" },
-                new { Val = "200", Desc = "Sales & Marketing" },
-                new { Val = "300", Desc = "Operations" },
-                new { Val = "400", Desc = "Human Resources" },
-                new { Val = "500", Desc = "Finance" }
-            };
-
-            int order = 1;
-            foreach (var dept in depts)
-            {
-                await _context.SegmentLookupValues.AddAsync(new SegmentLookupValue
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    SegmentStructureId = deptSegmentId,
-                    SegmentValue = dept.Val,
-                    Description = dept.Desc,
-                    DisplayOrder = order++,
-                    EffectiveDate = baseDate,
-                    IsActive = true,
-                    CreatedAt = baseDate,
-                    CreatedBy = "System"
-                });
-            }
+        order = 1;
+        foreach (var project in projects)
+        {
+            await EnsureSegmentLookupValueAsync(tenantId, projectSegment.Id, project.Val, project.Desc, order++, baseDate);
         }
 
-        // 3. Natural Account Segment (Pos 3)
-        var accountSegmentId = Guid.Parse("00000004-0001-0001-0001-000000000003");
-        if (!await _context.AccountSegmentStructures.AnyAsync(s => s.IsNaturalAccount && s.TenantId == tenantId))
-        {
-            await _context.AccountSegmentStructures.AddAsync(new AccountSegmentStructure
-            {
-                Id = accountSegmentId,
-                TenantId = tenantId,
-                SegmentName = "Natural Account",
-                SegmentCode = "ACCT",
-                SegmentPosition = 3,
-                SegmentLength = 4,
-                DataType = "Numeric",
-                SeparatorCharacter = null, // Last segment
-                LookupTableRequired = false, // Derived from AccountCode
-                IsMandatory = true,
-                IsReportingDimension = true,
-                IsNaturalAccount = true,
-                IsActive = true,
-                Description = "Natural GL Account",
-                CreatedAt = baseDate,
-                CreatedBy = "System"
-            });
-            
-            // Seed Natural Account Lookup Values (Standard COA subset)
-            var naturalAccounts = new[]
-            {
-                // Assets
-                new { Val = "1000", Desc = "Cash and Cash Equivalents" },
-                new { Val = "1100", Desc = "Accounts Receivable" },
-                new { Val = "1200", Desc = "Inventory" },
-                new { Val = "1300", Desc = "Prepaid Expenses" },
-                new { Val = "1500", Desc = "Property, Plant and Equipment" },
-                
-                // Liabilities
-                new { Val = "2000", Desc = "Accounts Payable" },
-                new { Val = "2100", Desc = "Accrued Liabilities" },
-                new { Val = "2200", Desc = "Short-Term Loans" },
-                
-                // Equity
-                new { Val = "3000", Desc = "Share Capital" },
-                new { Val = "3100", Desc = "Retained Earnings" },
-                
-                // Revenue
-                new { Val = "4000", Desc = "Sales Revenue" },
-                new { Val = "4100", Desc = "Service Revenue" },
-                new { Val = "4900", Desc = "Other Income" },
-                
-                // Expenses
-                new { Val = "5000", Desc = "Cost of Goods Sold" },
-                new { Val = "6000", Desc = "Salaries and Wages" },
-                new { Val = "6100", Desc = "Rent Expense" },
-                new { Val = "6200", Desc = "Utilities Expense" },
-                new { Val = "6300", Desc = "Depreciation Expense" },
-                new { Val = "6400", Desc = "Marketing and Advertising" },
-                new { Val = "8000", Desc = "Income Tax Expense" }
-            };
+        await DeactivateLegacySegmentAsync(tenantId, "FUND", "FUND");
+        await DeactivateLegacySegmentAsync(tenantId, "TEST", "TEST SEGMENT");
 
-            int acctOrder = 1;
-            foreach (var acct in naturalAccounts)
-            {
-                await _context.SegmentLookupValues.AddAsync(new SegmentLookupValue
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    SegmentStructureId = accountSegmentId,
-                    SegmentValue = acct.Val,
-                    Description = acct.Desc,
-                    DisplayOrder = acctOrder++,
-                    EffectiveDate = baseDate,
-                    IsActive = true,
-                    CreatedAt = baseDate,
-                    CreatedBy = "System"
-                });
-            }
-        }
-        else
-        {
-            // If segment already exists, check if values need seeding (for existing deployments)
-            var existingSegment = await _context.AccountSegmentStructures
-                .FirstOrDefaultAsync(s => s.IsNaturalAccount && s.TenantId == tenantId);
-            
-        if (existingSegment != null)
-            {
-                // Ensure LookupTableRequired is true if we are managing values distinct from accounts
-                // existingSegment.LookupTableRequired = true; 
-
-                // 1. Cleanup Duplicates
-                var existingValues = await _context.SegmentLookupValues
-                    .Where(v => v.SegmentStructureId == existingSegment.Id)
-                    .ToListAsync();
-
-                var duplicates = existingValues
-                    .GroupBy(v => v.SegmentValue)
-                    .Where(g => g.Count() > 1);
-
-                if (duplicates.Any())
-                {
-                    _logger.LogWarning("Found duplicate natural account values. Cleaning up...");
-                    foreach (var group in duplicates)
-                    {
-                        // Keep the one with the earliest creation date, or just the first one
-                        var toRemove = group.OrderBy(v => v.CreatedAt).Skip(1);
-                        _context.SegmentLookupValues.RemoveRange(toRemove);
-                    }
-                    await _context.SaveChangesAsync();
-                    existingValues = await _context.SegmentLookupValues
-                        .Where(v => v.SegmentStructureId == existingSegment.Id)
-                        .ToListAsync(); // Refresh list
-                }
-
-                // 2. Seed Missing Values (Idempotent)
-                var naturalAccounts = new[]
-                {
-                    // Assets
-                    new { Val = "1000", Desc = "Cash and Cash Equivalents" },
-                    new { Val = "1100", Desc = "Accounts Receivable" },
-                    new { Val = "1200", Desc = "Inventory" },
-                    new { Val = "1300", Desc = "Prepaid Expenses" },
-                    new { Val = "1500", Desc = "Property, Plant and Equipment" },
-                    
-                    // Liabilities
-                    new { Val = "2000", Desc = "Accounts Payable" },
-                    new { Val = "2100", Desc = "Accrued Liabilities" },
-                    new { Val = "2200", Desc = "Short-Term Loans" },
-                    
-                    // Equity
-                    new { Val = "3000", Desc = "Share Capital" },
-                    new { Val = "3100", Desc = "Retained Earnings" },
-                    
-                    // Revenue
-                    new { Val = "4000", Desc = "Sales Revenue" },
-                    new { Val = "4100", Desc = "Service Revenue" },
-                    new { Val = "4900", Desc = "Other Income" },
-                    
-                    // Expenses
-                    new { Val = "5000", Desc = "Cost of Goods Sold" },
-                    new { Val = "6000", Desc = "Salaries and Wages" },
-                    new { Val = "6100", Desc = "Rent Expense" },
-                    new { Val = "6200", Desc = "Utilities Expense" },
-                    new { Val = "6300", Desc = "Depreciation Expense" },
-                    new { Val = "6400", Desc = "Marketing and Advertising" },
-                    new { Val = "8000", Desc = "Income Tax Expense" }
-                };
-
-                int acctOrder = 1;
-                foreach (var acct in naturalAccounts)
-                {
-                    if (!existingValues.Any(v => v.SegmentValue == acct.Val))
-                    {
-                        await _context.SegmentLookupValues.AddAsync(new SegmentLookupValue
-                        {
-                            Id = Guid.NewGuid(),
-                            TenantId = tenantId,
-                            SegmentStructureId = existingSegment.Id,
-                            SegmentValue = acct.Val,
-                            Description = acct.Desc,
-                            DisplayOrder = acctOrder, // Note: Order might be non-sequential if mixed, but acceptable
-                            EffectiveDate = baseDate,
-                            IsActive = true,
-                            CreatedAt = baseDate,
-                            CreatedBy = "System"
-                        });
-                    }
-                    acctOrder++;
-                }
-            }
-        }
-        
         await _context.SaveChangesAsync();
         _logger.LogInformation("Account segments seeded");
+
+        async Task EnsureSegmentLookupValueAsync(
+            Guid lookupTenantId,
+            Guid segmentStructureId,
+            string segmentValue,
+            string description,
+            int displayOrder,
+            DateTime effectiveDate)
+        {
+            var existing = await _context.SegmentLookupValues
+                .FirstOrDefaultAsync(v =>
+                    v.TenantId == lookupTenantId &&
+                    v.SegmentStructureId == segmentStructureId &&
+                    v.SegmentValue == segmentValue);
+
+            if (existing == null)
+            {
+                await _context.SegmentLookupValues.AddAsync(new SegmentLookupValue
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = lookupTenantId,
+                    SegmentStructureId = segmentStructureId,
+                    SegmentValue = segmentValue,
+                    Description = description,
+                    DisplayOrder = displayOrder,
+                    EffectiveDate = effectiveDate,
+                    IsActive = true,
+                    CreatedAt = effectiveDate,
+                    CreatedBy = "System"
+                });
+                return;
+            }
+
+            existing.Description = description;
+            existing.DisplayOrder = displayOrder;
+            existing.EffectiveDate = existing.EffectiveDate == default ? effectiveDate : existing.EffectiveDate;
+            existing.IsActive = true;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedBy = "System";
+        }
+
+        async Task DeactivateLegacySegmentAsync(Guid legacyTenantId, string segmentCode, string segmentName)
+        {
+            var code = segmentCode.ToUpper();
+            var name = segmentName.ToUpper();
+            var legacySegment = await _context.AccountSegmentStructures
+                .FirstOrDefaultAsync(s =>
+                    s.TenantId == legacyTenantId &&
+                    s.IsActive &&
+                    ((s.SegmentCode != null && s.SegmentCode.ToUpper() == code)
+                     || (s.SegmentName != null && s.SegmentName.ToUpper() == name)));
+
+            if (legacySegment == null)
+            {
+                return;
+            }
+
+            legacySegment.IsActive = false;
+            legacySegment.UpdatedAt = DateTime.UtcNow;
+            legacySegment.UpdatedBy = "System";
+            _logger.LogInformation("Deactivated legacy segment structure {SegmentCode} for tenant {TenantId}", legacySegment.SegmentCode, legacyTenantId);
+        }
+    }
+
+    private async Task<AccountSegmentStructure> EnsureSegmentStructureAsync(
+        Guid tenantId,
+        Guid preferredId,
+        string segmentName,
+        string segmentCode,
+        int segmentPosition,
+        int segmentLength,
+        string dataType,
+        string? separatorCharacter,
+        bool lookupTableRequired,
+        bool isMandatory,
+        bool isReportingDimension,
+        bool isNaturalAccount,
+        string description,
+        DateTime baseDate)
+    {
+        var normalizedSegmentCode = segmentCode.ToUpperInvariant();
+        var normalizedSegmentName = segmentName.ToUpperInvariant();
+
+        var existing = await _context.AccountSegmentStructures
+            .FirstOrDefaultAsync(s =>
+                s.TenantId == tenantId &&
+                (
+                    (isNaturalAccount && s.IsNaturalAccount)
+                    || (s.SegmentCode != null && s.SegmentCode.ToUpper() == normalizedSegmentCode)
+                    || (s.SegmentName != null && s.SegmentName.ToUpper() == normalizedSegmentName)
+                ));
+
+        if (existing != null)
+        {
+            existing.SegmentName = segmentName;
+            existing.SegmentCode = segmentCode;
+            existing.SegmentPosition = segmentPosition;
+            existing.SegmentLength = segmentLength;
+            existing.DataType = dataType;
+            existing.SeparatorCharacter = separatorCharacter;
+            existing.LookupTableRequired = lookupTableRequired;
+            existing.IsMandatory = isMandatory;
+            existing.IsReportingDimension = isReportingDimension;
+            existing.IsNaturalAccount = isNaturalAccount;
+            existing.IsActive = true;
+            existing.Description = description;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedBy = "System";
+            return existing;
+        }
+
+        var idInUse = await _context.AccountSegmentStructures.AnyAsync(s => s.Id == preferredId);
+        var newId = idInUse ? Guid.NewGuid() : preferredId;
+        var created = new AccountSegmentStructure
+        {
+            Id = newId,
+            TenantId = tenantId,
+            SegmentName = segmentName,
+            SegmentCode = segmentCode,
+            SegmentPosition = segmentPosition,
+            SegmentLength = segmentLength,
+            DataType = dataType,
+            SeparatorCharacter = separatorCharacter,
+            LookupTableRequired = lookupTableRequired,
+            IsMandatory = isMandatory,
+            IsReportingDimension = isReportingDimension,
+            IsNaturalAccount = isNaturalAccount,
+            IsActive = true,
+            Description = description,
+            CreatedAt = baseDate,
+            CreatedBy = "System"
+        };
+
+        await _context.AccountSegmentStructures.AddAsync(created);
+        return created;
     }
 
     #endregion
@@ -729,19 +779,19 @@ public class FinanceDataSeeder
     private async Task SeedAccountsAsync(Guid tenantId, DateTime baseDate)
     {
         // Get Segments
-        var fundSegment = await _context.AccountSegmentStructures.FirstOrDefaultAsync(s => s.SegmentName == "Fund" && s.TenantId == tenantId);
-        var deptSegment = await _context.AccountSegmentStructures.FirstOrDefaultAsync(s => s.SegmentName == "Department" && s.TenantId == tenantId);
+        var deptSegment = await _context.AccountSegmentStructures.FirstOrDefaultAsync(s => s.SegmentCode == "DEPT" && s.TenantId == tenantId && s.IsActive);
         var acctSegment = await _context.AccountSegmentStructures.FirstOrDefaultAsync(s => s.IsNaturalAccount && s.TenantId == tenantId);
+        var projectSegment = await _context.AccountSegmentStructures.FirstOrDefaultAsync(s => s.SegmentCode == "PROJ" && s.TenantId == tenantId && s.IsActive);
 
-        if (fundSegment == null || deptSegment == null || acctSegment == null)
+        if (deptSegment == null || acctSegment == null || projectSegment == null)
         {
             _logger.LogError("Segments not found during account seeding. Ensure SeedAccountSegmentsAsync runs first.");
             return;
         }
 
         // Get Default Values
-        var fundValue = await _context.SegmentLookupValues.FirstOrDefaultAsync(v => v.SegmentStructureId == fundSegment.Id && v.SegmentValue == "001");
         var deptValue = await _context.SegmentLookupValues.FirstOrDefaultAsync(v => v.SegmentStructureId == deptSegment.Id && v.SegmentValue == "000");
+        var projectValue = await _context.SegmentLookupValues.FirstOrDefaultAsync(v => v.SegmentStructureId == projectSegment.Id && v.SegmentValue == "0000");
 
         var standardAccounts = GetStandardChartOfAccounts(tenantId, baseDate);
         
@@ -763,53 +813,53 @@ public class FinanceDataSeeder
         {
             // Apply Segmentation
             account.IsSegmented = true;
-            account.AccountNumber = $"001-000-{account.AccountCode}"; // Fund-Dept-Account
+            account.AccountNumber = $"000-{account.AccountCode}-0000"; // Dept-Account-Project
             
             // Create Segment Values
             account.SegmentValues = new List<AccountSegmentValue>
             {
-                // Segment 1: Fund (001)
-                new AccountSegmentValue
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    SegmentStructureId = fundSegment.Id,
-                    SegmentPosition = 1,
-                    SegmentValue = "001",
-                    SegmentLookupValueId = fundValue?.Id,
-                    SegmentValueDescription = fundValue?.Description ?? "General Fund",
-                    EffectiveDate = baseDate,
-                    IsLocked = false,
-                    CreatedAt = baseDate,
-                    CreatedBy = "System"
-                },
-                
-                // Segment 2: Department (000)
+                // Segment 1: Department (000)
                 new AccountSegmentValue
                 {
                     Id = Guid.NewGuid(),
                     TenantId = tenantId,
                     SegmentStructureId = deptSegment.Id,
-                    SegmentPosition = 2,
+                    SegmentPosition = 1,
                     SegmentValue = "000",
                     SegmentLookupValueId = deptValue?.Id,
-                    SegmentValueDescription = deptValue?.Description ?? "No Department",
+                    SegmentValueDescription = deptValue?.Description ?? "General / No Department",
                     EffectiveDate = baseDate,
                     IsLocked = false,
                     CreatedAt = baseDate,
                     CreatedBy = "System"
                 },
 
-                // Segment 3: Natural Account (Code)
+                // Segment 2: Natural Account (Code)
                 new AccountSegmentValue
                 {
                     Id = Guid.NewGuid(),
                     TenantId = tenantId,
                     SegmentStructureId = acctSegment.Id,
-                    SegmentPosition = 3,
+                    SegmentPosition = 2,
                     SegmentValue = account.AccountCode,
                     SegmentLookupValueId = null, // Natural account usually doesn't have lookup, or lookup IS the account list
                     SegmentValueDescription = account.AccountName,
+                    EffectiveDate = baseDate,
+                    IsLocked = false,
+                    CreatedAt = baseDate,
+                    CreatedBy = "System"
+                },
+
+                // Segment 3: Project (0000)
+                new AccountSegmentValue
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    SegmentStructureId = projectSegment.Id,
+                    SegmentPosition = 3,
+                    SegmentValue = "0000",
+                    SegmentLookupValueId = projectValue?.Id,
+                    SegmentValueDescription = projectValue?.Description ?? "No Project",
                     EffectiveDate = baseDate,
                     IsLocked = false,
                     CreatedAt = baseDate,
@@ -824,13 +874,170 @@ public class FinanceDataSeeder
         _logger.LogInformation($"Seeded {newAccounts.Count} new accounts with segmentation");
     }
 
+    private async Task SeedUnitAccountingDemoDataAsync(Guid tenantId, DateTime baseDate)
+    {
+        var unitTypeDefinitions = new (Guid Id, string Code, string Name, string Description, int DecimalPlaces)[]
+        {
+            (Guid.Parse("10000000-0000-0000-0000-000000000101"), "EMP", "Employees", "Headcount used for workforce ratios and cost allocations.", 0),
+            (Guid.Parse("10000000-0000-0000-0000-000000000102"), "SQM", "Square Meters", "Area measurements used for occupancy and facilities allocations.", 2),
+            (Guid.Parse("10000000-0000-0000-0000-000000000103"), "HRS", "Hours", "Hours used for labour, machine-time, and utilization metrics.", 2),
+            (Guid.Parse("10000000-0000-0000-0000-000000000104"), "UNIT", "Production Units", "Operational output count used for production KPIs.", 0)
+        };
+
+        var unitTypesByCode = await _context.UnitTypes
+            .Where(ut => ut.TenantId == tenantId && !ut.IsDeleted)
+            .ToDictionaryAsync(ut => ut.Code);
+
+        foreach (var definition in unitTypeDefinitions)
+        {
+            if (unitTypesByCode.ContainsKey(definition.Code))
+            {
+                continue;
+            }
+
+            var unitType = new UnitType
+            {
+                Id = definition.Id,
+                TenantId = tenantId,
+                Code = definition.Code,
+                Name = definition.Name,
+                Description = definition.Description,
+                DecimalPlaces = definition.DecimalPlaces,
+                IsActive = true,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            };
+
+            _context.UnitTypes.Add(unitType);
+            unitTypesByCode[unitType.Code] = unitType;
+        }
+
+        var accountDefinitions = new (Guid Id, string AccountNumber, string Name, string Description, string UnitTypeCode, string? ParentAccountNumber, int AccountLevel, bool IsPostingAccount, decimal CurrentBalance)[]
+        {
+            (Guid.Parse("10000000-0000-0000-0000-000000001000"), "U-1000", "Total Employees", "Summary headcount across all departments.", "EMP", null, 1, false, 45m),
+            (Guid.Parse("10000000-0000-0000-0000-000000001100"), "U-1100", "Operations Employees", "Operations department headcount.", "EMP", "U-1000", 2, true, 18m),
+            (Guid.Parse("10000000-0000-0000-0000-000000001200"), "U-1200", "Sales Employees", "Sales department headcount.", "EMP", "U-1000", 2, true, 12m),
+            (Guid.Parse("10000000-0000-0000-0000-000000001300"), "U-1300", "Administration Employees", "Administration department headcount.", "EMP", "U-1000", 2, true, 15m),
+            (Guid.Parse("10000000-0000-0000-0000-000000002000"), "U-2000", "Total Office Space", "Summary office space occupied by the business.", "SQM", null, 1, false, 2500m),
+            (Guid.Parse("10000000-0000-0000-0000-000000002100"), "U-2100", "Head Office Space", "Head office floor area.", "SQM", "U-2000", 2, true, 1600m),
+            (Guid.Parse("10000000-0000-0000-0000-000000002200"), "U-2200", "Branch Office Space", "Branch office floor area.", "SQM", "U-2000", 2, true, 900m),
+            (Guid.Parse("10000000-0000-0000-0000-000000003000"), "U-3000", "Machine Hours", "Machine hours available for production analysis.", "HRS", null, 1, true, 1240m),
+            (Guid.Parse("10000000-0000-0000-0000-000000004000"), "U-4000", "Production Units", "Completed production units for operational KPIs.", "UNIT", null, 1, true, 8600m)
+        };
+
+        var unitAccountsByNumber = await _context.UnitAccounts
+            .Where(ua => ua.TenantId == tenantId && !ua.IsDeleted)
+            .ToDictionaryAsync(ua => ua.AccountNumber);
+
+        foreach (var definition in accountDefinitions)
+        {
+            if (unitAccountsByNumber.ContainsKey(definition.AccountNumber))
+            {
+                continue;
+            }
+
+            if (!unitTypesByCode.TryGetValue(definition.UnitTypeCode, out var unitType))
+            {
+                _logger.LogWarning("Skipping unit account {AccountNumber}; unit type {UnitTypeCode} is missing.", definition.AccountNumber, definition.UnitTypeCode);
+                continue;
+            }
+
+            Guid? parentAccountId = null;
+            if (!string.IsNullOrWhiteSpace(definition.ParentAccountNumber))
+            {
+                if (!unitAccountsByNumber.TryGetValue(definition.ParentAccountNumber, out var parentAccount))
+                {
+                    _logger.LogWarning("Skipping unit account {AccountNumber}; parent account {ParentAccountNumber} is missing.", definition.AccountNumber, definition.ParentAccountNumber);
+                    continue;
+                }
+
+                parentAccountId = parentAccount.Id;
+            }
+
+            var unitAccount = new UnitAccount
+            {
+                Id = definition.Id,
+                TenantId = tenantId,
+                AccountNumber = definition.AccountNumber,
+                Name = definition.Name,
+                Description = definition.Description,
+                UnitTypeId = unitType.Id,
+                ParentAccountId = parentAccountId,
+                AccountLevel = definition.AccountLevel,
+                IsPostingAccount = definition.IsPostingAccount,
+                IsActive = true,
+                CurrentBalance = definition.CurrentBalance,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            };
+
+            _context.UnitAccounts.Add(unitAccount);
+            unitAccountsByNumber[unitAccount.AccountNumber] = unitAccount;
+        }
+
+        var openPeriod = await _context.FiscalPeriods
+            .Where(fp => fp.TenantId == tenantId && fp.IsOpen && !fp.IsDeleted)
+            .OrderBy(fp => fp.StartDate)
+            .FirstOrDefaultAsync();
+
+        if (openPeriod == null)
+        {
+            _logger.LogInformation("No open fiscal period found for unit-account demo balances. Seeded unit types/accounts only.");
+            return;
+        }
+
+        var postingAccountIds = accountDefinitions
+            .Where(a => a.IsPostingAccount && unitAccountsByNumber.ContainsKey(a.AccountNumber))
+            .Select(a => unitAccountsByNumber[a.AccountNumber].Id)
+            .ToList();
+
+        var existingBalanceAccountIds = await _context.UnitAccountBalances
+            .Where(b => b.TenantId == tenantId && b.FiscalPeriodId == openPeriod.Id && postingAccountIds.Contains(b.UnitAccountId))
+            .Select(b => b.UnitAccountId)
+            .ToListAsync();
+
+        foreach (var definition in accountDefinitions.Where(a => a.IsPostingAccount))
+        {
+            if (!unitAccountsByNumber.TryGetValue(definition.AccountNumber, out var unitAccount) ||
+                existingBalanceAccountIds.Contains(unitAccount.Id))
+            {
+                continue;
+            }
+
+            // Demo statistical balances only; production movements should come from posted UnitJournalEntry lines.
+            _context.UnitAccountBalances.Add(new UnitAccountBalance
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                UnitAccountId = unitAccount.Id,
+                FiscalYearId = openPeriod.FiscalYearId,
+                FiscalPeriodId = openPeriod.Id,
+                OpeningBalance = definition.CurrentBalance,
+                PeriodActivity = 0,
+                ClosingBalance = definition.CurrentBalance,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            });
+        }
+    }
+
     private async Task SeedPayrollAccountsAsync(Guid tenantId, DateTime baseDate)
     {
         var payrollAccounts = GetPayrollChartOfAccounts(tenantId, baseDate);
         var payrollCodes = payrollAccounts.Select(a => a.AccountCode).ToList();
-        var existingAccounts = await _context.Accounts
-            .Where(a => a.TenantId == tenantId && payrollCodes.Contains(a.AccountCode))
-            .ToListAsync();
+        List<Account> existingAccounts;
+        try
+        {
+            existingAccounts = await _context.Accounts
+                .Where(a => a.TenantId == tenantId && payrollCodes.Contains(a.AccountCode))
+                .ToListAsync();
+        }
+        catch (SqlException ex) when (ex.Number == 207)
+        {
+            _logger.LogWarning(
+                "Skipping payroll GL account seed because account schema appears behind code (missing columns). Apply latest migrations and rerun seeding.");
+            return;
+        }
 
         foreach (var account in payrollAccounts)
         {
@@ -873,7 +1080,7 @@ public class FinanceDataSeeder
                 Id = Guid.Parse("00000005-1010-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "1010",
-                AccountNumber = "001-000-1010",
+                AccountNumber = "000-1010-0000",
                 AccountName = "Cash and Bank - Payroll Clearing",
                 AccountType = AccountType.Asset,
                 AccountCategory = "Current Assets",
@@ -898,7 +1105,7 @@ public class FinanceDataSeeder
                 Id = Guid.Parse("00000005-1120-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "1120",
-                AccountNumber = "001-000-1120",
+                AccountNumber = "000-1120-0000",
                 AccountName = "Staff Loans and Salary Advances",
                 AccountType = AccountType.Asset,
                 AccountCategory = "Current Assets",
@@ -923,7 +1130,7 @@ public class FinanceDataSeeder
                 Id = Guid.Parse("00000005-2120-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "2120",
-                AccountNumber = "001-000-2120",
+                AccountNumber = "000-2120-0000",
                 AccountName = "Accrued Payroll Payables",
                 AccountType = AccountType.Liability,
                 AccountCategory = "Current Liabilities",
@@ -948,7 +1155,7 @@ public class FinanceDataSeeder
                 Id = Guid.Parse("00000005-4920-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "4920",
-                AccountNumber = "001-000-4920",
+                AccountNumber = "000-4920-0000",
                 AccountName = "Payroll Recoveries and Interest Income",
                 AccountType = AccountType.Revenue,
                 AccountCategory = "Other Income",
@@ -973,7 +1180,7 @@ public class FinanceDataSeeder
                 Id = Guid.Parse("00000005-6020-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "6020",
-                AccountNumber = "001-000-6020",
+                AccountNumber = "000-6020-0000",
                 AccountName = "Salaries, Wages and Payroll Costs",
                 AccountType = AccountType.Expense,
                 AccountCategory = "Operating Expenses",
@@ -1190,6 +1397,30 @@ public class FinanceDataSeeder
             },
             new Account
             {
+                Id = Guid.Parse("00000005-1990-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1990",
+                AccountNumber = "1990",
+                AccountName = "Migration Clearing Account",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Current Assets",
+                Description = "Temporary clearing account for opening-balance migration offsets; expected to net to zero after migration.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = true,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                Balance = 0m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
                 Id = Guid.Parse("00000005-9999-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "9999",
@@ -1257,6 +1488,56 @@ public class FinanceDataSeeder
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
                 Balance = 45000m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-2110-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "2110",
+                AccountNumber = "2110",
+                AccountName = "GRV Accrual Control",
+                AccountType = AccountType.Liability,
+                AccountCategory = "Current Liabilities",
+                AccountSubCategory = "Goods Received Not Invoiced",
+                Description = "Dedicated control account credited when goods are received before supplier invoicing, then cleared when the AP invoice is posted.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                Balance = 0m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-2200-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "2200",
+                AccountNumber = "2200",
+                AccountName = "Tax/VAT Control",
+                AccountType = AccountType.Liability,
+                AccountCategory = "Current Liabilities",
+                AccountSubCategory = "Tax Payables",
+                Description = "Control account for VAT, levies, withholding tax, and other statutory tax clearing balances.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1377,6 +1658,31 @@ public class FinanceDataSeeder
             },
             new Account
             {
+                Id = Guid.Parse("00000005-4210-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "4210",
+                AccountNumber = "4210",
+                AccountName = "Sales Discounts Allowed",
+                AccountType = AccountType.Revenue,
+                AccountCategory = "Revenue Deductions",
+                AccountSubCategory = "Contra Revenue",
+                Description = "Contra-revenue account debited for customer trade and settlement discounts allowed.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = true,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = true,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = true,
+                Status = AccountStatus.Active,
+                Balance = 0m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
                 Id = Guid.Parse("00000005-4900-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "4900",
@@ -1399,14 +1705,39 @@ public class FinanceDataSeeder
             },
             new Account
             {
+                Id = Guid.Parse("00000005-4910-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "4910",
+                AccountNumber = "4910",
+                AccountName = "Purchase Discounts Received",
+                AccountType = AccountType.Revenue,
+                AccountCategory = "Other Income",
+                AccountSubCategory = "Supplier Discounts",
+                Description = "Income account credited for supplier trade and settlement discounts received.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = true,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = true,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                Balance = 0m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
                 Id = Guid.Parse("00000005-7100-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "7100",
                 AccountNumber = "7100",
-                AccountName = "Unrealized Exchange Gain/Loss",
+                AccountName = "Unrealized Exchange Gain",
                 AccountType = AccountType.Revenue,
                 AccountCategory = "Other Income",
-                Description = "Unrealized foreign exchange gains and losses from multi-currency revaluation",
+                Description = "Unrealized foreign exchange gains from multi-currency revaluation",
                 CurrencyCode = "GHS",
                 IsMultiCurrency = false,
                 IsSegmented = false,
@@ -1423,14 +1754,38 @@ public class FinanceDataSeeder
             },
             new Account
             {
+                Id = Guid.Parse("00000005-7110-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "7110",
+                AccountNumber = "7110",
+                AccountName = "Unrealized Exchange Loss",
+                AccountType = AccountType.Expense,
+                AccountCategory = "Other Expenses",
+                Description = "Unrealized foreign exchange losses from multi-currency revaluation",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                Balance = 0m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
                 Id = Guid.Parse("00000005-7200-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "7200",
                 AccountNumber = "7200",
-                AccountName = "Realized Exchange Gain/Loss",
+                AccountName = "Realized Exchange Gain",
                 AccountType = AccountType.Revenue,
                 AccountCategory = "Other Income",
-                Description = "Realized foreign exchange gains and losses from settled transactions",
+                Description = "Realized foreign exchange gains from settled transactions",
                 CurrencyCode = "GHS",
                 IsMultiCurrency = false,
                 IsSegmented = false,
@@ -1442,6 +1797,30 @@ public class FinanceDataSeeder
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
                 Balance = 8200m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-7210-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "7210",
+                AccountNumber = "7210",
+                AccountName = "Realized Exchange Loss",
+                AccountType = AccountType.Expense,
+                AccountCategory = "Other Expenses",
+                Description = "Realized foreign exchange losses from settled transactions",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1818,7 +2197,18 @@ public class FinanceDataSeeder
 
     private async Task SeedFinanceSettingsAsync(Guid tenantId, DateTime baseDate)
     {
-        var existingSettings = await _context.FinanceSettings.FirstOrDefaultAsync(fs => fs.TenantId == tenantId);
+        FinanceSettings? existingSettings;
+        try
+        {
+            existingSettings = await _context.FinanceSettings.FirstOrDefaultAsync(fs => fs.TenantId == tenantId);
+        }
+        catch (SqlException ex) when (ex.Number == 207)
+        {
+            _logger.LogWarning(
+                ex,
+                "Skipping finance settings seed because finance settings schema appears behind code (missing columns). Apply latest migrations and rerun seeding.");
+            return;
+        }
         
         if (existingSettings != null)
         {
@@ -1826,17 +2216,20 @@ public class FinanceDataSeeder
             {
                 _logger.LogInformation($"Updating existing Finance Settings COA Type from {existingSettings.CoaType} to Segmented");
                 existingSettings.CoaType = "Segmented";
-                // Ensure other critical fields match expected default if needed, or leave them.
-                // For now, just fixing the COA Type is key.
             }
-            else
+
+            var settingsUpdated = ApplyDefaultFinanceSettingsControlAccounts(existingSettings);
+            if (settingsUpdated)
             {
-                _logger.LogInformation("Finance settings already exist and correct. Skipping settings seeding.");
+                existingSettings.UpdatedAt = DateTime.UtcNow;
+                existingSettings.UpdatedBy = "System";
+                _logger.LogInformation("Updated missing finance settings control account defaults.");
             }
+
             return;
         }
 
-        await _context.FinanceSettings.AddAsync(new FinanceSettings
+        var settings = new FinanceSettings
         {
             Id = Guid.Parse("00000006-0001-0001-0001-000000000001"),
             TenantId = tenantId,
@@ -1846,13 +2239,121 @@ public class FinanceDataSeeder
             AccountSeparator = "-",
             RetainedEarningsAccountId = Guid.Parse("00000005-3100-0000-0000-000000000001"),
             UnrealizedGainLossAccountId = Guid.Parse("00000005-7100-0000-0000-000000000001"),
+            UnrealizedFxGainAccountId = Guid.Parse("00000005-7100-0000-0000-000000000001"),
+            UnrealizedFxLossAccountId = Guid.Parse("00000005-7110-0000-0000-000000000001"),
             RealizedGainLossAccountId = Guid.Parse("00000005-7200-0000-0000-000000000001"),
+            RealizedFxGainAccountId = Guid.Parse("00000005-7200-0000-0000-000000000001"),
+            RealizedFxLossAccountId = Guid.Parse("00000005-7210-0000-0000-000000000001"),
             SuspenseAccountId = Guid.Parse("00000005-9999-0000-0000-000000000001"),
+            ControlAccountArId = Guid.Parse("00000005-1100-0000-0000-000000000001"),
+            ControlAccountApId = Guid.Parse("00000005-2000-0000-0000-000000000001"),
+            ControlAccountInventoryId = Guid.Parse("00000005-1200-0000-0000-000000000001"),
+            ControlAccountPayrollId = Guid.Parse("00000005-2120-0000-0000-000000000001"),
+            ControlAccountTaxId = Guid.Parse("00000005-2200-0000-0000-000000000001"),
+            ControlAccountGRVAccrualId = Guid.Parse("00000005-2110-0000-0000-000000000001"),
+            DiscountAllowedAccountId = Guid.Parse("00000005-4210-0000-0000-000000000001"),
+            DiscountReceivedAccountId = Guid.Parse("00000005-4910-0000-0000-000000000001"),
+            MigrationClearingAccountId = Guid.Parse("00000005-1990-0000-0000-000000000001"),
+            OpeningBalanceAutoRoutingEnabled = true,
             CreatedAt = baseDate,
             CreatedBy = "System"
-        });
+        };
+
+        await _context.FinanceSettings.AddAsync(settings);
 
         _logger.LogInformation("Finance settings seeded");
+
+        static bool ApplyDefaultFinanceSettingsControlAccounts(FinanceSettings settings)
+        {
+            var updated = false;
+
+            if (!settings.ControlAccountArId.HasValue)
+            {
+                settings.ControlAccountArId = Guid.Parse("00000005-1100-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.ControlAccountApId.HasValue)
+            {
+                settings.ControlAccountApId = Guid.Parse("00000005-2000-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.ControlAccountInventoryId.HasValue)
+            {
+                settings.ControlAccountInventoryId = Guid.Parse("00000005-1200-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.ControlAccountPayrollId.HasValue)
+            {
+                settings.ControlAccountPayrollId = Guid.Parse("00000005-2120-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.ControlAccountTaxId.HasValue)
+            {
+                settings.ControlAccountTaxId = Guid.Parse("00000005-2200-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.ControlAccountGRVAccrualId.HasValue)
+            {
+                settings.ControlAccountGRVAccrualId = Guid.Parse("00000005-2110-0000-0000-000000000001");
+                updated = true;
+            }
+
+            // Move tenants that still have the old generic default to the dedicated GRV control account.
+            if (settings.ControlAccountGRVAccrualId == Guid.Parse("00000005-2100-0000-0000-000000000001"))
+            {
+                settings.ControlAccountGRVAccrualId = Guid.Parse("00000005-2110-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.DiscountAllowedAccountId.HasValue)
+            {
+                settings.DiscountAllowedAccountId = Guid.Parse("00000005-4210-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.DiscountReceivedAccountId.HasValue)
+            {
+                settings.DiscountReceivedAccountId = Guid.Parse("00000005-4910-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.MigrationClearingAccountId.HasValue)
+            {
+                settings.MigrationClearingAccountId = Guid.Parse("00000005-1990-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.UnrealizedFxGainAccountId.HasValue)
+            {
+                settings.UnrealizedFxGainAccountId = Guid.Parse("00000005-7100-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.UnrealizedFxLossAccountId.HasValue)
+            {
+                settings.UnrealizedFxLossAccountId = Guid.Parse("00000005-7110-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.RealizedFxGainAccountId.HasValue)
+            {
+                settings.RealizedFxGainAccountId = Guid.Parse("00000005-7200-0000-0000-000000000001");
+                updated = true;
+            }
+
+            if (!settings.RealizedFxLossAccountId.HasValue)
+            {
+                settings.RealizedFxLossAccountId = Guid.Parse("00000005-7210-0000-0000-000000000001");
+                updated = true;
+            }
+
+            return updated;
+        }
     }
 
     #endregion
@@ -1869,8 +2370,14 @@ public class FinanceDataSeeder
         // 1.2 GETFund (2.5%)
         var getfund = await GetOrCreateTaxAsync(tenantId, "GETFUND", "GETFund Levy", 2.5m, TaxApplicability.Sales, TaxCategory.Standard, false, baseDate, systemUserId);
         
-        // 1.3 COVID-19 (1%)
+        // 1.3 COVID-19 (1%) - retained inactive for historical transactions only.
         var covid = await GetOrCreateTaxAsync(tenantId, "COVID19", "COVID-19 Health Recovery Levy", 1.0m, TaxApplicability.Sales, TaxCategory.Standard, false, baseDate, systemUserId);
+        if (covid.IsActive)
+        {
+            covid.IsActive = false;
+            covid.UpdatedAt = DateTime.UtcNow;
+            covid.UpdatedBy = "System";
+        }
         
         // 1.4 VAT Standard (15%)
         var vatStd = await GetOrCreateTaxAsync(tenantId, "VAT-STD", "Value Added Tax (Standard)", 15.0m, TaxApplicability.Sales, TaxCategory.Standard, true, baseDate, systemUserId);
@@ -1886,15 +2393,20 @@ public class FinanceDataSeeder
         // 2. Create Tax Groups
         
         // 2.1 VAT Standard Scheme (Sales)
-        if (!await _context.TaxGroups.AnyAsync(g => g.Code == "VAT-STD-SCHEME" && g.TenantId == tenantId))
+        // Ghana's active standard scheme excludes the abolished COVID-19 Health Recovery Levy,
+        // and VAT is calculated on the base taxable amount rather than compounded on levies.
+        var vatGroup = await _context.TaxGroups
+            .FirstOrDefaultAsync(g => g.Code == "VAT-STD-SCHEME" && g.TenantId == tenantId);
+
+        if (vatGroup == null)
         {
-            var vatGroup = new TaxGroup
+            vatGroup = new TaxGroup
             {
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 Code = "VAT-STD-SCHEME",
                 Name = "VAT Standard Scheme (15% + Levies)",
-                Description = "Standard VAT Scheme including NHIL, GETFund, and COVID-19 Levy",
+                Description = "Standard VAT Scheme including NHIL, GETFund, and VAT on the base taxable amount. COVID-19 Health Recovery Levy is inactive.",
                 Applicability = TaxApplicability.Sales,
                 IsDefault = true,
                 IsActive = true,
@@ -1903,16 +2415,33 @@ public class FinanceDataSeeder
             };
             
             await _context.TaxGroups.AddAsync(vatGroup);
-            
-            // Add Components
-            // NHIL - Base
-            await _context.TaxGroupComponents.AddAsync(new TaxGroupComponent { Id = Guid.NewGuid(), TenantId = tenantId, TaxId = nhil.Id, TaxGroupId = vatGroup.Id, CalculationOrder = 1, CompoundBasis = CompoundBasis.BaseOnly });
-            // GETFund - Base
-            await _context.TaxGroupComponents.AddAsync(new TaxGroupComponent { Id = Guid.NewGuid(), TenantId = tenantId, TaxId = getfund.Id, TaxGroupId = vatGroup.Id, CalculationOrder = 2, CompoundBasis = CompoundBasis.BaseOnly });
-            // COVID - Base
-            await _context.TaxGroupComponents.AddAsync(new TaxGroupComponent { Id = Guid.NewGuid(), TenantId = tenantId, TaxId = covid.Id, TaxGroupId = vatGroup.Id, CalculationOrder = 3, CompoundBasis = CompoundBasis.BaseOnly });
-            // VAT - Compound (Cumulative)
-            await _context.TaxGroupComponents.AddAsync(new TaxGroupComponent { Id = Guid.NewGuid(), TenantId = tenantId, TaxId = vatStd.Id, TaxGroupId = vatGroup.Id, CalculationOrder = 4, CompoundBasis = CompoundBasis.Cumulative });
+        }
+        else
+        {
+            vatGroup.Name = "VAT Standard Scheme (15% + Levies)";
+            vatGroup.Description = "Standard VAT Scheme including NHIL, GETFund, and VAT on the base taxable amount. COVID-19 Health Recovery Levy is inactive.";
+            vatGroup.Applicability = TaxApplicability.Sales;
+            vatGroup.IsDefault = true;
+            vatGroup.IsActive = true;
+            vatGroup.UpdatedAt = DateTime.UtcNow;
+            vatGroup.UpdatedBy = "System";
+        }
+
+        await EnsureTaxGroupComponentAsync(tenantId, vatGroup, nhil, 1, CompoundBasis.BaseOnly);
+        await EnsureTaxGroupComponentAsync(tenantId, vatGroup, getfund, 2, CompoundBasis.BaseOnly);
+        await EnsureTaxGroupComponentAsync(tenantId, vatGroup, vatStd, 3, CompoundBasis.BaseOnly);
+
+        var covidComponents = await _context.TaxGroupComponents
+            .Where(c => c.TenantId == tenantId && c.TaxGroupId == vatGroup.Id && c.TaxId == covid.Id && !c.IsDeleted)
+            .ToListAsync();
+
+        foreach (var component in covidComponents)
+        {
+            component.IsDeleted = true;
+            component.DeletedAt = DateTime.UtcNow;
+            component.DeletedBy = "System";
+            component.UpdatedAt = DateTime.UtcNow;
+            component.UpdatedBy = "System";
         }
 
         // 2.2 WHT Services (Purchases)
@@ -1964,114 +2493,125 @@ public class FinanceDataSeeder
         return tax;
     }
 
+    private async Task EnsureTaxGroupComponentAsync(
+        Guid tenantId,
+        TaxGroup taxGroup,
+        Tax tax,
+        int calculationOrder,
+        CompoundBasis compoundBasis)
+    {
+        var component = await _context.TaxGroupComponents
+            .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.TaxGroupId == taxGroup.Id && c.TaxId == tax.Id);
+
+        if (component == null)
+        {
+            await _context.TaxGroupComponents.AddAsync(new TaxGroupComponent
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                TaxId = tax.Id,
+                TaxGroupId = taxGroup.Id,
+                CalculationOrder = calculationOrder,
+                CompoundBasis = compoundBasis,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "System"
+            });
+            return;
+        }
+
+        component.CalculationOrder = calculationOrder;
+        component.CompoundBasis = compoundBasis;
+        component.AppliesOnTaxCodes = null;
+        component.IsDeleted = false;
+        component.DeletedAt = null;
+        component.DeletedBy = null;
+        component.UpdatedAt = DateTime.UtcNow;
+        component.UpdatedBy = "System";
+    }
+
     #endregion
 
     #region Module Definition Seeding
 
     private async Task SeedModuleDefinitionsAsync(Guid tenantId, DateTime baseDate)
     {
-        var modules = new[]
-        {
-            new { Code = "FIN", Name = "Finance", Desc = "General Ledger, Accounts Payable, Accounts Receivable, Cash Management", Icon = "fa-calculator", Sort = 1 },
-            new { Code = "INV", Name = "Inventory", Desc = "Inventory Management, Stock Control, Warehousing", Icon = "fa-boxes", Sort = 2 },
-            new { Code = "PROC", Name = "Procurement", Desc = "Purchase Orders, Requisitions, Supplier Management", Icon = "fa-shopping-cart", Sort = 3 },
-            new { Code = "SALES", Name = "Sales", Desc = "Sales Orders, Invoicing, Customer Management", Icon = "fa-chart-line", Sort = 4 },
-            new { Code = "FA", Name = "Fixed Assets", Desc = "Asset Registry, Depreciation, Asset Lifecycle", Icon = "fa-building", Sort = 5 },
-            new { Code = "MNT", Name = "Maintenance", Desc = "Work Orders, Preventive Maintenance, Equipment Management", Icon = "fa-wrench", Sort = 6 },
-            new { Code = "HR", Name = "Human Resources", Desc = "Employee Management, Payroll, Leave Management", Icon = "fa-users", Sort = 7 },
-            new { Code = "PROJ", Name = "Projects", Desc = "Project Management, Costing, Billing", Icon = "fa-project-diagram", Sort = 8 },
-            new { Code = "MFG", Name = "Manufacturing", Desc = "Production Planning, BOM, Manufacturing Execution", Icon = "fa-industry", Sort = 9 }
-        };
+        var now = DateTime.UtcNow;
+        var existing = await _context.ModuleDefinitions
+            .IgnoreQueryFilters()
+            .Where(module => module.TenantId == tenantId)
+            .ToListAsync();
+        var currentCodes = FinanceModuleLockCatalog.Definitions
+            .Select(module => module.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var mod in modules)
+        foreach (var definition in FinanceModuleLockCatalog.Definitions)
         {
-            if (!await _context.ModuleDefinitions.AnyAsync(m => m.ModuleCode == mod.Code && m.TenantId == tenantId))
+            var module = existing.FirstOrDefault(item =>
+                item.ModuleCode.Equals(definition.Code, StringComparison.OrdinalIgnoreCase));
+
+            if (module == null)
             {
                 await _context.ModuleDefinitions.AddAsync(new ModuleDefinition
                 {
                     Id = Guid.NewGuid(),
                     TenantId = tenantId,
-                    ModuleCode = mod.Code,
-                    ModuleName = mod.Name,
-                    Description = mod.Desc,
-                    IconClass = mod.Icon,
-                    SortOrder = mod.Sort,
+                    ModuleCode = definition.Code,
+                    ModuleName = definition.Name,
+                    Description = definition.Description,
+                    IconClass = definition.IconClass,
+                    SortOrder = definition.SortOrder,
                     IsActive = true,
                     IsSystem = true,
                     CreatedAt = baseDate,
                     CreatedBy = "System"
                 });
+                continue;
             }
+
+            module.ModuleCode = definition.Code;
+            module.ModuleName = definition.Name;
+            module.Description = definition.Description;
+            module.IconClass = definition.IconClass;
+            module.SortOrder = definition.SortOrder;
+            module.IsActive = true;
+            module.IsSystem = true;
+            module.IsDeleted = false;
+            module.DeletedAt = null;
+            module.DeletedBy = null;
+            module.UpdatedAt = now;
+            module.UpdatedBy = "System";
         }
-        
-        _logger.LogInformation("Module definitions seeded");
+
+        foreach (var stale in existing.Where(module => !currentCodes.Contains(module.ModuleCode) && module.IsActive))
+        {
+            stale.IsActive = false;
+            stale.UpdatedAt = now;
+            stale.UpdatedBy = "System";
+        }
+
+        _logger.LogInformation("Finance-integrated top-level module definitions reconciled");
     }
 
     private async Task SeedTransactionDocumentMappingsAsync(Guid tenantId, DateTime baseDate)
     {
-        // Get Modules
-        var finMod = await _context.ModuleDefinitions.FirstOrDefaultAsync(m => m.ModuleCode == "FIN" && m.TenantId == tenantId);
-        var invMod = await _context.ModuleDefinitions.FirstOrDefaultAsync(m => m.ModuleCode == "INV" && m.TenantId == tenantId);
-        var procMod = await _context.ModuleDefinitions.FirstOrDefaultAsync(m => m.ModuleCode == "PROC" && m.TenantId == tenantId);
-        var salesMod = await _context.ModuleDefinitions.FirstOrDefaultAsync(m => m.ModuleCode == "SALES" && m.TenantId == tenantId);
-        var faMod = await _context.ModuleDefinitions.FirstOrDefaultAsync(m => m.ModuleCode == "FA" && m.TenantId == tenantId);
+        // Document type alone cannot determine the originating top-level module. For
+        // example, an AR invoice may be entered in Finance or generated by Sales.
+        // OriginModuleCode on the posting request is now authoritative, so retire the
+        // early-stage mappings without deleting historical configuration rows.
+        var staleMappings = await _context.TransactionDocumentModuleMappings
+            .Where(mapping => mapping.TenantId == tenantId && mapping.IsActive)
+            .ToListAsync();
 
-        if (finMod == null) return; // Should not happen if previous method ran
-
-        var mappings = new List<(string DocType, Guid ModId)>
+        foreach (var mapping in staleMappings)
         {
-            // Finance
-            ("JournalEntry", finMod.Id),
-            ("Payment", finMod.Id),
-            ("Receipt", finMod.Id),
-            ("BankTransfer", finMod.Id),
-            ("BankReconciliation", finMod.Id),
-            ("TaxAdjustment", finMod.Id),
-            ("BudgetEntry", finMod.Id),
-
-            // Inventory
-            ("InventoryAdjustment", invMod?.Id ?? finMod.Id),
-            ("StockTransfer", invMod?.Id ?? finMod.Id),
-            ("StockCount", invMod?.Id ?? finMod.Id),
-            ("GoodsReceipt", invMod?.Id ?? finMod.Id),
-            ("GoodsIssue", invMod?.Id ?? finMod.Id),
-
-            // Procurement
-            ("PurchaseOrder", procMod?.Id ?? finMod.Id),
-            ("PurchaseRequisition", procMod?.Id ?? finMod.Id),
-            ("VendorInvoice", procMod?.Id ?? finMod.Id), // AP Invoice usually mapped to Procurement or Finance
-
-            // Sales
-            ("SalesOrder", salesMod?.Id ?? finMod.Id),
-            ("SalesInvoice", salesMod?.Id ?? finMod.Id), // AR Invoice
-            ("DeliveryNote", salesMod?.Id ?? finMod.Id),
-            ("Quotation", salesMod?.Id ?? finMod.Id),
-
-            // Fixed Assets
-            ("AssetAcquisition", faMod?.Id ?? finMod.Id),
-            ("AssetDepreciation", faMod?.Id ?? finMod.Id),
-            ("AssetDisposal", faMod?.Id ?? finMod.Id),
-            ("AssetTransfer", faMod?.Id ?? finMod.Id)
-        };
-
-        foreach (var mapping in mappings)
-        {
-            if (!await _context.TransactionDocumentModuleMappings.AnyAsync(m => m.DocumentType == mapping.DocType && m.TenantId == tenantId))
-            {
-                await _context.TransactionDocumentModuleMappings.AddAsync(new TransactionDocumentModuleMapping
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    DocumentType = mapping.DocType,
-                    ModuleDefinitionId = mapping.ModId,
-                    IsActive = true,
-                    CreatedAt = baseDate,
-                    CreatedBy = "System"
-                });
-            }
+            mapping.IsActive = false;
+            mapping.UpdatedAt = DateTime.UtcNow;
+            mapping.UpdatedBy = "System";
         }
 
-        _logger.LogInformation("Transaction document mappings seeded");
+        _logger.LogInformation(
+            "Retired {Count} legacy document-type module mappings; posting origin is now explicit",
+            staleMappings.Count);
     }
 
     #endregion

@@ -157,7 +157,7 @@ namespace ErpSystem.Core.Entities.Finance
 
     /// <summary>
     /// Tax group - bundles multiple taxes for common scenarios
-    /// e.g., "Ghana Standard Sales Tax" = NHIL + GETFL + COVID + VAT
+    /// e.g., "Ghana Standard Sales Tax" = NHIL + GETFL + VAT
     /// </summary>
     [Table("TaxGroups")]
     public class TaxGroup : TenantEntity
@@ -239,7 +239,7 @@ namespace ErpSystem.Core.Entities.Finance
 
         /// <summary>
         /// Comma-separated list of tax codes this tax applies on (for Specific compound basis)
-        /// e.g., "NHIL,GETFL,COVID" means VAT is calculated on Base + NHIL + GETFL + COVID
+        /// e.g., "NHIL,GETFL" means VAT is calculated on Base + NHIL + GETFL
         /// Only used when CompoundBasis = Specific
         /// </summary>
         [StringLength(500)]

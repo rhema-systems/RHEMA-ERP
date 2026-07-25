@@ -1,6 +1,9 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,16 +12,26 @@ namespace ErpSystem.Api.Services.Finance.Cash;
 public class BankAccountService : IBankAccountService
 {
     private readonly ApplicationDbContext _context;
+    private readonly ITenantSettingsService _tenantSettingsService;
+    private readonly ICurrentUserService _currentUserService;
 
-    public BankAccountService(ApplicationDbContext context)
+    public BankAccountService(
+        ApplicationDbContext context,
+        ITenantSettingsService tenantSettingsService,
+        ICurrentUserService currentUserService)
     {
         _context = context;
+        _tenantSettingsService = tenantSettingsService;
+        _currentUserService = currentUserService;
     }
+
+    private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
     public async Task<BankAccountDto?> GetByIdAsync(Guid id)
     {
+        var tenantId = TenantId;
         var account = await _context.BankAccounts
-            .Where(a => a.Id == id)
+            .Where(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
             .Select(a => new BankAccountDto
             {
                 Id = a.Id,
@@ -45,7 +58,9 @@ public class BankAccountService : IBankAccountService
 
     public async Task<IEnumerable<BankAccountDto>> GetAllAsync()
     {
+        var tenantId = TenantId;
         return await _context.BankAccounts
+            .Where(a => a.TenantId == tenantId && !a.IsDeleted)
             .Select(a => new BankAccountDto
             {
                 Id = a.Id,
@@ -70,8 +85,9 @@ public class BankAccountService : IBankAccountService
 
     public async Task<IEnumerable<BankAccountDto>> GetActiveAccountsAsync()
     {
+        var tenantId = TenantId;
         return await _context.BankAccounts
-            .Where(a => a.IsActive)
+            .Where(a => a.TenantId == tenantId && a.IsActive && !a.IsDeleted)
             .Select(a => new BankAccountDto
             {
                 Id = a.Id,
@@ -90,33 +106,63 @@ public class BankAccountService : IBankAccountService
 
     public async Task<BankAccountDto> CreateAsync(CreateBankAccountDto dto)
     {
-        var account = new BankAccount
+        var tenantId = TenantId;
+        var currency = NormalizeCurrency(dto.Currency);
+
+        if (dto.OpeningBalance != 0m)
         {
-            AccountNumber = dto.AccountNumber,
-            AccountName = dto.AccountName,
-            BankName = dto.BankName,
-            BankBranch = dto.BankBranch,
-            Currency = dto.Currency,
-            AccountType = dto.AccountType,
-            GLAccountId = dto.GLAccountId,
-            OpeningBalance = dto.OpeningBalance,
-            CurrentBalance = dto.OpeningBalance,
-            AvailableBalance = dto.OpeningBalance,
-            OpeningDate = dto.OpeningDate,
-            Notes = dto.Notes,
-            IsActive = true
-        };
+            throw new InvalidOperationException(
+                "Bank account opening-balance posting is disabled until the FIN-LIM-0006 opening-balance migration batch routes opening balances through IFinancePostingEngine.");
+        }
 
-        _context.BankAccounts.Add(account);
-        await _context.SaveChangesAsync();
+        if (dto.GLAccountId.HasValue)
+        {
+            await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "bank");
+        }
 
-        return await GetByIdAsync(account.Id) ?? throw new Exception("Failed to create bank account");
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var dbTransaction = await _context.Database.BeginTransactionAsync();
+
+            var account = new BankAccount
+            {
+                TenantId = tenantId,
+                AccountNumber = dto.AccountNumber,
+                AccountName = dto.AccountName,
+                BankName = dto.BankName,
+                BankBranch = dto.BankBranch,
+                Currency = currency,
+                AccountType = dto.AccountType,
+                GLAccountId = dto.GLAccountId,
+                OpeningBalance = dto.OpeningBalance,
+                CurrentBalance = dto.OpeningBalance,
+                AvailableBalance = dto.OpeningBalance,
+                OpeningDate = dto.OpeningDate,
+                Notes = dto.Notes,
+                IsActive = true
+            };
+
+            _context.BankAccounts.Add(account);
+            await _context.SaveChangesAsync();
+
+            await dbTransaction.CommitAsync();
+
+            return await GetByIdAsync(account.Id) ?? throw new Exception("Failed to create bank account");
+        });
     }
 
     public async Task<BankAccountDto> UpdateAsync(Guid id, UpdateBankAccountDto dto)
     {
-        var account = await _context.BankAccounts.FindAsync(id)
+        var tenantId = TenantId;
+        var account = await _context.BankAccounts
+            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
             ?? throw new Exception("Bank account not found");
+
+        if (dto.GLAccountId.HasValue)
+        {
+            await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "bank");
+        }
 
         account.AccountName = dto.AccountName;
         account.BankName = dto.BankName;
@@ -132,25 +178,30 @@ public class BankAccountService : IBankAccountService
 
     public async Task DeleteAsync(Guid id)
     {
-        var account = await _context.BankAccounts.FindAsync(id)
+        var tenantId = TenantId;
+        var account = await _context.BankAccounts
+            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
             ?? throw new Exception("Bank account not found");
 
         // Check if account has transactions
         var hasTransactions = await _context.Set<CashTransaction>()
-            .AnyAsync(t => t.BankAccountId == id);
+            .AnyAsync(t => t.TenantId == tenantId && t.BankAccountId == id);
 
         if (hasTransactions)
         {
             throw new Exception("Cannot delete bank account with existing transactions");
         }
 
-        _context.BankAccounts.Remove(account);
+        account.IsDeleted = true;
+        account.DeletedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
     }
 
     public async Task<BankAccountBalanceDto> GetBalanceAsync(Guid id)
     {
-        var account = await _context.BankAccounts.FindAsync(id)
+        var tenantId = TenantId;
+        var account = await _context.BankAccounts
+            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
             ?? throw new Exception("Bank account not found");
 
         return new BankAccountBalanceDto
@@ -170,8 +221,16 @@ public class BankAccountService : IBankAccountService
         DateTime? fromDate = null, 
         DateTime? toDate = null)
     {
+        var tenantId = TenantId;
+        var bankAccountExists = await _context.BankAccounts
+            .AnyAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted);
+        if (!bankAccountExists)
+        {
+            throw new Exception("Bank account not found");
+        }
+
         var query = _context.Set<CashTransaction>()
-            .Where(t => t.BankAccountId == id);
+            .Where(t => t.TenantId == tenantId && t.BankAccountId == id && !t.IsDeleted);
 
         if (fromDate.HasValue)
             query = query.Where(t => t.TransactionDate >= fromDate.Value);
@@ -197,7 +256,9 @@ public class BankAccountService : IBankAccountService
 
     public async Task UpdateBalanceAsync(Guid id, decimal amount, bool isDebit)
     {
-        var account = await _context.BankAccounts.FindAsync(id)
+        var tenantId = TenantId;
+        var account = await _context.BankAccounts
+            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
             ?? throw new Exception("Bank account not found");
 
         if (isDebit)
@@ -212,5 +273,24 @@ public class BankAccountService : IBankAccountService
         }
 
         await _context.SaveChangesAsync();
+    }
+
+    private static string NormalizeCurrency(string? currency)
+    {
+        return string.IsNullOrWhiteSpace(currency)
+            ? "GHS"
+            : currency.Trim().ToUpperInvariant();
+    }
+
+    private async Task ValidateGLAccountAsync(Guid accountId, Guid tenantId, string label)
+    {
+        var accountExists = await _context.Accounts
+            .AsNoTracking()
+            .AnyAsync(a => a.TenantId == tenantId && a.Id == accountId && !a.IsDeleted && a.Status == AccountStatus.Active);
+
+        if (!accountExists)
+        {
+            throw new InvalidOperationException($"The {label} GL account was not found for this tenant.");
+        }
     }
 }

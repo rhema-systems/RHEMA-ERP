@@ -9,6 +9,7 @@ import type {
     PaymentCreateRequest,
     PaymentAllocationRequest,
     AgingReport,
+    CustomerDetailedLedgerReport,
     CollectionsDashboardStats,
     PaymentAllocation,
     PaymentAllocationResultDto
@@ -41,6 +42,7 @@ export interface InvoiceQuery {
     endDate?: string;
     status?: string;
     searchTerm?: string;
+    isOpeningBalance?: boolean;
 }
 
 export interface PaymentQuery {
@@ -50,6 +52,8 @@ export interface PaymentQuery {
     startDate?: string;
     endDate?: string;
     status?: string;
+    paymentMethod?: string;
+    paymentMethodId?: string;
 }
 
 export type EstateArSource = 'facilities' | 'property-management';
@@ -112,6 +116,7 @@ class ArService {
         if (query.endDate) params.append('EndDate', query.endDate);
         if (query.status) params.append('Status', query.status);
         if (query.searchTerm) params.append('SearchTerm', query.searchTerm);
+        if (query.isOpeningBalance !== undefined) params.append('IsOpeningBalance', query.isOpeningBalance.toString());
 
         return apiService.get<PagedResult<Invoice>>(`${this.baseUrl}/invoices?${params.toString()}`);
     }
@@ -142,6 +147,8 @@ class ArService {
         if (query.startDate) params.append('StartDate', query.startDate);
         if (query.endDate) params.append('EndDate', query.endDate);
         if (query.status) params.append('Status', query.status);
+        if (query.paymentMethod) params.append('PaymentMethod', query.paymentMethod);
+        if (query.paymentMethodId) params.append('PaymentMethodId', query.paymentMethodId);
 
         return apiService.get<PagedResult<CustomerPayment>>(`${this.baseUrl}/payments?${params.toString()}`);
     }
@@ -158,8 +165,30 @@ class ArService {
         return apiService.post<PaymentAllocationResultDto>(`${this.baseUrl}/payments/${data.customerPaymentId}/allocate`, data);
     }
 
-    public async getOutstandingInvoices(customerId: string): Promise<{ id: string; invoiceNumber: string; balanceAmount: number; invoiceDate: string; dueDate: string }[]> {
-        return apiService.get<{ id: string; invoiceNumber: string; balanceAmount: number; invoiceDate: string; dueDate: string }[]>(`${this.baseUrl}/payments/customer/${customerId}/outstanding-invoices`);
+    public async getOutstandingInvoices(customerId: string): Promise<{
+        id: string;
+        invoiceNumber: string;
+        balanceAmount: number;
+        currencyCode: string;
+        invoiceDate: string;
+        dueDate?: string;
+        earlyPaymentDiscountPercentage?: number;
+        earlyPaymentDiscountDueDate?: string;
+        isDiscountAvailable?: boolean;
+        discountAmount?: number;
+    }[]> {
+        return apiService.get<{
+            id: string;
+            invoiceNumber: string;
+            balanceAmount: number;
+            currencyCode: string;
+            invoiceDate: string;
+            dueDate?: string;
+            earlyPaymentDiscountPercentage?: number;
+            earlyPaymentDiscountDueDate?: string;
+            isDiscountAvailable?: boolean;
+            discountAmount?: number;
+        }[]>(`${this.baseUrl}/payments/customer/${customerId}/outstanding-invoices`);
     }
 
     // --- Reports ---
@@ -175,6 +204,39 @@ class ArService {
         params.append('fromDate', startDate);
         params.append('toDate', endDate);
         return apiService.get<any>(`${this.baseUrl}/reports/customer-statement/${customerId}?${params.toString()}`);
+    }
+
+    public async getCustomerDetailedLedger(query: {
+        fromDate: string;
+        toDate: string;
+        customerIds?: string[];
+        showCustomerCurrency?: boolean;
+    }): Promise<CustomerDetailedLedgerReport> {
+        const params = new URLSearchParams();
+        params.append('fromDate', query.fromDate);
+        params.append('toDate', query.toDate);
+        query.customerIds?.forEach((customerId) => params.append('customerIds', customerId));
+        if (query.showCustomerCurrency !== undefined) {
+            params.append('showCustomerCurrency', query.showCustomerCurrency.toString());
+        }
+
+        return apiService.get<CustomerDetailedLedgerReport>(`${this.baseUrl}/reports/customer-detailed-ledger?${params.toString()}`);
+    }
+
+    public async downloadCustomerStatementCsv(query: {
+        fromDate: string;
+        toDate: string;
+        customerIds?: string[];
+        showCustomerCurrency?: boolean;
+    }): Promise<Blob> {
+        return apiService.postBlob('/finance/report-exports/export', {
+            reportType: 'CustomerStatement',
+            format: 'Csv',
+            periodStart: query.fromDate,
+            periodEnd: query.toDate,
+            customerIds: query.customerIds ?? [],
+            showCustomerCurrency: query.showCustomerCurrency === true,
+        });
     }
 
     public async getCollectionsDashboard(): Promise<CollectionsDashboardStats> {

@@ -190,7 +190,9 @@ BEGIN
 
     IF @constraintName IS NOT NULL
     BEGIN
-        EXEC(N'ALTER TABLE [dbo].[{table}] DROP CONSTRAINT ' + QUOTENAME(@constraintName));
+        DECLARE @dropConstraintSql nvarchar(max) =
+            N'ALTER TABLE [dbo].[{table}] DROP CONSTRAINT ' + QUOTENAME(@constraintName);
+        EXEC sp_executesql @dropConstraintSql;
     END
 
     ALTER TABLE [dbo].[{table}] DROP COLUMN [{column}];

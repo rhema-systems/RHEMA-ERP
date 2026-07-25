@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Data.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -11,10 +12,15 @@ namespace ErpSystem.Data.Repositories.Procurement;
 public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisition>, IPurchaseRequisitionRepository
 {
     private readonly IProcurementSettingsRepository _settingsRepository;
+    private readonly ITenantContext _tenantContext;
 
-    public PurchaseRequisitionRepository(ApplicationDbContext context, IProcurementSettingsRepository settingsRepository) : base(context)
+    public PurchaseRequisitionRepository(
+        ApplicationDbContext context,
+        IProcurementSettingsRepository settingsRepository,
+        ITenantContext tenantContext) : base(context)
     {
         _settingsRepository = settingsRepository;
+        _tenantContext = tenantContext;
     }
 
     public async Task<IEnumerable<PurchaseRequisition>> GetRequisitionsByStatusAsync(string status)
@@ -171,8 +177,10 @@ public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisiti
                 .Replace("{DD}", now.Day.ToString("D2"));
             
             // Get all requisitions matching the prefix pattern
+            var tenantId = _tenantContext.GetCurrentTenantId();
             var existingNumbers = await _dbSet
-                .Where(pr => pr.RequisitionNumber.StartsWith(prefixPattern) && !pr.IsDeleted)
+                .IgnoreQueryFilters()
+                .Where(pr => pr.TenantId == tenantId && pr.RequisitionNumber.StartsWith(prefixPattern))
                 .Select(pr => pr.RequisitionNumber)
                 .ToListAsync();
             

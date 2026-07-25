@@ -117,6 +117,10 @@ public class SalesOrder : DocumentEntity
     public Guid? InvoiceId { get; set; }
     public virtual Invoice? Invoice { get; set; }
 
+    public Guid? TaxGroupId { get; set; }
+    [ForeignKey(nameof(TaxGroupId))]
+    public virtual TaxGroup? TaxGroup { get; set; }
+
     // ── Approval (inherited from ApprovableEntity via DocumentEntity) ───
     // ApprovalStatus, SubmittedById, SubmittedDate, ApprovedById, ApprovedDate, ApprovalComments
 
@@ -204,6 +208,10 @@ public class SalesOrderLine : BaseEntity
 
     [MaxLength(50)]
     public string? TaxCode { get; set; }
+
+    public Guid? TaxGroupId { get; set; }
+    [ForeignKey(nameof(TaxGroupId))]
+    public virtual TaxGroup? TaxGroup { get; set; }
 
     // ── UOM ──────────────────────────────────────────────────────────────
 

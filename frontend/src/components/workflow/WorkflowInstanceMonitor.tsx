@@ -92,9 +92,18 @@ interface WorkflowInstanceView {
 interface WorkflowInstanceMonitorProps {
   isOpen: boolean;
   onClose: () => void;
+  workflowDefinitionId?: string;
+  workflowName?: string;
+  onLiveInstancesCountChanged?: (count: number) => void;
 }
 
-export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMonitorProps) {
+export function WorkflowInstanceMonitor({
+  isOpen,
+  onClose,
+  workflowDefinitionId,
+  workflowName,
+  onLiveInstancesCountChanged,
+}: WorkflowInstanceMonitorProps) {
   const [instances, setInstances] = useState<WorkflowStatusDto[]>([]);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -104,6 +113,8 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
   const [activeTab, setActiveTab] = useState('list');
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Instance cancellation and ad-hoc approver management are independent governance actions.
+  const [cancellingInstanceId, setCancellingInstanceId] = useState<string | null>(null);
   const [approverDialogOpen, setApproverDialogOpen] = useState(false);
   const [directoryUsers, setDirectoryUsers] = useState<WorkflowDirectoryUser[]>([]);
   const [adHocUserId, setAdHocUserId] = useState('');
@@ -213,6 +224,8 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
     value.replace(/[\s_-]+/g, '').toLowerCase();
 
   const entityRouteMap: Record<string, (id: string) => string> = {
+    journalentry: (id) => `/finance/journal-entries/${id}`,
+    journalentries: (id) => `/finance/journal-entries/${id}`,
     jobcard: (id) => `/maintenance/job-cards?id=${id}`,
     workorder: (id) => `/maintenance/work-orders?id=${id}`,
     asset: (id) => `/maintenance/assets?id=${id}`,
@@ -295,13 +308,31 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
     setIsLoading(true);
     setLoadError(null);
     try {
-      const result = await workflowApiService.getWorkflowInstances({
+      const baseFilter = {
         page: 1,
-        pageSize: 50,
+        pageSize: 100,
         sortBy: 'StartedDate',
         sortDescending: true,
-      });
+        workflowDefinitionId,
+      };
+
+      const result = workflowDefinitionId
+        ? await Promise.all(['Created', 'InProgress', 'Waiting', 'Suspended'].map((status) =>
+            workflowApiService.getWorkflowInstances({
+              ...baseFilter,
+              status,
+            })
+          )).then((responses) => ({
+            data: Array.from(
+              new Map(responses.flatMap((response) => response.data).map((instance) => [instance.workflowInstanceId, instance])).values()
+            ),
+          }))
+        : await workflowApiService.getWorkflowInstances(baseFilter);
+
       setInstances(result.data);
+      if (workflowDefinitionId) {
+        onLiveInstancesCountChanged?.(result.data.length);
+      }
       if (selectedInstanceId && !result.data.some(item => item.workflowInstanceId === selectedInstanceId)) {
         setSelectedInstanceId(null);
       }
@@ -354,7 +385,7 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
     if (isOpen) {
       loadInstances();
     }
-  }, [isOpen]);
+  }, [isOpen, workflowDefinitionId]);
 
   useEffect(() => {
     if (selectedInstance) {
@@ -509,14 +540,42 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
     return matchesStatus && matchesSearch;
   });
 
+  const canCancelInstance = (instance: WorkflowInstanceView | null) =>
+    !!instance && (instance.status === 'running' || instance.status === 'paused');
+
+  const handleCancelInstance = async (instance: WorkflowInstanceView) => {
+    const confirmed = window.confirm(
+      `Cancel workflow instance for ${instance.entityType} ${instance.entityId}? This will remove it from the live workflow pipeline.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setCancellingInstanceId(instance.id);
+      await workflowApiService.cancelWorkflow(instance.id, {
+        reason: 'Cancelled by workflow administrator to unblock workflow configuration.',
+      });
+      await loadInstances();
+    } catch (error) {
+      console.error('Failed to cancel workflow instance:', error);
+      setLoadError('Failed to cancel workflow instance.');
+    } finally {
+      setCancellingInstanceId(null);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-[70] bg-black bg-opacity-50 flex items-center justify-center">
       <div className="bg-white rounded-lg shadow-lg w-[95vw] h-[95vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="text-xl font-semibold">Workflow Instance Monitor</h2>
+          <div>
+            <h2 className="text-xl font-semibold">Workflow Instance Monitor</h2>
+            {workflowName && (
+              <p className="text-sm text-muted-foreground">Showing live instances for {workflowName}</p>
+            )}
+          </div>
           <div className="flex items-center space-x-2">
             <Button variant="outline" size="sm" onClick={loadInstances} disabled={isLoading}>
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -666,6 +725,18 @@ export function WorkflowInstanceMonitor({ isOpen, onClose }: WorkflowInstanceMon
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-lg font-semibold">{selectedInstance.workflowName}</h3>
                     <div className="flex items-center space-x-2">
+                      {/* Keep both governance actions: cancellation for bad runs, approver editing for live approvals. */}
+                      {canCancelInstance(selectedInstance) && (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleCancelInstance(selectedInstance)}
+                          disabled={cancellingInstanceId === selectedInstance.id}
+                        >
+                          <XCircle className="h-4 w-4 mr-2" />
+                          {cancellingInstanceId === selectedInstance.id ? 'Cancelling...' : 'Cancel Instance'}
+                        </Button>
+                      )}
                       {selectedInstance.currentStepId && selectedInstance.pendingApprovals.length > 0 && (
                         <Button size="sm" variant="outline" onClick={() => void openApproverDialog()}><UserRoundPlus className="mr-2 h-4 w-4" />Approvers</Button>
                       )}

@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
+using ErpSystem.Data.Seeders;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,19 +18,28 @@ public class TenantController : ControllerBase
     private readonly IAuditLogService _auditLogService;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILdapAuthenticationService _ldapAuthenticationService;
+    private readonly PaymentTermBaselineSeeder _paymentTermBaselineSeeder;
+    private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
+    private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
 
     public TenantController(
         ITenantService tenantService,
         ILogger<TenantController> logger,
         IAuditLogService auditLogService,
         ICurrentUserService currentUserService,
-        ILdapAuthenticationService ldapAuthenticationService)
+        ILdapAuthenticationService ldapAuthenticationService,
+        PaymentTermBaselineSeeder paymentTermBaselineSeeder,
+        ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
+        ProcurementAccessControlSeeder? procurementAccessControlSeeder = null)
     {
         _tenantService = tenantService;
         _logger = logger;
         _auditLogService = auditLogService;
         _currentUserService = currentUserService;
         _ldapAuthenticationService = ldapAuthenticationService;
+        _paymentTermBaselineSeeder = paymentTermBaselineSeeder;
+        _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
+        _procurementAccessControlSeeder = procurementAccessControlSeeder;
     }
 
     /// <summary>
@@ -183,6 +193,23 @@ public class TenantController : ControllerBase
             };
 
             var createdTenant = await _tenantService.CreateTenantAsync(tenant);
+            if (_procurementConfigurationProfileSeeder is not null)
+            {
+                var initializerActorId = Guid.TryParse(_currentUserService.UserId, out var parsedInitializerActorId)
+                    ? parsedInitializerActorId
+                    : (Guid?)null;
+                await _procurementConfigurationProfileSeeder.SeedTenantAsync(createdTenant.Id, initializerActorId);
+            }
+            if (_procurementAccessControlSeeder is not null)
+            {
+                var initializerActorId = Guid.TryParse(_currentUserService.UserId, out var parsedInitializerActorId)
+                    ? parsedInitializerActorId
+                    : (Guid?)null;
+                await _procurementAccessControlSeeder.SeedTenantAsync(createdTenant.Id, initializerActorId);
+            }
+
+            // Tenant provisioning owns baseline installation; startup reconciliation is only the safety net.
+            await _paymentTermBaselineSeeder.SeedTenantAsync(createdTenant.Id);
 
             // Log audit trail for tenant creation
             try

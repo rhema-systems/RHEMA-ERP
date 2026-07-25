@@ -300,8 +300,17 @@ class ApiService {
 
       // Create a proper error with the message from the API response
       // Only fall back to generic HTTP status message if no other message is available
+      const firstValidationError =
+        Array.isArray(errorData?.errors)
+          ? errorData.errors.find((e: unknown) => typeof e === 'string')
+          : (errorData?.errors && typeof errorData.errors === 'object'
+            ? Object.values(errorData.errors).flat().find((e: unknown) => typeof e === 'string')
+            : undefined);
+
       const errorMessage = errorData.message ||
+        errorData.detail ||
         errorData.title ||
+        firstValidationError ||
         errorData.error ||
         `HTTP ${response.status}: ${response.statusText}`;
       const error = new Error(errorMessage);
@@ -487,6 +496,15 @@ class ApiService {
 
   public async downloadBlob(endpoint: string, query?: Record<string, unknown>): Promise<Blob> {
     return this.privateBlobRequest(this.appendQueryParams(endpoint, query), { method: 'GET' });
+  }
+
+  public async postBlob(endpoint: string, data?: any): Promise<Blob> {
+    const options: RequestInit = { method: 'POST' };
+    if (data !== undefined && data !== null) {
+      options.body = JSON.stringify(data);
+    }
+
+    return this.privateBlobRequest(endpoint, options);
   }
 
   // Rename private request method
@@ -753,6 +771,14 @@ class ApiService {
     return this.privateRequest<T>(this.appendQueryParams(endpoint, query), { method: 'GET' });
   }
 
+  public async getWithSignal<T = any>(
+    endpoint: string,
+    query: Record<string, unknown> | undefined,
+    signal: AbortSignal
+  ): Promise<T> {
+    return this.privateRequest<T>(this.appendQueryParams(endpoint, query), { method: 'GET', signal });
+  }
+
   // Silent GET method - doesn't log errors to console (useful for expected 404s)
   public async silentGet<T = any>(endpoint: string, query?: Record<string, unknown>): Promise<T> {
     return this.privateRequest<T>(this.appendQueryParams(endpoint, query), { method: 'GET' }, true, true);
@@ -760,7 +786,9 @@ class ApiService {
 
   public async post<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'POST' };
-    if (data) {
+    if (data instanceof FormData) {
+      options.body = data;
+    } else if (data !== undefined && data !== null) {
       options.body = JSON.stringify(data);
     }
     return this.privateRequest<T>(endpoint, options);
@@ -768,19 +796,27 @@ class ApiService {
 
   public async put<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'PUT' };
+    if (data instanceof FormData) {
+      options.body = data;
+    } else if (data !== undefined && data !== null) {
+      options.body = JSON.stringify(data);
+    }
+    return this.privateRequest<T>(endpoint, options);
+  }
+
+  public async delete<T = any>(endpoint: string, data?: any): Promise<T> {
+    const options: RequestInit = { method: 'DELETE' };
     if (data) {
       options.body = JSON.stringify(data);
     }
     return this.privateRequest<T>(endpoint, options);
   }
 
-  public async delete<T = any>(endpoint: string): Promise<T> {
-    return this.privateRequest<T>(endpoint, { method: 'DELETE' });
-  }
-
   public async patch<T = any>(endpoint: string, data?: any): Promise<T> {
     const options: RequestInit = { method: 'PATCH' };
-    if (data) {
+    if (data instanceof FormData) {
+      options.body = data;
+    } else if (data !== undefined && data !== null) {
       options.body = JSON.stringify(data);
     }
     return this.privateRequest<T>(endpoint, options);
@@ -795,7 +831,7 @@ export default apiService;
 // Helper function to get stored token for SignalR
 export function getStoredToken(): string | null {
   if (typeof window !== 'undefined') {
-    return localStorage.getItem('authToken');
+    return localStorage.getItem('authToken') || localStorage.getItem('token');
   }
   return null;
 }

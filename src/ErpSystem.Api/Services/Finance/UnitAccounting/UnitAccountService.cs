@@ -9,6 +9,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting
 {
@@ -32,7 +33,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             _logger = logger;
         }
 
-        private Guid TenantId => _currentUserService.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
         private string UserName => _currentUserService.UserName ?? "system";
 
         public async Task<IReadOnlyList<UnitAccountDto>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -132,9 +133,11 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (dto.ParentAccountId.HasValue)
             {
                 var parent = await _unitOfWork.Repository<UnitAccount>()
-                    .FirstOrDefaultAsync(ua => ua.Id == dto.ParentAccountId.Value && !ua.IsDeleted);
-                if (parent != null)
-                    accountLevel = parent.AccountLevel + 1;
+                    .FirstOrDefaultAsync(ua => ua.TenantId == TenantId && ua.Id == dto.ParentAccountId.Value && !ua.IsDeleted);
+                if (parent == null)
+                    throw new ArgumentException($"Parent unit account with ID '{dto.ParentAccountId}' not found.");
+
+                accountLevel = parent.AccountLevel + 1;
             }
 
             var now = DateTime.UtcNow;

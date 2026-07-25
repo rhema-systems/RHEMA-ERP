@@ -12,16 +12,41 @@ namespace ErpSystem.Core.DTOs.Finance
         public string BaseCurrencyName { get; set; } = "Ghana Cedi";
         public string BaseCurrencySymbol { get; set; } = "₵";
         public int BaseCurrencyDecimalPlaces { get; set; } = 2;
+        public bool FunctionalCurrencyLocked { get; set; }
+        public DateTime? FunctionalCurrencyLockedAt { get; set; }
+        public string? FunctionalCurrencyLockedReason { get; set; }
         public string AccountSeparator { get; set; } = "-";
         public Guid? RetainedEarningsAccountId { get; set; }
         public Guid? UnrealizedGainLossAccountId { get; set; }
+        public Guid? UnrealizedFxGainAccountId { get; set; }
+        public Guid? UnrealizedFxLossAccountId { get; set; }
         public Guid? RealizedGainLossAccountId { get; set; }
+        public Guid? RealizedFxGainAccountId { get; set; }
+        public Guid? RealizedFxLossAccountId { get; set; }
         public Guid? SuspenseAccountId { get; set; }
         public Guid? ControlAccountArId { get; set; }
         public Guid? ControlAccountApId { get; set; }
+        public Guid? SupplierAdvanceAccountId { get; set; }
+        public Guid? CustomerAdvanceAccountId { get; set; }
         public Guid? ControlAccountInventoryId { get; set; }
         public Guid? ControlAccountPayrollId { get; set; }
         public Guid? ControlAccountTaxId { get; set; }
+        public Guid? ControlAccountGRVAccrualId { get; set; }
+        public Guid? DiscountAllowedAccountId { get; set; }
+        public Guid? DiscountReceivedAccountId { get; set; }
+        
+        // Subledger Settings
+        public Guid? WriteOffExpenseAccountId { get; set; }
+        public Guid? WriteOffRecoveryAccountId { get; set; }
+        public bool RequireSubledgerJournalApproval { get; set; }
+
+        /// <summary>
+        /// True when posted transactions exist for the tenant.
+        /// When true, base currency and default control accounts cannot be changed.
+        /// </summary>
+        public bool TransactionsExist { get; set; }
+        public Guid? MigrationClearingAccountId { get; set; }
+        public bool OpeningBalanceAutoRoutingEnabled { get; set; } = true;
     }
 
     public class UpdateFinanceSettingsDto
@@ -31,12 +56,28 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? AccountSeparator { get; set; }
         public Guid? RetainedEarningsAccountId { get; set; }
         public Guid? UnrealizedGainLossAccountId { get; set; }
+        public Guid? UnrealizedFxGainAccountId { get; set; }
+        public Guid? UnrealizedFxLossAccountId { get; set; }
         public Guid? RealizedGainLossAccountId { get; set; }
+        public Guid? RealizedFxGainAccountId { get; set; }
+        public Guid? RealizedFxLossAccountId { get; set; }
         public Guid? SuspenseAccountId { get; set; }
         public Guid? ControlAccountArId { get; set; }
         public Guid? ControlAccountApId { get; set; }
+        public Guid? SupplierAdvanceAccountId { get; set; }
+        public Guid? CustomerAdvanceAccountId { get; set; }
         public Guid? ControlAccountInventoryId { get; set; }
         public Guid? ControlAccountPayrollId { get; set; }
         public Guid? ControlAccountTaxId { get; set; }
+        public Guid? ControlAccountGRVAccrualId { get; set; }
+        public Guid? DiscountAllowedAccountId { get; set; }
+        public Guid? DiscountReceivedAccountId { get; set; }
+        public Guid? MigrationClearingAccountId { get; set; }
+        public bool? OpeningBalanceAutoRoutingEnabled { get; set; }
+        
+        // Subledger Settings
+        public Guid? WriteOffExpenseAccountId { get; set; }
+        public Guid? WriteOffRecoveryAccountId { get; set; }
+        public bool? RequireSubledgerJournalApproval { get; set; }
     }
 }

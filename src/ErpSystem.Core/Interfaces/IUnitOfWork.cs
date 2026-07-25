@@ -1,5 +1,6 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces.Finance;
+using System.Data;
 
 namespace ErpSystem.Core.Interfaces;
 
@@ -29,6 +30,13 @@ public interface IUnitOfWork : IDisposable
     Task BeginTransactionAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Begin a database transaction at the requested isolation level.
+    /// Finance settlement posting uses serializable isolation where a concurrent
+    /// posting could otherwise over-settle the same source document.
+    /// </summary>
+    Task BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Commit the current transaction
     /// </summary>
     Task CommitAsync(CancellationToken cancellationToken = default);
@@ -47,4 +55,9 @@ public interface IUnitOfWork : IDisposable
     /// Execute an operation within an execution strategy (for SQL Server retry logic)
     /// </summary>
     Task ExecuteInStrategyAsync(Func<Task> operation, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Execute a value-returning operation within an execution strategy (for SQL Server retry logic)
+    /// </summary>
+    Task<T> ExecuteInStrategyAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken = default);
 }

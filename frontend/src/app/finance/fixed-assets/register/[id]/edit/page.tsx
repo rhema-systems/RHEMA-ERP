@@ -45,6 +45,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
           assetCode: asset.assetCode,
           name: asset.name,
           description: asset.description,
+          location: asset.location,
           fixedAssetCategoryId: asset.fixedAssetCategoryId,
           purchaseDate: toDateInput(asset.purchaseDate),
           placedInServiceDate: toDateInput(asset.placedInServiceDate),
@@ -92,6 +93,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
       await fixedAssetsDataService.updateAsset(id, {
         ...formData,
         placedInServiceDate: formData.placedInServiceDate || undefined,
+        location: formData.location || undefined,
         maintenanceAssetId: formData.maintenanceAssetId || undefined,
         serialNumber: formData.serialNumber || undefined,
         disposalDate: formData.disposalDate || undefined,
@@ -231,6 +233,14 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
             />
           </div>
           <div className="space-y-2">
+            <Label htmlFor="location">Location</Label>
+            <Input
+              id="location"
+              value={formData.location || ''}
+              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="serialNumber">Serial Number</Label>
             <Input
               id="serialNumber"
@@ -255,6 +265,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
                 <SelectItem value="HeldForSale">Held For Sale</SelectItem>
                 <SelectItem value="WrittenOff">Written Off</SelectItem>
                 <SelectItem value="UnderConstruction">Under Construction</SelectItem>
+                <SelectItem value="OnHold">On Hold</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -393,12 +404,12 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               <Pause className="h-4 w-4 mr-2" />Put on Hold
             </Button>
           )}
-          {formData.status === 'HeldForSale' && (
+          {formData.status === 'OnHold' && (
             <Button onClick={handleResume} className="bg-blue-600 hover:bg-blue-700">
               <RotateCcw className="h-4 w-4 mr-2" />Resume Asset
             </Button>
           )}
-          {(formData.status !== 'Draft' && formData.status !== 'Disposed' && formData.status !== 'WrittenOff') && formData.status !== 'HeldForSale' && formData.status !== 'Active' && (
+          {(formData.status !== 'Draft' && formData.status !== 'Disposed' && formData.status !== 'WrittenOff') && formData.status !== 'OnHold' && formData.status !== 'Active' && (
             <p className="text-sm text-muted-foreground">No lifecycle actions available for the current status.</p>
           )}
         </CardContent>

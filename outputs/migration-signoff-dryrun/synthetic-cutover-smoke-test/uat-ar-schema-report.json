@@ -1,0 +1,902 @@
+[
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "Id",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "ContractorId",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "WorkOrderId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "InvoiceNumber",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "InvoiceDate",
+    "typeName": "datetime2",
+    "isNullable": false
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "DueDate",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "TotalAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "TaxAmount",
+    "typeName": "decimal",
+    "isNullable": true
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "Status",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "Description",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "LineItems",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "AttachmentPaths",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "CreatedDate",
+    "typeName": "datetime2",
+    "isNullable": false
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "ApprovedDate",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "PaidDate",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "ApprovedById",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "TenantId",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "ContractorInvoice",
+    "columnName": "MaintenanceContractorId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "Id",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "PaymentNumber",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "CustomerId",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "PaymentDate",
+    "typeName": "datetime2",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "TotalAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "AllocatedAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "PaymentMethod",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "CurrencyCode",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "ExchangeRate",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "BankAccountId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "CheckNumber",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "TransactionReference",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "Notes",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "Status",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "ClearedDate",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "IsCreditNote",
+    "typeName": "bit",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "CreditNoteId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "JournalEntryId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "CreatedAt",
+    "typeName": "datetime2",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "UpdatedAt",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "CreatedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "UpdatedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "CreatedById",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "LastModifiedById",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "IsDeleted",
+    "typeName": "bit",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "DeletedAt",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "DeletedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "TenantId",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "ReferenceNumber",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "EffectiveDate",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "ExpirationDate",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "Metadata",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "Tags",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "Priority",
+    "typeName": "int",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "WithholdingTaxId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "WithholdingTaxAccountId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "WithholdingTaxAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "VatWithholdingTaxId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "VatWithholdingAccountId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "VatWithholdingAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "WithholdingCertificateNumber",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "CustomerPayment",
+    "columnName": "WithholdingCertificateDate",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "Id",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "InvoiceId",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "LineItemType",
+    "typeName": "int",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "ProductId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "InventoryItemId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "WarehouseId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "LocationId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "SerialNumber",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "LotNumber",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "ExpirationDate",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "UnitCost",
+    "typeName": "decimal",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "CostTotal",
+    "typeName": "decimal",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "GLAccountId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "Description",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "Quantity",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "UnitPrice",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "TaxGroupId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "TaxTreatment",
+    "typeName": "int",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "TaxRate",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "TaxAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "TaxCode",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "Unit",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "DiscountPercentage",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "DiscountAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "TenantId",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "CreatedAt",
+    "typeName": "datetime2",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "UpdatedAt",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "CreatedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "UpdatedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "CreatedById",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "LastModifiedById",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "IsDeleted",
+    "typeName": "bit",
+    "isNullable": false
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "DeletedAt",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "InvoiceLineItem",
+    "columnName": "DeletedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "Id",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "InvoiceNumber",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "BusinessPartnerId",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "CustomerName",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "CustomerAddress",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "InvoiceDate",
+    "typeName": "datetime2",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "DueDate",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "SubTotal",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "TaxAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "DiscountAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "TotalAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "PaidAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "CreditedAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "Status",
+    "typeName": "int",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "Notes",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "Reference",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "IsOpeningBalance",
+    "typeName": "bit",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "CurrencyCode",
+    "typeName": "nvarchar",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "ExchangeRate",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "BaseCurrencyAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "PaymentTermsDays",
+    "typeName": "int",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "PaymentTermId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "EarlyPaymentDiscountPercentage",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "EarlyPaymentDiscountDueDate",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "EarlyPaymentDiscountAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "TaxGroupId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "JournalEntryId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "TenantId",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "CreatedAt",
+    "typeName": "datetime2",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "UpdatedAt",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "CreatedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "UpdatedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "CreatedById",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "LastModifiedById",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "IsDeleted",
+    "typeName": "bit",
+    "isNullable": false
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "DeletedAt",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "Invoices",
+    "columnName": "DeletedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "Id",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "CustomerPaymentId",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "InvoiceId",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "AllocatedAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "DiscountAmount",
+    "typeName": "decimal",
+    "isNullable": false
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "AllocationDate",
+    "typeName": "datetime2",
+    "isNullable": false
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "Notes",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "IsReversal",
+    "typeName": "bit",
+    "isNullable": false
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "OriginalAllocationId",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "TenantId",
+    "typeName": "uniqueidentifier",
+    "isNullable": false
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "CreatedAt",
+    "typeName": "datetime2",
+    "isNullable": false
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "UpdatedAt",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "CreatedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "UpdatedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "CreatedById",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "LastModifiedById",
+    "typeName": "uniqueidentifier",
+    "isNullable": true
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "IsDeleted",
+    "typeName": "bit",
+    "isNullable": false
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "DeletedAt",
+    "typeName": "datetime2",
+    "isNullable": true
+  },
+  {
+    "tableName": "PaymentAllocation",
+    "columnName": "DeletedBy",
+    "typeName": "nvarchar",
+    "isNullable": true
+  }
+]

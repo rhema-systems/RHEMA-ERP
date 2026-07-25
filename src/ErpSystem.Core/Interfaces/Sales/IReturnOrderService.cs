@@ -16,7 +16,7 @@ public interface IReturnOrderService
     Task<PagedResult<ReturnOrderSummaryDto>> GetReturnOrdersAsync(
         int page = 1, int pageSize = 20,
         string? search = null, ReturnOrderStatus? status = null,
-        Guid? customerId = null, Guid? salesOrderId = null,
+        Guid? businessPartnerId = null, Guid? salesOrderId = null,
         DateTime? startDate = null, DateTime? endDate = null);
     Task<ReturnOrderDetailDto> ApproveReturnOrderAsync(Guid id);
     Task<ReturnOrderDetailDto> ReceiveReturnOrderAsync(Guid id);
@@ -31,11 +31,13 @@ public interface IReturnOrderService
     Task<PagedResult<CreditNoteSummaryDto>> GetCreditNotesAsync(
         int page = 1, int pageSize = 20,
         string? search = null, CreditNoteStatus? status = null,
-        Guid? customerId = null, DateTime? startDate = null, DateTime? endDate = null);
+        Guid? businessPartnerId = null, DateTime? startDate = null, DateTime? endDate = null);
     Task<CreditNoteDetailDto> SubmitCreditNoteForApprovalAsync(Guid id);
     Task<CreditNoteDetailDto> ProcessCreditNoteApprovalAsync(Guid id, CreditNoteApprovalDto dto);
     Task<CreditNoteDetailDto> ApproveCreditNoteAsync(Guid id);
+    Task<CreditNoteDetailDto> PostCreditNoteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<CreditNoteDetailDto> ApplyCreditNoteAsync(Guid id, Guid? invoiceId = null);
+    Task<CreditNoteDetailDto> ReverseCreditNoteAsync(Guid id, ReverseCreditNoteDto dto, CancellationToken cancellationToken = default);
     Task<CreditNoteDetailDto> VoidCreditNoteAsync(Guid id, string? reason = null);
 
     // ── Refunds ──
@@ -44,7 +46,7 @@ public interface IReturnOrderService
     Task<PagedResult<RefundSummaryDto>> GetRefundsAsync(
         int page = 1, int pageSize = 20,
         string? search = null, RefundStatus? status = null,
-        Guid? customerId = null, DateTime? startDate = null, DateTime? endDate = null);
+        Guid? businessPartnerId = null, DateTime? startDate = null, DateTime? endDate = null);
     Task<RefundDetailDto> SubmitRefundForApprovalAsync(Guid id);
     Task<RefundDetailDto> ProcessRefundApprovalAsync(Guid id, RefundApprovalDto dto);
     Task<RefundDetailDto> ApproveRefundAsync(Guid id);

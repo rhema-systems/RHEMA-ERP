@@ -99,6 +99,10 @@ public class AllocationRule : TenantEntity
     [Required]
     public bool IsActive { get; set; } = true;
 
+    [Required]
+    [MaxLength(30)]
+    public string ApprovalStatus { get; set; } = "Draft";
+
     /// <summary>
     /// Whether to auto-reverse allocations at period end.
     /// </summary>

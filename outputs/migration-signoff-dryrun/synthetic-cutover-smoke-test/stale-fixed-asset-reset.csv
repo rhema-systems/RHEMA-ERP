@@ -1,0 +1,5 @@
+AssetId,AssetCode,AssetName,PostedEventCount,PostedJournalCount,Reason
+e09e906d-6d03-4685-ac98-6eb91ade421d,FA-2024-BLDG-001,Headquarters Building,0,0,"Soft-deleted in RhemaERP_UAT_DryRun only for synthetic GL-only smoke scope. Row had no source, capitalization, journal, or posting-event evidence; posted GL was not mutated."
+23e99b72-9af9-492c-baca-653777236142,FA-2024-EQP-001,Industrial Generator,0,0,"Soft-deleted in RhemaERP_UAT_DryRun only for synthetic GL-only smoke scope. Row had no source, capitalization, journal, or posting-event evidence; posted GL was not mutated."
+de297d7f-c7ad-4927-b627-1e43ec9586a7,FA-2024-EQP-002,Server Rack System,0,0,"Soft-deleted in RhemaERP_UAT_DryRun only for synthetic GL-only smoke scope. Row had no source, capitalization, journal, or posting-event evidence; posted GL was not mutated."
+ba1f441e-2025-41ca-82f7-1bb9213cc9c2,FA-2024-VEH-001,Delivery Truck - Toyota Hilux,0,0,"Soft-deleted in RhemaERP_UAT_DryRun only for synthetic GL-only smoke scope. Row had no source, capitalization, journal, or posting-event evidence; posted GL was not mutated."

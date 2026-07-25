@@ -53,6 +53,11 @@ public interface IInvoiceService
     Task<InvoiceDto> SendInvoiceAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Posts a sent customer invoice to the General Ledger through the central finance posting engine.
+    /// </summary>
+    Task<InvoiceDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Voids/cancels an invoice.
     /// Reverses customer's outstanding balance.
     /// </summary>

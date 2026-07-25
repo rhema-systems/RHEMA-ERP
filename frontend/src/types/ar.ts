@@ -10,10 +10,13 @@ export interface Customer {
     creditLimit: number;
     outstandingBalance: number;
     paymentTermsDays: number;
+    paymentTermId?: string | null;
     priceGroup?: string;
     currencyCode: string;
     lastPaymentDate?: string;
     overdueAmount?: number;
+    isActive?: boolean;
+    notes?: string;
     status: 'Active' | 'Inactive' | 'OnHold';
     tenantId: string;
     createdAt: string;
@@ -30,13 +33,16 @@ export interface CustomerCreateRequest {
     country?: string;
     creditLimit?: number;
     paymentTermsDays?: number;
+    paymentTermId?: string | null;
     priceGroup?: string;
     currencyCode: string;
+    notes?: string;
 }
 
 export interface CustomerUpdateRequest extends Partial<CustomerCreateRequest> {
     id: string;
     status?: 'Active' | 'Inactive' | 'OnHold';
+    isActive?: boolean;
     currencyCode?: string;
 }
 
@@ -69,10 +75,13 @@ export interface Invoice {
     totalAmount: number;
     paidAmount: number;
     balanceAmount: number;
-    status: 'Draft' | 'Posted' | 'Paid' | 'Void' | 'Overdue';
+    status: 'Draft' | 'Sent' | 'Posted' | 'Paid' | 'Void' | 'Overdue';
     currencyCode: string;
     exchangeRate: number;
     paymentTermsDays: number;
+    paymentTermId?: string | null;
+    discountAmount: number;
+    isOpeningBalance: boolean;
     notes?: string;
     lineItems: InvoiceLineItem[];
     tenantId: string;
@@ -87,6 +96,10 @@ export interface InvoiceCreateRequest {
     currencyCode: string;
     exchangeRate?: number;
     paymentTermsDays?: number;
+    paymentTermId?: string | null;
+    discountAmount?: number;
+    taxGroupId?: string | null;
+    isOpeningBalance?: boolean;
     notes?: string;
     lineItems: InvoiceLineItemRequest[];
 }
@@ -99,6 +112,7 @@ export interface InvoiceLineItemRequest {
     quantity: number;
     unitPrice: number;
     taxCode?: string;
+    taxGroupId?: string | null;
     taxRate?: number;
     discountPercentage?: number;
 }
@@ -113,7 +127,11 @@ export interface CustomerPayment {
     allocatedAmount: number;
     unallocatedAmount: number;
     paymentMethod: string;
+    paymentMethodId?: string;
+    paymentMethodName?: string;
     referenceNumber?: string;
+    paymentReference: string;
+    amount: number;
     status: 'Draft' | 'Posted' | 'Void' | 'Bounced';
     currencyCode: string;
     exchangeRate: number;
@@ -131,11 +149,16 @@ export interface PaymentCreateRequest {
     paymentDate: string;
     totalAmount: number;
     paymentMethod: string;
+    paymentMethodId?: string;
     referenceNumber?: string;
+    bankAccountId?: string;
+    checkNumber?: string;
+    transactionReference?: string;
     currencyCode: string;
     exchangeRate?: number;
     notes?: string;
     isCreditNote?: boolean;
+    allocations?: InvoiceAllocationRequest[];
 }
 
 export interface PaymentAllocation {
@@ -151,9 +174,13 @@ export interface PaymentAllocation {
 
 export interface PaymentAllocationRequest {
     customerPaymentId: string;
+    allocations: InvoiceAllocationRequest[];
+}
+
+export interface InvoiceAllocationRequest {
     invoiceId: string;
-    amount: number;
-    discountAndAdjustments?: number;
+    allocatedAmount: number;
+    discountAmount?: number;
     notes?: string;
 }
 
@@ -166,6 +193,7 @@ export interface PaymentAllocationResultDto {
 
 export interface AgingBucket {
     bucketName: string;
+    bucket?: string;
     amount: number;
     customerCount: number;
     invoiceCount?: number;
@@ -177,6 +205,45 @@ export interface AgingReport {
     buckets: AgingBucket[];
     totalOutstanding: number;
     customerDetails?: any[]; // Simplified for summary view
+}
+
+export interface CustomerDetailedLedgerReport {
+    fromDate: string;
+    toDate: string;
+    currencyCode: string;
+    showCustomerCurrency: boolean;
+    totalOpeningBalance: number;
+    totalDebits: number;
+    totalCredits: number;
+    totalClosingBalance: number;
+    warnings: string[];
+    customers: CustomerDetailedLedgerAccount[];
+}
+
+export interface CustomerDetailedLedgerAccount {
+    customerId: string;
+    customerCode: string;
+    customerName: string;
+    currencyCode: string;
+    openingBalance: number;
+    totalDebits: number;
+    totalCredits: number;
+    closingBalance: number;
+    lines: CustomerDetailedLedgerLine[];
+}
+
+export interface CustomerDetailedLedgerLine {
+    sourceDocumentId: string;
+    transactionDate: string;
+    transactionType: string;
+    documentNumber: string;
+    reference?: string;
+    description: string;
+    transactionCurrencyCode: string;
+    exchangeRate: number;
+    debit: number;
+    credit: number;
+    runningBalance: number;
 }
 
 export interface CollectionsDashboardStats {

@@ -163,6 +163,9 @@ frontend/public/*
 !frontend/public/login.svg
 !frontend/public/manifest.json
 !frontend/public/sw.js
+!frontend/public/templates/
+frontend/public/templates/*
+!frontend/public/templates/bank-statement-import-template.xlsx
 
 # vuepress build output
 .vuepress/dist
@@ -302,6 +305,9 @@ src/ErpSystem.Api/build-errors*.txt
 # Archives
 *.zip
 
+# Temporary Microsoft Office owner/lock files
+~$*
+
 # Local dev helper scripts (ignore if they are personal-only)
 Fix-Backend.ps1
 Quick-Start.ps1
@@ -310,6 +316,9 @@ Stop-Dev.ps1
 
 # Local notes (ignore if personal-only)
 DEV-SERVERS.md
+
+# Locally generated management submission packs
+docs/tdc-finance-submission-pack/
 
 # AI assistant local settings
 .claude/settings.local.json

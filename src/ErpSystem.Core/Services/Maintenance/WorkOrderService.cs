@@ -1502,7 +1502,6 @@ public class WorkOrderService : IWorkOrderService
             }
 
             var currencyCode = await MaintenanceCurrencyResolver.ResolveBaseCurrencyCodeAsync(_unitOfWork, workOrder.TenantId);
-            var customer = await GetOrCreateArCustomerAsync(customerPartner, currencyCode);
             var lineItems = await BuildArInvoiceLineItemsAsync(workOrder);
 
             if (lineItems.Count == 0 || lineItems.Sum(li => li.Quantity * li.UnitPrice) <= 0)
@@ -1512,11 +1511,11 @@ public class WorkOrderService : IWorkOrderService
 
             return await _invoiceService.CreateAsync(new InvoiceCreateDto
             {
-                CustomerId = customer.Id,
+                CustomerId = customerPartner.Id,
                 InvoiceDate = DateTime.UtcNow.Date,
                 Reference = workOrder.WorkOrderNumber,
                 Notes = $"Maintenance work order {workOrder.WorkOrderNumber} generated from job card {workOrder.JobCard.JobCardNumber}.",
-                CurrencyCode = currencyCode,
+                CurrencyCode = string.IsNullOrWhiteSpace(customerPartner.Currency) ? currencyCode : customerPartner.Currency,
                 ExchangeRate = 1m,
                 DiscountAmount = 0m,
                 LineItems = lineItems
@@ -1527,64 +1526,6 @@ public class WorkOrderService : IWorkOrderService
             _logger.LogError(ex, "Error posting work order {WorkOrderId} billing to AR invoice", id);
             throw;
         }
-    }
-
-    private async Task<Customer> GetOrCreateArCustomerAsync(BusinessPartner customerPartner, string currencyCode)
-    {
-        var customerCode = !string.IsNullOrWhiteSpace(customerPartner.CustomerAccountNumber)
-            ? customerPartner.CustomerAccountNumber.Trim()
-            : customerPartner.PartnerCode.Trim();
-
-        var customer = await _unitOfWork.Repository<Customer>()
-            .FirstOrDefaultAsync(c => c.TenantId == customerPartner.TenantId
-                && !c.IsDeleted
-                && (c.CustomerCode == customerCode || c.CustomerCode == customerPartner.PartnerCode));
-
-        if (customer != null)
-        {
-            if (!string.Equals(customer.CurrencyCode, currencyCode, StringComparison.OrdinalIgnoreCase))
-            {
-                customer.CurrencyCode = currencyCode;
-                customer.UpdatedAt = DateTime.UtcNow;
-                customer.UpdatedBy = _currentUserService.UserName ?? "System";
-                await _unitOfWork.Repository<Customer>().UpdateAsync(customer);
-                await _unitOfWork.SaveChangesAsync();
-            }
-
-            return customer;
-        }
-
-        customer = new Customer
-        {
-            Id = Guid.NewGuid(),
-            TenantId = customerPartner.TenantId,
-            CustomerName = customerPartner.PartnerName,
-            CustomerCode = customerCode,
-            CustomerType = customerPartner.CustomerType ?? "Corporate",
-            ContactPerson = customerPartner.PrimaryContactName,
-            Email = customerPartner.PrimaryEmail,
-            Phone = customerPartner.PrimaryPhone,
-            Address = customerPartner.PhysicalAddress ?? customerPartner.MailingAddress,
-            City = customerPartner.PhysicalCity ?? customerPartner.MailingCity,
-            State = customerPartner.PhysicalState ?? customerPartner.MailingState,
-            PostalCode = customerPartner.PhysicalPostalCode ?? customerPartner.MailingPostalCode,
-            Country = customerPartner.PhysicalCountry ?? customerPartner.MailingCountry,
-            TaxId = customerPartner.TaxIdentificationNumber,
-            CreditLimit = customerPartner.CreditLimit ?? 0m,
-            OutstandingBalance = customerPartner.OutstandingBalance ?? 0m,
-            PaymentTermId = customerPartner.PaymentTermId,
-            DefaultArAccountId = customerPartner.DefaultArAccountId,
-            CurrencyCode = currencyCode,
-            Status = "Active",
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = _currentUserService.UserName ?? "System"
-        };
-
-        customer.PaymentTermsDays = TryParsePaymentTermsDays(customerPartner.PaymentTerms) ?? customer.PaymentTermsDays;
-
-        await _unitOfWork.Repository<Customer>().AddAsync(customer);
-        await _unitOfWork.SaveChangesAsync();
-        return customer;
     }
 
     private async Task<List<InvoiceLineItemCreateDto>> BuildArInvoiceLineItemsAsync(WorkOrder workOrder)
@@ -1671,17 +1612,6 @@ public class WorkOrderService : IWorkOrderService
             Unit = unit,
             DiscountPercentage = 0m
         });
-    }
-
-    private static int? TryParsePaymentTermsDays(string? paymentTerms)
-    {
-        if (string.IsNullOrWhiteSpace(paymentTerms))
-        {
-            return null;
-        }
-
-        var digits = new string(paymentTerms.Where(char.IsDigit).ToArray());
-        return int.TryParse(digits, out var days) && days > 0 ? days : null;
     }
 
     /// <summary>

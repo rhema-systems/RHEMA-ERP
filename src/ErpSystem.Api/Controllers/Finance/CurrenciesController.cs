@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -94,7 +95,7 @@ public class CurrenciesController : ControllerBase
     /// Create a new currency
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult<CurrencyDto>> Create([FromBody] CreateCurrencyDto dto)
     {
         if (!ModelState.IsValid)
@@ -117,7 +118,7 @@ public class CurrenciesController : ControllerBase
     /// Update a currency
     /// </summary>
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult<CurrencyDto>> Update(Guid id, [FromBody] UpdateCurrencyDto dto)
     {
         if (!ModelState.IsValid)
@@ -140,7 +141,7 @@ public class CurrenciesController : ControllerBase
     /// Delete a currency
     /// </summary>
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult> Delete(Guid id)
     {
         try
@@ -162,7 +163,7 @@ public class CurrenciesController : ControllerBase
     /// Set a currency as base currency
     /// </summary>
     [HttpPost("{id:guid}/set-base")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult> SetBaseCurrency(Guid id)
     {
         var result = await _currencyService.SetBaseCurrencyAsync(id);
@@ -177,7 +178,7 @@ public class CurrenciesController : ControllerBase
     /// Update exchange rate for a currency
     /// </summary>
     [HttpPut("{id:guid}/exchange-rate")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = FinancePermissions.ManageFxRates)]
     public async Task<ActionResult> UpdateExchangeRate(Guid id, [FromBody] UpdateExchangeRateDto dto)
     {
         if (!ModelState.IsValid)
@@ -239,7 +240,7 @@ public class CurrenciesController : ControllerBase
     /// Activates a currency, making it available for use in transactions.
     /// </summary>
     [HttpPatch("{code}/activate")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult<CurrencyDto>> ActivateCurrency(string code)
     {
         try
@@ -261,7 +262,7 @@ public class CurrenciesController : ControllerBase
     /// Deactivates a currency, preventing it from being used in new transactions.
     /// </summary>
     [HttpPatch("{code}/deactivate")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize(Policy = FinancePermissions.AdministerFinance)]
     public async Task<ActionResult<CurrencyDto>> DeactivateCurrency(string code)
     {
         try

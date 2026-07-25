@@ -35,14 +35,70 @@ namespace ErpSystem.Core.Enums
         Standard = 1,
 
         /// <summary>
-        /// Levies like NHIL, GETFL, COVID
+        /// Levies like NHIL and GETFund.
         /// </summary>
         Levy = 2,
 
         /// <summary>
         /// Withholding taxes (WHT)
         /// </summary>
-        Withholding = 3
+        Withholding = 3,
+
+        /// <summary>
+        /// Exempt supplies that do not create output or input tax postings.
+        /// </summary>
+        Exempt = 4,
+
+        /// <summary>
+        /// Zero-rated supplies reported as taxable at a zero percent rate.
+        /// </summary>
+        ZeroRated = 5,
+
+        /// <summary>
+        /// Non-taxable or out-of-scope supplies.
+        /// </summary>
+        OutOfScope = 6,
+
+        /// <summary>
+        /// VAT withholding or withholding VAT clearing treatment.
+        /// </summary>
+        VatWithholding = 7,
+
+        /// <summary>
+        /// Reverse-charge or import VAT placeholder categories.
+        /// </summary>
+        ReverseCharge = 8
+    }
+
+    /// <summary>
+    /// Canonical line-level tax treatment for AP and AR invoice lines.
+    /// </summary>
+    public enum TaxTreatment
+    {
+        /// <summary>
+        /// Standard-rated taxable supply.
+        /// </summary>
+        Standard = 1,
+
+        /// <summary>
+        /// Exempt supply. No input/output tax posting is created.
+        /// </summary>
+        Exempt = 2,
+
+        /// <summary>
+        /// Zero-rated taxable supply. Reportable as taxable at zero percent.
+        /// </summary>
+        ZeroRated = 3,
+
+        /// <summary>
+        /// Non-taxable or out-of-scope supply.
+        /// </summary>
+        OutOfScope = 4,
+
+        /// <summary>
+        /// Alias for out-of-scope/non-taxable supply.
+        /// </summary>
+        NonTaxable = OutOfScope
     }
 
     /// <summary>
@@ -57,14 +113,12 @@ namespace ErpSystem.Core.Enums
         BaseOnly = 1,
 
         /// <summary>
-        /// Tax on base + all previous taxes in the group
-        /// Example: VAT = (Base + NHIL + GETFL + COVID) * 15%
+        /// Tax on base + all previous taxes in the group.
         /// </summary>
         Cumulative = 2,
 
         /// <summary>
         /// Tax on base + specific previous taxes (defined in AppliesOnTaxCodes)
-        /// Example: VAT = (Base + NHIL + GETFL) * 15% (excludes COVID)
         /// </summary>
         Specific = 3
     }

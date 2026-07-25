@@ -47,6 +47,15 @@ namespace ErpSystem.Core.Interfaces.Finance
         Task<IReadOnlyList<SegmentLookupValueDto>> GetSegmentLookupValuesAsync(Guid segmentStructureId, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Retrieves valid account-backed values for a reporting dimension.
+        /// </summary>
+        Task<ReportingSegmentOptionsDto> GetReportingOptionsAsync(
+            Guid segmentStructureId,
+            string? search,
+            int take,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Adds a new lookup value to a segment.
         /// </summary>
         Task<SegmentLookupValueDto> AddSegmentLookupValueAsync(Guid segmentStructureId, SegmentLookupValueCreateDto dto, CancellationToken cancellationToken = default);

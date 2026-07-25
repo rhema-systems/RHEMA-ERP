@@ -1,6 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Maintenance; // For MaintenanceAsset integration
 using ErpSystem.Core.Enums;
 
@@ -18,6 +20,18 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         [MaxLength(1000)]
         public string? Description { get; set; }
+
+        [MaxLength(500)]
+        public string? Location { get; set; }
+
+        public Guid? CurrentCustodianId { get; set; }
+        public virtual Employee? CurrentCustodian { get; set; }
+
+        [MaxLength(500)]
+        public string? CurrentSegmentString { get; set; }
+
+        public Guid? CurrentSegmentLookupValueId { get; set; }
+        public virtual SegmentLookupValue? CurrentSegmentLookupValue { get; set; }
 
         [Required]
         public Guid FixedAssetCategoryId { get; set; }
@@ -39,6 +53,8 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal TaxAmount { get; set; } = 0;
+
+        public DateTime? CapitalizationDate { get; set; }
 
         /// <summary>
         /// Total capitalized value (Basis for depreciation)
@@ -70,6 +86,32 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public FixedAssetStatus Status { get; set; } = FixedAssetStatus.Draft;
         public DateTime? DisposalDate { get; set; }
 
+        [MaxLength(3)]
+        public string FunctionalCurrencyCode { get; set; } = "GHS";
+
+        [MaxLength(3)]
+        public string? TransactionCurrencyCode { get; set; }
+
+        [Column(TypeName = "decimal(18,6)")]
+        public decimal? ExchangeRate { get; set; }
+
+        public Guid? ExchangeRateId { get; set; }
+
+        public DateTime? ExchangeRateDate { get; set; }
+
+        [MaxLength(50)]
+        public string? SourceDocumentType { get; set; }
+
+        public Guid? SourceDocumentId { get; set; }
+
+        public Guid? SourceDocumentLineId { get; set; }
+
+        public Guid? JournalEntryId { get; set; }
+
+        public Guid? PostingEventId { get; set; }
+
+        public DateTime? CapitalizedAt { get; set; }
+
         // --- Integration (Link to Operations/Maintenance) ---
         
         public Guid? MaintenanceAssetId { get; set; }
@@ -83,6 +125,7 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public string? SerialNumber { get; set; } // Redundant if linked, but useful if standalone
 
         // --- Navigation ---
+        public virtual ICollection<FixedAssetBookValue> BookValues { get; set; } = new List<FixedAssetBookValue>();
         public virtual ICollection<AssetDepreciationSchedule> DepreciationSchedules { get; set; } = new List<AssetDepreciationSchedule>();
         public virtual ICollection<AssetTransaction> Transactions { get; set; } = new List<AssetTransaction>();
         public virtual ICollection<AssetValuation> Valuations { get; set; } = new List<AssetValuation>();

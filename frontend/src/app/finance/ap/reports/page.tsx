@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
+    AlertCircle,
     Calendar as CalendarIcon,
     Download,
-    FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,9 +24,15 @@ import {
 } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { accountsPayableService } from '@/services/accountsPayableService';
+import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PartnerStatementReport } from '@/components/finance/PartnerStatementReport';
+import type {
+    DetailedLedgerReport,
+    LedgerPartnerOption,
+} from '@/components/finance/PartnerDetailedLedgerReport';
 import {
     Table,
     TableBody,
@@ -34,9 +41,36 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+
+const REPORT_TABS = ['aging', 'cash', 'statements'] as const;
+const supplierPartnerTypes = new Set(['supplier', 'contractor', 'both']);
+
+const isSupplierPartner = (partner: BusinessPartnerDto) =>
+    supplierPartnerTypes.has((partner.partnerType ?? '').toLowerCase());
+
+function getReportTab(tab: string | null) {
+    return REPORT_TABS.find((reportTab) => reportTab === tab) ?? 'aging';
+}
+
+function getReportErrorMessage(error: unknown) {
+    const message = error instanceof Error ? error.message : '';
+
+    if (message.includes('SubledgerUnappliedSettlementBalances')) {
+        return 'The AP settlement read-model schema is incomplete. The database is missing SubledgerUnappliedSettlementBalances; apply the pending finance settlement migration before rerunning this report.';
+    }
+
+    return message || 'The report could not be loaded.';
+}
 
 export default function ApReportsPage() {
-    const [activeTab, setActiveTab] = useState('aging');
+    const searchParams = useSearchParams();
+    const tabParam = searchParams.get('tab');
+    const [activeTab, setActiveTab] = useState(() => getReportTab(tabParam));
+
+    useEffect(() => {
+        setActiveTab(getReportTab(tabParam));
+    }, [tabParam]);
 
     return (
         <div className="space-y-8 p-8 max-w-[1600px] mx-auto">
@@ -47,7 +81,7 @@ export default function ApReportsPage() {
                 </p>
             </div>
 
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'aging' | 'cash' | 'statements')} className="space-y-4">
                 <TabsList>
                     <TabsTrigger value="aging">AP Aging Analysis</TabsTrigger>
                     <TabsTrigger value="cash">Cash Requirements</TabsTrigger>
@@ -73,7 +107,7 @@ export default function ApReportsPage() {
 function ApAgingReportView() {
     const [asOfDate, setAsOfDate] = useState<Date>(new Date());
 
-    const { data: agingReport, isLoading } = useQuery({
+    const { data: agingReport, isLoading, isError, error } = useQuery({
         queryKey: ['ap-aging-report', asOfDate],
         queryFn: () => accountsPayableService.getAgingReport(format(asOfDate, 'yyyy-MM-dd')),
     });
@@ -121,6 +155,12 @@ function ApAgingReportView() {
                         <Skeleton className="h-12 w-full" />
                         <Skeleton className="h-64 w-full" />
                     </div>
+                ) : isError ? (
+                    <Alert variant="destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Unable to load AP aging</AlertTitle>
+                        <AlertDescription>{getReportErrorMessage(error)}</AlertDescription>
+                    </Alert>
                 ) : !agingReport ? (
                     <div className="text-center py-12 text-muted-foreground">No data available</div>
                 ) : (
@@ -130,31 +170,31 @@ function ApAgingReportView() {
                             <Card className="bg-muted/30">
                                 <CardContent className="p-4 text-center">
                                     <div className="text-sm font-medium text-muted-foreground mb-1">Current</div>
-                                    <div className="text-xl font-bold text-green-600">{formatCurrency(agingReport.current)}</div>
+                                    <div className="text-xl font-bold text-green-600">{formatCurrency(agingReport.current, agingReport.currencyCode)}</div>
                                 </CardContent>
                             </Card>
                             <Card className="bg-muted/30">
                                 <CardContent className="p-4 text-center">
                                     <div className="text-sm font-medium text-muted-foreground mb-1">1 - 30 Days</div>
-                                    <div className="text-xl font-bold text-amber-500">{formatCurrency(agingReport.thirtyDays)}</div>
+                                    <div className="text-xl font-bold text-amber-500">{formatCurrency(agingReport.thirtyDays, agingReport.currencyCode)}</div>
                                 </CardContent>
                             </Card>
                             <Card className="bg-muted/30">
                                 <CardContent className="p-4 text-center">
                                     <div className="text-sm font-medium text-muted-foreground mb-1">31 - 60 Days</div>
-                                    <div className="text-xl font-bold text-amber-600">{formatCurrency(agingReport.sixtyDays)}</div>
+                                    <div className="text-xl font-bold text-amber-600">{formatCurrency(agingReport.sixtyDays, agingReport.currencyCode)}</div>
                                 </CardContent>
                             </Card>
                             <Card className="bg-muted/30">
                                 <CardContent className="p-4 text-center">
                                     <div className="text-sm font-medium text-muted-foreground mb-1">61 - 90+ Days</div>
-                                    <div className="text-xl font-bold text-red-600">{formatCurrency(agingReport.ninetyPlusDays)}</div>
+                                    <div className="text-xl font-bold text-red-600">{formatCurrency(agingReport.ninetyPlusDays, agingReport.currencyCode)}</div>
                                 </CardContent>
                             </Card>
                             <Card className="bg-primary/5 border-primary/20">
                                 <CardContent className="p-4 text-center">
                                     <div className="text-sm font-medium text-primary mb-1">Total Outstanding</div>
-                                    <div className="text-2xl font-black text-primary">{formatCurrency(agingReport.totalOutstanding)}</div>
+                                    <div className="text-2xl font-black text-primary">{formatCurrency(agingReport.totalOutstanding, agingReport.currencyCode)}</div>
                                     <div className="text-xs text-muted-foreground mt-1">{agingReport.totalSuppliers} suppliers</div>
                                 </CardContent>
                             </Card>
@@ -180,11 +220,11 @@ function ApAgingReportView() {
                                                 {supplier.supplierName}
                                                 <div className="text-xs text-muted-foreground">{supplier.invoiceCount} invoices</div>
                                             </TableCell>
-                                            <TableCell className="text-right">{supplier.current > 0 ? formatCurrency(supplier.current) : '-'}</TableCell>
-                                            <TableCell className="text-right">{supplier.thirtyDays > 0 ? formatCurrency(supplier.thirtyDays) : '-'}</TableCell>
-                                            <TableCell className="text-right">{supplier.sixtyDays > 0 ? formatCurrency(supplier.sixtyDays) : '-'}</TableCell>
-                                            <TableCell className="text-right">{supplier.ninetyPlusDays > 0 ? formatCurrency(supplier.ninetyPlusDays) : '-'}</TableCell>
-                                            <TableCell className="text-right font-bold text-primary">{formatCurrency(supplier.totalOutstanding)}</TableCell>
+                                            <TableCell className="text-right">{supplier.current > 0 ? formatCurrency(supplier.current, agingReport.currencyCode) : '-'}</TableCell>
+                                            <TableCell className="text-right">{supplier.thirtyDays > 0 ? formatCurrency(supplier.thirtyDays, agingReport.currencyCode) : '-'}</TableCell>
+                                            <TableCell className="text-right">{supplier.sixtyDays > 0 ? formatCurrency(supplier.sixtyDays, agingReport.currencyCode) : '-'}</TableCell>
+                                            <TableCell className="text-right">{supplier.ninetyPlusDays > 0 ? formatCurrency(supplier.ninetyPlusDays, agingReport.currencyCode) : '-'}</TableCell>
+                                            <TableCell className="text-right font-bold text-primary">{formatCurrency(supplier.totalOutstanding, agingReport.currencyCode)}</TableCell>
                                         </TableRow>
                                     ))}
                                     {(!agingReport.supplierDetails || agingReport.supplierDetails.length === 0) && (
@@ -197,11 +237,11 @@ function ApAgingReportView() {
                                     {agingReport.supplierDetails && agingReport.supplierDetails.length > 0 && (
                                         <TableRow className="bg-muted/50 font-bold">
                                             <TableCell>Total</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(agingReport.current)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(agingReport.thirtyDays)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(agingReport.sixtyDays)}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(agingReport.ninetyPlusDays)}</TableCell>
-                                            <TableCell className="text-right text-primary text-lg">{formatCurrency(agingReport.totalOutstanding)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(agingReport.current, agingReport.currencyCode)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(agingReport.thirtyDays, agingReport.currencyCode)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(agingReport.sixtyDays, agingReport.currencyCode)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(agingReport.ninetyPlusDays, agingReport.currencyCode)}</TableCell>
+                                            <TableCell className="text-right text-primary text-lg">{formatCurrency(agingReport.totalOutstanding, agingReport.currencyCode)}</TableCell>
                                         </TableRow>
                                     )}
                                 </TableBody>
@@ -272,11 +312,11 @@ function CashRequirementsView() {
                         <div className="flex gap-8 mb-6">
                             <div>
                                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Total Payable</h3>
-                                <p className="text-3xl font-bold">{formatCurrency(forecastReport.totalPayable)}</p>
+                                <p className="text-3xl font-bold">{formatCurrency(forecastReport.totalPayable, forecastReport.currencyCode)}</p>
                             </div>
                             <div>
                                 <h3 className="text-sm font-semibold text-red-500 uppercase tracking-wider">Overdue</h3>
-                                <p className="text-3xl font-bold text-red-600">{formatCurrency(forecastReport.overdueAmount)}</p>
+                                <p className="text-3xl font-bold text-red-600">{formatCurrency(forecastReport.overdueAmount, forecastReport.currencyCode)}</p>
                             </div>
                         </div>
 
@@ -299,8 +339,8 @@ function CashRequirementsView() {
                                                 {format(new Date(period.periodStart), 'MMM dd')} - {format(new Date(period.periodEnd), 'MMM dd, yyyy')}
                                             </TableCell>
                                             <TableCell className="text-right">{period.invoiceCount}</TableCell>
-                                            <TableCell className="text-right text-green-600">{period.discountAvailable > 0 ? formatCurrency(period.discountAvailable) : '-'}</TableCell>
-                                            <TableCell className="text-right font-medium">{formatCurrency(period.amountDue)}</TableCell>
+                                            <TableCell className="text-right text-green-600">{period.discountAvailable > 0 ? formatCurrency(period.discountAvailable, forecastReport.currencyCode) : '-'}</TableCell>
+                                            <TableCell className="text-right font-medium">{formatCurrency(period.amountDue, forecastReport.currencyCode)}</TableCell>
                                         </TableRow>
                                     ))}
                                     {(!forecastReport.periods || forecastReport.periods.length === 0) && (
@@ -321,19 +361,90 @@ function CashRequirementsView() {
 }
 
 function SupplierStatementsView() {
+    const [partners, setPartners] = useState<LedgerPartnerOption[]>([]);
+    const [partnersLoading, setPartnersLoading] = useState(true);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadPartners = async () => {
+            setPartnersLoading(true);
+            try {
+                const allPartners = await businessPartnerService.getAllPartnersForDropdown();
+                if (!isMounted) return;
+
+                setPartners(
+                    allPartners
+                        .filter(isSupplierPartner)
+                        .map((partner) => ({
+                            id: partner.id,
+                            code: partner.partnerCode,
+                            name: partner.partnerName,
+                            currencyCode: partner.currency,
+                        }))
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                );
+            } catch (error) {
+                console.error('Failed to load supplier statement partners', error);
+                if (isMounted) setPartners([]);
+            } finally {
+                if (isMounted) setPartnersLoading(false);
+            }
+        };
+
+        loadPartners();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Supplier Statements</CardTitle>
-                <CardDescription>Generate and download account statements for suppliers</CardDescription>
-            </CardHeader>
-            <CardContent className="text-center py-12 text-muted-foreground">
-                <FileText className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                <p>Select a supplier and date range to generate a statement.</p>
-                <div className="max-w-md mx-auto mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900 rounded-lg text-sm text-yellow-800 dark:text-yellow-200">
-                    PDF Generation coming soon. Please use individual Supplier Details page to view billing history.
-                </div>
-            </CardContent>
-        </Card>
+        <PartnerStatementReport
+            title="Supplier Statements"
+            description="Generate payable statements of account with opening balance, period movements, and closing balance."
+            partnerLabel="Supplier"
+            partnerPluralLabel="Suppliers"
+            currencyToggleLabel="Show transactions in supplier currency where available"
+            exportFilePrefix="supplier-statement"
+            partners={partners}
+            partnersLoading={partnersLoading}
+            loadReport={async (params): Promise<DetailedLedgerReport> => {
+                const report = await accountsPayableService.getSupplierDetailedLedger({
+                    fromDate: params.fromDate,
+                    toDate: params.toDate,
+                    supplierIds: params.partnerIds,
+                    showSupplierCurrency: params.showPartnerCurrency,
+                });
+
+                return {
+                    fromDate: report.fromDate,
+                    toDate: report.toDate,
+                    currencyCode: report.currencyCode,
+                    totalOpeningBalance: report.totalOpeningBalance,
+                    totalDebits: report.totalDebits,
+                    totalCredits: report.totalCredits,
+                    totalClosingBalance: report.totalClosingBalance,
+                    warnings: report.warnings ?? [],
+                    accounts: report.suppliers.map((supplier) => ({
+                        id: supplier.businessPartnerId ?? supplier.supplierId,
+                        code: supplier.supplierCode,
+                        name: supplier.supplierName,
+                        currencyCode: supplier.currencyCode,
+                        openingBalance: supplier.openingBalance,
+                        totalDebits: supplier.totalDebits,
+                        totalCredits: supplier.totalCredits,
+                        closingBalance: supplier.closingBalance,
+                        lines: supplier.lines,
+                    })),
+                };
+            }}
+            downloadCsv={(params) => accountsPayableService.downloadSupplierStatementCsv({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                supplierIds: params.partnerIds,
+                showSupplierCurrency: params.showPartnerCurrency,
+            })}
+        />
     )
 }

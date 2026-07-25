@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -26,6 +27,8 @@ public class TenderBidService : ITenderBidService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TenderBidService> _logger;
     private readonly IAppEventBus _appEventBus;
+    private readonly IProcurementTenderControlService _tenderControlService;
+    private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
 
     public TenderBidService(
         ITenderBidRepository bidRepository,
@@ -43,6 +46,8 @@ public class TenderBidService : ITenderBidService
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         IAppEventBus appEventBus,
+        IProcurementTenderControlService tenderControlService,
+        IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
         ILogger<TenderBidService> logger)
     {
         _bidRepository = bidRepository;
@@ -60,6 +65,8 @@ public class TenderBidService : ITenderBidService
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _appEventBus = appEventBus;
+        _tenderControlService = tenderControlService;
+        _exceptionalSourcingControlService = exceptionalSourcingControlService;
         _logger = logger;
     }
 
@@ -277,7 +284,8 @@ public class TenderBidService : ITenderBidService
                 throw new InvalidOperationException("Bids can only be submitted for published tenders");
             }
 
-            if (DateTime.UtcNow > tender.SubmissionDeadline)
+            var isNctOrIct = await _tenderControlService.IsNctOrIctAsync(tender.Id);
+            if (!isNctOrIct && DateTime.UtcNow > tender.SubmissionDeadline)
             {
                 throw new InvalidOperationException("Tender submission deadline has passed");
             }
@@ -300,6 +308,8 @@ public class TenderBidService : ITenderBidService
             {
                 throw new InvalidOperationException("No business partner found for the current user. Please complete your business partner registration first.");
             }
+
+            await _exceptionalSourcingControlService.EnsureBidSupplierAllowedAsync(tender.Id, businessPartner.Id);
 
             // Validate supplier eligibility for this tender
             var validationResult = await _supplierValidationService.ValidateForTenderAsync(
@@ -544,7 +554,10 @@ public class TenderBidService : ITenderBidService
             var tender = await _tenderRepository.GetByIdAsync(bid.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {bid.TenderId} not found");
 
-            if (DateTime.UtcNow > tender.SubmissionDeadline)
+            var submittedAtUtc = DateTime.UtcNow;
+            await _exceptionalSourcingControlService.EnsureBidSupplierAllowedAsync(tender.Id, bid.BusinessPartnerId);
+            var isNctOrIct = await _tenderControlService.IsNctOrIctAsync(tender.Id);
+            if (!isNctOrIct && submittedAtUtc > tender.SubmissionDeadline)
             {
                 throw new InvalidOperationException("Tender submission deadline has passed");
             }
@@ -564,16 +577,26 @@ public class TenderBidService : ITenderBidService
             }
 
             bid.Status = "Submitted";
-            bid.SubmittedDate = DateTime.UtcNow;
-            bid.UpdatedAt = DateTime.UtcNow;
+            bid.SubmittedDate = submittedAtUtc;
+            bid.UpdatedAt = submittedAtUtc;
 
             await _bidRepository.UpdateAsync(bid);
+            var documents = await _bidDocumentRepository.GetByBidIdAsync(id);
+            var disposition = await _tenderControlService.RecordSubmissionAsync(
+                bid, bid.SubmittedDate, Guid.NewGuid().ToString("N"));
+            if (disposition == ProcurementTenderSubmissionDisposition.LateRejected)
+            {
+                bid.Status = "Rejected";
+                bid.RejectionReason = "Late submission rejected by the statutory NCT/ICT deadline control.";
+                await _bidRepository.UpdateAsync(bid);
+            }
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Submitted bid {BidId}", id);
 
-            // Send notification
-            await _notificationService.SendBidSubmittedNotificationAsync(id);
+            // Send notification only for accepted submissions.
+            if (disposition != ProcurementTenderSubmissionDisposition.LateRejected)
+                await _notificationService.SendBidSubmittedNotificationAsync(id);
 
             // Publish events for admin-configurable notification topics (best-effort).
             try
@@ -618,8 +641,6 @@ public class TenderBidService : ITenderBidService
                 _logger.LogWarning(ex, "Failed to publish Bid.Submitted entity activity event for bid {BidId}", bid.Id);
             }
 
-            var documents = await _bidDocumentRepository.GetByBidIdAsync(id);
-
             return MapToDetailDto(bid, tender, items, documents);
         }
         catch (Exception ex)
@@ -663,6 +684,10 @@ public class TenderBidService : ITenderBidService
         {
             var bid = await _bidRepository.GetWithAllRelatedDataAsync(id)
                 ?? throw new InvalidOperationException($"Bid with ID {id} not found");
+            if (await _tenderControlService.IsNctOrIctAsync(bid.TenderId))
+                throw new ProcurementTenderControlConflictException(
+                    "TENDER_STATUTORY_OPENING_REQUIRED",
+                    "NCT/ICT bids can be opened only through the signed public-opening control.");
 
             if (bid.Status != "Submitted")
             {
@@ -696,6 +721,10 @@ public class TenderBidService : ITenderBidService
     {
         try
         {
+            if (await _tenderControlService.IsNctOrIctAsync(tenderId))
+                throw new ProcurementTenderControlConflictException(
+                    "TENDER_STATUTORY_OPENING_REQUIRED",
+                    "NCT/ICT bids can be opened only through the signed public-opening control.");
             var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
             var submittedBids = bids.Where(b => b.Status == "Submitted").ToList();
 

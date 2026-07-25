@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Sales;
@@ -19,8 +20,9 @@ public class ReturnOrder : DocumentEntity
     public Guid? DeliveryNoteId { get; set; }
     public virtual DeliveryNote? DeliveryNote { get; set; }
 
-    public Guid CustomerId { get; set; }
-    public virtual Customer Customer { get; set; } = null!;
+    // Returns participate in AR and must use the same tenant-scoped customer identity as sales orders.
+    public Guid BusinessPartnerId { get; set; }
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
 
     public ReturnOrderStatus ReturnStatus { get; set; } = ReturnOrderStatus.Requested;
     public ReturnReasonCode ReasonCode { get; set; }
@@ -97,8 +99,9 @@ public class ReturnOrderLine : BaseEntity
 /// </summary>
 public class CreditNote : DocumentEntity
 {
-    public Guid CustomerId { get; set; }
-    public virtual Customer Customer { get; set; } = null!;
+    // This is the AR counterparty. Do not use the legacy Sales Customer entity for Finance settlement.
+    public Guid BusinessPartnerId { get; set; }
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
 
     public Guid? ReturnOrderId { get; set; }
     public virtual ReturnOrder? ReturnOrder { get; set; }
@@ -114,6 +117,17 @@ public class CreditNote : DocumentEntity
     // Application
     public DateTime? AppliedDate { get; set; }
     public Guid? AppliedToInvoiceId { get; set; }
+
+    // GL Posting
+    public Guid? JournalEntryId { get; set; }
+
+    // Posted credit notes are corrected by a separate, engine-posted reversal. The original amount,
+    // lines and source links remain immutable for audit and settlement rebuilds.
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public DateTime? ReversedAt { get; set; }
+    [StringLength(500)]
+    public string? ReversalReason { get; set; }
 
     // Multi-tenant
     public Guid TenantId { get; set; }
@@ -160,8 +174,9 @@ public class CreditNoteLine : BaseEntity
 /// </summary>
 public class Refund : DocumentEntity
 {
-    public Guid CustomerId { get; set; }
-    public virtual Customer Customer { get; set; } = null!;
+    // Refunds retain the canonical AR counterparty used by their credit note or return order.
+    public Guid BusinessPartnerId { get; set; }
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
 
     public Guid? CreditNoteId { get; set; }
     public virtual CreditNote? CreditNote { get; set; }

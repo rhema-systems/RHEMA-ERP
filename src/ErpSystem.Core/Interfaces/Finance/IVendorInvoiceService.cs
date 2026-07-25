@@ -60,6 +60,11 @@ public interface IVendorInvoiceService
     Task<VendorInvoiceDto> ApproveAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Posts an approved vendor invoice to the general ledger through the central finance posting engine.
+    /// </summary>
+    Task<VendorInvoiceDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Rejects a pending vendor invoice with required comments.
     /// </summary>
     Task<VendorInvoiceDto> RejectAsync(Guid id, string comments, CancellationToken cancellationToken = default);

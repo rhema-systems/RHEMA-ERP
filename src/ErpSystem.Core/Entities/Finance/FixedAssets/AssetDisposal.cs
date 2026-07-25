@@ -15,6 +15,17 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Required]
         public DateTime DisposalDate { get; set; }
 
+        public DateTime? AccountingDate { get; set; }
+
+        public Guid? FiscalPeriodId { get; set; }
+        public virtual FiscalPeriod? FiscalPeriod { get; set; }
+
+        public Guid? AccountingBookId { get; set; }
+        public virtual AccountingBook? AccountingBook { get; set; }
+
+        [MaxLength(20)]
+        public string BookClassification { get; set; } = "IFRS";
+
         [Required]
         public DisposalType DisposalType { get; set; } = DisposalType.Sale;
 
@@ -31,6 +42,27 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal DisposalCost { get; set; } = 0; // Costs to sell/remove
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal NetProceeds { get; set; } = 0;
+
+        [MaxLength(3)]
+        public string ProceedsCurrencyCode { get; set; } = "GHS";
+
+        public Guid? ProceedsAccountId { get; set; }
+        public virtual Account? ProceedsAccount { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal CostAtDisposal { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal AccumulatedDepreciationAtDisposal { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal AccumulatedImpairmentAtDisposal { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal RevaluationSurplusAtDisposal { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal NetBookValueAtDisposal { get; set; }
@@ -53,10 +85,27 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public DateTime? ApprovedAt { get; set; }
 
+        public DateTime? CompletedAt { get; set; }
+
+        public DateTime? PostedAt { get; set; }
+
+        public DateTime? FailedAt { get; set; }
+
         [MaxLength(1000)]
         public string? Comments { get; set; }
 
+        [MaxLength(1000)]
+        public string? FailureReason { get; set; }
+
         public Guid? JournalEntryId { get; set; }
         public virtual JournalEntry? JournalEntry { get; set; }
+
+        public Guid? PostingEventId { get; set; }
+        public virtual FinancePostingEvent? PostingEvent { get; set; }
+
+        public Guid? WorkflowInstanceId { get; set; }
+
+        [MaxLength(150)]
+        public string? IdempotencyKey { get; set; }
     }
 }

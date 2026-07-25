@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Services.Projects;
 using ErpSystem.Data;
@@ -23,6 +24,7 @@ public class SalesAgreementService : ISalesAgreementService
     private readonly ApplicationDbContext _context;
     private readonly ILogger<SalesAgreementService> _logger;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IDocumentNumberingService _documentNumberingService;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
 
@@ -30,12 +32,15 @@ public class SalesAgreementService : ISalesAgreementService
         ApplicationDbContext context,
         ILogger<SalesAgreementService> logger,
         ICurrentUserService currentUserService,
+        IDocumentNumberingService documentNumberingService,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry)
     {
         _context = context;
         _logger = logger;
         _currentUserService = currentUserService;
+        // Keep document numbering and workflow adapters together: agreements are numbered by Sales, then governed by workflow.
+        _documentNumberingService = documentNumberingService;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
     }
@@ -574,10 +579,12 @@ public class SalesAgreementService : ISalesAgreementService
 
     private async Task<string> GenerateDocumentNumberAsync()
     {
-        var year = DateTime.UtcNow.Year;
-        var count = await _context.Set<SalesAgreement>()
-            .CountAsync(a => a.CreatedAt.Year == year);
-        return $"SA-{year}-{(count + 1):D5}";
+        return await _documentNumberingService.GenerateAsync(
+            DocumentNumberingModules.Sales,
+            SalesDocumentTypes.SalesAgreement,
+            _currentUserService.TenantId,
+            DateTime.UtcNow,
+            nameof(SalesAgreement));
     }
 
     private async Task SyncLinkedProjectUnitsAsync(SalesAgreement agreement)

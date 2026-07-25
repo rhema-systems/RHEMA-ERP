@@ -5,10 +5,12 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Core.Services.Workflow;
@@ -48,6 +50,7 @@ public class WorkflowController : ControllerBase
     private readonly IAppEventBus _appEventBus;
     private readonly IFileStorageService _fileStorageService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IProcurementRequisitionBudgetControlService _requisitionBudgetControlService;
     private readonly ILogger<WorkflowController> _logger;
 
     public WorkflowController(
@@ -70,6 +73,7 @@ public class WorkflowController : ControllerBase
         IAppEventBus appEventBus,
         IFileStorageService fileStorageService,
         ICurrentUserService currentUserService,
+        IProcurementRequisitionBudgetControlService requisitionBudgetControlService,
         ILogger<WorkflowController> logger)
     {
         _workflowEngine = workflowEngine;
@@ -91,6 +95,7 @@ public class WorkflowController : ControllerBase
         _appEventBus = appEventBus;
         _fileStorageService = fileStorageService;
         _currentUserService = currentUserService;
+        _requisitionBudgetControlService = requisitionBudgetControlService;
         _logger = logger;
     }
 
@@ -1349,7 +1354,63 @@ public class WorkflowController : ControllerBase
                 : request.Reason.Trim();
 
             var canonicalEntityType = entityTypeRecord.Code ?? entityTypeRecord.Name ?? entityType;
-            var result = await _workflowService.RecallWorkflowAsync(canonicalEntityType, entityId, currentUserId.Value, reason);
+            var isPurchaseRequisition = NormalizeEntityTypeKey(canonicalEntityType) is
+                "PURCHASEREQUISITION" or "PR";
+            WorkflowExecutionResult? result = null;
+            var entityStatusUpdated = false;
+            if (isPurchaseRequisition && _db.Database.IsRelational())
+            {
+                var executionStrategy = _db.Database.CreateExecutionStrategy();
+                await executionStrategy.ExecuteAsync(async () =>
+                {
+                    await using var recallTransaction = await _db.Database.BeginTransactionAsync(HttpContext.RequestAborted);
+                    result = await _workflowService.RecallWorkflowAsync(
+                        canonicalEntityType,
+                        entityId,
+                        currentUserId.Value,
+                        reason);
+                    if (!result.Success)
+                    {
+                        await recallTransaction.RollbackAsync(HttpContext.RequestAborted);
+                        return;
+                    }
+
+                    entityStatusUpdated = await TryApplyRecallStatusAsync(
+                        canonicalEntityType,
+                        entityId,
+                        currentUserId.Value,
+                        reason,
+                        HttpContext.RequestAborted);
+                    await recallTransaction.CommitAsync(HttpContext.RequestAborted);
+                });
+            }
+            else
+            {
+                result = await _workflowService.RecallWorkflowAsync(
+                    canonicalEntityType,
+                    entityId,
+                    currentUserId.Value,
+                    reason);
+                if (result.Success)
+                {
+                    entityStatusUpdated = await TryApplyRecallStatusAsync(
+                        canonicalEntityType,
+                        entityId,
+                        currentUserId.Value,
+                        reason,
+                        HttpContext.RequestAborted);
+                }
+            }
+
+            if (result is null)
+            {
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = "Workflow recall did not return an execution result"
+                });
+            }
+
             if (!result.Success)
             {
                 return BadRequest(new
@@ -1358,13 +1419,6 @@ public class WorkflowController : ControllerBase
                     message = result.Message
                 });
             }
-
-            var entityStatusUpdated = await TryApplyRecallStatusAsync(
-                canonicalEntityType,
-                entityId,
-                currentUserId.Value,
-                reason,
-                HttpContext.RequestAborted);
 
             return Ok(new
             {
@@ -1376,6 +1430,22 @@ public class WorkflowController : ControllerBase
                     entityStatusUpdated
                 }
             });
+        }
+        catch (ProcurementRequisitionBudgetAuthorizationException ex)
+        {
+            return StatusCode(403, new { success = false, code = "PR_BUDGET_RELEASE_FORBIDDEN", message = ex.Message });
+        }
+        catch (ProcurementRequisitionBudgetNotFoundException ex)
+        {
+            return NotFound(new { success = false, code = ex.Code, message = ex.Message });
+        }
+        catch (ProcurementRequisitionBudgetConflictException ex)
+        {
+            return Conflict(new { success = false, code = ex.Code, message = ex.Message });
+        }
+        catch (ProcurementRequisitionBudgetValidationException ex)
+        {
+            return UnprocessableEntity(new { success = false, code = ex.Code, message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -1674,8 +1744,36 @@ public class WorkflowController : ControllerBase
             return false;
         }
 
-        adapter.ApplyRecallOutcome(entity, userId, reason);
-        await _db.SaveChangesAsync(cancellationToken);
+        if (entity is PurchaseRequisition requisition)
+        {
+            await using var transaction = _db.Database.IsRelational() && _db.Database.CurrentTransaction is null
+                ? await _db.Database.BeginTransactionAsync(cancellationToken)
+                : null;
+            try
+            {
+                adapter.ApplyRecallOutcome(entity, userId, reason);
+                await _requisitionBudgetControlService.ReleaseAsync(
+                    requisition,
+                    string.IsNullOrWhiteSpace(reason) ? "Purchase requisition workflow recalled." : reason,
+                    "procurement.requisition.create",
+                    HttpContext.TraceIdentifier,
+                    cancellationToken);
+                await _db.SaveChangesAsync(cancellationToken);
+                if (transaction is not null)
+                    await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                if (transaction is not null)
+                    await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+        else
+        {
+            adapter.ApplyRecallOutcome(entity, userId, reason);
+            await _db.SaveChangesAsync(cancellationToken);
+        }
         return true;
     }
 
@@ -2712,6 +2810,7 @@ public class WorkflowController : ControllerBase
             IsRequired = step.IsRequired,
             RequiredRole = step.RequiredRole,
             EstimatedHours = step.EstimatedHours,
+            // Use the guarded deserializer because workflow JSON may come from older saved definitions.
             Configuration = DeserializeWorkflowJson<WorkflowStepConfigurationDto>(step.Configuration)
         };
     }
@@ -2730,6 +2829,7 @@ public class WorkflowController : ControllerBase
             Description = transition.Description,
             IsDefault = transition.IsDefault,
             Priority = transition.Priority,
+            // Keep transition deserialization non-fatal for legacy definitions edited by other modules.
             Condition = DeserializeWorkflowJson<WorkflowConditionDto>(transition.Condition)
         };
     }
