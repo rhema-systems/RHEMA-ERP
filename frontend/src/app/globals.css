@@ -275,6 +275,60 @@
   body.printing-payroll-payslip .payroll-payslip-no-print {
     display: none !important;
   }
+
+  body.printing-finance-po > * {
+    visibility: hidden;
+  }
+
+  body.printing-finance-grv > * {
+    visibility: hidden;
+  }
+
+  body.printing-finance-po .finance-po-print-root,
+  body.printing-finance-po .finance-po-print-root * {
+    visibility: visible;
+  }
+
+  body.printing-finance-grv .finance-grv-print-root,
+  body.printing-finance-grv .finance-grv-print-root * {
+    visibility: visible;
+  }
+
+  body.printing-finance-po .finance-po-no-print {
+    display: none !important;
+  }
+
+  body.printing-finance-grv .finance-grv-no-print {
+    display: none !important;
+  }
+
+  body.printing-finance-po .finance-po-print-root {
+    position: absolute;
+    inset: 0;
+    display: block !important;
+    box-sizing: border-box;
+    width: 210mm;
+    min-height: 297mm;
+    max-width: none;
+    padding: 12mm !important;
+    overflow: visible;
+    background: white !important;
+    color: black !important;
+  }
+
+  body.printing-finance-grv .finance-grv-print-root {
+    position: absolute;
+    inset: 0;
+    display: block !important;
+    box-sizing: border-box;
+    width: 210mm;
+    min-height: 297mm;
+    max-width: none;
+    padding: 12mm !important;
+    overflow: visible;
+    background: white !important;
+    color: black !important;
+  }
 }
 @keyframes mobile-scanner-sweep {
   0%, 100% {

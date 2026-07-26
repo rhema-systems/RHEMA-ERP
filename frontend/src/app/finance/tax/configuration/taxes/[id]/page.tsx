@@ -1,39 +1,42 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { ArrowLeft, Loader2, Save, MoreHorizontal } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { useRouter } from 'next/navigation';
 import { taxDataService } from '@/services/finance/tax-data.service';
-import { TaxCategory, TaxApplicability } from '@/types/tax';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import { TaxFormDialog } from '@/components/finance/tax/TaxFormDialog';
 import type { Tax } from '@/types/tax';
+import type { Account } from '@/types/finance';
 
 interface PageProps {
-    params: {
-        id: string;
-    };
+    params: Promise<{ id: string }>;
 }
 
 export default function TaxDetailPage({ params }: PageProps) {
+    const { id } = React.use(params);
     const router = useRouter();
     const [isLoading, setIsLoading] = useState(true);
-    const [isSaving, setIsSaving] = useState(false);
+    const [accountsLoading, setAccountsLoading] = useState(true);
+    const [editOpen, setEditOpen] = useState(false);
     const [tax, setTax] = useState<Tax | null>(null);
+    const [accounts, setAccounts] = useState<Account[]>([]);
 
     useEffect(() => {
         loadTax();
-    }, [params.id]);
+        loadAccounts();
+    }, [id]);
 
     const loadTax = async () => {
         try {
             setIsLoading(true);
-            const data = await taxDataService.getTaxById(params.id);
+            const data = await taxDataService.getTaxById(id);
             setTax(data);
         } catch (error) {
             console.error('Failed to load tax:', error);
@@ -46,6 +49,31 @@ export default function TaxDetailPage({ params }: PageProps) {
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const loadAccounts = async () => {
+        try {
+            setAccountsLoading(true);
+            const data = await financeDataService.getAccounts({ status: 'Active', pageSize: 1000 });
+            setAccounts(data);
+        } catch (error) {
+            console.error('Failed to load accounts:', error);
+            toast({
+                title: 'Error',
+                description: 'Failed to load GL accounts.',
+                variant: 'destructive',
+            });
+        } finally {
+            setAccountsLoading(false);
+        }
+    };
+
+    const formatAccount = (accountId?: string | null) => {
+        if (!accountId) return 'Not Set';
+        const account = accounts.find(item => item.id === accountId);
+        return account
+            ? `${account.accountNumber || account.accountCode} - ${account.accountName}`
+            : accountId;
     };
 
     if (isLoading) {
@@ -86,7 +114,7 @@ export default function TaxDetailPage({ params }: PageProps) {
                     <Button variant="outline" onClick={() => loadTax()}>
                         Refresh
                     </Button>
-                    <Button variant="default" onClick={() => { /* TODO: Edit logic */ }}>
+                    <Button variant="default" onClick={() => setEditOpen(true)}>
                         Edit
                     </Button>
                 </div>
@@ -161,11 +189,11 @@ export default function TaxDetailPage({ params }: PageProps) {
                             <div className="mt-2 space-y-2 text-sm">
                                 <div className="flex justify-between border-b pb-2">
                                     <span>Payable Account</span>
-                                    <span className="font-mono text-muted-foreground">{tax.taxPayableAccountId || 'Not Set'}</span>
+                                    <span className="text-right font-mono text-muted-foreground">{formatAccount(tax.taxPayableAccountId)}</span>
                                 </div>
                                 <div className="flex justify-between border-b pb-2">
                                     <span>Receivable Account</span>
-                                    <span className="font-mono text-muted-foreground">{tax.taxReceivableAccountId || 'Not Set'}</span>
+                                    <span className="text-right font-mono text-muted-foreground">{formatAccount(tax.taxReceivableAccountId)}</span>
                                 </div>
                             </div>
                         </div>
@@ -178,6 +206,21 @@ export default function TaxDetailPage({ params }: PageProps) {
                     </CardContent>
                 </Card>
             </div>
+
+            <TaxFormDialog
+                open={editOpen}
+                tax={tax}
+                accounts={accounts}
+                accountsLoading={accountsLoading}
+                onOpenChange={setEditOpen}
+                onSaved={(saved) => {
+                    setTax(saved);
+                    toast({
+                        title: 'Success',
+                        description: 'Tax updated successfully.',
+                    });
+                }}
+            />
         </div>
     );
 }

@@ -47,7 +47,19 @@ namespace ErpSystem.Core.Enums
         UnderConstruction = 7,
 
         [Display(Name = "On Hold")]
-        OnHold = 8  // Temporarily paused (depreciation suspended)
+        OnHold = 8,  // Temporarily paused (depreciation suspended)
+
+        [Display(Name = "Acquired")]
+        Acquired = 9,
+
+        [Display(Name = "Capitalized")]
+        Capitalized = 10,
+
+        [Display(Name = "Pending Approval")]
+        PendingApproval = 11,
+
+        [Display(Name = "Rejected")]
+        Rejected = 12
     }
 
     public enum DepreciationConvention
@@ -110,7 +122,13 @@ namespace ErpSystem.Core.Enums
         External = 2,
 
         [Display(Name = "Custodial")]
-        Custodial = 3
+        Custodial = 3,
+
+        [Display(Name = "Segment Movement")]
+        SegmentMovement = 4,
+
+        [Display(Name = "GL Reclassification")]
+        GlReclassification = 5
     }
 
     public enum AssetDisposalStatus
@@ -146,7 +164,16 @@ namespace ErpSystem.Core.Enums
         Completed = 3,
 
         [Display(Name = "Cancelled")]
-        Cancelled = 4
+        Cancelled = 4,
+
+        [Display(Name = "Pending Approval")]
+        PendingApproval = 5,
+
+        [Display(Name = "Approved")]
+        Approved = 6,
+
+        [Display(Name = "Rejected")]
+        Rejected = 7
     }
 
     public enum AssetCondition
@@ -200,7 +227,13 @@ namespace ErpSystem.Core.Enums
         Terminated = 3,
 
         [Display(Name = "Completed")]
-        Completed = 4
+        Completed = 4,
+
+        [Display(Name = "Pending Approval")]
+        PendingApproval = 5,
+
+        [Display(Name = "Rejected")]
+        Rejected = 6
     }
 
     /// <summary>

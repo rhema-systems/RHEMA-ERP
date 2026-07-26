@@ -9,6 +9,7 @@ import type {
     PaymentBatch,
     PaymentBatchCreateRequest,
     ApAgingReport,
+    SupplierDetailedLedgerReport,
     CashRequirementForecast,
     ApSummaryStats,
     OutstandingVendorInvoice
@@ -38,6 +39,7 @@ export interface VendorInvoiceQuery {
     dueFromDate?: string;
     dueToDate?: string;
     overdueOnly?: boolean;
+    isOpeningBalance?: boolean;
     sortBy?: string;
     sortDescending?: boolean;
 }
@@ -49,6 +51,7 @@ export interface VendorPaymentQuery {
     supplierId?: string;
     status?: string;
     paymentMethod?: string;
+    paymentMethodId?: string;
     paymentBatchId?: string;
     fromDate?: string;
     toDate?: string;
@@ -85,30 +88,39 @@ class AccountsPayableService {
         if (query.dueFromDate) params.append('DueFromDate', query.dueFromDate);
         if (query.dueToDate) params.append('DueToDate', query.dueToDate);
         if (query.overdueOnly !== undefined) params.append('OverdueOnly', query.overdueOnly.toString());
+        if (query.isOpeningBalance !== undefined) params.append('IsOpeningBalance', query.isOpeningBalance.toString());
         if (query.sortBy) params.append('SortBy', query.sortBy);
         if (query.sortDescending !== undefined) params.append('SortDescending', query.sortDescending.toString());
 
-        return apiService.get<PagedResult<VendorInvoice>>(`${this.baseUrl}/vendor-invoices?${params.toString()}`);
+        return apiService.get<PagedResult<VendorInvoice>>(`${this.baseUrl}/invoices?${params.toString()}`);
     }
 
     public async getInvoice(id: string): Promise<VendorInvoice> {
-        return apiService.get<VendorInvoice>(`${this.baseUrl}/vendor-invoices/${id}`);
+        return apiService.get<VendorInvoice>(`${this.baseUrl}/invoices/${id}`);
     }
 
     public async createInvoice(data: VendorInvoiceCreateRequest): Promise<VendorInvoice> {
-        return apiService.post<VendorInvoice>(`${this.baseUrl}/vendor-invoices`, data);
+        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices`, data);
     }
 
     public async updateInvoice(id: string, data: VendorInvoiceUpdateRequest): Promise<VendorInvoice> {
-        return apiService.put<VendorInvoice>(`${this.baseUrl}/vendor-invoices/${id}`, data);
+        return apiService.put<VendorInvoice>(`${this.baseUrl}/invoices/${id}`, data);
     }
 
     public async approveInvoice(id: string, comments?: string): Promise<VendorInvoice> {
-        return apiService.post<VendorInvoice>(`${this.baseUrl}/vendor-invoices/${id}/approve`, { comments });
+        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/approve`, comments || 'Approved');
+    }
+
+    public async submitInvoiceForApproval(id: string): Promise<VendorInvoice> {
+        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/submit`, {});
+    }
+
+    public async rejectInvoice(id: string, comments: string): Promise<VendorInvoice> {
+        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/reject`, comments);
     }
 
     public async voidInvoice(id: string, comments?: string): Promise<VendorInvoice> {
-        return apiService.post<VendorInvoice>(`${this.baseUrl}/vendor-invoices/${id}/void`, { comments });
+        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/void`, comments || 'Voided by user');
     }
 
     // --- Vendor Payments ---
@@ -121,29 +133,34 @@ class AccountsPayableService {
         if (query.supplierId) params.append('SupplierId', query.supplierId);
         if (query.status) params.append('Status', query.status);
         if (query.paymentMethod) params.append('PaymentMethod', query.paymentMethod);
+        if (query.paymentMethodId) params.append('PaymentMethodId', query.paymentMethodId);
         if (query.paymentBatchId) params.append('PaymentBatchId', query.paymentBatchId);
         if (query.fromDate) params.append('FromDate', query.fromDate);
         if (query.toDate) params.append('ToDate', query.toDate);
         if (query.sortBy) params.append('SortBy', query.sortBy);
         if (query.sortDescending !== undefined) params.append('SortDescending', query.sortDescending.toString());
 
-        return apiService.get<PagedResult<VendorPayment>>(`${this.baseUrl}/vendor-payments?${params.toString()}`);
+        return apiService.get<PagedResult<VendorPayment>>(`${this.baseUrl}/payments?${params.toString()}`);
     }
 
     public async getPayment(id: string): Promise<VendorPayment> {
-        return apiService.get<VendorPayment>(`${this.baseUrl}/vendor-payments/${id}`);
+        return apiService.get<VendorPayment>(`${this.baseUrl}/payments/${id}`);
     }
 
     public async createPayment(data: VendorPaymentCreateRequest): Promise<VendorPayment> {
-        return apiService.post<VendorPayment>(`${this.baseUrl}/vendor-payments`, data);
+        return apiService.post<VendorPayment>(`${this.baseUrl}/payments`, data);
+    }
+
+    public async postPayment(id: string): Promise<VendorPayment> {
+        return apiService.post<VendorPayment>(`${this.baseUrl}/payments/${id}/post`, {});
     }
 
     public async allocatePayment(paymentId: string, data: VendorPaymentAllocationCreateRequest): Promise<any> {
-        return apiService.post<any>(`${this.baseUrl}/vendor-payments/${paymentId}/allocate`, data);
+        return apiService.post<any>(`${this.baseUrl}/payments/${paymentId}/allocate`, [data]);
     }
 
     public async getOutstandingInvoices(supplierId: string): Promise<OutstandingVendorInvoice[]> {
-        return apiService.get<OutstandingVendorInvoice[]>(`${this.baseUrl}/vendor-payments/supplier/${supplierId}/outstanding-invoices`);
+        return apiService.get<OutstandingVendorInvoice[]>(`${this.baseUrl}/payments/supplier/${supplierId}/outstanding-invoices`);
     }
 
     // --- Payment Batches ---
@@ -182,13 +199,13 @@ class AccountsPayableService {
     public async getAgingReport(asOfDate?: string): Promise<ApAgingReport> {
         const params = new URLSearchParams();
         if (asOfDate) params.append('AsOfDate', asOfDate);
-        return apiService.get<ApAgingReport>(`${this.baseUrl}/reports/aging?${params.toString()}`);
+        return apiService.silentGet<ApAgingReport>(`${this.baseUrl}/reports/aging?${params.toString()}`);
     }
 
     public async getCashRequirementForecast(asOfDate?: string): Promise<CashRequirementForecast> {
         const params = new URLSearchParams();
         if (asOfDate) params.append('AsOfDate', asOfDate);
-        return apiService.get<CashRequirementForecast>(`${this.baseUrl}/reports/cash-requirement?${params.toString()}`);
+        return apiService.get<CashRequirementForecast>(`${this.baseUrl}/reports/cash-forecast?${params.toString()}`);
     }
 
     public async getSupplierStatement(supplierId: string, fromDate: string, toDate: string): Promise<any> {
@@ -199,8 +216,59 @@ class AccountsPayableService {
         return apiService.get<any>(`${this.baseUrl}/reports/supplier-statement?${params.toString()}`);
     }
 
+    public async getSupplierDetailedLedger(query: {
+        fromDate: string;
+        toDate: string;
+        supplierIds?: string[];
+        showSupplierCurrency?: boolean;
+    }): Promise<SupplierDetailedLedgerReport> {
+        const params = new URLSearchParams();
+        params.append('fromDate', query.fromDate);
+        params.append('toDate', query.toDate);
+        query.supplierIds?.forEach((supplierId) => params.append('supplierIds', supplierId));
+        if (query.showSupplierCurrency !== undefined) {
+            params.append('showSupplierCurrency', query.showSupplierCurrency.toString());
+        }
+
+        return apiService.get<SupplierDetailedLedgerReport>(`${this.baseUrl}/reports/supplier-detailed-ledger?${params.toString()}`);
+    }
+
+    public async downloadSupplierStatementCsv(query: {
+        fromDate: string;
+        toDate: string;
+        supplierIds?: string[];
+        showSupplierCurrency?: boolean;
+    }): Promise<Blob> {
+        return apiService.postBlob('/finance/report-exports/export', {
+            reportType: 'SupplierStatement',
+            format: 'Csv',
+            periodStart: query.fromDate,
+            periodEnd: query.toDate,
+            supplierIds: query.supplierIds ?? [],
+            showSupplierCurrency: query.showSupplierCurrency === true,
+        });
+    }
+
     public async getApSummary(): Promise<ApSummaryStats> {
-        return apiService.get<ApSummaryStats>(`${this.baseUrl}/reports/ap-summary`);
+        return apiService.get<ApSummaryStats>(`${this.baseUrl}/reports/summary`);
+    }
+
+    // --- Supplier Returns & Debit Notes ---
+
+    public async getSupplierReturns(): Promise<any[]> {
+        return apiService.get<any[]>(`${this.baseUrl}/supplier-returns`);
+    }
+
+    public async getSupplierReturn(id: string): Promise<any> {
+        return apiService.get<any>(`${this.baseUrl}/supplier-returns/${id}`);
+    }
+
+    public async createSupplierReturn(data: any): Promise<any> {
+        return apiService.post<any>(`${this.baseUrl}/supplier-returns`, data);
+    }
+
+    public async approveSupplierReturn(id: string): Promise<any> {
+        return apiService.post<any>(`${this.baseUrl}/supplier-returns/${id}/approve`);
     }
 }
 

@@ -78,6 +78,10 @@ public class UnitAccountBudget : TenantEntity
     [MaxLength(50)]
     public string BudgetVersion { get; set; } = "Original";
 
+    [Required]
+    [MaxLength(30)]
+    public string Status { get; set; } = "Draft";
+
     /// <summary>
     /// Whether this is the active/current budget version.
     /// </summary>

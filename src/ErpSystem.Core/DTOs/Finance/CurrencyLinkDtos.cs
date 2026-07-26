@@ -10,9 +10,11 @@ namespace ErpSystem.Core.DTOs.Finance
         [Required]
         public Guid AccountId { get; set; }
 
-        [Required]
         [MaxLength(3)]
         public string CurrencyCode { get; set; } = string.Empty;
+
+        [MaxLength(3)]
+        public string? LinkedCurrencyCode { get; set; }
 
         [MaxLength(50)]
         public string? CurrencyName { get; set; }
@@ -20,6 +22,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? OpeningBalance { get; set; }
         public decimal? OpeningBalanceBaseCurrency { get; set; }
         public DateTime? OpeningBalanceDate { get; set; }
+        public bool RevaluationRequired { get; set; } = true;
+        public string? RevaluationFrequency { get; set; } = "Monthly";
+        public string? TransactionRateType { get; set; } = "Daily";
+        public string? RevaluationRateType { get; set; } = "Month-End";
+        public string? Notes { get; set; }
         public bool IsActive { get; set; } = true;
     }
 
@@ -33,19 +40,32 @@ namespace ErpSystem.Core.DTOs.Finance
         public string AccountNumber { get; set; } = string.Empty;
         public string AccountName { get; set; } = string.Empty;
         public string CurrencyCode { get; set; } = string.Empty;
+        public string LinkedCurrencyCode { get; set; } = string.Empty;
         public string? CurrencyName { get; set; }
         public decimal CurrentBalance { get; set; }
         public decimal CurrentBalanceBaseCurrency { get; set; }
+        public decimal ForeignCurrencyBalance { get; set; }
+        public decimal BaseCurrencyBalance { get; set; }
+        public decimal? CurrentExchangeRate { get; set; }
         public decimal? OpeningBalance { get; set; }
         public decimal? OpeningBalanceBaseCurrency { get; set; }
         public DateTime? OpeningBalanceDate { get; set; }
+        public bool RevaluationRequired { get; set; }
+        public string RevaluationFrequency { get; set; } = string.Empty;
+        public string TransactionRateType { get; set; } = string.Empty;
+        public string RevaluationRateType { get; set; } = string.Empty;
         public DateTime? LastRevaluationDate { get; set; }
         public decimal? LastRevaluationRate { get; set; }
+        public decimal? LastRevaluationAdjustment { get; set; }
+        public decimal CumulativeRevaluationAdjustment { get; set; }
         public decimal? UnrealizedGainLoss { get; set; }
         public bool IsActive { get; set; }
         public bool HasTransactions { get; set; }
         public int TransactionCount { get; set; }
+        public string? Notes { get; set; }
         public DateTime CreatedDate { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
     }
 
     /// <summary>

@@ -9,6 +9,8 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Services.Finance.MultiCurrency
 {
@@ -18,20 +20,26 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
         private readonly ICurrentUserService _currentUserService;
         private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<ExchangeRateService> _logger;
+        private readonly IFinanceAuditService? _financeAuditService;
+        private readonly IWorkflowService? _workflowService;
 
         public ExchangeRateService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
             ITenantSettingsService tenantSettingsService,
-            ILogger<ExchangeRateService> logger)
+            ILogger<ExchangeRateService> logger,
+            IFinanceAuditService? financeAuditService = null,
+            IWorkflowService? workflowService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _tenantSettingsService = tenantSettingsService;
             _logger = logger;
+            _financeAuditService = financeAuditService;
+            _workflowService = workflowService;
         }
 
-        private Guid TenantId => _currentUserService.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
         private string UserName => _currentUserService.UserName ?? "system";
         private Guid? CurrentUserId => Guid.TryParse(_currentUserService.UserId, out var id) ? id : null;
 
@@ -84,67 +92,168 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
             }
 
+            baseCurrencyCode = NormalizeCurrency(baseCurrencyCode, "Base currency");
+            targetCurrencyCode = NormalizeCurrency(targetCurrencyCode, "Target currency");
             var date = effectiveDate?.Date ?? DateTime.UtcNow.Date;
 
             var rate = await _unitOfWork.Repository<ExchangeRate>()
                 .GetQueryable(r => r.TenantId == TenantId
                     && r.BaseCurrencyCode == baseCurrencyCode
                     && r.TargetCurrencyCode == targetCurrencyCode
+                    && r.Rate > 0
                     && r.EffectiveDate <= date
                     && r.IsActive
+                    && (r.ApprovalStatus == RateApprovalStatus.Approved || r.ApprovalStatus == RateApprovalStatus.AutoApproved)
                     && (r.EndDate == null || r.EndDate >= date))
                 .OrderByDescending(r => r.EffectiveDate)
+                .ThenByDescending(r => r.Priority)
                 .ThenByDescending(r => r.CreatedAt)
                 .FirstOrDefaultAsync(cancellationToken);
 
             return rate == null ? null : MapToDto(rate);
         }
 
+        public async Task<IReadOnlyList<TrendAnalysisDto>> GetTrendsAsync(
+            string? baseCurrencyCode,
+            string targetCurrencyCode,
+            DateTime startDate,
+            DateTime endDate,
+            string interval = "daily",
+            int movingAverageWindow = 7,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(baseCurrencyCode))
+            {
+                baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+            }
+
+            baseCurrencyCode = NormalizeCurrency(baseCurrencyCode, "Base currency");
+            targetCurrencyCode = NormalizeCurrency(targetCurrencyCode, "Target currency");
+
+            var start = startDate.Date;
+            var end = endDate.Date;
+            if (end < start)
+            {
+                throw new InvalidOperationException("Trend end date cannot be before the start date.");
+            }
+
+            if (movingAverageWindow <= 0)
+            {
+                throw new InvalidOperationException("Moving average window must be greater than zero.");
+            }
+
+            var endExclusive = end.AddDays(1);
+            var rawRates = await _unitOfWork.Repository<ExchangeRate>()
+                .GetQueryable(r => r.TenantId == TenantId
+                    && r.BaseCurrencyCode == baseCurrencyCode
+                    && r.TargetCurrencyCode == targetCurrencyCode
+                    && r.Rate > 0
+                    && r.EffectiveDate >= start
+                    && r.EffectiveDate < endExclusive)
+                .OrderBy(r => r.EffectiveDate)
+                .ThenByDescending(r => r.Priority)
+                .ThenByDescending(r => r.CreatedDate)
+                .ToListAsync(cancellationToken);
+
+            var rates = rawRates
+                .GroupBy(r => r.EffectiveDate.Date)
+                .Select(g => g
+                    .OrderByDescending(r => r.Priority)
+                    .ThenByDescending(r => r.CreatedDate)
+                    .First())
+                .OrderBy(r => r.EffectiveDate)
+                .ToList();
+
+            if (rates.Count == 0)
+            {
+                return Array.Empty<TrendAnalysisDto>();
+            }
+
+            var periodMin = rates.Min(r => r.Rate);
+            var periodMax = rates.Max(r => r.Rate);
+            var result = new List<TrendAnalysisDto>(rates.Count);
+
+            for (var i = 0; i < rates.Count; i++)
+            {
+                var rate = rates[i];
+                var previousRate = i == 0 ? (decimal?)null : rates[i - 1].Rate;
+                var changeAmount = previousRate.HasValue ? rate.Rate - previousRate.Value : (decimal?)null;
+                var changePercentage = previousRate is > 0
+                    ? changeAmount / previousRate.Value * 100
+                    : null;
+
+                result.Add(new TrendAnalysisDto
+                {
+                    Date = rate.EffectiveDate.Date,
+                    SourceCurrency = baseCurrencyCode,
+                    TargetCurrency = targetCurrencyCode,
+                    Rate = rate.Rate,
+                    PreviousRate = previousRate,
+                    ChangeAmount = changeAmount,
+                    ChangePercentage = changePercentage,
+                    MovingAverage = CalculateMovingAverage(rates, i, movingAverageWindow),
+                    Volatility = CalculateVolatility(rates, i, movingAverageWindow),
+                    MinRate = periodMin,
+                    MaxRate = periodMax
+                });
+            }
+
+            return result;
+        }
+
         public async Task<ExchangeRateDto> CreateExchangeRateAsync(CreateExchangeRateDto dto, CancellationToken cancellationToken = default)
         {
+            var baseCurrencyCode = NormalizeCurrency(dto.BaseCurrencyCode, "Base currency");
+            var targetCurrencyCode = NormalizeCurrency(dto.TargetCurrencyCode, "Target currency");
+            var rateType = ParseRateType(dto.RateType);
+            var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
+            var approvalStatus = _workflowService == null
+                ? requestedApprovalStatus
+                : RateApprovalStatus.Pending;
+            ValidateRateWindow(dto.Rate, dto.EffectiveDate, dto.ExpiryDate);
+
             var baseCurrencyExists = await _unitOfWork.Repository<Currency>()
-                .GetQueryable(c => c.TenantId == TenantId && c.CurrencyCode == dto.BaseCurrencyCode)
+                .GetQueryable(c => c.TenantId == TenantId && c.CurrencyCode == baseCurrencyCode)
                 .AnyAsync(cancellationToken);
 
             if (!baseCurrencyExists)
-                throw new ArgumentException($"Base currency '{dto.BaseCurrencyCode}' not found.");
+                throw new ArgumentException($"Base currency '{baseCurrencyCode}' not found.");
 
             var targetCurrencyExists = await _unitOfWork.Repository<Currency>()
-                .GetQueryable(c => c.TenantId == TenantId && c.CurrencyCode == dto.TargetCurrencyCode)
+                .GetQueryable(c => c.TenantId == TenantId && c.CurrencyCode == targetCurrencyCode)
                 .AnyAsync(cancellationToken);
 
             if (!targetCurrencyExists)
-                throw new ArgumentException($"Target currency '{dto.TargetCurrencyCode}' not found.");
+                throw new ArgumentException($"Target currency '{targetCurrencyCode}' not found.");
 
-            var duplicate = await _unitOfWork.Repository<ExchangeRate>()
-                .GetQueryable(r => r.TenantId == TenantId
-                    && r.BaseCurrencyCode == dto.BaseCurrencyCode
-                    && r.TargetCurrencyCode == dto.TargetCurrencyCode
-                    && r.EffectiveDate.Date == dto.EffectiveDate.Date
-                    && r.RateType == (ExchangeRateType)Enum.Parse(typeof(ExchangeRateType), dto.RateType))
-                .AnyAsync(cancellationToken);
-
-            if (duplicate)
-                throw new InvalidOperationException(
-                    $"Exchange rate for {dto.BaseCurrencyCode}/{dto.TargetCurrencyCode} " +
-                    $"on {dto.EffectiveDate:yyyy-MM-dd} with type '{dto.RateType}' already exists.");
+            await EnsureNoOverlappingRateAsync(
+                baseCurrencyCode,
+                targetCurrencyCode,
+                rateType,
+                dto.EffectiveDate.Date,
+                dto.ExpiryDate?.Date,
+                excludeId: null,
+                cancellationToken);
 
             var now = DateTime.UtcNow;
             var rate = new ExchangeRate
             {
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
-                BaseCurrencyCode = dto.BaseCurrencyCode.ToUpper(),
-                TargetCurrencyCode = dto.TargetCurrencyCode.ToUpper(),
+                BaseCurrencyCode = baseCurrencyCode,
+                TargetCurrencyCode = targetCurrencyCode,
                 Rate = dto.Rate,
-                InverseRate = dto.Rate > 0 ? 1 / dto.Rate : 0,
+                InverseRate = 1 / dto.Rate,
                 EffectiveDate = dto.EffectiveDate.Date,
                 EndDate = dto.ExpiryDate?.Date,
-                RateType = (ExchangeRateType)Enum.Parse(typeof(ExchangeRateType), dto.RateType),
+                RateType = rateType,
                 RateSource = dto.RateSource ?? "Manual Entry",
                 IsManualEntry = true,
                 APIResponseMetadata = dto.SourceReference,
                 IsActive = dto.IsActive,
+                ApprovalStatus = approvalStatus,
+                ApprovalDate = approvalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved ? now : null,
+                ApprovedByUserId = approvalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved ? CurrentUserId : null,
                 CreatedByUserId = CurrentUserId ?? Guid.Empty,
                 CreatedDate = now
             };
@@ -154,6 +263,9 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
 
             _logger.LogInformation("Exchange rate {Base}/{Target} @ {Rate} created by {User}",
                 rate.BaseCurrencyCode, rate.TargetCurrencyCode, rate.Rate, UserName);
+
+            await RecordExchangeRateAuditAsync(FinanceAuditEvents.ExchangeRateCreated, rate, afterValues: BuildRateAuditSnapshot(rate), cancellationToken: cancellationToken);
+            await StartExchangeRateWorkflowIfRequiredAsync(rate, requestedApprovalStatus, cancellationToken);
 
             return MapToDto(rate);
         }
@@ -166,23 +278,44 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             if (rate == null)
                 throw new ArgumentException($"Exchange rate with ID '{id}' not found.");
 
-            var hasBeenUsed = await _unitOfWork.Repository<AccountTransaction>()
-                .GetQueryable(t => t.ExchangeRate == rate.Rate
-                    && t.TransactionCurrency == rate.TargetCurrencyCode
-                    && t.TransactionDate.Date == rate.EffectiveDate.Date
-                    && !t.IsDeleted)
-                .AnyAsync(cancellationToken);
-
-            if (hasBeenUsed)
+            if (await IsRateUsedAsync(rate, cancellationToken))
+            {
+                await RecordExchangeRateAuditAsync(
+                    FinanceAuditEvents.ExchangeRateEditRejectedAfterUse,
+                    rate,
+                    afterValues: new { dto.Rate, dto.ExpiryDate, dto.RateType, dto.RateSource, dto.IsActive },
+                    reason: "Exchange rate has already been used in posted accounting.",
+                    cancellationToken: cancellationToken);
                 throw new InvalidOperationException("Cannot update exchange rate that has been used in transactions.");
+            }
+
+            var rateType = ParseRateType(dto.RateType);
+            var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
+            var approvalStatus = _workflowService == null
+                ? requestedApprovalStatus
+                : RateApprovalStatus.Pending;
+            ValidateRateWindow(dto.Rate, rate.EffectiveDate, dto.ExpiryDate);
+            await EnsureNoOverlappingRateAsync(
+                rate.BaseCurrencyCode,
+                rate.TargetCurrencyCode,
+                rateType,
+                rate.EffectiveDate.Date,
+                dto.ExpiryDate?.Date,
+                excludeId: rate.Id,
+                cancellationToken);
+
+            var before = BuildRateAuditSnapshot(rate);
 
             rate.Rate = dto.Rate;
-            rate.InverseRate = dto.Rate > 0 ? 1 / dto.Rate : 0;
+            rate.InverseRate = 1 / dto.Rate;
             rate.EndDate = dto.ExpiryDate?.Date;
-            rate.RateType = (ExchangeRateType)Enum.Parse(typeof(ExchangeRateType), dto.RateType);
+            rate.RateType = rateType;
             rate.RateSource = dto.RateSource ?? "Manual Entry";
             rate.APIResponseMetadata = dto.SourceReference;
             rate.IsActive = dto.IsActive;
+            rate.ApprovalStatus = approvalStatus;
+            rate.ApprovalDate = approvalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved ? DateTime.UtcNow : null;
+            rate.ApprovedByUserId = approvalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved ? CurrentUserId : null;
             rate.ModifiedDate = DateTime.UtcNow;
             rate.ModifiedByUserId = CurrentUserId;
 
@@ -191,6 +324,9 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
 
             _logger.LogInformation("Exchange rate {Base}/{Target} updated by {User}",
                 rate.BaseCurrencyCode, rate.TargetCurrencyCode, UserName);
+
+            await RecordExchangeRateAuditAsync(FinanceAuditEvents.ExchangeRateUpdated, rate, beforeValues: before, afterValues: BuildRateAuditSnapshot(rate), cancellationToken: cancellationToken);
+            await StartExchangeRateWorkflowIfRequiredAsync(rate, requestedApprovalStatus, cancellationToken);
 
             return MapToDto(rate);
         }
@@ -203,21 +339,25 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             if (rate == null)
                 return;
 
-            var hasBeenUsed = await _unitOfWork.Repository<AccountTransaction>()
-                .GetQueryable(t => t.ExchangeRate == rate.Rate
-                    && t.TransactionCurrency == rate.TargetCurrencyCode
-                    && t.TransactionDate.Date == rate.EffectiveDate.Date
-                    && !t.IsDeleted)
-                .AnyAsync(cancellationToken);
-
-            if (hasBeenUsed)
+            if (await IsRateUsedAsync(rate, cancellationToken))
+            {
+                await RecordExchangeRateAuditAsync(
+                    FinanceAuditEvents.ExchangeRateEditRejectedAfterUse,
+                    rate,
+                    reason: "Exchange rate has already been used in posted accounting.",
+                    cancellationToken: cancellationToken);
                 throw new InvalidOperationException("Cannot delete exchange rate that has been used in transactions.");
+            }
+
+            var before = BuildRateAuditSnapshot(rate);
 
             await _unitOfWork.Repository<ExchangeRate>().DeleteAsync(rate);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Exchange rate {Base}/{Target} deleted by {User}",
                 rate.BaseCurrencyCode, rate.TargetCurrencyCode, UserName);
+
+            await RecordExchangeRateAuditAsync(FinanceAuditEvents.ExchangeRateDeactivated, rate, beforeValues: before, cancellationToken: cancellationToken);
         }
 
         public async Task<IReadOnlyList<ExchangeRateDto>> BulkUploadRatesAsync(
@@ -231,36 +371,42 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             {
                 try
                 {
-                    var duplicate = await _unitOfWork.Repository<ExchangeRate>()
-                        .GetQueryable(r => r.TenantId == TenantId
-                            && r.BaseCurrencyCode == dto.BaseCurrencyCode
-                            && r.TargetCurrencyCode == dto.TargetCurrencyCode
-                            && r.EffectiveDate.Date == dto.EffectiveDate.Date
-                            && r.RateType == (ExchangeRateType)Enum.Parse(typeof(ExchangeRateType), dto.RateType))
-                        .AnyAsync(cancellationToken);
-
-                    if (duplicate)
-                    {
-                        errors.Add($"Duplicate rate: {dto.BaseCurrencyCode}/{dto.TargetCurrencyCode} on {dto.EffectiveDate:yyyy-MM-dd}");
-                        continue;
-                    }
+                    var baseCurrencyCode = NormalizeCurrency(dto.BaseCurrencyCode, "Base currency");
+                    var targetCurrencyCode = NormalizeCurrency(dto.TargetCurrencyCode, "Target currency");
+                    var rateType = ParseRateType(dto.RateType);
+                    var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
+                    var approvalStatus = _workflowService == null
+                        ? requestedApprovalStatus
+                        : RateApprovalStatus.Pending;
+                    ValidateRateWindow(dto.Rate, dto.EffectiveDate, dto.ExpiryDate);
+                    await EnsureNoOverlappingRateAsync(
+                        baseCurrencyCode,
+                        targetCurrencyCode,
+                        rateType,
+                        dto.EffectiveDate.Date,
+                        dto.ExpiryDate?.Date,
+                        excludeId: null,
+                        cancellationToken);
 
                     var now = DateTime.UtcNow;
                     var rate = new ExchangeRate
                     {
                         Id = Guid.NewGuid(),
                         TenantId = TenantId,
-                        BaseCurrencyCode = dto.BaseCurrencyCode.ToUpper(),
-                        TargetCurrencyCode = dto.TargetCurrencyCode.ToUpper(),
+                        BaseCurrencyCode = baseCurrencyCode,
+                        TargetCurrencyCode = targetCurrencyCode,
                         Rate = dto.Rate,
-                        InverseRate = dto.Rate > 0 ? 1 / dto.Rate : 0,
+                        InverseRate = 1 / dto.Rate,
                         EffectiveDate = dto.EffectiveDate.Date,
                         EndDate = dto.ExpiryDate?.Date,
-                        RateType = (ExchangeRateType)Enum.Parse(typeof(ExchangeRateType), dto.RateType),
+                        RateType = rateType,
                         RateSource = dto.RateSource ?? "Manual Entry",
                         IsManualEntry = true,
                         APIResponseMetadata = dto.SourceReference,
                         IsActive = dto.IsActive,
+                        ApprovalStatus = approvalStatus,
+                        ApprovalDate = approvalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved ? now : null,
+                        ApprovedByUserId = approvalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved ? CurrentUserId : null,
                         CreatedByUserId = CurrentUserId ?? Guid.Empty,
                         CreatedDate = now
                     };
@@ -281,6 +427,11 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 }
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+                foreach (var rate in createdRates)
+                {
+                    await StartExchangeRateWorkflowIfRequiredAsync(rate, RateApprovalStatus.Pending, cancellationToken);
+                }
+
                 _logger.LogInformation("{Count} exchange rates bulk uploaded by {User}",
                     createdRates.Count, UserName);
             }
@@ -294,28 +445,55 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             return createdRates.Select(MapToDto).ToList();
         }
 
+        private static decimal? CalculateMovingAverage(IReadOnlyList<ExchangeRate> rates, int index, int window)
+        {
+            if (index + 1 < window)
+            {
+                return null;
+            }
+
+            return rates
+                .Skip(index + 1 - window)
+                .Take(window)
+                .Average(r => r.Rate);
+        }
+
+        private static decimal? CalculateVolatility(IReadOnlyList<ExchangeRate> rates, int index, int window)
+        {
+            if (index + 1 < window)
+            {
+                return null;
+            }
+
+            var windowRates = rates
+                .Skip(index + 1 - window)
+                .Take(window)
+                .Select(r => r.Rate)
+                .ToList();
+            var average = windowRates.Average();
+            var variance = windowRates.Average(rate => Math.Pow((double)(rate - average), 2));
+            return (decimal)Math.Sqrt(variance);
+        }
+
         private ExchangeRateDto MapToDto(ExchangeRate rate)
         {
             var usageCount = _unitOfWork.Repository<AccountTransaction>()
-                .GetQueryable(t => t.ExchangeRate == rate.Rate
-                    && t.TransactionCurrency == rate.TargetCurrencyCode
-                    && t.TransactionDate.Date == rate.EffectiveDate.Date
+                .GetQueryable(t => t.TenantId == rate.TenantId
+                    && t.ExchangeRateId == rate.Id
                     && !t.IsDeleted)
                 .Count();
 
             var firstUsed = _unitOfWork.Repository<AccountTransaction>()
-                .GetQueryable(t => t.ExchangeRate == rate.Rate
-                    && t.TransactionCurrency == rate.TargetCurrencyCode
-                    && t.TransactionDate.Date == rate.EffectiveDate.Date
+                .GetQueryable(t => t.TenantId == rate.TenantId
+                    && t.ExchangeRateId == rate.Id
                     && !t.IsDeleted)
                 .OrderBy(t => t.TransactionDate)
                 .Select(t => (DateTime?)t.TransactionDate)
                 .FirstOrDefault();
 
             var lastUsed = _unitOfWork.Repository<AccountTransaction>()
-                .GetQueryable(t => t.ExchangeRate == rate.Rate
-                    && t.TransactionCurrency == rate.TargetCurrencyCode
-                    && t.TransactionDate.Date == rate.EffectiveDate.Date
+                .GetQueryable(t => t.TenantId == rate.TenantId
+                    && t.ExchangeRateId == rate.Id
                     && !t.IsDeleted)
                 .OrderByDescending(t => t.TransactionDate)
                 .Select(t => (DateTime?)t.TransactionDate)
@@ -336,7 +514,9 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 SourceName = rate.RateSource,
                 SourceReference = rate.APIResponseMetadata,
                 IsActive = rate.IsActive,
-                HasBeenUsed = usageCount > 0,
+                HasBeenUsed = rate.HasBeenUsedInTransactions || usageCount > 0,
+                UsageLocked = rate.HasBeenUsedInTransactions || usageCount > 0,
+                ApprovalStatus = rate.ApprovalStatus.ToString(),
                 UsageCount = usageCount,
                 FirstUsedDate = firstUsed,
                 LastUsedDate = lastUsed,
@@ -344,6 +524,199 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 UpdatedAt = rate.ModifiedDate,
                 CreatedBy = rate.CreatedByUserId.ToString(), // TODO: Resolve username
                 UpdatedBy = rate.ModifiedByUserId?.ToString() // TODO: Resolve username
+            };
+        }
+
+        private async Task<bool> IsRateUsedAsync(ExchangeRate rate, CancellationToken cancellationToken)
+        {
+            if (rate.HasBeenUsedInTransactions)
+            {
+                return true;
+            }
+
+            return await _unitOfWork.Repository<AccountTransaction>()
+                .GetQueryable(t => t.TenantId == rate.TenantId && t.ExchangeRateId == rate.Id && !t.IsDeleted)
+                .AnyAsync(cancellationToken);
+        }
+
+        private async Task EnsureNoOverlappingRateAsync(
+            string baseCurrencyCode,
+            string targetCurrencyCode,
+            ExchangeRateType rateType,
+            DateTime effectiveDate,
+            DateTime? expiryDate,
+            Guid? excludeId,
+            CancellationToken cancellationToken)
+        {
+            var start = effectiveDate.Date;
+            var end = expiryDate?.Date ?? DateTime.MaxValue.Date;
+            var overlapExists = await _unitOfWork.Repository<ExchangeRate>()
+                .GetQueryable(r => r.TenantId == TenantId
+                    && !r.IsDeleted
+                    && (!excludeId.HasValue || r.Id != excludeId.Value)
+                    && r.BaseCurrencyCode == baseCurrencyCode
+                    && r.TargetCurrencyCode == targetCurrencyCode
+                    && r.RateType == rateType
+                    && r.EffectiveDate.Date <= end
+                    && (r.EndDate == null || r.EndDate.Value.Date >= start))
+                .AnyAsync(cancellationToken);
+
+            if (overlapExists)
+            {
+                throw new InvalidOperationException(
+                    $"Exchange rate range overlaps an existing {baseCurrencyCode}/{targetCurrencyCode} {rateType} rate for this tenant.");
+            }
+        }
+
+        private static void ValidateRateWindow(decimal rate, DateTime effectiveDate, DateTime? expiryDate)
+        {
+            if (rate <= 0)
+            {
+                throw new InvalidOperationException("Exchange rate must be greater than zero.");
+            }
+
+            if (effectiveDate == default)
+            {
+                throw new InvalidOperationException("Exchange rate effective date is required.");
+            }
+
+            if (expiryDate.HasValue && expiryDate.Value.Date < effectiveDate.Date)
+            {
+                throw new InvalidOperationException("Exchange rate expiry date cannot be before the effective date.");
+            }
+        }
+
+        private static string NormalizeCurrency(string? currencyCode, string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(currencyCode))
+            {
+                throw new InvalidOperationException($"{fieldName} is required.");
+            }
+
+            var normalized = currencyCode.Trim().ToUpperInvariant();
+            if (normalized.Length != 3)
+            {
+                throw new InvalidOperationException($"{fieldName} must be a three-character ISO currency code.");
+            }
+
+            return normalized;
+        }
+
+        private static ExchangeRateType ParseRateType(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)
+                || !Enum.TryParse<ExchangeRateType>(value.Trim(), ignoreCase: true, out var rateType))
+            {
+                throw new InvalidOperationException("Exchange rate type is invalid.");
+            }
+
+            return rateType;
+        }
+
+        private static RateApprovalStatus ParseApprovalStatus(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return RateApprovalStatus.Approved;
+            }
+
+            if (!Enum.TryParse<RateApprovalStatus>(value.Trim(), ignoreCase: true, out var approvalStatus))
+            {
+                throw new InvalidOperationException("Exchange rate approval status is invalid.");
+            }
+
+            return approvalStatus;
+        }
+
+        private async Task StartExchangeRateWorkflowIfRequiredAsync(
+            ExchangeRate rate,
+            RateApprovalStatus requestedApprovalStatus,
+            CancellationToken cancellationToken)
+        {
+            if (_workflowService == null)
+            {
+                return;
+            }
+
+            var workflowResult = await _workflowService.StartApprovalWorkflowAsync("ExchangeRate", rate.Id);
+            if (!workflowResult.Success)
+            {
+                rate.ApprovalStatus = RateApprovalStatus.Rejected;
+                rate.Comments = string.IsNullOrWhiteSpace(rate.Comments)
+                    ? workflowResult.Message
+                    : $"{rate.Comments}{Environment.NewLine}{workflowResult.Message}";
+                rate.ModifiedDate = DateTime.UtcNow;
+                rate.ModifiedByUserId = CurrentUserId;
+                await _unitOfWork.Repository<ExchangeRate>().UpdateAsync(rate);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                await RecordExchangeRateAuditAsync(
+                    FinanceAuditEvents.FinanceWorkflowApprovalFailed,
+                    rate,
+                    afterValues: new { workflowResult.Status, workflowResult.Message, requestedApprovalStatus },
+                    reason: workflowResult.Message,
+                    cancellationToken: cancellationToken);
+                throw new InvalidOperationException(workflowResult.Message ?? "Exchange rate approval workflow could not be started.");
+            }
+
+            await RecordExchangeRateAuditAsync(
+                FinanceAuditEvents.FinanceWorkflowSubmitted,
+                rate,
+                afterValues: new
+                {
+                    rate.ApprovalStatus,
+                    workflowResult.WorkflowInstanceId,
+                    requestedApprovalStatus
+                },
+                cancellationToken: cancellationToken);
+        }
+
+        private async Task RecordExchangeRateAuditAsync(
+            string eventType,
+            ExchangeRate rate,
+            object? beforeValues = null,
+            object? afterValues = null,
+            string? reason = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (_financeAuditService == null)
+            {
+                return;
+            }
+
+            await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = eventType,
+                TenantId = rate.TenantId,
+                SourceModule = "FX",
+                SourceDocumentType = "ExchangeRate",
+                SourceDocumentId = rate.Id,
+                BeforeValues = beforeValues,
+                AfterValues = afterValues,
+                Reason = reason,
+                Resource = "Finance.ExchangeRate",
+                ResourceId = rate.Id.ToString()
+            }, cancellationToken);
+        }
+
+        private static object BuildRateAuditSnapshot(ExchangeRate rate)
+        {
+            return new
+            {
+                rate.Id,
+                rate.TenantId,
+                rate.BaseCurrencyCode,
+                rate.TargetCurrencyCode,
+                rate.Rate,
+                rate.InverseRate,
+                rate.EffectiveDate,
+                rate.EndDate,
+                rate.RateType,
+                rate.RateSource,
+                rate.IsActive,
+                rate.ApprovalStatus,
+                rate.HasBeenUsedInTransactions,
+                rate.TransactionCount
             };
         }
     }

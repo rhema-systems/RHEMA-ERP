@@ -43,7 +43,7 @@ public class AccountBalance : BusinessEntity
 
     /// <summary>
     /// Book/Classification for parallel accounting frameworks.
-    /// Values: "IFRS", "Base", "Local"
+    /// Values: "IFRS", "LOCAL_STATUTORY", "MANAGEMENT"
     /// Separate balances maintained for each book to support multiple reporting standards.
     /// </summary>
     [Required]
@@ -438,7 +438,7 @@ public class AccountBalance : BusinessEntity
 /// CHECK CONSTRAINTS:
 /// - OpeningBalanceType IN ('DR', 'CR')
 /// - ClosingBalanceType IN ('DR', 'CR')
-/// - BookClassification IN ('IFRS', 'Base', 'Local')
+/// - BookClassification IN ('IFRS', 'LOCAL_STATUTORY', 'MANAGEMENT')
 /// - PeriodDebits >= 0
 /// - PeriodCredits >= 0
 /// - TransactionCount >= 0

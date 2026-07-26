@@ -37,6 +37,11 @@ public interface IPaymentService
     Task<ErpSystem.Core.DTOs.Finance.CustomerPaymentDto> CreateAsync(PaymentCreateDto dto, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Posts an approved or postable customer receipt to the General Ledger through the central finance posting engine.
+    /// </summary>
+    Task<ErpSystem.Core.DTOs.Finance.CustomerPaymentDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Updates an existing payment (only if status is Pending).
     /// </summary>
     Task<ErpSystem.Core.DTOs.Finance.CustomerPaymentDto> UpdateAsync(PaymentUpdateDto dto, CancellationToken cancellationToken = default);

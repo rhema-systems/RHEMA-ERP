@@ -1,0 +1,10 @@
+{
+  "tenantId": "00000000-0000-0000-0000-000000000001",
+  "repairMode": false,
+  "examinedCount": 0,
+  "repairableCount": 0,
+  "repairedCount": 0,
+  "ambiguousCount": 0,
+  "unsupportedCount": 0,
+  "items": []
+}

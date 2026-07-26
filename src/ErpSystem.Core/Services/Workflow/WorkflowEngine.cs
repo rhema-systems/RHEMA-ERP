@@ -1293,6 +1293,26 @@ public class WorkflowEngine : IWorkflowEngine
             return;
         }
 
+        if (stepDefinition.IsEndStep)
+        {
+            stepInstance.Status = WorkflowStepInstanceStatus.Completed;
+            stepInstance.CompletedDate = DateTime.UtcNow;
+            await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
+            await _workflowStepInstanceRepository.SaveChangesAsync();
+
+            await _activityService.LogActivityAsync(
+                instance.Id,
+                WorkflowActivityType.StepCompleted,
+                "End step completed",
+                stepDefinition.Name,
+                userId,
+                stepInstance.Id,
+                dataContext);
+
+            await CompleteWorkflowIfPossibleAsync(instance, userId);
+            return;
+        }
+
         if (stepDefinition.StepType == WorkflowStepType.Approval)
         {
             if (config?.ApprovalConfig?.AutoApprovalCondition != null &&

@@ -1,0 +1,5 @@
+TenantName,TenantId,ApprovedCutoverDate,ApprovedFiscalPeriod,BookClassification,CutoverItem,YesNo,DataFilePath,RecordCount,FunctionalAmount,Currency,RequiresGlReconciliation,Owner,ApprovalStatus,Notes
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Bank balances only,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Detailed cashbook history required,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Unreconciled bank items,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Foreign-currency bank accounts,,,"",,,Yes,,,

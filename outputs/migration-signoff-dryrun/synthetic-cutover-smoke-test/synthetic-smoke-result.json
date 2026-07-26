@@ -1,0 +1,688 @@
+{
+  "syntheticOnly": true,
+  "warning": "This is not accountant approval or production sign-off evidence.",
+  "database": "RhemaERP_UAT_DryRun",
+  "tenant": "Default Tenant",
+  "tenantId": "00000000-0000-0000-0000-000000000001",
+  "auditUserId": "36e1f0f7-ae24-4f77-c081-08dec15ea8c4",
+  "auditEnabled": true,
+  "removedStaleSyntheticDraftBatches": 0,
+  "cutoverDate": "2026-06-30T00:00:00",
+  "fiscalPeriodId": "00000004-0001-0001-2026-000000000006",
+  "fiscalPeriod": "June 2026 (2026-06-01 to 2026-06-30)",
+  "bookClassification": "IFRS",
+  "openingBalanceBatch": {
+    "id": "684fe707-2049-4007-81ae-14c878b5b975",
+    "batchNumber": "SYN-UAT-OB-20260709203617",
+    "status": "Posted",
+    "totalDebit": 10000.00,
+    "totalCredit": 10000.00,
+    "difference": 0.00,
+    "journalEntryId": "37a14c37-8cad-4660-8cca-4d384baf72b6",
+    "postingEventId": "c27d9f2d-7542-4a27-aa16-c3322970c7a5"
+  },
+  "staleFixedAssetReset": [
+    {
+      "assetId": "e09e906d-6d03-4685-ac98-6eb91ade421d",
+      "assetCode": "FA-2024-BLDG-001",
+      "assetName": "Headquarters Building",
+      "postedEventCount": 0,
+      "postedJournalCount": 0,
+      "reason": "Soft-deleted in RhemaERP_UAT_DryRun only for synthetic GL-only smoke scope. Row had no source, capitalization, journal, or posting-event evidence; posted GL was not mutated."
+    },
+    {
+      "assetId": "23e99b72-9af9-492c-baca-653777236142",
+      "assetCode": "FA-2024-EQP-001",
+      "assetName": "Industrial Generator",
+      "postedEventCount": 0,
+      "postedJournalCount": 0,
+      "reason": "Soft-deleted in RhemaERP_UAT_DryRun only for synthetic GL-only smoke scope. Row had no source, capitalization, journal, or posting-event evidence; posted GL was not mutated."
+    },
+    {
+      "assetId": "de297d7f-c7ad-4927-b627-1e43ec9586a7",
+      "assetCode": "FA-2024-EQP-002",
+      "assetName": "Server Rack System",
+      "postedEventCount": 0,
+      "postedJournalCount": 0,
+      "reason": "Soft-deleted in RhemaERP_UAT_DryRun only for synthetic GL-only smoke scope. Row had no source, capitalization, journal, or posting-event evidence; posted GL was not mutated."
+    },
+    {
+      "assetId": "ba1f441e-2025-41ca-82f7-1bb9213cc9c2",
+      "assetCode": "FA-2024-VEH-001",
+      "assetName": "Delivery Truck - Toyota Hilux",
+      "postedEventCount": 0,
+      "postedJournalCount": 0,
+      "reason": "Soft-deleted in RhemaERP_UAT_DryRun only for synthetic GL-only smoke scope. Row had no source, capitalization, journal, or posting-event evidence; posted GL was not mutated."
+    }
+  ],
+  "accounts": [
+    {
+      "side": "Debit",
+      "id": "00000005-1000-0000-0000-000000000001",
+      "accountCode": "1000",
+      "accountName": "Cash and Cash Equivalents",
+      "accountType": 1
+    },
+    {
+      "side": "Credit",
+      "id": "00000005-3000-0000-0000-000000000001",
+      "accountCode": "3000",
+      "accountName": "Share Capital",
+      "accountType": 3
+    }
+  ],
+  "validations": {
+    "debitsEqualCredits": true,
+    "bookClassificationIsIfrs": true,
+    "containsAllActiveBooks": false,
+    "accountsAreSameTenantActivePostingAccounts": true,
+    "finLim0017RemainsOpen": true,
+    "finLim0048RemainsGloballyOpen": true,
+    "finLim0048SmokeDecision": "Not applicable for this synthetic GL-only smoke test."
+  },
+  "signOff": {
+    "tenantId": "00000000-0000-0000-0000-000000000001",
+    "runId": "7bd1d05b-d26b-43d5-83c4-24eb87c1c79e",
+    "runReference": "SIGNOFF-20260710010353-7bd1d05b",
+    "runType": "SyntheticUatSmokeTest",
+    "asOfDate": "2026-06-30T00:00:00",
+    "fiscalPeriodId": "00000004-0001-0001-2026-000000000006",
+    "bookClassification": "IFRS",
+    "status": "PassedWithAcceptedLimitations",
+    "startedAt": "2026-07-10T01:03:53.7463934Z",
+    "completedAt": "2026-07-10T01:03:54.7501844Z",
+    "checkCount": 11,
+    "blockingFindingsCount": 0,
+    "warningCount": 1,
+    "acceptedLimitationsCount": 24,
+    "notApplicableLimitationsCount": 1,
+    "checks": [
+      {
+        "area": "GL",
+        "code": "TRIAL-BALANCE-BALANCED",
+        "status": "Passed",
+        "severity": "Info",
+        "message": "Posted GL debit and credit totals balance for the sign-off scope.",
+        "amount": 0.00,
+        "count": null,
+        "sourceReference": null,
+        "sourceId": null
+      },
+      {
+        "area": "Opening Balances",
+        "code": "OPENING-BALANCE-CHECKS",
+        "status": "Passed",
+        "severity": "Info",
+        "message": "Opening-balance batches are posted, balanced, referenced, and not duplicated for the sign-off scope.",
+        "amount": null,
+        "count": null,
+        "sourceReference": null,
+        "sourceId": null
+      },
+      {
+        "area": "Posting Back-References",
+        "code": "BACK-REFERENCE-DIAGNOSTIC",
+        "status": "Passed",
+        "severity": "Info",
+        "message": "Posting back-reference diagnostics found no unresolved gaps.",
+        "amount": null,
+        "count": null,
+        "sourceReference": null,
+        "sourceId": null
+      },
+      {
+        "area": "Cash/Bank",
+        "code": "BANK-SNAPSHOT-DIAGNOSTIC",
+        "status": "Passed",
+        "severity": "Info",
+        "message": "Bank snapshot diagnostics completed without unaccepted blocking variance.",
+        "amount": null,
+        "count": null,
+        "sourceReference": null,
+        "sourceId": null
+      },
+      {
+        "area": "AP",
+        "code": "AP-SETTLEMENT-CHECKS",
+        "status": "Passed",
+        "severity": "Info",
+        "message": "AP settlement read-model and control checks did not find blocking variance.",
+        "amount": null,
+        "count": null,
+        "sourceReference": null,
+        "sourceId": null
+      },
+      {
+        "area": "AR",
+        "code": "AR-SETTLEMENT-CHECKS",
+        "status": "Passed",
+        "severity": "Info",
+        "message": "AR settlement read-model and control checks did not find blocking variance.",
+        "amount": null,
+        "count": null,
+        "sourceReference": null,
+        "sourceId": null
+      },
+      {
+        "area": "Fixed Assets",
+        "code": "FA-RECONCILIATION-CHECKS",
+        "status": "Passed",
+        "severity": "Info",
+        "message": "Fixed asset sign-off checks did not find missing references or unreconciled disposal NBV.",
+        "amount": null,
+        "count": null,
+        "sourceReference": null,
+        "sourceId": null
+      },
+      {
+        "area": "Tax",
+        "code": "TAX-RECONCILIATION-CHECKS",
+        "status": "Passed",
+        "severity": "Info",
+        "message": "Tax snapshot/configuration checks did not find blocking variance.",
+        "amount": null,
+        "count": null,
+        "sourceReference": null,
+        "sourceId": null
+      },
+      {
+        "area": "Workflow",
+        "code": "WORKFLOW-PENDING-HIGH-RISK",
+        "status": "Warning",
+        "severity": "Warning",
+        "message": "Pending workflow instances exist and must be reviewed before production sign-off.",
+        "amount": null,
+        "count": 3,
+        "sourceReference": null,
+        "sourceId": null
+      },
+      {
+        "area": "Posting Boundary",
+        "code": "POSTING-BYPASS-BLOCKED",
+        "status": "Passed",
+        "severity": "Info",
+        "message": "No legacy posting bypass evidence was detected in FinancePostingEvents.",
+        "amount": null,
+        "count": null,
+        "sourceReference": null,
+        "sourceId": null
+      },
+      {
+        "area": "Migration/Subledger Openings",
+        "code": "FIN-LIM-0048-CUTOVER-SCOPE",
+        "status": "Passed",
+        "severity": "Info",
+        "message": "FIN-LIM-0048 is not applicable to this tenant cutover because no AP/AR/fixed-asset source-level opening balances were declared.",
+        "amount": null,
+        "count": null,
+        "sourceReference": null,
+        "sourceId": null
+      }
+    ],
+    "evidenceExports": [
+      {
+        "reportType": "TrialBalance",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "BalanceSheet",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "IncomeStatement",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "DetailedLedger",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "CashBankLedger",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "ApAging",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Settlement read model built from posted subledger facts",
+        "usesSettlementReadModel": true,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "ArAging",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Settlement read model built from posted subledger facts",
+        "usesSettlementReadModel": true,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "ApControlReconciliation",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "ArControlReconciliation",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "FixedAssetRegister",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted GL reconciled to fixed asset subledger snapshots",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "FixedAssetRollForward",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted GL reconciled to fixed asset subledger snapshots",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "FixedAssetGlReconciliation",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted GL reconciled to fixed asset subledger snapshots",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "TaxOutput",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted tax snapshots and withholding records reconciled to posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "TaxInput",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted tax snapshots and withholding records reconciled to posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "TaxNetSummary",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted tax snapshots and withholding records reconciled to posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "VatWithholding",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted tax snapshots and withholding records reconciled to posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "WhtPayable",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted tax snapshots and withholding records reconciled to posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "WhtReceivable",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted tax snapshots and withholding records reconciled to posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "TaxAccountReconciliation",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted tax snapshots and withholding records reconciled to posted GL",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Report is listed as required sign-off evidence."
+      },
+      {
+        "reportType": "OpeningBalanceDiagnostics",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Controlled opening-balance batches and FinancePostingEvents",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Generated by the migration sign-off run checks and SQL diagnostics."
+      },
+      {
+        "reportType": "BankSnapshotDiagnostics",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Posted GL movement compared to bank read-side snapshots",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Generated by IMigrationSignOffService bank snapshot diagnostics."
+      },
+      {
+        "reportType": "PostingBackReferenceDiagnostics",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "FinancePostingEvents and source-document back-references",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Generated by IMigrationSignOffService posting back-reference diagnostics."
+      },
+      {
+        "reportType": "LimitationAcceptanceMatrix",
+        "format": "Csv",
+        "status": "Available",
+        "sourceOfTruthMode": "Finance go-live limitations register and run-time acceptance request",
+        "usesSettlementReadModel": false,
+        "rowCount": null,
+        "fileName": null,
+        "message": "Generated by the migration sign-off run output."
+      }
+    ],
+    "limitationAcceptanceMatrix": [
+      {
+        "limitationId": "FIN-LIM-0009",
+        "area": "Corrections/Reversals",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0010",
+        "area": "Corrections/Reversals",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0011",
+        "area": "Corrections/Reversals",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0012",
+        "area": "Corrections/Reversals",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0013",
+        "area": "Corrections/Reversals",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0014",
+        "area": "Tenant Roles",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0021",
+        "area": "FX/CashBank",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0022",
+        "area": "FX/CashBank",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0028",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0030",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0031",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0033",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0034",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0035",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0037",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0038",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0039",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0040",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0041",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0042",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0043",
+        "area": "Fixed Assets",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Open limitation from the Finance go-live register."
+      },
+      {
+        "limitationId": "FIN-LIM-0045",
+        "area": "AP/AR Settlement",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve before production go-live or obtain explicit accounting/product acceptance.",
+        "rationale": "Unapplied payments, receipts, and advances remain outside the core settlement projection scope."
+      },
+      {
+        "limitationId": "FIN-LIM-0046",
+        "area": "Reporting/Export",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Accept CSV backend exports or schedule rich PDF/Excel pack enhancement.",
+        "rationale": "Backend CSV export is accountant-reviewable; richer packs are product presentation scope."
+      },
+      {
+        "limitationId": "FIN-LIM-0047",
+        "area": "Tax",
+        "classification": "AcceptedNonBlocking",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Accept backend Ghana statutory CSV/report scope or schedule portal-specific filing/certificate workflow pack.",
+        "rationale": "Backend tax reports exist; portal-specific filing/certificate workflow may still be required."
+      },
+      {
+        "limitationId": "FIN-LIM-0048",
+        "area": "Migration/Subledger Openings",
+        "classification": "NotApplicable",
+        "goLiveBlocking": false,
+        "blocksSignOff": false,
+        "requiredAction": "Resolve source-document opening migration or mark not applicable for this tenant cutover shape.",
+        "rationale": "FIN-LIM-0048 is not applicable to this tenant cutover because no AP/AR/fixed-asset source-level opening balances were declared."
+      }
+    ],
+    "cutoverDataShapeEvaluation": {
+      "requiresSubledgerOpeningMigration": false,
+      "finLim0048BlocksSignOff": false,
+      "requiredSourceOpeningAreas": [],
+      "decision": "FIN-LIM-0048 is not applicable to this tenant cutover because no AP/AR/fixed-asset source-level opening balances were declared."
+    }
+  }
+}

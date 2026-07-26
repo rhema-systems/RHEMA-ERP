@@ -54,6 +54,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? Description { get; set; }
 
         public bool? IsReportingDimension { get; set; }
+        public bool? IsMandatory { get; set; }
         public bool? IsActive { get; set; }
     }
 
@@ -81,6 +82,25 @@ namespace ErpSystem.Core.DTOs.Finance
         /// List of lookup values for this segment (when loading with details)
         /// </summary>
         public List<SegmentLookupValueDto>? LookupValues { get; set; }
+    }
+
+    /// <summary>
+    /// A valid reporting value derived from active tenant GL account combinations.
+    /// </summary>
+    public class ReportingSegmentOptionDto
+    {
+        public string SegmentValue { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public int AccountCombinationCount { get; set; }
+    }
+
+    /// <summary>
+    /// Bounded option response used by async financial-report segment selectors.
+    /// </summary>
+    public class ReportingSegmentOptionsDto
+    {
+        public List<ReportingSegmentOptionDto> Items { get; set; } = new();
+        public bool HasMore { get; set; }
     }
 
     /// <summary>

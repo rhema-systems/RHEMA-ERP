@@ -44,6 +44,7 @@ export default function EditBusinessPartnerPage() {
     isPreferred: false,
     currency: '',
     paymentTerms: '',
+    paymentTermId: '',
     priceList: '',
     parentId: '',
   });
@@ -103,6 +104,7 @@ export default function EditBusinessPartnerPage() {
         isPreferred: partnerData.isPreferred || false,
         currency: partnerData.currency || '',
         paymentTerms: partnerData.paymentTerms || '',
+        paymentTermId: partnerData.paymentTermId || '',
         priceList: partnerData.priceList || '',
         parentId: partnerData.parentId || '',
       });
@@ -342,7 +344,7 @@ export default function EditBusinessPartnerPage() {
                   <SelectContent>
                     {currencies.length > 0 ? (
                       currencies.map((curr) => (
-                        <SelectItem key={curr.id} value={curr.id}>
+                        <SelectItem key={curr.id} value={curr.code}>
                           {curr.code} - {curr.name} ({curr.symbol})
                         </SelectItem>
                       ))
@@ -359,7 +361,8 @@ export default function EditBusinessPartnerPage() {
               </div>
               <div>
                 <Label htmlFor="paymentTerms">Payment Terms</Label>
-                <Select value={formData.paymentTerms || ''} onValueChange={(value) => setFormData({ ...formData, paymentTerms: value })}>
+                {/* Procurement/Finance boundary: PaymentTermId is authoritative; legacy text is backend-managed. */}
+                <Select value={formData.paymentTermId || ''} onValueChange={(value) => setFormData({ ...formData, paymentTermId: value })}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select payment terms" />
                   </SelectTrigger>

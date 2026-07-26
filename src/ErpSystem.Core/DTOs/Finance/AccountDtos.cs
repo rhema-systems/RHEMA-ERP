@@ -166,6 +166,26 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         public bool IsLocalFrameworkClassified { get; set; }
 
+        /// <summary>
+        /// Backward-compatible alias used by older frontend screens.
+        /// Maps to the local statutory framework flag.
+        /// </summary>
+        public bool IsBaseClassified { get; set; }
+
+        /// <summary>
+        /// Backward-compatible alias used by older frontend screens.
+        /// Maps to the management reporting framework flag.
+        /// </summary>
+        public bool IsLocalClassified { get; set; }
+
+        /// <summary>
+        /// Backward-compatible alias for the management reporting framework.
+        /// </summary>
+        public bool IsManagementClassified { get; set; }
+
+        public IReadOnlyCollection<AccountAccountingBookDto> AccountingBooks { get; set; }
+            = Array.Empty<AccountAccountingBookDto>();
+
         #endregion
 
         #region Control/Posting Flags
@@ -189,6 +209,11 @@ namespace ErpSystem.Core.DTOs.Finance
         /// - Posting is restricted (e.g., purely control/technical accounts).
         /// </summary>
         public bool IsPostingAllowed { get; set; }
+
+        /// <summary>
+        /// Backward-compatible alias used by existing frontend account screens.
+        /// </summary>
+        public bool AllowDirectPosting { get; set; }
 
         #endregion
 
@@ -482,6 +507,9 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         public List<AccountSegmentValueCreateDto> SegmentValues { get; set; }
             = new();
+
+        public List<AccountAccountingBookUpdateDto> AccountingBooks { get; set; }
+            = new();
     }
 
     // ========================================================================
@@ -634,6 +662,9 @@ namespace ErpSystem.Core.DTOs.Finance
         /// - In many implementations, segment changes after posting are restricted.
         /// </summary>
         public List<AccountSegmentValueUpdateDto> SegmentValues { get; set; }
+            = new();
+
+        public List<AccountAccountingBookUpdateDto> AccountingBooks { get; set; }
             = new();
     }
 }

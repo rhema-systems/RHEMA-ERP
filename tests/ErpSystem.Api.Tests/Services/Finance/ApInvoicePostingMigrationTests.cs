@@ -1,0 +1,532 @@
+using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.AP;
+using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Data;
+using ErpSystem.Shared;
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+#pragma warning disable CS0618 // Regression tests intentionally assert that obsolete legacy posting paths are not used.
+
+namespace ErpSystem.Api.Tests.Services.Finance;
+
+public sealed class ApInvoicePostingMigrationTests
+{
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task ApprovedApInvoice_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var (service, subledgerPostingMock) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Invoice.Id);
+
+        result.JournalEntryId.Should().NotBeNull();
+        subledgerPostingMock.Verify(x => x.PostApInvoiceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        var postingEvent = await db.FinancePostingEvents.SingleAsync(e =>
+            e.TenantId == tenantId &&
+            e.SourceModule == "AP" &&
+            e.SourceDocumentType == "VendorInvoice" &&
+            e.SourceDocumentId == fixture.Invoice.Id &&
+            e.PostingAction == "Post");
+        postingEvent.JournalEntryId.Should().Be(result.JournalEntryId);
+
+        var journal = await db.JournalEntries
+            .Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == result.JournalEntryId);
+        journal.PostingStatus.Should().Be("Posted");
+        journal.SourceModule.Should().Be("AP");
+        journal.SourceDocumentType.Should().Be("VendorInvoice");
+        journal.Transactions.Should().HaveCount(2);
+        journal.Transactions.Single(t => t.AccountId == fixture.ExpenseAccount.Id).DebitAmount.Should().Be(100m);
+        journal.Transactions.Single(t => t.AccountId == fixture.ApAccount.Id).CreditAmount.Should().Be(100m);
+
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ApInvoicePosted && a.TenantId == tenantId)).Should().Be(1);
+        // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
+        fixture.ExpenseAccount.Balance.Should().Be(100m);
+        fixture.ApAccount.Balance.Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task OpeningBalanceApInvoice_ShouldPostControlAgainstMigrationClearing()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.IsOpeningBalance = true;
+            var line = invoice.LineItems.Single();
+            line.LineItemType = "FixedAsset";
+            line.GLAccountId = Guid.NewGuid();
+        });
+        var clearingAccount = SeedAccount(db, tenantId, "3999", AccountType.Equity);
+        var settings = await db.FinanceSettings.SingleAsync(s => s.TenantId == tenantId);
+        settings.MigrationClearingAccountId = clearingAccount.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Invoice.Id);
+
+        result.JournalEntryId.Should().NotBeNull();
+
+        var journal = await db.JournalEntries
+            .Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == result.JournalEntryId);
+        journal.JournalType.Should().Be("AP Opening Balance");
+        journal.SourceModule.Should().Be("AP");
+        journal.SourceDocumentType.Should().Be("VendorInvoice");
+        journal.Transactions.Should().HaveCount(2);
+        journal.Transactions.Single(t => t.AccountId == clearingAccount.Id).DebitAmount.Should().Be(100m);
+        journal.Transactions.Single(t => t.AccountId == fixture.ApAccount.Id).CreditAmount.Should().Be(100m);
+        journal.Transactions.Should().NotContain(t => t.AccountId == fixture.ExpenseAccount.Id);
+
+        (await db.FinancePostingEvents.CountAsync(e =>
+            e.TenantId == tenantId &&
+            e.SourceModule == "AP" &&
+            e.SourceDocumentType == "VendorInvoice" &&
+            e.SourceDocumentId == fixture.Invoice.Id)).Should().Be(1);
+        (await db.Set<TaxCalculation>().CountAsync()).Should().Be(0);
+        fixture.ExpenseAccount.Balance.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task UnapprovedApInvoice_ShouldNotPost()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = VendorInvoiceStatus.PendingApproval;
+            invoice.ApprovalStatus = "PendingApproval";
+        });
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.PostAsync(fixture.Invoice.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Only approved AP invoices can be posted.");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task UnbalancedApInvoice_ShouldFailBeforeLedgerPosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.TotalAmount = 125m;
+            invoice.BaseCurrencyAmount = 125m;
+        });
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.PostAsync(fixture.Invoice.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AP invoice amount does not match posting line totals.");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ApInvoicePostingFailed)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task CrossTenantSupplier_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        SeedTenant(db, otherTenantId, "OTH");
+        var otherSupplier = SeedSupplier(db, otherTenantId, fixture.ApAccount.Id, fixture.ExpenseAccount.Id);
+        fixture.Invoice.SupplierId = otherSupplier.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.PostAsync(fixture.Invoice.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AP invoice supplier was not found for this tenant.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task CrossTenantLineAccount_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        SeedTenant(db, otherTenantId, "OTH");
+        var otherAccount = SeedAccount(db, otherTenantId, "6010", AccountType.Expense);
+        fixture.Invoice.LineItems.Single().GLAccountId = otherAccount.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.PostAsync(fixture.Invoice.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AP posting expense account was not found for this tenant.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task CrossTenantApControlAccount_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        SeedTenant(db, otherTenantId, "OTH");
+        var otherApAccount = SeedAccount(db, otherTenantId, "2100", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
+        fixture.Invoice.ApAccountId = otherApAccount.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.PostAsync(fixture.Invoice.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AP posting AP control account was not found for this tenant.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task NonPostableExpenseAccount_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        fixture.ExpenseAccount.AllowDirectPosting = false;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.PostAsync(fixture.Invoice.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AP posting expense account account '6000' does not allow direct posting.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task ClosedPeriod_ShouldBeRejectedByPostingEngine()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, periodIsOpen: false, periodIsClosed: true);
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.PostAsync(fixture.Invoice.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Posting period is not open.");
+        fixture.Invoice.JournalEntryId.Should().BeNull();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task DuplicateApInvoicePosting_ShouldReturnExistingPostingAndAuditDuplicate()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+
+        var first = await service.PostAsync(fixture.Invoice.Id);
+        var second = await service.PostAsync(fixture.Invoice.Id);
+
+        second.JournalEntryId.Should().Be(first.JournalEntryId);
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ApInvoiceDuplicatePostingAttempt)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task PostedApInvoice_ShouldNotBeEditedOrDeleted()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        await service.PostAsync(fixture.Invoice.Id);
+
+        var update = () => service.UpdateAsync(new VendorInvoiceUpdateDto
+        {
+            Id = fixture.Invoice.Id,
+            InvoiceDate = fixture.Invoice.InvoiceDate,
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            LineItems = new List<VendorInvoiceLineItemCreateDto>()
+        });
+        var delete = () => service.DeleteAsync(fixture.Invoice.Id);
+
+        await update.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Posted vendor invoices cannot be updated. Use a reversal, credit note, or adjustment.");
+        await delete.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Posted vendor invoices cannot be deleted. Use a reversal, credit note, or adjustment.");
+    }
+
+    private static ApplicationDbContext CreateContext()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"ap-invoice-posting-{Guid.NewGuid()}")
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+
+        return new ApplicationDbContext(options);
+    }
+
+    private static (VendorInvoiceService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreateService(
+        ApplicationDbContext db,
+        Guid tenantId)
+    {
+        var currentUser = CreateCurrentUser(tenantId);
+        var auditService = new FinanceAuditService(
+            db,
+            currentUser.Object,
+            new HttpContextAccessor
+            {
+                HttpContext = new DefaultHttpContext { TraceIdentifier = "trace-ap-posting" }
+            });
+        var postingEngine = new FinancePostingEngine(
+            db,
+            currentUser.Object,
+            Mock.Of<ILogger<FinancePostingEngine>>(),
+            auditService);
+        var subledgerPostingMock = new Mock<ISubledgerPostingService>();
+
+        var service = new VendorInvoiceService(
+            new UnitOfWork(db),
+            currentUser.Object,
+            Mock.Of<IInventoryValuationService>(),
+            Mock.Of<ILogger<VendorInvoiceService>>(),
+            Mock.Of<IDocumentNumberingService>(),
+            Mock.Of<IWorkflowService>(),
+            postingEngine,
+            auditService);
+
+        return (service, subledgerPostingMock);
+    }
+
+    private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
+    {
+        var userId = Guid.NewGuid().ToString();
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
+        currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
+        currentUser.SetupGet(x => x.UserId).Returns(userId);
+        currentUser.SetupGet(x => x.UserName).Returns("ap.poster");
+        currentUser.SetupGet(x => x.IpAddress).Returns("127.0.0.1");
+        currentUser.SetupGet(x => x.UserAgent).Returns("ap-posting-tests");
+        currentUser.SetupGet(x => x.IsAuthenticated).Returns(true);
+        currentUser.SetupGet(x => x.Roles).Returns(Array.Empty<string>());
+        return currentUser;
+    }
+
+    private static async Task<ApInvoiceFixture> SeedApprovedApInvoiceAsync(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Action<VendorInvoice>? configureInvoice = null,
+        bool periodIsOpen = true,
+        bool periodIsClosed = false)
+    {
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId, periodIsOpen, periodIsClosed);
+        var expenseAccount = SeedAccount(db, tenantId, "6000", AccountType.Expense);
+        var apAccount = SeedAccount(db, tenantId, "2000", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
+        var taxAccount = SeedAccount(db, tenantId, "1400", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        var supplier = SeedSupplier(db, tenantId, apAccount.Id, expenseAccount.Id);
+
+        db.Set<FinanceSettings>().Add(new FinanceSettings
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrency = "GHS",
+            ControlAccountApId = apAccount.Id,
+            ControlAccountTaxId = taxAccount.Id
+        });
+
+        var invoice = new VendorInvoice
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            InvoiceNumber = "VI-2026-00001",
+            SupplierInvoiceNumber = "SUP-001",
+            SupplierId = supplier.Id,
+            SupplierName = supplier.Name,
+            InvoiceDate = new DateTime(2026, 7, 5),
+            ReceivedDate = new DateTime(2026, 7, 5),
+            DueDate = new DateTime(2026, 8, 4),
+            SubTotal = 100m,
+            TaxAmount = 0m,
+            DiscountAmount = 0m,
+            TotalAmount = 100m,
+            PaidAmount = 0m,
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            BaseCurrencyAmount = 100m,
+            Status = VendorInvoiceStatus.Approved,
+            ApprovalStatus = "Approved",
+            ApprovedById = Guid.NewGuid(),
+            ApprovedDate = DateTime.UtcNow,
+            ApAccountId = apAccount.Id,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+
+        invoice.LineItems.Add(new VendorInvoiceLineItem
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            VendorInvoiceId = invoice.Id,
+            LineItemType = "Expense",
+            GLAccountId = expenseAccount.Id,
+            Description = "Professional services",
+            Quantity = 1m,
+            UnitPrice = 100m,
+            TaxRate = 0m,
+            TaxAmount = 0m,
+            DiscountPercentage = 0m,
+            DiscountAmount = 0m,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
+
+        configureInvoice?.Invoke(invoice);
+        db.VendorInvoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        return new ApInvoiceFixture(invoice, supplier, expenseAccount, apAccount, taxAccount);
+    }
+
+    private static void SeedTenant(ApplicationDbContext db, Guid tenantId, string code = "TEN")
+    {
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = $"Tenant {code}",
+            Code = code,
+            Status = TenantStatus.Active,
+            BaseCurrency = "GHS"
+        });
+    }
+
+    private static FiscalPeriod SeedOpenPeriod(
+        ApplicationDbContext db,
+        Guid tenantId,
+        bool isOpen = true,
+        bool isClosed = false)
+    {
+        var period = new FiscalPeriod
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearId = Guid.NewGuid(),
+            PeriodName = "July 2026",
+            PeriodCode = "2026-07",
+            PeriodNumber = 7,
+            PeriodType = PeriodType.Monthly,
+            StartDate = new DateTime(2026, 7, 1),
+            EndDate = new DateTime(2026, 7, 31),
+            PeriodDays = 31,
+            PeriodStatus = isClosed ? "Closed" : isOpen ? "Open" : "Future",
+            IsOpen = isOpen,
+            IsClosed = isClosed,
+            IsLocked = false
+        };
+
+        db.FiscalPeriods.Add(period);
+        return period;
+    }
+
+    private static Account SeedAccount(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string accountNumber,
+        AccountType accountType,
+        AccountStatus status = AccountStatus.Active,
+        bool isControlAccount = false,
+        bool allowDirectPosting = true)
+    {
+        var account = new Account
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountCode = accountNumber,
+            AccountNumber = accountNumber,
+            AccountName = $"Account {accountNumber}",
+            AccountType = accountType,
+            Status = status,
+            CurrencyCode = "GHS",
+            IsControlAccount = isControlAccount,
+            AllowDirectPosting = allowDirectPosting
+        };
+
+        db.Accounts.Add(account);
+        return account;
+    }
+
+    private static Supplier SeedSupplier(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Guid apAccountId,
+        Guid expenseAccountId)
+    {
+        var supplier = new Supplier
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SupplierCode = $"SUP-{tenantId.ToString("N")[..6]}",
+            Name = "Test Supplier",
+            SupplierType = "Vendor",
+            IsActive = true,
+            Status = "Active",
+            DefaultApAccountId = apAccountId,
+            DefaultExpenseAccountId = expenseAccountId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+
+        db.Suppliers.Add(supplier);
+        return supplier;
+    }
+
+    private sealed record ApInvoiceFixture(
+        VendorInvoice Invoice,
+        Supplier Supplier,
+        Account ExpenseAccount,
+        Account ApAccount,
+        Account TaxAccount);
+}

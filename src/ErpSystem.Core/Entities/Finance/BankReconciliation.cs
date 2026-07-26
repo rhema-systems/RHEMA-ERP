@@ -9,6 +9,9 @@ namespace ErpSystem.Core.Entities.Finance;
 public class BankReconciliation : BaseEntity
 {
     [Required]
+    public Guid TenantId { get; set; }
+
+    [Required]
     public Guid BankAccountId { get; set; }
 
     public DateTime ReconciliationDate { get; set; } = DateTime.UtcNow;
@@ -61,6 +64,9 @@ public class BankReconciliation : BaseEntity
 /// </summary>
 public class ReconciliationMatch : BaseEntity
 {
+    [Required]
+    public Guid TenantId { get; set; }
+
     [Required]
     public Guid ReconciliationId { get; set; }
 

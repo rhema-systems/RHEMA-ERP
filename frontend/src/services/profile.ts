@@ -166,7 +166,9 @@ export class ProfileService {
   
   async getPasswordPolicy(): Promise<PasswordPolicy> {
     try {
-      const response = await apiService.get<PasswordPolicy>('/api/auth/password-policy');
+      // apiService already prefixes '/api'; the previous '/api/auth/...' path produced
+      // '/api/api/auth/password-policy' and always fell through to the default policy below.
+      const response = await apiService.get<PasswordPolicy>('/auth/password-policy');
       return response;
     } catch (error: any) {
       // Return default policy if API fails

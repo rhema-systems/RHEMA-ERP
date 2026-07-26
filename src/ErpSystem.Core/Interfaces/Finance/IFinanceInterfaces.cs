@@ -32,6 +32,7 @@ namespace ErpSystem.Core.Interfaces.Finance
         Task<PaymentTermDto> UpdateAsync(Guid id, UpdatePaymentTermDto dto);
         Task<bool> DeleteAsync(Guid id);
         Task<bool> SetDefaultAsync(Guid id);
+        Task<bool> ToggleActiveAsync(Guid id);
         Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null);
     }
 

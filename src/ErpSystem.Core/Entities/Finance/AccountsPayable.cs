@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Finance;
 
@@ -192,6 +194,17 @@ public class VendorInvoice : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
 
+    public Guid? WithholdingTaxId { get; set; }
+    public virtual Tax? WithholdingTax { get; set; }
+
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public virtual Account? WithholdingTaxAccount { get; set; }
+
+    [MaxLength(100)]
+    public string? WithholdingCertificateNumber { get; set; }
+
+    public DateTime? WithholdingCertificateDate { get; set; }
+
     // ── Matching ────────────────────────────────────────────────────────
 
     public InvoiceMatchingType MatchingType { get; set; } = InvoiceMatchingType.None;
@@ -237,6 +250,8 @@ public class VendorInvoice : TenantEntity
 
     // ── Multi-tenant ────────────────────────────────────────────────────
 
+    public bool IsOpeningBalance { get; set; }
+
     public Guid TenantId { get; set; }
     public virtual Tenant Tenant { get; set; } = null!;
 
@@ -268,8 +283,19 @@ public class VendorInvoiceLineItem : TenantEntity
     public Guid? GLAccountId { get; set; }
     public virtual Account? GLAccount { get; set; }
 
+    public Guid? FixedAssetId { get; set; }
+    public virtual FixedAsset? FixedAsset { get; set; }
+
+    public Guid? CapitalizationJournalEntryId { get; set; }
+    public Guid? CapitalizationPostingEventId { get; set; }
+    public DateTime? CapitalizedAt { get; set; }
+
     // ── For product-based lines (links to PO item for matching) ─────────
 
+    /// <summary>
+    /// Legacy procurement PO line link. Finance PO/GRV conversions must not store
+    /// FinancePurchaseOrderItem ids here because this FK targets PurchaseOrderItems.
+    /// </summary>
     public Guid? PurchaseOrderItemId { get; set; }
     public virtual PurchaseOrderItem? PurchaseOrderItem { get; set; }
 
@@ -309,6 +335,11 @@ public class VendorInvoiceLineItem : TenantEntity
     public decimal LineTotal => Quantity * UnitPrice;
 
     // ── Tax ──────────────────────────────────────────────────────────────
+
+    public Guid? TaxGroupId { get; set; }
+    public virtual TaxGroup? TaxGroup { get; set; }
+
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
 
     [Column(TypeName = "decimal(5,2)")]
     public decimal TaxRate { get; set; }
@@ -370,12 +401,20 @@ public class VendorPayment : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal AllocatedAmount { get; set; }
 
+    /// <summary>
+    /// True only when the original posted payment was recorded to the configured supplier-advance
+    /// account. Later allocations must reclassify that advance through the Finance posting engine.
+    /// </summary>
+    public bool IsSupplierAdvance { get; set; }
+
     [NotMapped]
     public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
 
     // ── Payment Method ──────────────────────────────────────────────────
 
     public VendorPaymentMethod PaymentMethod { get; set; } = VendorPaymentMethod.BankTransfer;
+    public Guid? PaymentMethodId { get; set; }
+    public virtual PaymentMethod? ConfiguredPaymentMethod { get; set; }
 
     // ── Currency ────────────────────────────────────────────────────────
 
@@ -403,6 +442,17 @@ public class VendorPayment : TenantEntity
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
+
+    public Guid? WithholdingTaxId { get; set; }
+    public virtual Tax? WithholdingTax { get; set; }
+
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public virtual Account? WithholdingTaxAccount { get; set; }
+
+    [MaxLength(100)]
+    public string? WithholdingCertificateNumber { get; set; }
+
+    public DateTime? WithholdingCertificateDate { get; set; }
 
     // ── Early-Payment Discount Applied ──────────────────────────────────
 
@@ -475,6 +525,14 @@ public class VendorPaymentAllocation : TenantEntity
     public bool IsReversal { get; set; } = false;
     public Guid? OriginalAllocationId { get; set; }
 
+    /// <summary>
+    /// Present only when a previously posted supplier advance is applied. The allocation's
+    /// reclassification journal/event are immutable evidence; ordinary pre-post allocations
+    /// do not create a second journal.
+    /// </summary>
+    public Guid? ApplicationJournalEntryId { get; set; }
+    public Guid? ApplicationPostingEventId { get; set; }
+
     // ── Multi-tenant ────────────────────────────────────────────────────
 
     public Guid TenantId { get; set; }
@@ -515,6 +573,8 @@ public class PaymentBatch : TenantEntity
     // ── Payment Method ──────────────────────────────────────────────────
 
     public VendorPaymentMethod PaymentMethod { get; set; } = VendorPaymentMethod.BankTransfer;
+    public Guid? PaymentMethodId { get; set; }
+    public virtual PaymentMethod? ConfiguredPaymentMethod { get; set; }
 
     public Guid? BankAccountId { get; set; }
     public virtual BankAccount? BankAccount { get; set; }

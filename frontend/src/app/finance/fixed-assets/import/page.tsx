@@ -13,8 +13,10 @@ import Link from 'next/link';
 
 export default function AssetImportPage() {
     const [file, setFile] = useState<File | null>(null);
-    const [uploading, setUploading] = useState(false);
+    const [validating, setValidating] = useState(false);
+    const [importing, setImporting] = useState(false);
     const [result, setResult] = useState<BulkImportResult | null>(null);
+    const [isValidationResult, setIsValidationResult] = useState(false);
     const [downloading, setDownloading] = useState(false);
     const { toast } = useToast();
 
@@ -22,6 +24,7 @@ export default function AssetImportPage() {
         if (e.target.files && e.target.files[0]) {
             setFile(e.target.files[0]);
             setResult(null);
+            setIsValidationResult(false);
         }
     };
 
@@ -45,36 +48,77 @@ export default function AssetImportPage() {
         }
     };
 
-    const handleUpload = async () => {
+    const handleValidate = async () => {
         if (!file) {
             toast({
                 title: "Validation Error",
-                description: "Please select a file to upload.",
+                description: "Please select a file to validate.",
                 variant: "destructive",
             });
             return;
         }
 
         try {
-            setUploading(true);
-            const importResult = await fixedAssetsDataService.bulkImportAssets(file);
+            setValidating(true);
+            const validationResult = await fixedAssetsDataService.bulkImportAssets(file, true);
+            setResult(validationResult);
+            setIsValidationResult(true);
+
+            if (validationResult.errorCount === 0) {
+                toast({
+                    title: "Validation Passed",
+                    description: `${validationResult.successCount} assets are ready to import.`,
+                });
+            } else if (validationResult.successCount > 0) {
+                toast({
+                    title: "Validation Found Issues",
+                    description: `${validationResult.successCount} rows are valid, but ${validationResult.errorCount} rows need correction before import.`,
+                    variant: "destructive",
+                });
+            } else {
+                toast({
+                    title: "Validation Failed",
+                    description: `${validationResult.errorCount} rows need correction before import.`,
+                    variant: "destructive",
+                });
+            }
+        } catch (error) {
+            console.error('Failed to validate assets:', error);
+            toast({
+                title: "Error",
+                description: "Failed to validate assets. Please check the file format.",
+                variant: "destructive",
+            });
+        } finally {
+            setValidating(false);
+        }
+    };
+
+    const handleImport = async () => {
+        if (!file || !result || !isValidationResult || result.errorCount > 0) {
+            toast({
+                title: "Validation Required",
+                description: "Validate a file with no errors before importing.",
+                variant: "destructive",
+            });
+            return;
+        }
+
+        try {
+            setImporting(true);
+            const importResult = await fixedAssetsDataService.bulkImportAssets(file, false);
             setResult(importResult);
+            setIsValidationResult(false);
 
             if (importResult.errorCount === 0) {
                 toast({
                     title: "Import Successful",
                     description: `Successfully imported ${importResult.successCount} assets.`,
                 });
-            } else if (importResult.successCount > 0) {
-                toast({
-                    title: "Partial Success",
-                    description: `Imported ${importResult.successCount} assets with ${importResult.errorCount} errors.`,
-                    variant: "destructive",
-                });
             } else {
                 toast({
                     title: "Import Failed",
-                    description: `All ${importResult.errorCount} rows had errors.`,
+                    description: `${importResult.errorCount} rows need correction. No assets were imported.`,
                     variant: "destructive",
                 });
             }
@@ -86,7 +130,7 @@ export default function AssetImportPage() {
                 variant: "destructive",
             });
         } finally {
-            setUploading(false);
+            setImporting(false);
         }
     };
 
@@ -137,11 +181,29 @@ export default function AssetImportPage() {
                         </div>
 
                         <Button
-                            onClick={handleUpload}
-                            disabled={!file || uploading}
+                            onClick={handleValidate}
+                            disabled={!file || validating || importing}
                             className="w-full bg-indigo-600 hover:bg-indigo-700"
                         >
-                            {uploading ? (
+                            {validating ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Validating...
+                                </>
+                            ) : (
+                                <>
+                                    <Upload className="h-4 w-4 mr-2" />
+                                    Validate File
+                                </>
+                            )}
+                        </Button>
+                        <Button
+                            onClick={handleImport}
+                            disabled={!file || !result || !isValidationResult || result.errorCount > 0 || importing || validating}
+                            className="w-full"
+                            variant={result && isValidationResult && result.errorCount === 0 ? "default" : "outline"}
+                        >
+                            {importing ? (
                                 <>
                                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                     Importing...
@@ -184,6 +246,10 @@ export default function AssetImportPage() {
                                 <CheckCircle2 className="h-4 w-4 text-emerald-600 mt-0.5 flex-shrink-0" />
                                 <span>Purchase Date cannot be in the future</span>
                             </li>
+                            <li className="flex items-start gap-2">
+                                <CheckCircle2 className="h-4 w-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+                                <span>Location is optional and stored directly on the finance asset register</span>
+                            </li>
                         </ul>
 
                         <Button
@@ -212,7 +278,7 @@ export default function AssetImportPage() {
             {result && (
                 <Card className="border-slate-200 shadow-sm">
                     <CardHeader className="bg-slate-50 border-b">
-                        <CardTitle className="text-lg font-semibold">Import Results</CardTitle>
+                        <CardTitle className="text-lg font-semibold">{isValidationResult ? "Validation Results" : "Import Results"}</CardTitle>
                         <div className="flex gap-4 mt-2">
                             <div className="flex items-center gap-2">
                                 <Badge variant="outline" className="bg-slate-100">
@@ -222,7 +288,7 @@ export default function AssetImportPage() {
                             <div className="flex items-center gap-2">
                                 <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
                                     <CheckCircle2 className="h-3 w-3 mr-1" />
-                                    Success: {result.successCount}
+                                    {isValidationResult ? "Ready" : "Success"}: {result.successCount}
                                 </Badge>
                             </div>
                             <div className="flex items-center gap-2">
@@ -261,7 +327,9 @@ export default function AssetImportPage() {
 
                         {result.successfulAssetCodes && result.successfulAssetCodes.length > 0 && (
                             <div className="p-4 bg-emerald-50 border-t">
-                                <p className="text-sm font-semibold text-emerald-800 mb-2">Successfully Imported Assets:</p>
+                                <p className="text-sm font-semibold text-emerald-800 mb-2">
+                                    {isValidationResult ? "Assets Ready For Import:" : "Successfully Imported Assets:"}
+                                </p>
                                 <div className="flex flex-wrap gap-2">
                                     {result.successfulAssetCodes.map((code, idx) => (
                                         <Badge key={idx} variant="outline" className="bg-white text-emerald-700 border-emerald-200 font-mono text-xs">

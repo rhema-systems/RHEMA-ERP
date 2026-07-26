@@ -16,6 +16,10 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime TransactionDate { get; set; }
         public string Reference { get; set; } = string.Empty;
         public decimal BalanceAfter { get; set; }
+        public string? CurrencyCode { get; set; }
+        public decimal? ForeignAmount { get; set; }
+        public decimal? ExchangeRate { get; set; }
+        public int? LineNumber { get; set; }
     }
 
     public class CreateAccountTransactionDto

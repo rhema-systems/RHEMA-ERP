@@ -59,6 +59,8 @@ export interface SalesOrderDetailDto {
   totalAmount: number;
   currency: string;
   paymentTerms?: string;
+  paymentTermId?: string;
+  paymentTermsDays?: number;
   salesRepId?: string;
   salesRepName?: string;
   propertyReference?: string;
@@ -119,6 +121,7 @@ export interface CreateSalesOrderDto {
   priority?: string;
   expectedDeliveryDate?: string;
   paymentTerms?: string;
+  paymentTermId?: string;
   currency?: string;
   salesRepId?: string;
   propertyReference?: string;
@@ -128,6 +131,9 @@ export interface CreateSalesOrderDto {
   customerPoNumber?: string;
   notes?: string;
   internalNotes?: string;
+  // Finance posting consumes these optional document-level currency and tax fields when supplied by Sales UI flows.
+  exchangeRate?: number;
+  taxGroupId?: string;
   quoteId?: string;
   opportunityId?: string;
   lines: CreateSalesOrderLineDto[];
@@ -149,6 +155,7 @@ export interface CreateSalesOrderLineDto {
   discountPercentage?: number;
   taxPercent?: number;
   taxRate?: number;
+  taxGroupId?: string;
   warehouseId?: string;
   locationId?: string;
 }
@@ -157,6 +164,7 @@ export interface UpdateSalesOrderDto {
   expectedDeliveryDate?: string;
   priority?: string;
   paymentTerms?: string;
+  paymentTermId?: string;
   salesRepId?: string;
   propertyReference?: string;
   propertyType?: string;
@@ -165,6 +173,9 @@ export interface UpdateSalesOrderDto {
   customerPoNumber?: string;
   notes?: string;
   internalNotes?: string;
+  currency?: string;
+  exchangeRate?: number;
+  taxGroupId?: string;
   lines?: CreateSalesOrderLineDto[];
 }
 

@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Api.Caching;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Data.Repositories;
 using ErpSystem.Shared;
@@ -24,17 +25,20 @@ public class OptimizedAuditLogController : ControllerBase
     private readonly ILogger<OptimizedAuditLogController> _logger;
     private readonly ICachingService _cachingService;
     private readonly IOptimizedGenericRepository<AuditLog> _repository;
+    private readonly ICurrentUserService _currentUserService;
 
     public OptimizedAuditLogController(
         IAuditLogService auditLogService,
         ILogger<OptimizedAuditLogController> logger,
         ICachingService cachingService,
-        IOptimizedGenericRepository<AuditLog> repository)
+        IOptimizedGenericRepository<AuditLog> repository,
+        ICurrentUserService currentUserService)
     {
         _auditLogService = auditLogService;
         _logger = logger;
         _cachingService = cachingService;
         _repository = repository;
+        _currentUserService = currentUserService;
     }
 
     /// <summary>
@@ -57,8 +61,10 @@ public class OptimizedAuditLogController : ControllerBase
                 return BadRequest(ModelState);
             }
 
+            var tenantId = GetRequiredAuditTenantId();
+
             // Create cache key
-            var cacheKey = $"audit:logs:{request.GetHashCode()}";
+            var cacheKey = $"audit:logs:{tenantId}:{request.GetHashCode()}";
 
             // Try to get from cache first
             var cachedResult = await _cachingService.GetAsync<PagedAuditLogResponse>(cacheKey);
@@ -69,7 +75,7 @@ public class OptimizedAuditLogController : ControllerBase
             }
 
             // Build query with filters
-            var query = BuildAuditLogQuery(request);
+            var query = BuildAuditLogQuery(request, tenantId);
 
             // Execute optimized query with projection
             var result = await _repository.GetPagedWithProjectionAsync(
@@ -133,7 +139,8 @@ public class OptimizedAuditLogController : ControllerBase
     {
         try
         {
-            var cacheKey = $"audit:log:{id}";
+            var tenantId = GetRequiredAuditTenantId();
+            var cacheKey = $"audit:log:{tenantId}:{id}";
 
             // Try cache first
             var cachedLog = await _cachingService.GetAsync<DetailedAuditLogDto>(cacheKey);
@@ -193,7 +200,8 @@ public class OptimizedAuditLogController : ControllerBase
     {
         try
         {
-            var cacheKey = "audit:stats:global";
+            var tenantId = GetRequiredAuditTenantId();
+            var cacheKey = $"audit:stats:{tenantId}";
 
             var cachedStats = await _cachingService.GetAsync<AuditLogStatsDto>(cacheKey);
             if (cachedStats != null)
@@ -210,10 +218,10 @@ public class OptimizedAuditLogController : ControllerBase
             // Use parallel queries for better performance
             var tasks = new[]
             {
-                _repository.CountAsync(a => a.Timestamp >= last24Hours),
-                _repository.CountAsync(a => a.Timestamp >= last7Days),
-                _repository.CountAsync(a => a.Timestamp >= last30Days),
-                _repository.CountAsync()
+                _repository.CountAsync(a => a.TenantId == tenantId && a.Timestamp >= last24Hours),
+                _repository.CountAsync(a => a.TenantId == tenantId && a.Timestamp >= last7Days),
+                _repository.CountAsync(a => a.TenantId == tenantId && a.Timestamp >= last30Days),
+                _repository.CountAsync(a => a.TenantId == tenantId)
             };
 
             var results = await Task.WhenAll(tasks);
@@ -278,40 +286,54 @@ public class OptimizedAuditLogController : ControllerBase
 
     #region Private Helper Methods
 
-    private static System.Linq.Expressions.Expression<Func<AuditLog, bool>>? BuildAuditLogQuery(AuditLogQueryRequest request)
+    private static System.Linq.Expressions.Expression<Func<AuditLog, bool>> BuildAuditLogQuery(
+        AuditLogQueryRequest request,
+        Guid tenantId)
     {
-        System.Linq.Expressions.Expression<Func<AuditLog, bool>>? query = null;
+        System.Linq.Expressions.Expression<Func<AuditLog, bool>> query = a => a.TenantId == tenantId;
 
         if (request.UserId.HasValue)
         {
-            query = a => a.UserId == request.UserId.Value;
+            var userQuery = (System.Linq.Expressions.Expression<Func<AuditLog, bool>>)(a => a.UserId == request.UserId.Value);
+            query = CombineWithAnd(query, userQuery);
         }
 
         if (!string.IsNullOrEmpty(request.Action))
         {
             var actionQuery = (System.Linq.Expressions.Expression<Func<AuditLog, bool>>)(a => a.Action == request.Action);
-            query = query == null ? actionQuery : CombineWithAnd(query, actionQuery);
+            query = CombineWithAnd(query, actionQuery);
         }
 
         if (!string.IsNullOrEmpty(request.Resource))
         {
             var resourceQuery = (System.Linq.Expressions.Expression<Func<AuditLog, bool>>)(a => a.Resource == request.Resource);
-            query = query == null ? resourceQuery : CombineWithAnd(query, resourceQuery);
+            query = CombineWithAnd(query, resourceQuery);
         }
 
         if (request.FromDate.HasValue)
         {
             var fromQuery = (System.Linq.Expressions.Expression<Func<AuditLog, bool>>)(a => a.Timestamp >= request.FromDate.Value);
-            query = query == null ? fromQuery : CombineWithAnd(query, fromQuery);
+            query = CombineWithAnd(query, fromQuery);
         }
 
         if (request.ToDate.HasValue)
         {
             var toQuery = (System.Linq.Expressions.Expression<Func<AuditLog, bool>>)(a => a.Timestamp <= request.ToDate.Value);
-            query = query == null ? toQuery : CombineWithAnd(query, toQuery);
+            query = CombineWithAnd(query, toQuery);
         }
 
         return query;
+    }
+
+    private Guid GetRequiredAuditTenantId()
+    {
+        var tenantId = _currentUserService.TenantId;
+        if (!tenantId.HasValue || tenantId.Value == Guid.Empty)
+        {
+            throw new InvalidOperationException("Tenant context is required for audit log access.");
+        }
+
+        return tenantId.Value;
     }
 
     private static System.Linq.Expressions.Expression<Func<AuditLog, bool>> CombineWithAnd(

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.Finance;
@@ -29,6 +30,7 @@ namespace ErpSystem.Api.Controllers.Finance;
 /// - **Audit Trail:** Each reconciliation and its matches are persisted for audit and compliance purposes
 /// </remarks>
 [ApiController]
+[Authorize]
 [Route("api/finance/bank-reconciliation")]
 public class BankReconciliationController : ControllerBase
 {
@@ -252,6 +254,79 @@ public class BankReconciliationController : ControllerBase
         {
             var match = await _reconciliationService.RemoveMatchAsync(matchId);
             return Ok(match);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Retrieves the transaction pairs already matched in a reconciliation.
+    /// </summary>
+    [HttpGet("{id}/matches")]
+    public async Task<ActionResult<IEnumerable<ReconciliationMatchDto>>> GetMatches(Guid id)
+    {
+        try
+        {
+            return Ok(await _reconciliationService.GetMatchesAsync(id));
+        }
+        catch (Exception ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Creates and posts an explicit reconciliation adjustment through the central Finance posting engine.
+    /// </summary>
+    [HttpPost("{id}/adjustments/post")]
+    public async Task<ActionResult<ReconciliationAdjustmentDto>> CreateAndPostAdjustment(
+        Guid id,
+        [FromBody] CreateReconciliationAdjustmentDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var adjustment = await _reconciliationService.CreateAndPostAdjustmentAsync(id, dto, cancellationToken);
+            return Ok(adjustment);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Finalizes a reconciliation after posted GL book balance agrees to the statement balance.
+    /// </summary>
+    [HttpPost("{id}/finalize")]
+    public async Task<ActionResult<BankReconciliationDto>> Finalize(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var reconciliation = await _reconciliationService.FinalizeReconciliationAsync(id, cancellationToken);
+            return Ok(reconciliation);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Cancels an open reconciliation that has not been finalized.
+    /// </summary>
+    [HttpPost("{id}/cancel")]
+    public async Task<ActionResult<BankReconciliationDto>> Cancel(
+        Guid id,
+        [FromBody] CancelReconciliationDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var reconciliation = await _reconciliationService.CancelReconciliationAsync(id, dto.Reason, cancellationToken);
+            return Ok(reconciliation);
         }
         catch (Exception ex)
         {

@@ -7,7 +7,7 @@ namespace ErpSystem.Core.Entities.Finance
 {
     /// <summary>
     /// General Ledger Account entity supporting segmented account structure,
-    /// multi-currency operations, and multiple classification frameworks (IFRS/Base/Local).
+    /// multi-currency operations, and multiple accounting books (IFRS/Local Statutory/Management).
     /// 
     /// PATTERN: This entity follows the enhanced specifications for segmented accounts
     /// with up to 20 segments and reporting dimension control.
@@ -109,7 +109,7 @@ namespace ErpSystem.Core.Entities.Finance
 
         #endregion
 
-        #region Classification Framework (IFRS/Base/Local)
+        #region Accounting Book Classification (IFRS / Local Statutory / Management)
 
         /// <summary>
         /// Indicates if account is used in IFRS financial reporting.
@@ -118,14 +118,14 @@ namespace ErpSystem.Core.Entities.Finance
         public bool IsIFRSClassified { get; set; } = true;
 
         /// <summary>
-        /// Indicates if account is used in Base/Statutory reporting framework.
-        /// Typically follows local GAAP or primary reporting standard.
+        /// Indicates if account is used in Local Statutory reporting.
+        /// Backed by the legacy Base flag until account/book mappings fully replace it.
         /// </summary>
         public bool IsBaseClassified { get; set; } = true;
 
         /// <summary>
-        /// Indicates if account is used in Local/Tax reporting framework.
-        /// Used for tax calculations and local regulatory reporting.
+        /// Indicates if account is used in Management reporting.
+        /// Backed by the legacy Local flag until account/book mappings fully replace it.
         /// </summary>
         public bool IsLocalClassified { get; set; } = false;
 
@@ -137,13 +137,13 @@ namespace ErpSystem.Core.Entities.Finance
         public string? IFRSLineItem { get; set; }
 
         /// <summary>
-        /// Financial statement line item for Base/Statutory reporting.
+        /// Financial statement line item for Local Statutory reporting.
         /// </summary>
         [MaxLength(100)]
         public string? BaseLineItem { get; set; }
 
         /// <summary>
-        /// Financial statement line item for Local/Tax reporting.
+        /// Financial statement line item for Management reporting.
         /// </summary>
         [MaxLength(100)]
         public string? LocalLineItem { get; set; }
@@ -326,6 +326,11 @@ namespace ErpSystem.Core.Entities.Finance
         /// Empty collection if IsMultiCurrency = false.
         /// </summary>
         public virtual ICollection<AccountCurrencyLink> CurrencyLinks { get; set; } = new List<AccountCurrencyLink>();
+
+        /// <summary>
+        /// Accounting books where this account is available for posting and reporting.
+        /// </summary>
+        public virtual ICollection<AccountAccountingBook> AccountingBooks { get; set; } = new List<AccountAccountingBook>();
 
         /// <summary>
         /// All transactions posted to this account.

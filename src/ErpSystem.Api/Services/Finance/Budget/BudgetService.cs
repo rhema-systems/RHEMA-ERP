@@ -1,6 +1,9 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,12 +12,21 @@ namespace ErpSystem.Api.Services.Finance.Budget;
 public class BudgetService : IBudgetService
 {
     private readonly ApplicationDbContext _context;
-    // In a real app, I would inject ICurrentUserService for user IDs, but I'll stick to simple logic for now
+    private readonly ICurrentUserService _currentUserService;
+    private readonly IWorkflowService _workflowService;
 
-    public BudgetService(ApplicationDbContext context)
+    public BudgetService(
+        ApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        IWorkflowService workflowService)
     {
         _context = context;
+        _currentUserService = currentUserService;
+        _workflowService = workflowService;
     }
+
+    private Guid CurrentUserId => Guid.TryParse(_currentUserService.UserId, out var id) ? id : Guid.Empty;
+    private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
     // ========================================================================
     // SCENARIOS
@@ -22,9 +34,16 @@ public class BudgetService : IBudgetService
 
     public async Task<BudgetScenarioDto> CreateScenarioAsync(CreateBudgetScenarioDto dto)
     {
+        var tenantId = TenantId;
+        var fiscalYearExists = await _context.FiscalYears
+            .AnyAsync(fy => fy.TenantId == tenantId && fy.Id == dto.FiscalYearId && !fy.IsDeleted);
+        if (!fiscalYearExists)
+            throw new InvalidOperationException("Fiscal year not found for the current tenant.");
+
         var scenario = new BudgetScenario
         {
             Id = Guid.NewGuid(),
+            TenantId = tenantId,
             Name = dto.Name,
             Description = dto.Description,
             FiscalYearId = dto.FiscalYearId,
@@ -41,9 +60,10 @@ public class BudgetService : IBudgetService
 
     public async Task<BudgetScenarioDto> UpdateScenarioAsync(UpdateBudgetScenarioDto dto)
     {
+        var tenantId = TenantId;
         var scenario = await _context.BudgetScenarios
             .Include(s => s.FiscalYear)
-            .FirstOrDefaultAsync(s => s.Id == dto.Id);
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == dto.Id);
 
         if (scenario == null) throw new KeyNotFoundException("Budget Scenario not found");
 
@@ -59,7 +79,7 @@ public class BudgetService : IBudgetService
         if (dto.IsActive)
         {
             var others = await _context.BudgetScenarios
-                .Where(s => s.FiscalYearId == scenario.FiscalYearId && s.Id != scenario.Id)
+                .Where(s => s.TenantId == tenantId && s.FiscalYearId == scenario.FiscalYearId && s.Id != scenario.Id)
                 .ToListAsync();
             
             foreach (var other in others)
@@ -74,10 +94,11 @@ public class BudgetService : IBudgetService
 
     public async Task<BudgetScenarioDto> GetScenarioAsync(Guid id)
     {
+        var tenantId = TenantId;
         var scenario = await _context.BudgetScenarios
             .Include(s => s.FiscalYear)
             .Include(s => s.BudgetReturns)
-            .FirstOrDefaultAsync(s => s.Id == id);
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == id);
 
         if (scenario == null) throw new KeyNotFoundException("Budget Scenario not found");
 
@@ -86,10 +107,11 @@ public class BudgetService : IBudgetService
 
     public async Task<IEnumerable<BudgetScenarioDto>> GetScenariosForYearAsync(Guid fiscalYearId)
     {
+        var tenantId = TenantId;
         var scenarios = await _context.BudgetScenarios
             .Include(s => s.FiscalYear)
             .Include(s => s.BudgetReturns)
-            .Where(s => s.FiscalYearId == fiscalYearId)
+            .Where(s => s.TenantId == tenantId && s.FiscalYearId == fiscalYearId)
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
 
@@ -103,7 +125,9 @@ public class BudgetService : IBudgetService
 
     public async Task<bool> DeleteScenarioAsync(Guid id)
     {
-        var scenario = await _context.BudgetScenarios.FindAsync(id);
+        var tenantId = TenantId;
+        var scenario = await _context.BudgetScenarios
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == id);
         if (scenario == null) return false;
 
         if (scenario.Status == "Locked")
@@ -116,9 +140,10 @@ public class BudgetService : IBudgetService
 
     public async Task<BudgetScenarioDto> LockScenarioAsync(Guid id)
     {
+        var tenantId = TenantId;
         var scenario = await _context.BudgetScenarios
             .Include(s => s.FiscalYear)
-            .FirstOrDefaultAsync(s => s.Id == id);
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == id);
 
         if (scenario == null) throw new KeyNotFoundException("Budget Scenario not found");
 
@@ -139,9 +164,27 @@ public class BudgetService : IBudgetService
 
     public async Task<BudgetReturnDto> CreateReturnAsync(CreateBudgetReturnDto dto)
     {
+        var tenantId = TenantId;
+        var scenarioExists = await _context.BudgetScenarios
+            .AnyAsync(s => s.TenantId == tenantId && s.Id == dto.BudgetScenarioId && !s.IsDeleted);
+        if (!scenarioExists)
+            throw new InvalidOperationException("Budget scenario not found for the current tenant.");
+
+        if (dto.SegmentValueId.HasValue)
+        {
+            var segmentExists = await _context.SegmentLookupValues
+                .AnyAsync(s => s.TenantId == tenantId
+                    && s.Id == dto.SegmentValueId.Value
+                    && s.IsActive
+                    && !s.IsDeleted);
+            if (!segmentExists)
+                throw new InvalidOperationException("Segment value not found for the current tenant.");
+        }
+
         var budgetReturn = new BudgetReturn
         {
             Id = Guid.NewGuid(),
+            TenantId = tenantId,
             BudgetScenarioId = dto.BudgetScenarioId,
             SegmentValueId = dto.SegmentValueId,
             AssignedToUserId = dto.AssignedToUserId,
@@ -156,6 +199,27 @@ public class BudgetService : IBudgetService
         return await MapToReturnDto(budgetReturn);
     }
 
+    public async Task<BudgetReturnDto> UpdateReturnAsync(Guid id, UpdateBudgetReturnDto dto)
+    {
+        var budgetReturn = await GetReturnEntityAsync(id);
+        if (budgetReturn.Status != "Draft" && budgetReturn.Status != "Rejected")
+            throw new InvalidOperationException("Only Draft or Rejected returns can be updated.");
+
+        if (dto.AssignedToUserId.HasValue)
+            budgetReturn.AssignedToUserId = dto.AssignedToUserId;
+
+        if (dto.ApproverUserId.HasValue)
+            budgetReturn.ApproverUserId = dto.ApproverUserId;
+
+        if (dto.Notes != null)
+            budgetReturn.Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
+
+        budgetReturn.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return await MapToReturnDto(budgetReturn);
+    }
+
     public async Task<BudgetReturnDto> GetReturnAsync(Guid id)
     {
         var budgetReturn = await GetReturnEntityAsync(id);
@@ -164,10 +228,11 @@ public class BudgetService : IBudgetService
 
     public async Task<IEnumerable<BudgetReturnDto>> GetReturnsForScenarioAsync(Guid scenarioId)
     {
+         var tenantId = TenantId;
          var returns = await _context.BudgetReturns
             .Include(r => r.BudgetScenario)
             .Include(r => r.SegmentValue)
-            .Where(r => r.BudgetScenarioId == scenarioId)
+            .Where(r => r.TenantId == tenantId && r.BudgetScenarioId == scenarioId)
             .ToListAsync();
 
         var dtos = new List<BudgetReturnDto>();
@@ -189,6 +254,17 @@ public class BudgetService : IBudgetService
         budgetReturn.RejectionReason = null; // Clear rejection reason
 
         await _context.SaveChangesAsync();
+
+        var workflowResult = await _workflowService.StartApprovalWorkflowAsync("BudgetReturn", id);
+        if (!workflowResult.Success)
+        {
+            budgetReturn.Status = "Draft";
+            budgetReturn.SubmittedDate = null;
+            await _context.SaveChangesAsync();
+
+            throw new InvalidOperationException(workflowResult.Message ?? "Unable to start budget return approval workflow.");
+        }
+
         return await MapToReturnDto(budgetReturn);
     }
 
@@ -197,6 +273,20 @@ public class BudgetService : IBudgetService
         var budgetReturn = await GetReturnEntityAsync(id);
         if (budgetReturn.Status != "Submitted")
             throw new InvalidOperationException("Only Submitted returns can be approved.");
+
+        var workflowUserId = CurrentUserId != Guid.Empty ? CurrentUserId : approverId;
+        if (workflowUserId == Guid.Empty)
+            throw new InvalidOperationException("Unable to resolve the current approver.");
+
+        if (!await _workflowService.CanUserApproveAsync("BudgetReturn", id, workflowUserId))
+            throw new InvalidOperationException("This budget return is assigned to another workflow approver.");
+
+        var workflowResult = await _workflowService.ProcessApprovalStepAsync("BudgetReturn", id, workflowUserId, "Approve");
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "Unable to process budget return approval.");
+
+        if (workflowResult.Status != WorkflowInstanceStatus.Completed)
+            return await MapToReturnDto(budgetReturn);
 
         budgetReturn.Status = "Approved";
         budgetReturn.ApprovedDate = DateTime.UtcNow;
@@ -212,6 +302,20 @@ public class BudgetService : IBudgetService
         if (budgetReturn.Status != "Submitted" && budgetReturn.Status != "Approved")
              throw new InvalidOperationException("Can only reject Submitted or Approved returns.");
 
+        var workflowUserId = CurrentUserId != Guid.Empty ? CurrentUserId : rejectorId;
+        if (workflowUserId == Guid.Empty)
+            throw new InvalidOperationException("Unable to resolve the current approver.");
+
+        if (!await _workflowService.CanUserApproveAsync("BudgetReturn", id, workflowUserId))
+            throw new InvalidOperationException("This budget return is assigned to another workflow approver.");
+
+        var workflowResult = await _workflowService.ProcessApprovalStepAsync("BudgetReturn", id, workflowUserId, "Reject", reason);
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "Unable to process budget return rejection.");
+
+        if (workflowResult.Status is not (WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed))
+            return await MapToReturnDto(budgetReturn);
+
         budgetReturn.Status = "Rejected";
         budgetReturn.RejectionReason = reason;
 
@@ -225,10 +329,11 @@ public class BudgetService : IBudgetService
 
     public async Task<IEnumerable<BudgetEntryDto>> GetEntriesAsync(Guid returnId)
     {
+        var tenantId = TenantId;
         var entries = await _context.BudgetEntries
             .Include(e => e.Account)
             .Include(e => e.FiscalPeriod)
-            .Where(e => e.BudgetReturnId == returnId)
+            .Where(e => e.TenantId == tenantId && e.BudgetReturnId == returnId)
             .OrderBy(e => e.Account!.AccountCode)
             .ThenBy(e => e.FiscalPeriod!.PeriodNumber)
             .ToListAsync();
@@ -238,9 +343,10 @@ public class BudgetService : IBudgetService
 
     public async Task BulkSaveEntriesAsync(BulkSaveBudgetEntriesDto dto)
     {
+        var tenantId = TenantId;
         var budgetReturn = await _context.BudgetReturns
             .Include(r => r.BudgetScenario)
-            .FirstOrDefaultAsync(r => r.Id == dto.BudgetReturnId);
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == dto.BudgetReturnId);
             
         if (budgetReturn == null) throw new KeyNotFoundException("Budget Return not found");
 
@@ -251,8 +357,20 @@ public class BudgetService : IBudgetService
         // Upsert is safer. matching on AccountId + PeriodId
 
         var existingEntries = await _context.BudgetEntries
-            .Where(e => e.BudgetReturnId == dto.BudgetReturnId)
+            .Where(e => e.TenantId == tenantId && e.BudgetReturnId == dto.BudgetReturnId)
             .ToListAsync();
+
+        var accountIds = dto.Entries.Select(e => e.AccountId).Distinct().ToList();
+        var periodIds = dto.Entries.Select(e => e.FiscalPeriodId).Distinct().ToList();
+        var validAccountCount = await _context.Accounts
+            .CountAsync(a => a.TenantId == tenantId && accountIds.Contains(a.Id) && !a.IsDeleted);
+        if (validAccountCount != accountIds.Count)
+            throw new InvalidOperationException("One or more budget accounts do not belong to the current tenant.");
+
+        var validPeriodCount = await _context.FiscalPeriods
+            .CountAsync(p => p.TenantId == tenantId && periodIds.Contains(p.Id) && !p.IsDeleted);
+        if (validPeriodCount != periodIds.Count)
+            throw new InvalidOperationException("One or more fiscal periods do not belong to the current tenant.");
 
         var entryMap = existingEntries.ToDictionary(e => (e.AccountId, e.FiscalPeriodId));
 
@@ -289,6 +407,7 @@ public class BudgetService : IBudgetService
                 var newEntry = new BudgetEntry
                 {
                     Id = Guid.NewGuid(),
+                    TenantId = tenantId,
                     BudgetReturnId = dto.BudgetReturnId,
                     AccountId = incoming.AccountId,
                     FiscalPeriodId = incoming.FiscalPeriodId,
@@ -308,12 +427,15 @@ public class BudgetService : IBudgetService
 
     public async Task<IEnumerable<BudgetEntryDto>> GetConsolidatedBudgetAsync(Guid scenarioId, Guid? accountId = null)
     {
+        var tenantId = TenantId;
         // This aggregates all APPROVED returns for a scenario
         var query = _context.BudgetEntries
             .Include(e => e.Account)
             .Include(e => e.FiscalPeriod)
             .Include(e => e.BudgetReturn)
-            .Where(e => e.BudgetReturn!.BudgetScenarioId == scenarioId 
+            .Where(e => e.TenantId == tenantId
+                     && e.BudgetReturn!.TenantId == tenantId
+                     && e.BudgetReturn.BudgetScenarioId == scenarioId
                      && e.BudgetReturn.Status == "Approved");
 
         if (accountId.HasValue)
@@ -325,22 +447,54 @@ public class BudgetService : IBudgetService
         return entries.Select(MapToEntryDto).ToList();
     }
 
+    public async Task<BudgetSummaryDto> GetScenarioSummaryAsync(Guid scenarioId)
+    {
+        var tenantId = TenantId;
+        var scenario = await _context.BudgetScenarios
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == scenarioId && !s.IsDeleted);
+        if (scenario == null)
+            throw new KeyNotFoundException("Budget scenario not found");
+
+        // Summarize approved returns only, mirroring the consolidated budget definition.
+        var rows = await _context.BudgetEntries
+            .Where(e => e.TenantId == tenantId
+                     && !e.IsDeleted
+                     && e.BudgetReturn!.TenantId == tenantId
+                     && e.BudgetReturn.BudgetScenarioId == scenarioId
+                     && e.BudgetReturn.Status == "Approved")
+            .Select(e => new { e.Account!.AccountType, e.AmountBase })
+            .ToListAsync();
+
+        var totalRevenue = rows.Where(r => r.AccountType == AccountType.Revenue).Sum(r => r.AmountBase);
+        var totalExpense = rows.Where(r => r.AccountType == AccountType.Expense).Sum(r => r.AmountBase);
+
+        return new BudgetSummaryDto
+        {
+            ScenarioId = scenarioId,
+            TotalRevenue = totalRevenue,
+            TotalExpense = totalExpense,
+            NetIncome = totalRevenue - totalExpense,
+            CurrencyCode = scenario.BaseCurrencyCode
+        };
+    }
+
     //Helpers
     private async Task<BudgetReturn> GetReturnEntityAsync(Guid id)
     {
+        var tenantId = TenantId;
         var r = await _context.BudgetReturns
              .Include(r => r.BudgetScenario)
              .Include(r => r.SegmentValue) // To get segment name
-             .FirstOrDefaultAsync(x => x.Id == id);
+             .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id);
              
          if (r == null) throw new KeyNotFoundException("Budget Return not found");
          return r;
     }
 
-    private async Task<BudgetScenarioDto> MapToDto(BudgetScenario s)
+    private Task<BudgetScenarioDto> MapToDto(BudgetScenario s)
     {
         // Re-fetch logic if navigation property missing logic omitted for brevity, assuming Include used
-        return new BudgetScenarioDto
+        return Task.FromResult(new BudgetScenarioDto
         {
             Id = s.Id,
             Name = s.Name,
@@ -353,13 +507,16 @@ public class BudgetService : IBudgetService
             LockedDate = s.LockedDate,
             CreatedAt = s.CreatedAt,
             ReturnCount = s.BudgetReturns.Count
-        };
+        });
     }
 
     private async Task<BudgetReturnDto> MapToReturnDto(BudgetReturn r)
     {
         // Basic mapping
-        var total = await _context.BudgetEntries.Where(e => e.BudgetReturnId == r.Id).SumAsync(e => e.AmountBase);
+        var tenantId = TenantId;
+        var total = await _context.BudgetEntries
+            .Where(e => e.TenantId == tenantId && e.BudgetReturnId == r.Id)
+            .SumAsync(e => e.AmountBase);
         
         return new BudgetReturnDto
         {
@@ -367,7 +524,7 @@ public class BudgetService : IBudgetService
             BudgetScenarioId = r.BudgetScenarioId,
             BudgetScenarioName = r.BudgetScenario?.Name ?? "",
             SegmentValueId = r.SegmentValueId,
-            SegmentValueName = r.SegmentValue?.SegmentValueDescription,
+            SegmentValueName = r.SegmentValue?.Description,
             SegmentValueCode = r.SegmentValue?.SegmentValue,
             AssignedToUserId = r.AssignedToUserId,
             ApproverUserId = r.ApproverUserId,

@@ -2,7 +2,9 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Enums;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,16 +14,19 @@ public class AssetVerificationService : IAssetVerificationService
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IDocumentNumberingService _documentNumberingService;
 
     public AssetVerificationService(
         ApplicationDbContext context,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        IDocumentNumberingService documentNumberingService)
     {
         _context = context;
         _currentUser = currentUser;
+        _documentNumberingService = documentNumberingService;
     }
 
-    private Guid TenantId => _currentUser.TenantId ?? Guid.Empty;
+    private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
     private string UserName => _currentUser.UserName ?? "system";
     private Guid CurrentUserId => Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
 
@@ -55,7 +60,12 @@ public class AssetVerificationService : IAssetVerificationService
             ScheduledDate = dto.ScheduledDate,
             Description = dto.Description,
             Status = VerificationSessionStatus.Draft,
-            ReferenceNumber = $"VRF-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..4].ToUpper()}",
+            ReferenceNumber = await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.AssetVerification,
+                TenantId,
+                dto.ScheduledDate,
+                nameof(AssetVerificationSession)),
             CreatedAt = DateTime.UtcNow,
             CreatedBy = UserName
         };
@@ -145,6 +155,13 @@ public class AssetVerificationService : IAssetVerificationService
         item.UpdatedAt = DateTime.UtcNow;
         item.UpdatedBy = UserName;
 
+        if (!string.IsNullOrWhiteSpace(dto.CurrentLocation) && item.FixedAsset != null)
+        {
+            item.FixedAsset.Location = dto.CurrentLocation.Trim();
+            item.FixedAsset.UpdatedAt = DateTime.UtcNow;
+            item.FixedAsset.UpdatedBy = UserName;
+        }
+
         await _context.SaveChangesAsync();
         return MapToItemDto(item);
     }
@@ -189,7 +206,7 @@ public class AssetVerificationService : IAssetVerificationService
             IsVerified = i.IsVerified,
             VerificationDate = i.VerificationDate,
             Condition = i.Condition,
-            CurrentLocation = i.CurrentLocation,
+            CurrentLocation = i.CurrentLocation ?? i.FixedAsset?.Location,
             Notes = i.Notes,
             ImageUrl = i.ImageUrl
         };

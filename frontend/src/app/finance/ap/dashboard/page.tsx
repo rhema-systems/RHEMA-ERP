@@ -56,6 +56,7 @@ export default function ApDashboardPage() {
     ];
 
     const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444'];
+    const dashboardCurrencyCode = agingReport?.currencyCode || 'GHS';
 
     if (summaryLoading || agingLoading) {
         return <DashboardSkeleton />;
@@ -78,7 +79,7 @@ export default function ApDashboardPage() {
                         <DollarSign className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">{formatCurrency(apSummary?.totalOutstanding || 0)}</div>
+                        <div className="text-2xl font-bold">{formatCurrency(apSummary?.totalOutstanding || 0, dashboardCurrencyCode)}</div>
                         <p className="text-xs text-muted-foreground mt-1">
                             {apSummary?.outstandingInvoiceCount || 0} open invoices
                         </p>
@@ -92,7 +93,7 @@ export default function ApDashboardPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold text-red-600">
-                            {formatCurrency(apSummary?.totalOverdue || 0)}
+                            {formatCurrency(apSummary?.totalOverdue || 0, dashboardCurrencyCode)}
                         </div>
                         <p className="text-xs flex items-center mt-1 text-red-600/80">
                             {apSummary?.overdueInvoiceCount || 0} overdue invoices
@@ -107,10 +108,10 @@ export default function ApDashboardPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold text-green-600">
-                            {formatCurrency(apSummary?.totalPaidThisMonth || 0)}
+                            {formatCurrency(apSummary?.totalPaidThisMonth || 0, dashboardCurrencyCode)}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
-                            Discounts taken: {formatCurrency(apSummary?.discountsTaken || 0)}
+                            Discounts taken: {formatCurrency(apSummary?.discountsTaken || 0, dashboardCurrencyCode)}
                         </p>
                     </CardContent>
                 </Card>
@@ -157,7 +158,7 @@ export default function ApDashboardPage() {
                                         fontSize={12}
                                         tickLine={false}
                                         axisLine={false}
-                                        tickFormatter={(value) => `$${value}`}
+                                        tickFormatter={(value) => formatCurrency(Number(value), dashboardCurrencyCode)}
                                     />
                                     <Tooltip
                                         cursor={{ fill: 'transparent' }}
@@ -225,7 +226,7 @@ export default function ApDashboardPage() {
                                     </p>
                                 </div>
                                 <div className="ml-auto font-medium text-purple-600">
-                                    {formatCurrency(apSummary?.discountsMissed || 0)}
+                                    {formatCurrency(apSummary?.discountsMissed || 0, dashboardCurrencyCode)}
                                 </div>
                             </div>
                         </div>

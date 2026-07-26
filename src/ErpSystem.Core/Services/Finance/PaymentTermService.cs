@@ -63,6 +63,11 @@ public class PaymentTermService : IPaymentTermService
 
     public async Task<PaymentTermDto> CreateAsync(CreatePaymentTermDto dto)
     {
+        NormalizeAndValidate(dto.DueDays, dto.DiscountPercent, dto.DiscountDays, dto.IsActive, dto.IsDefault, dto.ApplicableTo);
+        dto.Code = dto.Code.Trim().ToUpperInvariant();
+        dto.Name = dto.Name.Trim();
+        dto.ApplicableTo = NormalizeApplicableTo(dto.ApplicableTo);
+
         // Check for unique code
         if (!await IsCodeUniqueAsync(dto.Code))
         {
@@ -79,13 +84,13 @@ public class PaymentTermService : IPaymentTermService
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            Code = dto.Code.ToUpperInvariant(),
+            Code = dto.Code,
             Name = dto.Name,
             Description = dto.Description,
             DueDays = dto.DueDays,
             DiscountPercent = dto.DiscountPercent,
             DiscountDays = dto.DiscountDays,
-            IsActive = true,
+            IsActive = dto.IsActive,
             IsDefault = dto.IsDefault,
             DisplayOrder = dto.DisplayOrder,
             ApplicableTo = dto.ApplicableTo,
@@ -107,8 +112,17 @@ public class PaymentTermService : IPaymentTermService
 
     public async Task<PaymentTermDto> UpdateAsync(Guid id, UpdatePaymentTermDto dto)
     {
+        dto.Name = dto.Name.Trim();
+        dto.ApplicableTo = NormalizeApplicableTo(dto.ApplicableTo);
+        NormalizeAndValidate(dto.DueDays, dto.DiscountPercent, dto.DiscountDays, dto.IsActive, dto.IsDefault, dto.ApplicableTo);
+
         var entity = await _repository.GetByIdAsync(id)
             ?? throw new InvalidOperationException($"Payment term with ID {id} not found.");
+
+        if (entity.IsDefault && !dto.IsDefault)
+        {
+            throw new InvalidOperationException("The default flag cannot be cleared directly. Set another active term as default instead.");
+        }
 
         entity.Name = dto.Name;
         entity.Description = dto.Description;
@@ -142,6 +156,11 @@ public class PaymentTermService : IPaymentTermService
             return false;
         }
 
+        if (entity.IsDefault)
+        {
+            throw new InvalidOperationException("The default payment term cannot be deleted. Set another active term as default first.");
+        }
+
         entity.IsDeleted = true;
         entity.DeletedAt = DateTime.UtcNow;
         await _repository.UpdateAsync(entity);
@@ -159,6 +178,11 @@ public class PaymentTermService : IPaymentTermService
             return false;
         }
 
+        if (!entity.IsActive)
+        {
+            throw new InvalidOperationException("An inactive payment term cannot be set as default.");
+        }
+
         await UnsetOtherDefaultsAsync(id, entity.ApplicableTo);
 
         entity.IsDefault = true;
@@ -166,6 +190,26 @@ public class PaymentTermService : IPaymentTermService
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
+        return true;
+    }
+
+    public async Task<bool> ToggleActiveAsync(Guid id)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null)
+        {
+            return false;
+        }
+
+        if (entity.IsActive && entity.IsDefault)
+        {
+            throw new InvalidOperationException("The default payment term cannot be deactivated. Set another active term as default first.");
+        }
+
+        entity.IsActive = !entity.IsActive;
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _repository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
         return true;
     }
 
@@ -183,6 +227,50 @@ public class PaymentTermService : IPaymentTermService
             term.IsDefault = false;
             term.UpdatedAt = DateTime.UtcNow;
             await _repository.UpdateAsync(term);
+        }
+    }
+
+    private static string NormalizeApplicableTo(string? applicableTo)
+    {
+        var normalized = string.IsNullOrWhiteSpace(applicableTo) ? "All" : applicableTo.Trim();
+        return normalized.ToUpperInvariant() switch
+        {
+            "ALL" => "All",
+            "CUSTOMER" or "CLIENT" => "Customer",
+            "SUPPLIER" or "VENDOR" => "Supplier",
+            "CONTRACTOR" => "Contractor",
+            _ => throw new InvalidOperationException("Applicable To must be All, Customer, Supplier, or Contractor.")
+        };
+    }
+
+    private static void NormalizeAndValidate(
+        int dueDays,
+        decimal discountPercent,
+        int discountDays,
+        bool isActive,
+        bool isDefault,
+        string? applicableTo)
+    {
+        _ = NormalizeApplicableTo(applicableTo);
+
+        if (isDefault && !isActive)
+        {
+            throw new InvalidOperationException("A default payment term must be active.");
+        }
+
+        if (discountPercent == 0m && discountDays != 0)
+        {
+            throw new InvalidOperationException("Discount days must be zero when no discount percentage is configured.");
+        }
+
+        if (discountPercent > 0m && discountDays <= 0)
+        {
+            throw new InvalidOperationException("Discount days must be greater than zero when a discount is configured.");
+        }
+
+        if (discountPercent > 0m && (dueDays == 0 || discountDays > dueDays))
+        {
+            throw new InvalidOperationException("The discount window must fall within the payment due period.");
         }
     }
 

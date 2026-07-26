@@ -1,0 +1,6 @@
+TenantName,TenantId,ApprovedCutoverDate,ApprovedFiscalPeriod,BookClassification,CutoverItem,YesNo,DataFilePath,RecordCount,FunctionalAmount,Currency,RequiresPostedSourceImport,Owner,ApprovalStatus,Notes
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Open AP invoices,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Supplier advances,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Unapplied AP payments,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,AP WHT certificate balances,,,"",,GHS,Yes,,,
+Default Tenant,00000000-0000-0000-0000-000000000001,YYYY-MM-DD,PERIOD_NAME,IFRS,Foreign-currency AP balances,,,"",,,Yes,,,

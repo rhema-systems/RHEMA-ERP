@@ -34,6 +34,7 @@ public class BusinessPartnerDto
     public string? RiskLevel { get; set; }
     public bool IsPreferred { get; set; }
     public bool IsBlacklisted { get; set; }
+    public string? Currency { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<string> Categories { get; set; } = new();
     public List<string> Specializations { get; set; } = new();
@@ -43,6 +44,7 @@ public class BusinessPartnerDto
     public decimal? CreditLimit { get; set; }
     public decimal? OutstandingBalance { get; set; }
     public bool IsOnCreditHold { get; set; }
+    public Guid? PaymentTermId { get; set; }
     
     // Parent Business Partner
     public Guid? ParentId { get; set; }
@@ -212,6 +214,9 @@ public class CreateBusinessPartnerDto
     [MaxLength(200)]
     public string? Website { get; set; }
 
+    [MaxLength(50)]
+    public string? Currency { get; set; }
+
     public List<Guid> CategoryIds { get; set; } = new();
     public List<Guid> SpecializationIds { get; set; } = new();
 
@@ -224,8 +229,8 @@ public class CreateBusinessPartnerDto
     [MaxLength(50)]
     public string? PaymentTerms { get; set; } // Net 30, Net 60, COD, etc.
 
-    [MaxLength(50)]
-    public string? Currency { get; set; }
+    public Guid? PaymentTermId { get; set; }
+
 
     public decimal? DefaultDiscount { get; set; }
 
@@ -308,6 +313,9 @@ public class UpdateBusinessPartnerDto
     public string? Website { get; set; }
 
     [MaxLength(50)]
+    public string? Currency { get; set; }
+
+    [MaxLength(50)]
     public string Status { get; set; } = "Active";
 
     public bool IsPreferred { get; set; }
@@ -327,8 +335,8 @@ public class UpdateBusinessPartnerDto
     [MaxLength(50)]
     public string? PaymentTerms { get; set; } // Net 30, Net 60, COD, etc.
 
-    [MaxLength(50)]
-    public string? Currency { get; set; }
+    public Guid? PaymentTermId { get; set; }
+
 
     public decimal? DefaultDiscount { get; set; }
 

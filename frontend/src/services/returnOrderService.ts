@@ -37,7 +37,7 @@ export interface ReturnOrderSummaryDto {
 export interface ReturnOrderDetailDto extends ReturnOrderSummaryDto {
   salesOrderId: string;
   deliveryNoteId?: string;
-  customerId: string;
+  businessPartnerId: string;
   reasonDescription?: string;
   inspectedDate?: string;
   inspectedByName?: string;
@@ -63,7 +63,6 @@ export interface ReturnOrderLineDto {
 export interface CreateReturnOrderDto {
   salesOrderId: string;
   deliveryNoteId?: string;
-  customerId: string;
   reasonCode: string;
   reasonDescription?: string;
   lines: CreateReturnOrderLineDto[];
@@ -94,7 +93,7 @@ export interface CreditNoteSummaryDto {
 }
 
 export interface CreditNoteDetailDto extends CreditNoteSummaryDto {
-  customerId: string;
+  businessPartnerId: string;
   returnOrderId?: string;
   returnOrderNumber?: string;
   originalInvoiceId?: string;
@@ -126,7 +125,7 @@ export interface RefundSummaryDto {
 }
 
 export interface RefundDetailDto extends RefundSummaryDto {
-  customerId: string;
+  businessPartnerId: string;
   creditNoteId?: string;
   creditNoteNumber?: string;
   returnOrderId?: string;
@@ -136,7 +135,7 @@ export interface RefundDetailDto extends RefundSummaryDto {
 }
 
 export interface CreateRefundDto {
-  customerId: string;
+  businessPartnerId: string;
   creditNoteId?: string;
   returnOrderId?: string;
   refundAmount: number;

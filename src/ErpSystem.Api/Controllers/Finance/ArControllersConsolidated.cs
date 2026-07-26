@@ -1,8 +1,12 @@
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -36,10 +40,33 @@ namespace ErpSystem.Api.Controllers.Finance
     public class InvoiceController : ControllerBase
     {
         private readonly IInvoiceService _invoiceService;
+        private readonly ICurrentUserService _currentUserService;
+        private readonly ApplicationDbContext _dbContext;
 
-        public InvoiceController(IInvoiceService invoiceService)
+        public InvoiceController(
+            IInvoiceService invoiceService,
+            ICurrentUserService currentUserService,
+            ApplicationDbContext dbContext)
         {
             _invoiceService = invoiceService;
+            _currentUserService = currentUserService;
+            _dbContext = dbContext;
+        }
+
+        private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
+
+        private async Task<bool> HasAnyPermissionAsync(params string[] requiredPermissions)
+        {
+            if (requiredPermissions.Length == 0) return true;
+            if (PrivilegedRoles.Any(_currentUserService.IsInRole)) return true;
+            if (!Guid.TryParse(_currentUserService.UserId, out var userId)) return false;
+
+            var userPermissions = await _dbContext.UserRoles
+                .Where(ur => ur.UserId == userId)
+                .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Name))
+                .ToListAsync();
+
+            return userPermissions.Any(p => requiredPermissions.Contains(p, StringComparer.OrdinalIgnoreCase));
         }
 
         /// <summary>
@@ -136,6 +163,9 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost]
         public async Task<ActionResult<InvoiceDto>> Create([FromBody] InvoiceCreateDto dto)
         {
+            if (!await HasAnyPermissionAsync("Finance.AR.Invoices.Create", "Finance.AR.Invoices.Write"))
+                return Forbid();
+
             try
             {
                 var invoice = await _invoiceService.CreateAsync(dto);
@@ -176,6 +206,8 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<InvoiceDto>> Update(Guid id, [FromBody] InvoiceUpdateDto dto)
         {
             if (id != dto.Id) return BadRequest("ID mismatch");
+            if (!await HasAnyPermissionAsync("Finance.AR.Invoices.Edit", "Finance.AR.Invoices.Write"))
+                return Forbid();
             try { return Ok(await _invoiceService.UpdateAsync(dto)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -209,6 +241,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(Guid id)
         {
+            if (!await HasAnyPermissionAsync("Finance.AR.Invoices.Delete", "Finance.AR.Invoices.Write"))
+                return Forbid();
             try { await _invoiceService.DeleteAsync(id); return NoContent(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -245,7 +279,18 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/send")]
         public async Task<ActionResult<InvoiceDto>> Send(Guid id)
         {
+            if (!await HasAnyPermissionAsync("Finance.AR.Invoices.Send"))
+                return Forbid();
             try { return Ok(await _invoiceService.SendInvoiceAsync(id)); }
+            catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpPost("{id}/post")]
+        public async Task<ActionResult<InvoiceDto>> Post(Guid id)
+        {
+            if (!await HasAnyPermissionAsync("Finance.AR.Invoices.ApprovePost"))
+                return Forbid();
+            try { return Ok(await _invoiceService.PostAsync(id)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -282,6 +327,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [HttpPost("{id}/void")]
         public async Task<ActionResult<InvoiceDto>> Void(Guid id, [FromBody] string reason)
         {
+            if (!await HasAnyPermissionAsync("Finance.AR.Invoices.Void"))
+                return Forbid();
             try { return Ok(await _invoiceService.VoidInvoiceAsync(id, reason)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
@@ -533,6 +580,16 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Posts a customer receipt to the general ledger through the central finance posting engine.
+        /// </summary>
+        [HttpPost("{id}/post")]
+        public async Task<ActionResult<CustomerPaymentDto>> Post(Guid id)
+        {
+            try { return Ok(await _paymentService.PostAsync(id)); }
+            catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>
         /// Marks a customer payment as cleared by the bank on the specified date.
         /// </summary>
         /// <remarks>
@@ -745,6 +802,31 @@ namespace ErpSystem.Api.Controllers.Finance
             => Ok(await _reportsService.GetAgingReportAsync(asOfDate));
 
         /// <summary>
+        /// Rebuilds the AR settlement read model from posted AR source documents and posting events.
+        /// </summary>
+        [HttpPost("settlements/rebuild")]
+        public async Task<ActionResult<SubledgerSettlementRebuildResultDto>> RebuildSettlementReadModel([FromQuery] DateTime? asOfDate = null)
+            => Ok(await _reportsService.RebuildSettlementReadModelAsync(asOfDate));
+
+        /// <summary>
+        /// Reconciles the AR settlement read model to the posted AR control account balance.
+        /// </summary>
+        [HttpGet("control-reconciliation")]
+        public async Task<ActionResult<SubledgerControlReconciliationDto>> GetControlReconciliation([FromQuery] DateTime? asOfDate = null)
+            => Ok(await _reportsService.GetControlReconciliationAsync(asOfDate));
+
+        /// <summary>
+        /// Shows customer advances and other posted but unapplied receipts. These balances are
+        /// intentionally excluded from invoice aging because they do not have an invoice due date.
+        /// </summary>
+        [HttpGet("unapplied-settlements")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<SubledgerUnappliedSettlementReportDto>> GetUnappliedSettlements(
+            [FromQuery] DateTime? asOfDate = null,
+            [FromQuery] Guid? customerId = null)
+            => Ok(await _reportsService.GetUnappliedSettlementsAsync(asOfDate, customerId));
+
+        /// <summary>
         /// Generates a detailed AR aging report with per-customer and per-invoice breakdown by aging buckets.
         /// </summary>
         /// <remarks>
@@ -813,6 +895,26 @@ namespace ErpSystem.Api.Controllers.Finance
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate)
             => Ok(await _reportsService.GetCustomerStatementAsync(customerId, fromDate, toDate));
+
+        /// <summary>
+        /// Generates a detailed customer ledger for one or more customer business partners.
+        /// </summary>
+        [HttpGet("customer-detailed-ledger")]
+        public async Task<ActionResult<CustomerDetailedLedgerReportDto>> GetCustomerDetailedLedger(
+            [FromQuery] DateTime fromDate,
+            [FromQuery] DateTime toDate,
+            [FromQuery] List<Guid>? customerIds = null,
+            [FromQuery] bool showCustomerCurrency = false)
+        {
+            try
+            {
+                return Ok(await _reportsService.GetCustomerDetailedLedgerAsync(fromDate, toDate, customerIds, showCustomerCurrency));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
 
         /// <summary>
         /// Retrieves the collections dashboard with real-time KPIs and overdue receivable metrics.

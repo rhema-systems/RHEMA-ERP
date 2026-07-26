@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.AR;
 
@@ -11,13 +12,23 @@ public class PaymentCreateDto
     public DateTime PaymentDate { get; set; }
     public decimal TotalAmount { get; set; }
     public string PaymentMethod { get; set; } = "Cash";
+    public Guid? PaymentMethodId { get; set; }
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
     public Guid? BankAccountId { get; set; }
     public string? CheckNumber { get; set; }
     public string? TransactionReference { get; set; }
+    public Guid? WithholdingTaxId { get; set; }
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public decimal WithholdingTaxAmount { get; set; }
+    public Guid? VatWithholdingTaxId { get; set; }
+    public Guid? VatWithholdingAccountId { get; set; }
+    public decimal VatWithholdingAmount { get; set; }
+    public string? WithholdingCertificateNumber { get; set; }
+    public DateTime? WithholdingCertificateDate { get; set; }
     public string? Notes { get; set; }
     public bool IsCreditNote { get; set; }
+    public List<InvoiceAllocationDto>? Allocations { get; set; }
 }
 
 public class PaymentUpdateDto
@@ -26,9 +37,18 @@ public class PaymentUpdateDto
     public DateTime PaymentDate { get; set; }
     public decimal TotalAmount { get; set; }
     public string PaymentMethod { get; set; } = string.Empty;
+    public Guid? PaymentMethodId { get; set; }
     public Guid? BankAccountId { get; set; }
     public string? CheckNumber { get; set; }
     public string? TransactionReference { get; set; }
+    public Guid? WithholdingTaxId { get; set; }
+    public Guid? WithholdingTaxAccountId { get; set; }
+    public decimal WithholdingTaxAmount { get; set; }
+    public Guid? VatWithholdingTaxId { get; set; }
+    public Guid? VatWithholdingAccountId { get; set; }
+    public decimal VatWithholdingAmount { get; set; }
+    public string? WithholdingCertificateNumber { get; set; }
+    public DateTime? WithholdingCertificateDate { get; set; }
     public string? Notes { get; set; }
 }
 
@@ -37,6 +57,7 @@ public class PaymentQueryDto
     public string? SearchTerm { get; set; }
     public Guid? CustomerId { get; set; }
     public string? PaymentMethod { get; set; }
+    public Guid? PaymentMethodId { get; set; }
     public string? Status { get; set; }
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
@@ -57,6 +78,7 @@ public class InvoiceQueryDto
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
     public bool? IsOverdue { get; set; }
+    public bool? IsOpeningBalance { get; set; }
     public int PageNumber { get; set; } = 1;
     public int PageSize { get; set; } = 50;
     public string? SortBy { get; set; }
@@ -72,7 +94,10 @@ public class InvoiceCreateDto
     public string? Notes { get; set; }
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? PaymentTermId { get; set; }
     public decimal DiscountAmount { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public bool IsOpeningBalance { get; set; }
     public List<InvoiceLineItemCreateDto> LineItems { get; set; } = new();
 }
 
@@ -85,6 +110,8 @@ public class InvoiceLineItemCreateDto
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public string? TaxCode { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
     public string? Unit { get; set; }
     public decimal DiscountPercentage { get; set; }
 }
@@ -97,6 +124,10 @@ public class InvoiceUpdateDto
     public string? Reference { get; set; }
     public string? Notes { get; set; }
     public decimal DiscountAmount { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    public decimal ExchangeRate { get; set; } = 1.0m;
+    public bool IsOpeningBalance { get; set; }
     public List<InvoiceLineItemUpdateDto> LineItems { get; set; } = new();
 }
 
@@ -110,6 +141,8 @@ public class InvoiceLineItemUpdateDto
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public string? TaxCode { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
     public string? Unit { get; set; }
     public decimal DiscountPercentage { get; set; }
 }
@@ -160,4 +193,8 @@ public class OutstandingInvoiceDto
     public decimal BalanceAmount { get; set; }
     public int DaysOverdue { get; set; }
     public string CurrencyCode { get; set; } = string.Empty;
+    public decimal? EarlyPaymentDiscountPercentage { get; set; }
+    public DateTime? EarlyPaymentDiscountDueDate { get; set; }
+    public bool IsDiscountAvailable { get; set; }
+    public decimal? DiscountAmount { get; set; }
 }

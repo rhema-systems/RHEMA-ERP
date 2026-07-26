@@ -183,6 +183,30 @@ namespace ErpSystem.Core.DTOs.Finance
         
         [MaxLength(100)]
         public string? CountryName { get; set; }
+
+        /// <summary>
+        /// When true, currency creation also seeds the first ExchangeRate row for this tenant.
+        /// This is setup convenience only; rates remain authoritative in ExchangeRate history.
+        /// </summary>
+        public bool CreateInitialExchangeRate { get; set; } = false;
+
+        /// <summary>
+        /// Initial rate stored using the ExchangeRate convention: 1 target currency unit equals this many base currency units.
+        /// Example: BaseCurrencyCode=GHS, TargetCurrencyCode=CHF, InitialExchangeRate=18.50 means 1 CHF = 18.50 GHS.
+        /// </summary>
+        [Range(0.000001, 1000000)]
+        public decimal? InitialExchangeRate { get; set; }
+
+        public DateTime? InitialExchangeRateDate { get; set; }
+
+        [MaxLength(20)]
+        public string InitialExchangeRateType { get; set; } = "Daily";
+
+        [MaxLength(20)]
+        public string InitialExchangeRateSource { get; set; } = "Manual Entry";
+
+        [MaxLength(100)]
+        public string? InitialExchangeRateSourceReference { get; set; }
     }
 
     /// <summary>

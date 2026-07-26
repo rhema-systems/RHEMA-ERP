@@ -247,9 +247,11 @@ export default function WHTSummaryPage() {
                                             </td>
                                             <td className="p-3 text-right">{formatCurrency(entry.netAmount)}</td>
                                             <td className="p-3 text-center">
-                                                <Button variant="ghost" size="sm">
-                                                    <FileText className="h-4 w-4" />
-                                                </Button>
+                                                <Link href="/finance/tax/reports/wht-certificates">
+                                                    <Button variant="ghost" size="sm" aria-label="Open WHT certificates">
+                                                        <FileText className="h-4 w-4" />
+                                                    </Button>
+                                                </Link>
                                             </td>
                                         </tr>
                                     ))}

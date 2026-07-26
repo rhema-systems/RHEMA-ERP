@@ -37,6 +37,7 @@ public class CreateBankAccountDto
     public BankAccountType AccountType { get; set; }
     public Guid? GLAccountId { get; set; }
     public decimal OpeningBalance { get; set; }
+    public decimal? OpeningBalanceExchangeRate { get; set; }
     public DateTime OpeningDate { get; set; }
     public string? Notes { get; set; }
 }
@@ -60,6 +61,29 @@ public class BankAccountBalanceDto
     public decimal AvailableBalance { get; set; }
     public string Currency { get; set; } = "GHS";
     public DateTime AsOfDate { get; set; }
+}
+
+public class CashPositionSummaryDto
+{
+    public decimal TotalBalance { get; set; }
+    public string Currency { get; set; } = "GHS";
+    public int AccountCount { get; set; }
+    public List<CashPositionByAccountTypeDto> ByAccountType { get; set; } = new();
+    public List<CashPositionByCurrencyDto> ByCurrency { get; set; } = new();
+}
+
+public class CashPositionByAccountTypeDto
+{
+    public BankAccountType Type { get; set; }
+    public decimal Balance { get; set; }
+    public int Count { get; set; }
+}
+
+public class CashPositionByCurrencyDto
+{
+    public string Currency { get; set; } = "GHS";
+    public decimal Balance { get; set; }
+    public int Count { get; set; }
 }
 
 #endregion

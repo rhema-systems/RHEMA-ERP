@@ -100,7 +100,7 @@ public class FiscalYear : BusinessEntity
     /// Used for validation and period generation.
     /// </summary>
     [Required]
-    [Range(1, 53)]
+    [Range(1, 366)]
     public int NumberOfPeriods { get; set; } = 12;
 
     // ========================================================================

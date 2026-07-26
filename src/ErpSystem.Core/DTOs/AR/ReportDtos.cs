@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ErpSystem.Core.DTOs.Finance;
 
 namespace ErpSystem.Core.DTOs.AR;
 
@@ -8,9 +9,11 @@ namespace ErpSystem.Core.DTOs.AR;
 public class AgingReportDto
 {
     public DateTime AsOfDate { get; set; }
+    public bool UsesSettlementReadModel { get; set; }
     public List<CustomerAgingDto> Customers { get; set; } = new();
     public AgingSummaryDto Summary { get; set; } = new();
     public List<AgingBucketDto> Buckets { get; set; } = new();
+    public List<SubledgerSettlementDiagnosticDto> Diagnostics { get; set; } = new();
 }
 
 public class CustomerAgingDto
@@ -43,8 +46,10 @@ public class AgingSummaryDto
 public class DetailedAgingReportDto
 {
     public DateTime AsOfDate { get; set; }
+    public bool UsesSettlementReadModel { get; set; }
     public List<CustomerDetailedAgingDto> Customers { get; set; } = new();
     public AgingSummaryDto Summary { get; set; } = new();
+    public List<SubledgerSettlementDiagnosticDto> Diagnostics { get; set; } = new();
 }
 
 public class CustomerDetailedAgingDto
@@ -65,7 +70,13 @@ public class InvoiceAgingDto
     public int DaysOverdue { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal PaidAmount { get; set; }
+    public decimal CreditedAmount { get; set; }
+    public decimal WithheldAmount { get; set; }
     public decimal BalanceAmount { get; set; }
+    public Guid? SourcePostingEventId { get; set; }
+    public Guid? SourceJournalEntryId { get; set; }
+    public string? SettlementStatus { get; set; }
+    public string? DiagnosticFlags { get; set; }
     public string AgingBucket { get; set; } = string.Empty; // Current, 1-30, 31-60, 61-90, 90+
 }
 
@@ -95,6 +106,48 @@ public class StatementTransactionDto
     public decimal Debit { get; set; }
     public decimal Credit { get; set; }
     public decimal Balance { get; set; }
+}
+
+public class CustomerDetailedLedgerReportDto
+{
+    public DateTime FromDate { get; set; }
+    public DateTime ToDate { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    public bool ShowCustomerCurrency { get; set; }
+    public decimal TotalOpeningBalance { get; set; }
+    public decimal TotalDebits { get; set; }
+    public decimal TotalCredits { get; set; }
+    public decimal TotalClosingBalance { get; set; }
+    public List<string> Warnings { get; set; } = new();
+    public List<CustomerDetailedLedgerAccountDto> Customers { get; set; } = new();
+}
+
+public class CustomerDetailedLedgerAccountDto
+{
+    public Guid CustomerId { get; set; }
+    public string CustomerCode { get; set; } = string.Empty;
+    public string CustomerName { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = "GHS";
+    public decimal OpeningBalance { get; set; }
+    public decimal TotalDebits { get; set; }
+    public decimal TotalCredits { get; set; }
+    public decimal ClosingBalance { get; set; }
+    public List<CustomerDetailedLedgerLineDto> Lines { get; set; } = new();
+}
+
+public class CustomerDetailedLedgerLineDto
+{
+    public Guid SourceDocumentId { get; set; }
+    public DateTime TransactionDate { get; set; }
+    public string TransactionType { get; set; } = string.Empty;
+    public string DocumentNumber { get; set; } = string.Empty;
+    public string? Reference { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string TransactionCurrencyCode { get; set; } = "GHS";
+    public decimal ExchangeRate { get; set; } = 1m;
+    public decimal Debit { get; set; }
+    public decimal Credit { get; set; }
+    public decimal RunningBalance { get; set; }
 }
 
 // ============= Collections Dashboard DTOs =============

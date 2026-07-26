@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,13 +27,22 @@ import { saveAs } from 'file-saver';
 
 export default function BusinessPartnersPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const statusFromQuery = searchParams.get('status') || 'all';
+  const partnerTypeFromQuery = searchParams.get('partnerType') || 'all';
   const [partners, setPartners] = useState<BusinessPartnerDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [partnerTypeFilter, setPartnerTypeFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState(statusFromQuery);
+  const [partnerTypeFilter, setPartnerTypeFilter] = useState(partnerTypeFromQuery);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+
+  useEffect(() => {
+    setPage(1);
+    setStatusFilter(statusFromQuery);
+    setPartnerTypeFilter(partnerTypeFromQuery);
+  }, [statusFromQuery, partnerTypeFromQuery]);
 
   useEffect(() => {
     loadPartners();

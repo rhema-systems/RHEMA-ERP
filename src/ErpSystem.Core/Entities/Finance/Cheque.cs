@@ -4,9 +4,10 @@ using System.ComponentModel.DataAnnotations;
 namespace ErpSystem.Core.Entities.Finance;
 
 /// <summary>
-/// Represents a cheque issued or received
+/// Represents a cheque issued or received.
+/// Tenant-scoped: cheque registers must never leak across tenants.
 /// </summary>
-public class Cheque : BaseEntity
+public class Cheque : TenantEntity
 {
     [Required]
     [MaxLength(50)]
@@ -55,8 +56,9 @@ public class Cheque : BaseEntity
 
 /// <summary>
 /// Represents a payment method (cash, cheque, EFT, mobile money, etc.)
+/// Tenant-scoped: each tenant maintains its own configurable payment methods.
 /// </summary>
-public class PaymentMethod : BaseEntity
+public class PaymentMethod : TenantEntity
 {
     [Required]
     [MaxLength(100)]

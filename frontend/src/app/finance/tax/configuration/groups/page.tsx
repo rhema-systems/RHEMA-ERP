@@ -250,7 +250,7 @@ export default function TaxGroupsPage() {
                                 id="description"
                                 value={formData.description}
                                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                placeholder="Includes NHIL, GETFund, COVID, and VAT"
+                                placeholder="Includes NHIL, GETFund, and VAT"
                                 className="mt-1"
                             />
                         </div>

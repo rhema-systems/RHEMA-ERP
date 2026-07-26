@@ -10,7 +10,9 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Services.Finance.Taxation
 {
@@ -23,18 +25,21 @@ namespace ErpSystem.Api.Services.Finance.Taxation
         private readonly ApplicationDbContext _context;
         private readonly ICurrentUserService _currentUserService;
         private readonly ILogger<TaxConfigurationService> _logger;
+        private readonly IFinanceAuditService? _financeAuditService;
 
         public TaxConfigurationService(
             ApplicationDbContext context,
             ICurrentUserService currentUserService,
-            ILogger<TaxConfigurationService> logger)
+            ILogger<TaxConfigurationService> logger,
+            IFinanceAuditService? financeAuditService = null)
         {
             _context = context;
             _currentUserService = currentUserService;
             _logger = logger;
+            _financeAuditService = financeAuditService;
         }
 
-        private Guid TenantId => _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant context is required.");
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
         private string UserName => _currentUserService.UserName ?? "system";
 
         #region Taxes
@@ -81,6 +86,17 @@ namespace ErpSystem.Api.Services.Finance.Taxation
 
         public async Task<TaxDto> CreateTaxAsync(CreateTaxDto dto, CancellationToken cancellationToken = default)
         {
+            var effectiveFrom = (dto.EffectiveFrom ?? DateTime.UtcNow).Date;
+            await ValidateTaxConfigurationAsync(
+                dto.Code,
+                dto.Name,
+                dto.Rate,
+                effectiveFrom,
+                dto.IsActive,
+                dto.TaxPayableAccountId,
+                dto.TaxReceivableAccountId,
+                cancellationToken);
+
             // Validate unique code
             var existing = await _context.Set<Tax>()
                 .FirstOrDefaultAsync(t => t.Code == dto.Code && t.TenantId == TenantId && !t.IsDeleted, cancellationToken);
@@ -96,10 +112,10 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 Name = dto.Name,
                 Description = dto.Description,
                 Rate = dto.Rate,
-                EffectiveFrom = dto.EffectiveFrom ?? DateTime.UtcNow,
+                EffectiveFrom = effectiveFrom,
                 Applicability = dto.Applicability,
                 Category = dto.Category,
-                IsActive = true,
+                IsActive = dto.IsActive,
                 IsInputTaxDeductible = dto.IsInputTaxDeductible,
                 ThresholdAmount = dto.ThresholdAmount,
                 TaxPayableAccountId = dto.TaxPayableAccountId,
@@ -112,6 +128,22 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             await _context.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Created tax: {Code} - {Name} @ {Rate}%", tax.Code, tax.Name, tax.Rate);
+            await RecordTaxAuditAsync(
+                FinanceAuditEvents.TaxRuleCreated,
+                tax,
+                afterValues: new
+                {
+                    tax.Code,
+                    tax.Name,
+                    tax.Rate,
+                    tax.EffectiveFrom,
+                    tax.Applicability,
+                    tax.Category,
+                    tax.IsActive,
+                    tax.TaxPayableAccountId,
+                    tax.TaxReceivableAccountId
+                },
+                cancellationToken: cancellationToken);
 
             return MapToTaxDto(tax);
         }
@@ -124,12 +156,53 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             if (tax == null)
                 throw new InvalidOperationException("Tax not found.");
 
+            var beforeValues = new
+            {
+                tax.Code,
+                tax.Name,
+                tax.Description,
+                tax.Rate,
+                tax.EffectiveFrom,
+                tax.Applicability,
+                tax.Category,
+                tax.IsActive,
+                tax.IsInputTaxDeductible,
+                tax.ThresholdAmount,
+                tax.TaxPayableAccountId,
+                tax.TaxReceivableAccountId
+            };
+
+            var newRate = dto.Rate ?? tax.Rate;
+            var newEffectiveFrom = (dto.EffectiveFrom ?? (dto.Rate.HasValue && dto.Rate.Value != tax.Rate ? DateTime.UtcNow : tax.EffectiveFrom)).Date;
+            var newIsActive = dto.IsActive ?? tax.IsActive;
+            Guid? newPayableAccountId = dto.ClearTaxPayableAccount
+                ? null
+                : dto.TaxPayableAccountId ?? tax.TaxPayableAccountId;
+            Guid? newReceivableAccountId = dto.ClearTaxReceivableAccount
+                ? null
+                : dto.TaxReceivableAccountId ?? tax.TaxReceivableAccountId;
+
+            await ValidateTaxConfigurationAsync(
+                tax.Code,
+                dto.Name ?? tax.Name,
+                newRate,
+                newEffectiveFrom,
+                newIsActive,
+                newPayableAccountId,
+                newReceivableAccountId,
+                cancellationToken);
+
             // Track rate changes for history
             if (dto.Rate.HasValue && dto.Rate.Value != tax.Rate)
             {
-                await AddRateHistoryAsync(tax, cancellationToken);
+                if (newEffectiveFrom <= tax.EffectiveFrom.Date)
+                {
+                    throw new InvalidOperationException("New tax rate effective date must be after the current effective date. Use a new effective-dated version instead of overwriting historical rates.");
+                }
+
+                await AddRateHistoryAsync(tax, newEffectiveFrom, cancellationToken);
                 tax.Rate = dto.Rate.Value;
-                tax.EffectiveFrom = DateTime.UtcNow;
+                tax.EffectiveFrom = newEffectiveFrom;
             }
 
             if (dto.Name != null) tax.Name = dto.Name;
@@ -139,8 +212,10 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             if (dto.IsActive.HasValue) tax.IsActive = dto.IsActive.Value;
             if (dto.IsInputTaxDeductible.HasValue) tax.IsInputTaxDeductible = dto.IsInputTaxDeductible.Value;
             if (dto.ThresholdAmount.HasValue) tax.ThresholdAmount = dto.ThresholdAmount;
-            if (dto.TaxPayableAccountId.HasValue) tax.TaxPayableAccountId = dto.TaxPayableAccountId;
-            if (dto.TaxReceivableAccountId.HasValue) tax.TaxReceivableAccountId = dto.TaxReceivableAccountId;
+            if (dto.ClearTaxPayableAccount) tax.TaxPayableAccountId = null;
+            else if (dto.TaxPayableAccountId.HasValue) tax.TaxPayableAccountId = dto.TaxPayableAccountId;
+            if (dto.ClearTaxReceivableAccount) tax.TaxReceivableAccountId = null;
+            else if (dto.TaxReceivableAccountId.HasValue) tax.TaxReceivableAccountId = dto.TaxReceivableAccountId;
 
             tax.UpdatedAt = DateTime.UtcNow;
             tax.UpdatedBy = UserName;
@@ -149,6 +224,45 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             await _context.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Updated tax: {Code}", tax.Code);
+            await RecordTaxAuditAsync(
+                FinanceAuditEvents.TaxRuleUpdated,
+                tax,
+                beforeValues: beforeValues,
+                afterValues: new
+                {
+                    tax.Code,
+                    tax.Name,
+                    tax.Description,
+                    tax.Rate,
+                    tax.EffectiveFrom,
+                    tax.Applicability,
+                    tax.Category,
+                    tax.IsActive,
+                    tax.IsInputTaxDeductible,
+                    tax.ThresholdAmount,
+                    tax.TaxPayableAccountId,
+                    tax.TaxReceivableAccountId
+                },
+                cancellationToken: cancellationToken);
+
+            if (!Equals(beforeValues.TaxPayableAccountId, tax.TaxPayableAccountId)
+                || !Equals(beforeValues.TaxReceivableAccountId, tax.TaxReceivableAccountId))
+            {
+                await RecordTaxAuditAsync(
+                    FinanceAuditEvents.TaxAccountMappingChanged,
+                    tax,
+                    beforeValues: new
+                    {
+                        beforeValues.TaxPayableAccountId,
+                        beforeValues.TaxReceivableAccountId
+                    },
+                    afterValues: new
+                    {
+                        tax.TaxPayableAccountId,
+                        tax.TaxReceivableAccountId
+                    },
+                    cancellationToken: cancellationToken);
+            }
 
             return MapToTaxDto(tax);
         }
@@ -169,6 +283,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 throw new InvalidOperationException("Cannot delete tax used in tax groups. Deactivate instead.");
 
             tax.IsDeleted = true;
+            tax.IsActive = false;
             tax.UpdatedAt = DateTime.UtcNow;
             tax.UpdatedBy = UserName;
 
@@ -176,9 +291,15 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             await _context.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Deleted tax: {Code}", tax.Code);
+            await RecordTaxAuditAsync(
+                FinanceAuditEvents.TaxRuleDeactivated,
+                tax,
+                beforeValues: new { tax.Code, wasDeleted = false, wasActive = true },
+                afterValues: new { tax.Code, tax.IsDeleted, tax.IsActive },
+                cancellationToken: cancellationToken);
         }
 
-        private async Task AddRateHistoryAsync(Tax tax, CancellationToken cancellationToken)
+        private async Task AddRateHistoryAsync(Tax tax, DateTime newEffectiveFrom, CancellationToken cancellationToken)
         {
             var history = new TaxRateHistory
             {
@@ -187,7 +308,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 TaxId = tax.Id,
                 Rate = tax.Rate,
                 EffectiveFrom = tax.EffectiveFrom,
-                EffectiveTo = DateTime.UtcNow,
+                EffectiveTo = newEffectiveFrom.AddTicks(-1),
                 Notes = $"Rate changed from {tax.Rate}%",
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = UserName
@@ -406,6 +527,64 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             }
         }
 
+        private async Task ValidateTaxConfigurationAsync(
+            string code,
+            string name,
+            decimal rate,
+            DateTime effectiveFrom,
+            bool isActive,
+            Guid? taxPayableAccountId,
+            Guid? taxReceivableAccountId,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(code))
+                throw new InvalidOperationException("Tax code is required.");
+
+            if (string.IsNullOrWhiteSpace(name))
+                throw new InvalidOperationException("Tax name is required.");
+
+            if (rate < 0)
+                throw new InvalidOperationException("Tax rate cannot be negative.");
+
+            if (effectiveFrom == default)
+                throw new InvalidOperationException("Tax effective date is required.");
+
+            if (IsCovidHealthRecoveryLevy(code, name) && isActive && effectiveFrom.Date <= DateTime.UtcNow.Date)
+            {
+                throw new InvalidOperationException("COVID-19 Health Recovery Levy must not be active for current Ghana postings.");
+            }
+
+            await ValidateTaxAccountAsync(taxPayableAccountId, "tax payable account", cancellationToken);
+            await ValidateTaxAccountAsync(taxReceivableAccountId, "tax receivable account", cancellationToken);
+        }
+
+        private async Task ValidateTaxAccountAsync(
+            Guid? accountId,
+            string label,
+            CancellationToken cancellationToken)
+        {
+            if (!accountId.HasValue)
+            {
+                return;
+            }
+
+            var account = await _context.Accounts
+                .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == accountId.Value && !a.IsDeleted, cancellationToken);
+
+            if (account == null)
+                throw new InvalidOperationException($"Configured {label} was not found for this tenant.");
+
+            if (account.Status != AccountStatus.Active)
+                throw new InvalidOperationException($"Configured {label} is not active.");
+        }
+
+        private static bool IsCovidHealthRecoveryLevy(string code, string name)
+        {
+            return code.Contains("COVID", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("COVID", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Health Recovery", StringComparison.OrdinalIgnoreCase);
+        }
+
         #endregion
 
         #region Tax Group Components
@@ -473,7 +652,14 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 throw new InvalidOperationException("Component not found.");
 
             if (dto.CalculationOrder.HasValue) component.CalculationOrder = dto.CalculationOrder.Value;
-            if (dto.CompoundBasis.HasValue) component.CompoundBasis = dto.CompoundBasis.Value;
+            if (dto.CompoundBasis.HasValue)
+            {
+                component.CompoundBasis = dto.CompoundBasis.Value;
+                if (dto.CompoundBasis.Value != CompoundBasis.Specific)
+                {
+                    component.AppliesOnTaxCodes = null;
+                }
+            }
             if (dto.AppliesOnTaxCodes != null) component.AppliesOnTaxCodes = string.Join(",", dto.AppliesOnTaxCodes);
 
             component.UpdatedAt = DateTime.UtcNow;
@@ -548,13 +734,14 @@ namespace ErpSystem.Api.Services.Finance.Taxation
 
             // Check if already seeded
             var existing = await _context.Set<Tax>()
-                .AnyAsync(t => t.TenantId == TenantId && t.Code == "VAT" && !t.IsDeleted, cancellationToken);
+                .AnyAsync(t => t.TenantId == TenantId
+                    && (t.Code == "VAT" || t.Code == "VAT-STD")
+                    && !t.IsDeleted, cancellationToken);
 
             if (existing)
             {
-                _logger.LogInformation("Ghana taxes already seeded for tenant {TenantId}", TenantId);
-                // Even if taxes exist, we should check if rules exist and seed them if missing? 
-                // Separate method for rules.
+                await RepairGhanaVatStandardComponentsAsync(cancellationToken);
+                _logger.LogInformation("Ghana taxes already seeded for tenant {TenantId}; repaired standard VAT component settings", TenantId);
                 return;
             }
 
@@ -602,12 +789,12 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 TenantId = TenantId,
                 Code = "COVID",
                 Name = "COVID-19 Health Recovery Levy",
-                Description = "Ghana COVID-19 levy at 1%",
+                Description = "Historical Ghana COVID-19 Health Recovery Levy. Inactive for current postings.",
                 Rate = 1.00m,
                 EffectiveFrom = effectiveFrom,
                 Applicability = TaxApplicability.Both,
                 Category = TaxCategory.Levy,
-                IsActive = true,
+                IsActive = false,
                 IsInputTaxDeductible = true,
                 CreatedAt = now,
                 CreatedBy = "system"
@@ -619,7 +806,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 TenantId = TenantId,
                 Code = "VAT",
                 Name = "Value Added Tax",
-                Description = "Ghana VAT at 15% (compound on NHIL, GETFL, COVID)",
+                Description = "Ghana VAT at 15% on the base taxable amount",
                 Rate = 15.00m,
                 EffectiveFrom = effectiveFrom,
                 Applicability = TaxApplicability.Both,
@@ -675,7 +862,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 TenantId = TenantId,
                 Code = "GH-SALES-STD",
                 Name = "Ghana Standard Sales Tax",
-                Description = "NHIL + GETFL + COVID + VAT (compound)",
+                Description = "VAT 15%, NHIL 2.5%, and GETFund 2.5% on the same taxable base.",
                 Applicability = TaxApplicability.Sales,
                 IsDefault = true,
                 IsActive = true,
@@ -689,7 +876,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 TenantId = TenantId,
                 Code = "GH-PURCH-STD",
                 Name = "Ghana Standard Purchase Tax",
-                Description = "NHIL + GETFL + COVID + VAT (compound)",
+                Description = "VAT 15%, NHIL 2.5%, and GETFund 2.5% on the same taxable base.",
                 Applicability = TaxApplicability.Purchases,
                 IsDefault = true,
                 IsActive = true,
@@ -742,13 +929,8 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 },
                 new TaxGroupComponent
                 {
-                    Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = salesGroup.Id, TaxId = covid.Id,
-                    CalculationOrder = 3, CompoundBasis = CompoundBasis.BaseOnly, CreatedAt = now, CreatedBy = "system"
-                },
-                new TaxGroupComponent
-                {
                     Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = salesGroup.Id, TaxId = vat.Id,
-                    CalculationOrder = 4, CompoundBasis = CompoundBasis.Specific, AppliesOnTaxCodes = "NHIL,GETFL,COVID",
+                    CalculationOrder = 3, CompoundBasis = CompoundBasis.BaseOnly,
                     CreatedAt = now, CreatedBy = "system"
                 }
             }, cancellationToken);
@@ -768,13 +950,8 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 },
                 new TaxGroupComponent
                 {
-                    Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = purchaseGroup.Id, TaxId = covid.Id,
-                    CalculationOrder = 3, CompoundBasis = CompoundBasis.BaseOnly, CreatedAt = now, CreatedBy = "system"
-                },
-                new TaxGroupComponent
-                {
                     Id = Guid.NewGuid(), TenantId = TenantId, TaxGroupId = purchaseGroup.Id, TaxId = vat.Id,
-                    CalculationOrder = 4, CompoundBasis = CompoundBasis.Specific, AppliesOnTaxCodes = "NHIL,GETFL,COVID",
+                    CalculationOrder = 3, CompoundBasis = CompoundBasis.BaseOnly,
                     CreatedAt = now, CreatedBy = "system"
                 }
             }, cancellationToken);
@@ -795,6 +972,128 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             await _context.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Successfully seeded Ghana taxes: 6 taxes, 4 groups");
+        }
+
+        private async Task RepairGhanaVatStandardComponentsAsync(CancellationToken cancellationToken)
+        {
+            var candidateGroups = await _context.Set<TaxGroup>()
+                .Include(g => g.Components)
+                    .ThenInclude(c => c.Tax)
+                .Where(g => g.TenantId == TenantId
+                    && !g.IsDeleted
+                    && (g.Code == "VAT-STD-SCHEME"
+                        || g.Code == "GH-SALES-STD"
+                        || g.Code == "GH-PURCH-STD"
+                        || g.Name.Contains("VAT Standard")
+                        || g.Name.Contains("Ghana Standard")))
+                .ToListAsync(cancellationToken);
+
+            var now = DateTime.UtcNow;
+            var changed = false;
+
+            var covidTaxes = await _context.Set<Tax>()
+                .Where(t => t.TenantId == TenantId
+                    && !t.IsDeleted
+                    && (t.Code.Contains("COVID") || t.Name.Contains("COVID") || t.Name.Contains("Health Recovery")))
+                .ToListAsync(cancellationToken);
+
+            foreach (var tax in covidTaxes)
+            {
+                if (tax.IsActive)
+                {
+                    tax.IsActive = false;
+                    tax.UpdatedAt = now;
+                    tax.UpdatedBy = "system";
+                    changed = true;
+                }
+
+                if (string.IsNullOrWhiteSpace(tax.Description)
+                    || !tax.Description.Contains("Inactive for current postings", StringComparison.OrdinalIgnoreCase))
+                {
+                    tax.Description = "Historical Ghana COVID-19 Health Recovery Levy. Inactive for current postings.";
+                    tax.UpdatedAt = now;
+                    tax.UpdatedBy = "system";
+                    changed = true;
+                }
+            }
+
+            foreach (var group in candidateGroups)
+            {
+                var activeDescription = "VAT 15%, NHIL 2.5%, and GETFund 2.5% on the same taxable base.";
+                if (string.Equals(group.Code, "VAT-STD-SCHEME", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!string.Equals(group.Description, activeDescription, StringComparison.Ordinal))
+                    {
+                        group.Description = activeDescription;
+                        group.UpdatedAt = now;
+                        group.UpdatedBy = "system";
+                        changed = true;
+                    }
+                }
+                else if (string.Equals(group.Code, "GH-SALES-STD", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(group.Code, "GH-PURCH-STD", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!string.Equals(group.Description, activeDescription, StringComparison.Ordinal))
+                    {
+                        group.Description = activeDescription;
+                        group.UpdatedAt = now;
+                        group.UpdatedBy = "system";
+                        changed = true;
+                    }
+                }
+
+                foreach (var component in group.Components.Where(c => !c.IsDeleted))
+                {
+                    var taxCode = component.Tax?.Code ?? string.Empty;
+                    var taxName = component.Tax?.Name ?? string.Empty;
+                    var isCovidComponent =
+                        taxCode.Contains("COVID", StringComparison.OrdinalIgnoreCase)
+                        || taxName.Contains("COVID", StringComparison.OrdinalIgnoreCase)
+                        || taxName.Contains("Health Recovery", StringComparison.OrdinalIgnoreCase);
+
+                    if (isCovidComponent)
+                    {
+                        component.IsDeleted = true;
+                        component.DeletedAt = now;
+                        component.DeletedBy = "system";
+                        component.UpdatedAt = now;
+                        component.UpdatedBy = "system";
+                        changed = true;
+                        continue;
+                    }
+
+                    var isVatComponent =
+                        string.Equals(taxCode, "VAT", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(taxCode, "VAT-STD", StringComparison.OrdinalIgnoreCase)
+                        || taxName.Contains("Value Added Tax", StringComparison.OrdinalIgnoreCase);
+
+                    if (!isVatComponent)
+                    {
+                        continue;
+                    }
+
+                    if (component.CompoundBasis != CompoundBasis.BaseOnly)
+                    {
+                        component.CompoundBasis = CompoundBasis.BaseOnly;
+                        changed = true;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(component.AppliesOnTaxCodes))
+                    {
+                        component.AppliesOnTaxCodes = null;
+                        changed = true;
+                    }
+
+                    component.UpdatedAt = now;
+                    component.UpdatedBy = "system";
+                }
+            }
+
+            if (changed)
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+                _logger.LogInformation("Repaired Ghana standard VAT components for tenant {TenantId}", TenantId);
+            }
         }
 
         public async Task SeedTaxRulesAsync(CancellationToken cancellationToken = default)
@@ -934,6 +1233,72 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 UpdatedBy = group.UpdatedBy,
                 UpdatedAt = group.UpdatedAt
             };
+        }
+
+        private async Task RecordTaxAuditAsync(
+            string eventType,
+            Tax tax,
+            object? beforeValues = null,
+            object? afterValues = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (_financeAuditService == null)
+            {
+                return;
+            }
+
+            await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = eventType,
+                TenantId = TenantId,
+                SourceModule = "Tax",
+                SourceDocumentType = "Tax",
+                SourceDocumentId = tax.Id,
+                Resource = "Finance.Tax",
+                ResourceId = tax.Id.ToString(),
+                BeforeValues = beforeValues,
+                AfterValues = afterValues ?? new
+                {
+                    tax.Code,
+                    tax.Name,
+                    tax.Rate,
+                    tax.EffectiveFrom,
+                    tax.IsActive
+                }
+            }, cancellationToken);
+        }
+
+        private async Task RecordTaxGroupAuditAsync(
+            string eventType,
+            TaxGroup group,
+            object? beforeValues = null,
+            object? afterValues = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (_financeAuditService == null)
+            {
+                return;
+            }
+
+            await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = eventType,
+                TenantId = TenantId,
+                SourceModule = "Tax",
+                SourceDocumentType = "TaxGroup",
+                SourceDocumentId = group.Id,
+                Resource = "Finance.TaxGroup",
+                ResourceId = group.Id.ToString(),
+                BeforeValues = beforeValues,
+                AfterValues = afterValues ?? new
+                {
+                    group.Code,
+                    group.Name,
+                    group.Applicability,
+                    group.IsDefault,
+                    group.IsActive
+                }
+            }, cancellationToken);
         }
 
         #endregion

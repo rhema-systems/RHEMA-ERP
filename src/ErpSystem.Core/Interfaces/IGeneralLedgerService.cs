@@ -17,6 +17,7 @@ namespace ErpSystem.Core.Interfaces
         #endregion
 
         #region Transaction Processing
+        [Obsolete("Legacy direct GL posting is disabled. Use IJournalEntryService for manual journals or IFinancePostingEngine through the owning Finance module.")]
         Task<JournalEntry> PostJournalEntryAsync(CreateJournalEntryDto entryDto);
         Task<decimal> GetAccountBalanceAsync(Guid accountId, string? currencyCode);
         Task<string> GenerateJournalEntryNumberAsync(CancellationToken cancellationToken = default);
@@ -31,6 +32,8 @@ namespace ErpSystem.Core.Interfaces
         Task<BalanceSheetDto> GenerateBalanceSheetAsync(BalanceSheetRequestDto request);
         Task<IncomeStatementDto> GenerateIncomeStatementAsync(IncomeStatementRequestDto request);
         Task<TrialBalanceDto> GenerateTrialBalanceAsync(TrialBalanceRequestDto request);
+        Task<DetailedLedgerReportDto> GenerateDetailedLedgerAsync(DetailedLedgerRequestDto request);
+        Task<CashBankLedgerReportDto> GenerateCashBankLedgerAsync(CashBankLedgerRequestDto request);
         Task<CashFlowStatementDto> GenerateCashFlowStatementAsync(CashFlowStatementRequestDto request);
         Task<MultiCurrencyDetailReportDto> GenerateMultiCurrencyDetailReportAsync(MultiCurrencyDetailRequestDto request);
         #endregion
@@ -42,6 +45,13 @@ namespace ErpSystem.Core.Interfaces
         Task LockFiscalPeriodAsync(Guid fiscalPeriodId, string lockReason);
         Task UnlockFiscalPeriodAsync(Guid fiscalPeriodId, string unlockReason);
         Task<PeriodCloseResultDto> CloseFiscalYearAsync(YearEndCloseRequestDto request);
+        Task<PeriodCloseResultDto> ReopenFiscalYearAsync(Guid fiscalYearId, string reason);
         #endregion
+
+        /// <summary>
+        /// Read-side dashboard aggregates (KPIs, monthly trend, expense breakdown) for the
+        /// current fiscal year, computed from posted GL activity.
+        /// </summary>
+        Task<FinanceDashboardDto> GetFinanceDashboardAsync();
     }
 }

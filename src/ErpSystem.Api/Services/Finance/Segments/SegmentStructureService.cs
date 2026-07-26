@@ -7,8 +7,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Services.Finance.Segments
 {
@@ -32,7 +34,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
             _logger = logger;
         }
 
-        private Guid TenantId => _currentUserService.TenantId ?? Guid.Empty;
+        private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
         // Segment Structure Operations
         public async Task<IReadOnlyList<SegmentStructureDto>> GetSegmentStructuresAsync(CancellationToken cancellationToken = default)
@@ -128,21 +130,14 @@ namespace ErpSystem.Api.Services.Finance.Segments
             };
         }
 
-        public async Task<SegmentStructureDto> CreateSegmentStructureAsync(SegmentStructureCreateDto dto, CancellationToken cancellationToken = default)
-        {
-            // Simplified implementation - delegates to AccountSegmentStructureService
-            throw new NotImplementedException("Use AccountSegmentStructureService.CreateAsync instead");
-        }
+        public Task<SegmentStructureDto> CreateSegmentStructureAsync(SegmentStructureCreateDto dto, CancellationToken cancellationToken = default)
+            => Task.FromException<SegmentStructureDto>(new NotImplementedException("Use AccountSegmentStructureService.CreateAsync instead"));
 
-        public async Task<SegmentStructureDto> UpdateSegmentStructureAsync(Guid id, SegmentStructureUpdateDto dto, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("Use AccountSegmentStructureService.UpdateAsync instead");
-        }
+        public Task<SegmentStructureDto> UpdateSegmentStructureAsync(Guid id, SegmentStructureUpdateDto dto, CancellationToken cancellationToken = default)
+            => Task.FromException<SegmentStructureDto>(new NotImplementedException("Use AccountSegmentStructureService.UpdateAsync instead"));
 
-        public async Task DeleteSegmentStructureAsync(Guid id, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("Use AccountSegmentStructureService.DeleteAsync instead");
-        }
+        public Task DeleteSegmentStructureAsync(Guid id, CancellationToken cancellationToken = default)
+            => Task.FromException(new NotImplementedException("Use AccountSegmentStructureService.DeleteAsync instead"));
 
         // Segment Lookup Value Operations
         public async Task<IReadOnlyList<SegmentLookupValueDto>> GetSegmentLookupValuesAsync(Guid segmentStructureId, CancellationToken cancellationToken = default)
@@ -165,20 +160,83 @@ namespace ErpSystem.Api.Services.Finance.Segments
             }).ToList();
         }
 
-        public async Task<SegmentLookupValueDto> AddSegmentLookupValueAsync(Guid segmentStructureId, SegmentLookupValueCreateDto dto, CancellationToken cancellationToken = default)
+        public async Task<ReportingSegmentOptionsDto> GetReportingOptionsAsync(
+            Guid segmentStructureId,
+            string? search,
+            int take,
+            CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException("Use SegmentLookupValueService.CreateAsync instead");
+            var tenantId = TenantId;
+            var structureExists = await _unitOfWork.Repository<AccountSegmentStructure>()
+                .GetQueryable(s =>
+                    s.Id == segmentStructureId &&
+                    s.TenantId == tenantId &&
+                    !s.IsDeleted &&
+                    s.IsActive &&
+                    s.IsReportingDimension)
+                .AnyAsync(cancellationToken);
+
+            if (!structureExists)
+            {
+                throw new ArgumentException("The reporting dimension was not found for the current tenant.");
+            }
+
+            var boundedTake = Math.Clamp(take, 1, 100);
+            var normalizedSearch = search?.Trim();
+            var now = DateTime.UtcNow;
+
+            var optionQuery = _unitOfWork.Repository<AccountSegmentValue>()
+                .GetQueryable(value =>
+                    value.TenantId == tenantId &&
+                    value.SegmentStructureId == segmentStructureId &&
+                    !value.IsDeleted &&
+                    value.EffectiveDate <= now &&
+                    (value.EndDate == null || value.EndDate > now) &&
+                    value.Account.TenantId == tenantId &&
+                    !value.Account.IsDeleted &&
+                    value.Account.Status == AccountStatus.Active &&
+                    (value.Account.EffectiveDate == null || value.Account.EffectiveDate <= now) &&
+                    (value.Account.ExpirationDate == null || value.Account.ExpirationDate > now));
+
+            if (!string.IsNullOrWhiteSpace(normalizedSearch))
+            {
+                optionQuery = optionQuery.Where(value =>
+                    value.SegmentValue.Contains(normalizedSearch) ||
+                    value.Account.AccountCode.Contains(normalizedSearch) ||
+                    value.Account.AccountNumber.Contains(normalizedSearch) ||
+                    value.Account.AccountName.Contains(normalizedSearch));
+            }
+
+            var options = await optionQuery
+                .GroupBy(value => value.SegmentValue)
+                .Select(group => new ReportingSegmentOptionDto
+                {
+                    SegmentValue = group.Key,
+                    Description = group
+                        .Where(value => value.SegmentValueDescription != null && value.SegmentValueDescription != string.Empty)
+                        .Select(value => value.SegmentValueDescription!)
+                        .Min() ?? group.Select(value => value.Account.AccountName).Min() ?? group.Key,
+                    AccountCombinationCount = group.Select(value => value.AccountId).Distinct().Count()
+                })
+                .OrderBy(option => option.SegmentValue)
+                .Take(boundedTake + 1)
+                .ToListAsync(cancellationToken);
+
+            return new ReportingSegmentOptionsDto
+            {
+                Items = options.Take(boundedTake).ToList(),
+                HasMore = options.Count > boundedTake
+            };
         }
 
-        public async Task<SegmentLookupValueDto> UpdateSegmentLookupValueAsync(Guid valueId, SegmentLookupValueUpdateDto dto, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("Use SegmentLookupValueService.UpdateAsync instead");
-        }
+        public Task<SegmentLookupValueDto> AddSegmentLookupValueAsync(Guid segmentStructureId, SegmentLookupValueCreateDto dto, CancellationToken cancellationToken = default)
+            => Task.FromException<SegmentLookupValueDto>(new NotImplementedException("Use SegmentLookupValueService.CreateAsync instead"));
 
-        public async Task DeleteSegmentLookupValueAsync(Guid valueId, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("Use SegmentLookupValueService.DeleteAsync instead");
-        }
+        public Task<SegmentLookupValueDto> UpdateSegmentLookupValueAsync(Guid valueId, SegmentLookupValueUpdateDto dto, CancellationToken cancellationToken = default)
+            => Task.FromException<SegmentLookupValueDto>(new NotImplementedException("Use SegmentLookupValueService.UpdateAsync instead"));
+
+        public Task DeleteSegmentLookupValueAsync(Guid valueId, CancellationToken cancellationToken = default)
+            => Task.FromException(new NotImplementedException("Use SegmentLookupValueService.DeleteAsync instead"));
 
         // Account Number Utility Operations
         public async Task<bool> ValidateAccountNumberAsync(string accountNumber, CancellationToken cancellationToken = default)
