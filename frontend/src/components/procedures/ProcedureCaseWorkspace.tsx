@@ -361,6 +361,26 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     }
   };
 
+  const openDocument = async (document: ProcedureCaseDocument) => {
+    if (!selectedCase || !document.fileUrl) {
+      return;
+    }
+
+    if (!document.fileUrl.startsWith('/api/')) {
+      window.open(document.fileUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    try {
+      const blob = await procedureCaseService.downloadDocumentContent(selectedCase.id, document.id);
+      const objectUrl = URL.createObjectURL(blob);
+      window.open(objectUrl, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to open document.');
+    }
+  };
+
   const updateDocumentNotes = (documentId: string, value: string) => {
     setSelectedCase((current) => {
       if (!current) {
@@ -889,15 +909,14 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
                             <div className="font-medium text-foreground">{document.fileName}</div>
                             {document.fileUrl ? (
                               <div className="mt-2 flex flex-wrap gap-2">
-                                <a
+                                <button
+                                  type="button"
                                   className="inline-flex items-center gap-1 text-primary hover:underline"
-                                  href={document.fileUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                  onClick={() => void openDocument(document)}
                                 >
                                   <ExternalLink className="h-3 w-3" />
                                   Open uploaded file
-                                </a>
+                                </button>
                                 {isPdfDocument(document) ? (
                                   <button
                                     type="button"

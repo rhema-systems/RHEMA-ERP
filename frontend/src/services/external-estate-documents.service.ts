@@ -2,6 +2,8 @@ import { compatibleApiService as apiService } from './compatibleApiService';
 
 export interface ExternalEstateDocument {
   id: string;
+  documentRecordId?: string | null;
+  versionId?: string | null;
   documentReference: string;
   title: string;
   sourceLabel: string;

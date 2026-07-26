@@ -75,6 +75,11 @@ public sealed record ProcedureCaseActivityDto(
     Guid PerformedById,
     DateTime PerformedAt);
 
+public sealed record ProcedureCaseDocumentContentDto(
+    Stream FileStream,
+    string FileName,
+    string ContentType);
+
 public sealed record CreateProcedureCaseRequest(
     string Module,
     string EntityType,

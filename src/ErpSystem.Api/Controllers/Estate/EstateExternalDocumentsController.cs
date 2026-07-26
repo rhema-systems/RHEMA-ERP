@@ -94,10 +94,16 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     .OrderByDescending(item => item.PublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
                     .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item.RenditionPath)
                         || !string.IsNullOrWhiteSpace(item.RepositoryPath));
+                var contentUrl = $"/api/estate/external/documents/{record.Id}/content";
+                var hasFile = !string.IsNullOrWhiteSpace(version?.RenditionPath)
+                    || !string.IsNullOrWhiteSpace(version?.RepositoryPath)
+                    || !string.IsNullOrWhiteSpace(record.RepositoryPath);
 
                 return new
                 {
                     record.Id,
+                    documentRecordId = record.Id,
+                    versionId = version?.Id,
                     record.DocumentReference,
                     record.Title,
                     record.SourceLabel,
@@ -108,9 +114,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     record.PublishedAt,
                     record.CreatedAt,
                     fileName = version?.FileName,
-                    repositoryPath = version?.RepositoryPath ?? record.RepositoryPath,
-                    renditionPath = version?.RenditionPath,
-                    contentType = version?.ContentType,
+                    repositoryPath = hasFile ? contentUrl : null,
+                    renditionPath = hasFile && IsPdfDocument(version?.ContentType, version?.FileName, version?.RenditionPath ?? version?.RepositoryPath ?? record.RepositoryPath) ? contentUrl : null,
+                    contentType = ResolveExternalContentType(version, record),
                     version = version?.VersionNumber,
                     dispatchChannel = MetadataValue(record, "dispatchchannel"),
                     dispatchReference = MetadataValue(record, "dispatchreference"),
@@ -122,6 +128,36 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .ToList();
 
         return Ok(new { success = true, data });
+    }
+
+    [HttpGet("{id:guid}/content")]
+    public async Task<IActionResult> GetMyEstateDocumentContent(Guid id, CancellationToken cancellationToken)
+    {
+        var record = await LoadAuthorizedExternalEstateDocumentAsync(id, cancellationToken);
+        if (record is null)
+        {
+            return NotFound(new { success = false, message = "Estate document was not found." });
+        }
+
+        var version = SelectExternalDocumentVersion(record);
+        var filePath = SelectExternalDocumentPath(record, version);
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return NotFound(new { success = false, message = "Estate document file was not found." });
+        }
+
+        try
+        {
+            var stream = await _fileStorageService.DownloadFileAsync(filePath, version?.FileUploadRecordId ?? record.Id);
+            var fileName = SafeDownloadFileName(version?.FileName, record.DocumentReference);
+            var contentType = ResolveExternalContentType(version, record);
+            Response.Headers["Content-Disposition"] = $"inline; filename=\"{fileName}\"";
+            return File(stream, contentType);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new { success = false, message = "Estate document file was not found." });
+        }
     }
 
     [HttpGet("/api/estate/external/request-types")]
@@ -215,7 +251,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 request.Description,
                 fieldValues));
 
-            await NotifyExternalServiceRequestAsync(definition, created.Id, created.ReferenceNumber, applicantName, cancellationToken);
+            await NotifyExternalServiceRequestAsync(definition, created.Id, created.ReferenceNumber ?? reference, applicantName, cancellationToken);
 
             return Ok(new
             {
@@ -391,7 +427,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 description,
                 fieldValues));
 
-            await NotifyListingRequestAsync(asset, created.Id, created.ReferenceNumber, requestType, applicantName, cancellationToken);
+            await NotifyListingRequestAsync(asset, created.Id, created.ReferenceNumber ?? reference, requestType, applicantName, cancellationToken);
 
             return Ok(new
             {
@@ -436,6 +472,93 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
     private Guid? GetUserId()
         => Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : null;
+
+    private async Task<CentralDocumentRecord?> LoadAuthorizedExternalEstateDocumentAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var identities = BuildIdentityTerms();
+        if (tenantId == Guid.Empty || identities.Count == 0)
+        {
+            return null;
+        }
+
+        var isRecipient = await _db.CentralDocumentMetadataValues
+            .AsNoTracking()
+            .AnyAsync(value => value.TenantId == tenantId
+                && !value.IsDeleted
+                && value.DocumentRecordId == id
+                && value.FieldValue != null
+                && PortalRecipientFieldKeys.Contains(value.FieldKey)
+                && identities.Contains(value.FieldValue!.Trim().ToLower()), cancellationToken);
+
+        if (!isRecipient)
+        {
+            return null;
+        }
+
+        return await _db.CentralDocumentRecords
+            .AsNoTracking()
+            .Include(record => record.Versions.Where(version => !version.IsDeleted))
+            .FirstOrDefaultAsync(record => record.TenantId == tenantId
+                && !record.IsDeleted
+                && record.Id == id
+                && record.SourceModule == "Estate"
+                && record.LifecycleStatus == "Dispatched"
+                && record.RepositoryStatus == "Linked", cancellationToken);
+    }
+
+    private static CentralDocumentVersion? SelectExternalDocumentVersion(CentralDocumentRecord record)
+        => record.Versions
+            .OrderByDescending(item => item.PublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item.RenditionPath)
+                || !string.IsNullOrWhiteSpace(item.RepositoryPath));
+
+    private static string? SelectExternalDocumentPath(CentralDocumentRecord record, CentralDocumentVersion? version)
+    {
+        if (!string.IsNullOrWhiteSpace(version?.RenditionPath))
+        {
+            return version.RenditionPath;
+        }
+
+        if (!string.IsNullOrWhiteSpace(version?.RepositoryPath))
+        {
+            return version.RepositoryPath;
+        }
+
+        return record.RepositoryPath;
+    }
+
+    private static string ResolveExternalContentType(CentralDocumentVersion? version, CentralDocumentRecord record)
+    {
+        if (!string.IsNullOrWhiteSpace(version?.RenditionPath))
+        {
+            return "application/pdf";
+        }
+
+        if (!string.IsNullOrWhiteSpace(version?.ContentType))
+        {
+            return version.ContentType;
+        }
+
+        var path = version?.RepositoryPath ?? record.RepositoryPath ?? version?.FileName;
+        return IsPdfDocument(null, version?.FileName, path) ? "application/pdf" : "application/octet-stream";
+    }
+
+    private static bool IsPdfDocument(string? contentType, string? fileName, string? path)
+        => contentType?.Contains("pdf", StringComparison.OrdinalIgnoreCase) == true
+            || fileName?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) == true
+            || path?.Contains(".pdf", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static string SafeDownloadFileName(string? fileName, string fallback)
+    {
+        var candidate = string.IsNullOrWhiteSpace(fileName) ? $"{fallback}.pdf" : fileName.Trim();
+        foreach (var invalidChar in Path.GetInvalidFileNameChars())
+        {
+            candidate = candidate.Replace(invalidChar, '_');
+        }
+
+        return candidate;
+    }
 
     private async Task NotifyExternalServiceRequestAsync(
         ExternalEstateRequestDefinition definition,

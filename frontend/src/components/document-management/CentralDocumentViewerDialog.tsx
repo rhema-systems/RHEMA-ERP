@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { apiService as rawApiService } from '@/services/api.service';
 import { documentManagementService } from '@/services/document-management.service';
 
 const CentralDocumentPdfViewer = dynamic(
@@ -76,6 +77,10 @@ function getOriginalUrl(file: CentralDocumentViewerFile) {
     normalizeViewerUrl(file.externalDocumentUrl) ||
     normalizeViewerUrl(file.repositoryPath)
   );
+}
+
+function toApiEndpoint(url: string) {
+  return url.startsWith('/api/') ? url.slice(4) : url;
 }
 
 function resolvePdfView(file: CentralDocumentViewerFile | null) {
@@ -157,14 +162,17 @@ export function CentralDocumentViewerDialog({
     let objectUrl: string | null = null;
 
     setPreviewObjectUrl(null);
+    const currentFile = localFile;
+    const secureApiUrl = view.url?.startsWith('/api/') ? view.url : null;
 
-    if (!open || !localFile?.documentRecordId) {
+    if (!open || (!currentFile?.documentRecordId && !secureApiUrl)) {
       setIsLoadingPreview(false);
       return () => undefined;
     }
 
     const shouldFetchSecurePreview =
-      Boolean(localFile.versionId) ||
+      Boolean(currentFile?.versionId) ||
+      Boolean(secureApiUrl) ||
       view.url?.startsWith('/api/document-management/');
 
     if (!shouldFetchSecurePreview) {
@@ -175,14 +183,16 @@ export function CentralDocumentViewerDialog({
     setIsLoadingPreview(true);
     const loadPreview = async () => {
       try {
-        const blob = localFile.versionId
+        const blob = currentFile?.versionId
           ? await documentManagementService.downloadVersionFile(
-              localFile.documentRecordId!,
-              localFile.versionId,
+              currentFile.documentRecordId!,
+              currentFile.versionId,
               'pdf'
             )
+          : secureApiUrl
+          ? await rawApiService.downloadBlob(toApiEndpoint(secureApiUrl))
           : await documentManagementService.downloadRecordContent(
-              localFile.documentRecordId!
+              currentFile!.documentRecordId!
             );
 
         if (cancelled) return;

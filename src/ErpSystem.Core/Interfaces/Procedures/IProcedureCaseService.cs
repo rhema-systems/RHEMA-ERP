@@ -10,5 +10,7 @@ public interface IProcedureCaseService
     Task<ProcedureCaseDetailDto?> UpdateFieldsAsync(Guid id, UpdateProcedureCaseFieldsRequest request);
     Task<ProcedureCaseDetailDto?> UpdateChecklistItemAsync(Guid id, Guid checklistItemId, UpdateProcedureCaseChecklistRequest request);
     Task<ProcedureCaseDetailDto?> AttachDocumentAsync(Guid id, Guid documentId, AttachProcedureCaseDocumentRequest request);
+    Task<ProcedureCaseDetailDto?> UploadDocumentAsync(Guid id, Guid documentId, Stream fileStream, string fileName, string contentType, long fileSize, string? notes);
+    Task<ProcedureCaseDocumentContentDto?> GetDocumentContentAsync(Guid id, Guid documentId);
     Task<ProcedureCaseDetailDto?> CompleteCurrentStageAsync(Guid id, CompleteProcedureCaseStageRequest request);
 }

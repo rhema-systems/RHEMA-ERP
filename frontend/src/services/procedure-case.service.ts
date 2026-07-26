@@ -76,19 +76,6 @@ interface ApiResponse<T> {
   message?: string;
 }
 
-interface FileUploadResult {
-  success: boolean;
-  fileName: string;
-  originalFileName: string;
-  filePath: string;
-  publicUrl: string;
-  fileSize: number;
-  contentType: string;
-  category: string;
-  tenantId?: string | null;
-  uploadedAt: string;
-}
-
 interface CreateCasePayload {
   module: string;
   entityType: string;
@@ -100,21 +87,6 @@ interface CreateCasePayload {
   description?: string;
   fieldValues?: Record<string, string | null>;
 }
-
-const resolveUploadedFileUrl = (fileUrl: string, fallbackPath: string): string => {
-  const url = fileUrl || fallbackPath;
-
-  if (!url || url.startsWith('http://') || url.startsWith('https://')) {
-    return url;
-  }
-
-  const apiBase = process.env.NEXT_PUBLIC_API_URL;
-  if (!apiBase) {
-    return url;
-  }
-
-  return `${apiBase.replace(/\/api\/?$/i, '').replace(/\/$/, '')}/${url.replace(/^\//, '')}`;
-};
 
 class ProcedureCaseService {
   async listCases(module: string, entityType: string): Promise<ProcedureCaseSummary[]> {
@@ -186,18 +158,23 @@ class ProcedureCaseService {
   ): Promise<ProcedureCaseDetail> {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('category', 'procedure-case-documents');
+    if (notes) {
+      formData.append('notes', notes);
+    }
 
-    const upload = await rawApiService.request<FileUploadResult>('/FileUpload/single', {
-      method: 'POST',
-      body: formData,
-    });
+    const response = await rawApiService.request<ApiResponse<ProcedureCaseDetail>>(
+      `/procedure-cases/${id}/documents/${documentId}/upload`,
+      {
+        method: 'POST',
+        body: formData,
+      }
+    );
 
-    return this.attachDocument(id, documentId, {
-      fileName: upload.originalFileName || upload.fileName || file.name,
-      fileUrl: resolveUploadedFileUrl(upload.publicUrl, upload.filePath),
-      notes,
-    });
+    return response.data;
+  }
+
+  async downloadDocumentContent(id: string, documentId: string): Promise<Blob> {
+    return rawApiService.downloadBlob(`/procedure-cases/${id}/documents/${documentId}/content`);
   }
 
   async completeStage(id: string, notes?: string | null): Promise<ProcedureCaseDetail> {

@@ -10,6 +10,7 @@ using ErpSystem.Core.Interfaces.Legal;
 using ErpSystem.Core.Interfaces.Planning;
 using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Models;
 using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +28,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private readonly IPlanningProcedureCatalogService _planningCatalog;
     private readonly IWorkflowEngine _workflowEngine;
     private readonly INotificationService _notificationService;
+    private readonly IFileStorageService _fileStorageService;
 
     public ProcedureCaseService(
         ApplicationDbContext db,
@@ -37,7 +39,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         IPropertyManagementProcedureCatalogService propertyManagementCatalog,
         IPlanningProcedureCatalogService planningCatalog,
         IWorkflowEngine workflowEngine,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        IFileStorageService fileStorageService)
     {
         _db = db;
         _currentUser = currentUser;
@@ -48,13 +51,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         _planningCatalog = planningCatalog;
         _workflowEngine = workflowEngine;
         _notificationService = notificationService;
+        _fileStorageService = fileStorageService;
     }
 
     public async Task<IReadOnlyList<ProcedureCaseSummaryDto>> GetCasesAsync(string? module, string? entityType, bool mineOnly)
     {
         var tenantId = RequireTenantId();
-        var roles = _currentUser.Roles.ToArray();
-
         var query = _db.ProcedureCases
             .AsNoTracking()
             .Where(item => item.TenantId == tenantId && !item.IsDeleted);
@@ -69,23 +71,33 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             query = query.Where(item => item.EntityType == entityType);
         }
 
-        if (mineOnly && !IsWorkflowAdmin())
-        {
-            query = query.Where(item => item.CurrentAssignedRole == null || roles.Any(role => item.CurrentAssignedRole!.Contains(role)));
-        }
-
         var cases = await query
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
-            .Take(100)
+            .Take(IsWorkflowAdmin() ? 100 : 500)
             .ToListAsync();
 
-        return cases.Select(ToSummaryDto).ToList();
+        return cases
+            .Where(procedureCase => CanView(procedureCase)
+                && (!mineOnly || UserOwnsCase(procedureCase) || UserHasAssignedProcedureRole(procedureCase)))
+            .Take(100)
+            .Select(ToSummaryDto)
+            .ToList();
     }
 
     public async Task<ProcedureCaseDetailDto?> GetCaseAsync(Guid id)
     {
         var procedureCase = await LoadCaseAsync(id, asTracking: false);
-        return procedureCase is null ? null : ToDetailDto(procedureCase);
+        if (procedureCase is null)
+        {
+            return null;
+        }
+
+        if (!CanView(procedureCase))
+        {
+            throw new UnauthorizedAccessException("The current user is not allowed to view this procedure case.");
+        }
+
+        return ToDetailDto(procedureCase);
     }
 
     public async Task<ProcedureCaseDetailDto> CreateCaseAsync(CreateProcedureCaseRequest request)
@@ -316,13 +328,20 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
         var now = DateTime.UtcNow;
+        var isContentUrlSave = IsProcedureCaseContentUrl(request.FileUrl);
+        var fileUrl = isContentUrlSave ? document.FileUrl : request.FileUrl;
+
+        if (!isContentUrlSave && !string.IsNullOrWhiteSpace(fileUrl) && !IsPrivateProcedureDocumentPath(fileUrl))
+        {
+            throw new InvalidOperationException("Upload procedure case documents through the secure procedure document upload endpoint.");
+        }
 
         await _db.ProcedureCaseDocuments
             .IgnoreQueryFilters()
             .Where(item => item.TenantId == tenantId && item.ProcedureCaseId == id && item.Id == documentId && !item.IsDeleted)
             .ExecuteUpdateAsync(setters => setters
-                .SetProperty(item => item.FileName, request.FileName)
-                .SetProperty(item => item.FileUrl, request.FileUrl)
+                .SetProperty(item => item.FileName, string.IsNullOrWhiteSpace(request.FileName) ? document.FileName : request.FileName)
+                .SetProperty(item => item.FileUrl, fileUrl)
                 .SetProperty(item => item.Notes, request.Notes)
                 .SetProperty(item => item.UploadedById, userId)
                 .SetProperty(item => item.UploadedAt, now)
@@ -444,6 +463,81 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         await NotifyEstateProcedureHandoffsAsync(updatedCase, completedStageName, nextStage?.Name, userId, tenantId);
 
         return ToDetailDto((await LoadCaseAsync(id, asTracking: false))!);
+    }
+
+    public async Task<ProcedureCaseDetailDto?> UploadDocumentAsync(
+        Guid id,
+        Guid documentId,
+        Stream fileStream,
+        string fileName,
+        string contentType,
+        long fileSize,
+        string? notes)
+    {
+        var procedureCase = await LoadCaseAsync(id, asTracking: false);
+        if (procedureCase is null)
+        {
+            return null;
+        }
+
+        EnsureCanEdit(procedureCase);
+        var document = procedureCase.Documents.FirstOrDefault(item => item.Id == documentId);
+        if (document is null)
+        {
+            return null;
+        }
+
+        var upload = await _fileStorageService.UploadFileAsync(new FileUploadRequest
+        {
+            FileStream = fileStream,
+            FileName = fileName,
+            ContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType,
+            FileSize = fileSize,
+            Category = "procedure-case-documents",
+            TenantId = RequireTenantId().ToString(),
+            OverwriteExisting = false
+        });
+
+        if (!upload.Success)
+        {
+            throw new InvalidOperationException(upload.ErrorMessage ?? "Procedure case document upload failed.");
+        }
+
+        return await AttachDocumentAsync(id, documentId, new AttachProcedureCaseDocumentRequest(
+            upload.OriginalFileName,
+            upload.FilePath,
+            notes));
+    }
+
+    public async Task<ProcedureCaseDocumentContentDto?> GetDocumentContentAsync(Guid id, Guid documentId)
+    {
+        var procedureCase = await LoadCaseAsync(id, asTracking: false);
+        if (procedureCase is null)
+        {
+            return null;
+        }
+
+        if (!CanView(procedureCase))
+        {
+            throw new UnauthorizedAccessException("The current user is not allowed to view this procedure case document.");
+        }
+
+        var document = procedureCase.Documents.FirstOrDefault(item => item.Id == documentId);
+        if (document is null || string.IsNullOrWhiteSpace(document.FileUrl))
+        {
+            return null;
+        }
+
+        if (Uri.TryCreate(document.FileUrl, UriKind.Absolute, out _))
+        {
+            throw new InvalidOperationException("This procedure case document is not stored in managed private storage.");
+        }
+
+        var stream = await _fileStorageService.DownloadFileAsync(document.FileUrl, document.Id);
+        return new ProcedureCaseDocumentContentDto(
+            stream,
+            string.IsNullOrWhiteSpace(document.FileName) ? document.Name : document.FileName,
+            ResolveContentType(document.FileName ?? document.Name));
     }
 
     private async Task NotifyEstateProcedureHandoffsAsync(
@@ -1354,18 +1448,40 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return true;
         }
 
+        return UserHasAssignedProcedureRole(procedureCase);
+    }
+
+    private bool CanView(ProcedureCase procedureCase)
+        => IsWorkflowAdmin() || UserOwnsCase(procedureCase) || UserHasAssignedProcedureRole(procedureCase);
+
+    private bool UserOwnsCase(ProcedureCase procedureCase)
+        => Guid.TryParse(_currentUser.UserId, out var userId) && procedureCase.OpenedById == userId;
+
+    private bool UserHasAssignedProcedureRole(ProcedureCase procedureCase)
+    {
         if (string.IsNullOrWhiteSpace(procedureCase.CurrentAssignedRole))
         {
-            return true;
+            return false;
         }
 
-        var assignedTokens = procedureCase.CurrentAssignedRole
-            .Split(['/', ',', ';', '|'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var assignedTokens = SplitAssignedRoles(procedureCase.CurrentAssignedRole);
 
         return _currentUser.Roles.Any(role =>
-            assignedTokens.Any(token => string.Equals(token, role, StringComparison.OrdinalIgnoreCase))
-            || procedureCase.CurrentAssignedRole.Contains(role, StringComparison.OrdinalIgnoreCase));
+            assignedTokens.Any(token => string.Equals(token, role, StringComparison.OrdinalIgnoreCase)));
     }
+
+    private static string[] SplitAssignedRoles(string assignedRole)
+        => assignedRole
+            .Split(['/', ',', ';', '|'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+    private static bool IsPrivateProcedureDocumentPath(string fileUrl)
+        => fileUrl.Replace('\\', '/').TrimStart('/')
+            .StartsWith("private/procedure-case-documents/", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsProcedureCaseContentUrl(string? fileUrl)
+        => !string.IsNullOrWhiteSpace(fileUrl)
+            && fileUrl.Replace('\\', '/').TrimStart('/')
+                .StartsWith("api/procedure-cases/", StringComparison.OrdinalIgnoreCase);
 
     private bool IsWorkflowAdmin() =>
         _currentUser.Roles.Any(role =>
@@ -1501,7 +1617,18 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         new(item.Id, item.StageIndex, item.StageName, item.Text, item.IsCompleted, item.CompletedById, item.CompletedAt);
 
     private static ProcedureCaseDocumentDto ToDocumentDto(ProcedureCaseDocument document) =>
-        new(document.Id, document.Name, document.RequiredFrom, document.IsMandatory, document.FileName, document.FileUrl, document.Notes, document.UploadedById, document.UploadedAt);
+        new(
+            document.Id,
+            document.Name,
+            document.RequiredFrom,
+            document.IsMandatory,
+            document.FileName,
+            string.IsNullOrWhiteSpace(document.FileUrl)
+                ? null
+                : $"/api/procedure-cases/{document.ProcedureCaseId}/documents/{document.Id}/content",
+            document.Notes,
+            document.UploadedById,
+            document.UploadedAt);
 
     private static ProcedureCaseActivityDto ToActivityDto(ProcedureCaseActivity activity) =>
         new(activity.Id, activity.Action, activity.StageName, activity.Details, activity.PerformedById, activity.PerformedAt);
@@ -1522,6 +1649,20 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return null;
         }
     }
+
+    private static string ResolveContentType(string fileName)
+        => Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".pdf" => "application/pdf",
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls" => "application/vnd.ms-excel",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".txt" => "text/plain",
+            _ => "application/octet-stream"
+        };
 
     private static WorkflowStepConfigurationDto? DeserializeStepConfiguration(string? configurationJson)
     {

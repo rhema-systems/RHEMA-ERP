@@ -65,6 +65,49 @@ public sealed class ProcedureCasesController : ControllerBase
         return await ExecuteUpdate(() => _procedureCaseService.AttachDocumentAsync(id, documentId, request));
     }
 
+    [HttpPost("{id:guid}/documents/{documentId:guid}/upload")]
+    [RequestSizeLimit(52_428_800)]
+    public async Task<IActionResult> UploadDocument(Guid id, Guid documentId, [FromForm] IFormFile? file, [FromForm] string? notes)
+    {
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { success = false, message = "Select a document to upload." });
+        }
+
+        return await ExecuteUpdate(async () =>
+        {
+            await using var stream = file.OpenReadStream();
+            return await _procedureCaseService.UploadDocumentAsync(
+                id,
+                documentId,
+                stream,
+                file.FileName,
+                file.ContentType,
+                file.Length,
+                notes);
+        });
+    }
+
+    [HttpGet("{id:guid}/documents/{documentId:guid}/content")]
+    public async Task<IActionResult> GetDocumentContent(Guid id, Guid documentId)
+    {
+        try
+        {
+            var document = await _procedureCaseService.GetDocumentContentAsync(id, documentId);
+            return document is null
+                ? NotFound(new { success = false, message = "Procedure case document was not found." })
+                : File(document.FileStream, document.ContentType, document.FileName);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
     [HttpPost("{id:guid}/complete-stage")]
     public async Task<IActionResult> CompleteCurrentStage(Guid id, [FromBody] CompleteProcedureCaseStageRequest request)
     {
