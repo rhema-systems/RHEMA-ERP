@@ -26,6 +26,13 @@ dotnet user-secrets set "ConnectionStrings:Redis" "localhost:6379"
 # JWT Secret Key (at least 32 characters)
 dotnet user-secrets set "JwtSettings:SecretKey" "YourVerySecureJwtSecretKeyThatIsAtLeast32CharactersLong123456789"
 
+# External-portal token key (REQUIRED; MUST be different from JwtSettings:SecretKey)
+dotnet user-secrets set "JwtSettings:PortalSecretKey" "A-DIFFERENT-VerySecurePortalKeyAtLeast32CharactersLong987654321"
+# External-portal token audience (REQUIRED; MUST differ from JwtSettings:Audience)
+dotnet user-secrets set "JwtSettings:PortalAudience" "ErpSystem.Portal"
+# Absolute portal base URL for verification / reset / offer email links (REQUIRED)
+dotnet user-secrets set "CandidatePortal:PortalUrl" "http://localhost:3000"
+
 # Encryption Key (at least 32 characters)
 dotnet user-secrets set "Security:EncryptionKey" "YourVerySecureEncryptionKeyThatIsAtLeast32Characters"
 ```

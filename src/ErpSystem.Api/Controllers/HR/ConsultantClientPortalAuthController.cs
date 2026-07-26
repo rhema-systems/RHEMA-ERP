@@ -69,12 +69,10 @@ public class ConsultantClientPortalAuthController : ControllerBase
         [FromBody] ConsultantClientPortalVerifyEmailDto dto,
         CancellationToken ct)
     {
-        if (!TryGetTenantId(out var tenantId))
-            return BadRequest(new { message = "X-Tenant-Id header is required." });
-
+        // No X-Tenant-Id required — tenant resolved from the globally-unique token (emailed link).
         try
         {
-            await _authService.VerifyEmailAsync(dto.Token, tenantId, ct);
+            await _authService.VerifyEmailAsync(dto.Token, ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)
@@ -103,12 +101,10 @@ public class ConsultantClientPortalAuthController : ControllerBase
         [FromBody] ConsultantClientPortalResetPasswordDto dto,
         CancellationToken ct)
     {
-        if (!TryGetTenantId(out var tenantId))
-            return BadRequest(new { message = "X-Tenant-Id header is required." });
-
+        // No X-Tenant-Id required — tenant resolved from the globally-unique reset token.
         try
         {
-            await _authService.ResetPasswordAsync(dto, tenantId, ct);
+            await _authService.ResetPasswordAsync(dto, ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)
@@ -124,12 +120,10 @@ public class ConsultantClientPortalAuthController : ControllerBase
         [FromBody] ConsultantClientPortalCompleteSetupDto dto,
         CancellationToken ct)
     {
-        if (!TryGetTenantId(out var tenantId))
-            return BadRequest(new { message = "X-Tenant-Id header is required." });
-
+        // No X-Tenant-Id required — tenant resolved from the globally-unique setup token.
         try
         {
-            await _authService.CompleteAccountSetupAsync(dto, tenantId, ct);
+            await _authService.CompleteAccountSetupAsync(dto, ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)

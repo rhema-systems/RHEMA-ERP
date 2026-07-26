@@ -156,10 +156,13 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
     }
 
     // ── Email verification ─────────────────────────────────────────────────────
-    public async Task VerifyEmailAsync(string token, Guid tenantId, CancellationToken ct = default)
+    public async Task VerifyEmailAsync(string token, CancellationToken ct = default)
     {
+        // Token-only lookup: the verification token is 48-byte crypto-random and globally unique, so
+        // the tenant is derived from the account row — no X-Tenant-Id header is needed for this
+        // emailed-link flow (a recipient's clean browser has no tenant context).
         var account = await _accountRepo.FirstOrDefaultAsync(
-            a => a.TenantId == tenantId && a.EmailVerificationToken == token);
+            a => a.EmailVerificationToken == token);
 
         if (account == null)
             throw new InvalidOperationException("Verification link is invalid or has already been used.");
@@ -177,7 +180,7 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
         // here rather than at registration — see the note in RegisterAsync.
         if (account.JobCandidateId == null)
         {
-            var candidate = await _candidateRepo.GetByEmailAsync(account.Email, tenantId);
+            var candidate = await _candidateRepo.GetByEmailAsync(account.Email, account.TenantId);
             if (candidate != null)
                 account.JobCandidateId = candidate.Id;
         }
@@ -212,11 +215,12 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
     // ── Reset password ────────────────────────────────────────────────────────
     public async Task ResetPasswordAsync(
         CandidatePortalResetPasswordDto dto,
-        Guid tenantId,
         CancellationToken ct = default)
     {
+        // Token-only lookup: reset token is 48-byte crypto-random and globally unique; tenant is
+        // derived from the account, so no X-Tenant-Id header is required for this emailed-link flow.
         var account = await _accountRepo.FirstOrDefaultAsync(
-            a => a.TenantId == tenantId && a.PasswordResetToken == dto.Token);
+            a => a.PasswordResetToken == dto.Token);
 
         if (account == null)
             throw new InvalidOperationException("Reset link is invalid or has already been used.");

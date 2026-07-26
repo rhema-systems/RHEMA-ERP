@@ -33,12 +33,10 @@ public class ClientTimesheetConfirmationController : ControllerBase
     {
         if (token == Guid.Empty)
             return BadRequest(new { message = "Invalid token." });
-        if (!TryGetTenantId(out var tenantId))
-            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
 
         try
         {
-            return Ok(await _service.ValidateConfirmationTokenAsync(token, tenantId, ct));
+            return Ok(await _service.ValidateConfirmationTokenAsync(token, ct));
         }
         catch (ArgumentException ex)
         {
@@ -54,12 +52,10 @@ public class ClientTimesheetConfirmationController : ControllerBase
     {
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
-        if (!TryGetTenantId(out var tenantId))
-            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
 
         try
         {
-            return Ok(await _service.ConfirmByClientAsync(dto, tenantId, ct));
+            return Ok(await _service.ConfirmByClientAsync(dto, ct));
         }
         catch (ArgumentException ex)
         {
@@ -78,12 +74,10 @@ public class ClientTimesheetConfirmationController : ControllerBase
     {
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
-        if (!TryGetTenantId(out var tenantId))
-            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
 
         try
         {
-            return Ok(await _service.RejectByClientAsync(dto, tenantId, ct));
+            return Ok(await _service.RejectByClientAsync(dto, ct));
         }
         catch (ArgumentException ex)
         {
@@ -95,10 +89,4 @@ public class ClientTimesheetConfirmationController : ControllerBase
         }
     }
 
-    private bool TryGetTenantId(out Guid tenantId)
-    {
-        tenantId = Guid.Empty;
-        return Request.Headers.TryGetValue("X-Tenant-Id", out var value)
-            && Guid.TryParse(value.FirstOrDefault(), out tenantId);
-    }
 }

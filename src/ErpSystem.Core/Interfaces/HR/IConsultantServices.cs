@@ -108,17 +108,16 @@ public interface IConsultantTimesheetService
         Guid sentById,
         CancellationToken ct = default);
     Task<ClientTimesheetConfirmationDto?> GetConfirmationAsync(Guid timesheetId, CancellationToken ct = default);
+    // Tenant is resolved from the globally-unique one-time token itself, so these public
+    // (emailed-link) flows do not require an X-Tenant-Id header.
     Task<ClientTimesheetConfirmationPublicDto> ValidateConfirmationTokenAsync(
         Guid token,
-        Guid tenantId,
         CancellationToken ct = default);
     Task<ClientTimesheetConfirmationDto> ConfirmByClientAsync(
         ClientConfirmTimesheetDto dto,
-        Guid tenantId,
         CancellationToken ct = default);
     Task<ClientTimesheetConfirmationDto> RejectByClientAsync(
         ClientRejectTimesheetDto dto,
-        Guid tenantId,
         CancellationToken ct = default);
     Task<ClientTimesheetConfirmationDto> ConfirmByPortalClientAsync(
         Guid timesheetId,

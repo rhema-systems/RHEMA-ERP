@@ -1506,6 +1506,22 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
         {
             services.AddRateLimiter(rateLimiterOptions =>
             {
+                // Per-caller partition key: authenticated -> user id, anonymous -> client IP.
+                // Mirrors the GlobalLimiter keying below so every named policy is scoped PER CALLER
+                // instead of one shared bucket for the whole service (a few callers would otherwise
+                // exhaust the quota and 429 everyone else). Behind a proxy the client IP is only
+                // accurate when ForwardedHeaders is configured (see Program.cs / trust-none default).
+                static string CallerKey(HttpContext ctx)
+                {
+                    var user = ctx.User;
+                    if (user?.Identity?.IsAuthenticated == true)
+                    {
+                        var uid = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                        if (!string.IsNullOrEmpty(uid)) return $"user:{uid}";
+                    }
+                    return $"ip:{ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+                }
+
                 // [HR-MODULE-PORT] Named policies required by the ported HR portal/recruitment
                 // controllers ([EnableRateLimiting("...")]). Without them those endpoints throw
                 // "no such policy exists" at run time. These are ADDITIVE — named policies apply only
@@ -1513,20 +1529,26 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 // NOTE: "AuthPolicy" is NOT defined here — RHEMA already declares it further down.
 
                 // Public career portal — browsing (vacancies, catalogue, tracking)
-                rateLimiterOptions.AddFixedWindowLimiter(policyName: "PublicPortalPolicy", options =>
-                {
-                    options.PermitLimit = 60;
-                    options.Window = TimeSpan.FromMinutes(1);
-                    options.QueueLimit = 5;
-                });
+                rateLimiterOptions.AddPolicy("PublicPortalPolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 60,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 5
+                        }));
 
                 // Public career portal — application submission (strict, to prevent spam)
-                rateLimiterOptions.AddFixedWindowLimiter(policyName: "PublicApplyPolicy", options =>
-                {
-                    options.PermitLimit = 5;
-                    options.Window = TimeSpan.FromMinutes(10);
-                    options.QueueLimit = 0;
-                });
+                rateLimiterOptions.AddPolicy("PublicApplyPolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 5,
+                            Window = TimeSpan.FromMinutes(10),
+                            QueueLimit = 0
+                        }));
 
                 // Global limiter applies to every request (external portal included)
                 rateLimiterOptions.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
@@ -1585,29 +1607,39 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 });
 
                 // General API rate limiting
-                rateLimiterOptions.AddFixedWindowLimiter(policyName: "ApiPolicy", options =>
-                {
-                    options.PermitLimit = 100;
-                    options.Window = TimeSpan.FromMinutes(1);
-                    options.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-                    options.QueueLimit = 10;
-                });
+                rateLimiterOptions.AddPolicy("ApiPolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 100,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                            QueueLimit = 10
+                        }));
 
-                // Stricter rate limiting for authentication endpoints
-                rateLimiterOptions.AddFixedWindowLimiter(policyName: "AuthPolicy", options =>
-                {
-                    options.PermitLimit = 10;
-                    options.Window = TimeSpan.FromMinutes(1);
-                    options.QueueLimit = 2;
-                });
+                // Stricter rate limiting for authentication endpoints (per caller — mostly by IP since
+                // login is pre-auth, which is the correct key for brute-force protection)
+                rateLimiterOptions.AddPolicy("AuthPolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 10,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 2
+                        }));
 
                 // Very strict rate limiting for sensitive endpoints
-                rateLimiterOptions.AddFixedWindowLimiter(policyName: "SensitivePolicy", options =>
-                {
-                    options.PermitLimit = 5;
-                    options.Window = TimeSpan.FromMinutes(1);
-                    options.QueueLimit = 0; // No queuing for sensitive endpoints
-                });
+                rateLimiterOptions.AddPolicy("SensitivePolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 5,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0 // No queuing for sensitive endpoints
+                        }));
 
                 // Global rejection response
                 rateLimiterOptions.OnRejected = async (context, token) =>

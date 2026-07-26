@@ -15,6 +15,12 @@ services:
       - ASPNETCORE_Kestrel__Certificates__Default__Path=/https/aspnetcore-https-api.pfx
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=ErpSystemDb;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=true;
       - ConnectionStrings__Redis=redis:6379
+      # External-portal auth. REQUIRED — the app throws at startup without these. Dev defaults here;
+      # override via .env / user-secrets. PortalSecretKey MUST differ from the internal JWT SecretKey
+      # and PortalAudience MUST differ from the internal Audience.
+      - JwtSettings__PortalSecretKey=${JWT_PORTAL_SECRET_KEY:-dev-portal-secret-change-me-0123456789abcdef0123456789abcdef}
+      - JwtSettings__PortalAudience=${JWT_PORTAL_AUDIENCE:-ErpSystem.Portal}
+      - CandidatePortal__PortalUrl=${PORTAL_URL:-http://localhost:3000}
     volumes:
       - ~/.aspnet/https:/https:ro
       - ./data:/app/data

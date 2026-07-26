@@ -144,10 +144,12 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         return BuildAuthResult(account, client, tenantId);
     }
 
-    public async Task VerifyEmailAsync(string token, Guid tenantId, CancellationToken ct = default)
+    public async Task VerifyEmailAsync(string token, CancellationToken ct = default)
     {
+        // Token-only lookup: the token is 48-byte crypto-random and globally unique, so tenant is
+        // derived from the account — no X-Tenant-Id header needed for this emailed-link flow.
         var account = await _accountRepo.FirstOrDefaultAsync(
-            a => a.TenantId == tenantId && a.EmailVerificationToken == token);
+            a => a.EmailVerificationToken == token);
 
         if (account == null)
             throw new InvalidOperationException("Verification link is invalid or has already been used.");
@@ -188,11 +190,11 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
 
     public async Task ResetPasswordAsync(
         ConsultantClientPortalResetPasswordDto dto,
-        Guid tenantId,
         CancellationToken ct = default)
     {
+        // Token-only lookup: reset token is globally unique; tenant derived from the account.
         var account = await _accountRepo.FirstOrDefaultAsync(
-            a => a.TenantId == tenantId && a.PasswordResetToken == dto.Token);
+            a => a.PasswordResetToken == dto.Token);
 
         if (account == null)
             throw new InvalidOperationException("Reset link is invalid or has already been used.");
@@ -213,11 +215,11 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
 
     public async Task CompleteAccountSetupAsync(
         ConsultantClientPortalCompleteSetupDto dto,
-        Guid tenantId,
         CancellationToken ct = default)
     {
+        // Token-only lookup: setup token is globally unique; tenant derived from the account.
         var account = await _accountRepo.FirstOrDefaultAsync(
-            a => a.TenantId == tenantId && a.AccountSetupToken == dto.Token);
+            a => a.AccountSetupToken == dto.Token);
 
         if (account == null)
             throw new InvalidOperationException("Setup link is invalid or has already been used.");

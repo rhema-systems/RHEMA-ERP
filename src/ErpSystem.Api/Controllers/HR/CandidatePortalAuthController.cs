@@ -80,12 +80,11 @@ public class CandidatePortalAuthController : ControllerBase
         [FromBody] CandidatePortalVerifyEmailDto dto,
         CancellationToken ct)
     {
-        if (!TryGetTenantId(out var tenantId))
-            return BadRequest(new { message = "X-Tenant-Id header is required." });
-
+        // No X-Tenant-Id required — the tenant is resolved from the globally-unique token (this link
+        // is opened from an email, often in a clean browser with no tenant context).
         try
         {
-            await _authService.VerifyEmailAsync(dto.Token, tenantId, ct);
+            await _authService.VerifyEmailAsync(dto.Token, ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)
@@ -120,12 +119,10 @@ public class CandidatePortalAuthController : ControllerBase
         [FromBody] CandidatePortalResetPasswordDto dto,
         CancellationToken ct)
     {
-        if (!TryGetTenantId(out var tenantId))
-            return BadRequest(new { message = "X-Tenant-Id header is required." });
-
+        // No X-Tenant-Id required — the tenant is resolved from the globally-unique reset token.
         try
         {
-            await _authService.ResetPasswordAsync(dto, tenantId, ct);
+            await _authService.ResetPasswordAsync(dto, ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)

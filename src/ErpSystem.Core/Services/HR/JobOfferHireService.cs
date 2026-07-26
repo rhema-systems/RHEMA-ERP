@@ -866,7 +866,13 @@ public class JobOfferService : IJobOfferService
             ["SalaryLine"]    = offer.BaseSalary.HasValue ? $"{offer.CurrencyCode} {offer.BaseSalary:N2} per annum" : null,
             ["StartDate"]     = offer.ProposedStartDate?.ToString("dddd, d MMMM yyyy"),
             ["ExpiryDate"]    = offer.ExpiryDate?.ToString("dddd, d MMMM yyyy"),
-            ["RespondUrl"]    = $"{_portalBaseUrl}/careers/portal/login?returnUrl=/careers/portal/offer/{offer.JobApplicationId}",
+            // Point at the header-free, token-based offer-response flow (api/offer-response, backed by
+            // the globally-unique OfferCandidateToken) so a recipient can respond straight from the
+            // email without logging in / supplying a tenant. Falls back to the login deep-link only if
+            // no token was issued.
+            ["RespondUrl"]    = candidateToken.HasValue
+                ? $"{_portalBaseUrl}/careers/portal/offer-response?token={candidateToken.Value}"
+                : $"{_portalBaseUrl}/careers/portal/login?returnUrl=/careers/portal/offer/{offer.JobApplicationId}",
         };
 
         await _templatedEmail.SendAsync(

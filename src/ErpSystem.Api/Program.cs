@@ -223,6 +223,32 @@ builder.Services.AddErpSystemSearch(builder.Configuration);
 builder.Services.AddErpSystemLifecycle();
 builder.Services.AddErpSystemCors(builder.Configuration);
 builder.Services.AddErpSystemRateLimiting();
+
+// Forwarded headers so the app sees the REAL client IP behind a proxy/load balancer — used by rate
+// limiting (per-caller partitions) and audit logging. SECURE DEFAULT: trust NO proxies, so the
+// X-Forwarded-* headers are ignored (no client-IP spoofing) until an operator lists their proxy
+// IPs/networks in config: ForwardedHeaders:KnownProxies (["10.0.0.5", ...]) and/or
+// ForwardedHeaders:KnownNetworks (["10.0.0.0/8", ...]). Inert with empty config.
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+        | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = builder.Configuration.GetValue<int?>("ForwardedHeaders:ForwardLimit") ?? 1;
+    // Start from a clean, trust-nothing baseline.
+    options.KnownProxies.Clear();
+    options.KnownNetworks.Clear();
+    foreach (var proxy in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? Array.Empty<string>())
+    {
+        if (System.Net.IPAddress.TryParse(proxy, out var ip))
+            options.KnownProxies.Add(ip);
+    }
+    foreach (var network in builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? Array.Empty<string>())
+    {
+        var parts = network.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 2 && System.Net.IPAddress.TryParse(parts[0], out var prefix) && int.TryParse(parts[1], out var prefixLength))
+            options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(prefix, prefixLength));
+    }
+});
 builder.Services.AddErpSystemFileUpload(builder.Configuration);
 builder.Services.AddErpSystemSignalR();
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();
@@ -248,6 +274,10 @@ var app = builder.Build();
 Console.WriteLine("🔧 App built successfully - configuring middleware...");
 
 // Configure the HTTP request pipeline
+
+// Apply forwarded headers FIRST so every downstream component (rate limiter, logging, audit) sees
+// the real client IP. No-op unless trusted proxies/networks are configured (see registration above).
+app.UseForwardedHeaders();
 
 // Add global exception handling first
 app.UseMiddleware<GlobalExceptionHandlingMiddleware>();

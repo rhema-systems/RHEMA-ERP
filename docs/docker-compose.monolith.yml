@@ -36,9 +36,15 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
       - ConnectionStrings__Redis=${REDIS_CONNECTION_STRING}
-      - Jwt__Key=${JWT_SECRET_KEY}
-      - Jwt__Issuer=${JWT_ISSUER:-ErpSystem}
-      - Jwt__Audience=${JWT_AUDIENCE:-ErpSystemUsers}
+      # NOTE: the app reads the "JwtSettings" section — the old "Jwt__" prefix was never bound.
+      - JwtSettings__SecretKey=${JWT_SECRET_KEY}
+      - JwtSettings__Issuer=${JWT_ISSUER:-ErpSystem}
+      - JwtSettings__Audience=${JWT_AUDIENCE:-ErpSystemUsers}
+      # External-portal auth (REQUIRED — app throws at startup without these). Portal secret/audience
+      # MUST differ from the internal SecretKey/Audience.
+      - JwtSettings__PortalSecretKey=${JWT_PORTAL_SECRET_KEY}
+      - JwtSettings__PortalAudience=${JWT_PORTAL_AUDIENCE:-ErpSystem.Portal}
+      - CandidatePortal__PortalUrl=${PORTAL_URL:-http://localhost}
       - ASPNETCORE_URLS=http://+:5000
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft=Warning
@@ -87,9 +93,15 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
       - ConnectionStrings__Redis=${REDIS_CONNECTION_STRING}
-      - Jwt__Key=${JWT_SECRET_KEY}
-      - Jwt__Issuer=${JWT_ISSUER:-ErpSystem}
-      - Jwt__Audience=${JWT_AUDIENCE:-ErpSystemUsers}
+      # NOTE: the app reads the "JwtSettings" section — the old "Jwt__" prefix was never bound.
+      - JwtSettings__SecretKey=${JWT_SECRET_KEY}
+      - JwtSettings__Issuer=${JWT_ISSUER:-ErpSystem}
+      - JwtSettings__Audience=${JWT_AUDIENCE:-ErpSystemUsers}
+      # External-portal auth (REQUIRED — app throws at startup without these). Portal secret/audience
+      # MUST differ from the internal SecretKey/Audience.
+      - JwtSettings__PortalSecretKey=${JWT_PORTAL_SECRET_KEY}
+      - JwtSettings__PortalAudience=${JWT_PORTAL_AUDIENCE:-ErpSystem.Portal}
+      - CandidatePortal__PortalUrl=${PORTAL_URL:-http://localhost}
       - ASPNETCORE_URLS=http://+:5000
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft=Warning

@@ -822,11 +822,12 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<ClientTimesheetConfirmationPublicDto> ValidateConfirmationTokenAsync(
         Guid token,
-        Guid tenantId,
         CancellationToken ct = default)
     {
+        // Tenant is derived from the token row itself — the token is globally unique, so no
+        // X-Tenant-Id header is required for this emailed-link flow.
         var confirmation = await _confirmationRepository.GetByTokenAsync(token);
-        if (confirmation == null || confirmation.TenantId != tenantId)
+        if (confirmation == null)
             throw new ArgumentException("Invalid or expired confirmation token.");
 
         var timesheet = confirmation.Timesheet
@@ -882,11 +883,10 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<ClientTimesheetConfirmationDto> ConfirmByClientAsync(
         ClientConfirmTimesheetDto dto,
-        Guid tenantId,
         CancellationToken ct = default)
     {
         var confirmation = await _confirmationRepository.GetByTokenAsync(dto.ConfirmationToken);
-        if (confirmation == null || confirmation.TenantId != tenantId)
+        if (confirmation == null)
             throw new ArgumentException("Invalid or expired confirmation token.");
 
         var timesheet = await _repository.GetByIdAsync(confirmation.TimesheetId);
@@ -922,11 +922,10 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<ClientTimesheetConfirmationDto> RejectByClientAsync(
         ClientRejectTimesheetDto dto,
-        Guid tenantId,
         CancellationToken ct = default)
     {
         var confirmation = await _confirmationRepository.GetByTokenAsync(dto.ConfirmationToken);
-        if (confirmation == null || confirmation.TenantId != tenantId)
+        if (confirmation == null)
             throw new ArgumentException("Invalid or expired confirmation token.");
 
         var timesheet = await _repository.GetByIdAsync(confirmation.TimesheetId);
