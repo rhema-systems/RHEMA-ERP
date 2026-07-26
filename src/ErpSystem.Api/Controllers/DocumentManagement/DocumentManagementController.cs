@@ -3484,9 +3484,15 @@ public sealed class DocumentManagementController : ControllerBase
             return false;
         }
 
-        return rules.Any(rule => actionPredicate(rule)
-            && (string.IsNullOrWhiteSpace(rule.RoleName)
-                || _currentUserService.IsInRole(rule.RoleName)));
+        foreach (var rule in rules.Where(actionPredicate))
+        {
+            if (await CurrentUserMatchesAccessRuleAsync(rule, cancellationToken))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task<bool> CanAssignAccessProfileAsync(
@@ -3508,10 +3514,51 @@ public sealed class DocumentManagementController : ControllerBase
             .ToListAsync(cancellationToken);
 
         // Do not let non-admin users reclassify a protected document into an access profile with no active rules.
-        return rules.Count > 0
-            && rules.Any(rule => rule.CanUpload
-                && (string.IsNullOrWhiteSpace(rule.RoleName)
-                    || _currentUserService.IsInRole(rule.RoleName)));
+        foreach (var rule in rules.Where(rule => rule.CanUpload))
+        {
+            if (await CurrentUserMatchesAccessRuleAsync(rule, cancellationToken))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<bool> CurrentUserMatchesAccessRuleAsync(
+        CentralDocumentAccessRule rule,
+        CancellationToken cancellationToken)
+    {
+        var hasRoleConstraint = !string.IsNullOrWhiteSpace(rule.RoleName);
+        var hasPermissionConstraint = !string.IsNullOrWhiteSpace(rule.PermissionKey);
+
+        if (!hasRoleConstraint && !hasPermissionConstraint)
+        {
+            return false;
+        }
+
+        if (hasRoleConstraint && !_currentUserService.IsInRole(rule.RoleName!))
+        {
+            return false;
+        }
+
+        if (!hasPermissionConstraint)
+        {
+            return true;
+        }
+
+        if (!Guid.TryParse(_currentUserService.UserId, out var userId))
+        {
+            return false;
+        }
+
+        var permissionKey = rule.PermissionKey!.Trim().ToUpperInvariant();
+        return await _db.UserRoles
+            .AsNoTracking()
+            .Where(userRole => userRole.UserId == userId)
+            .AnyAsync(userRole => userRole.Role.RolePermissions
+                .Any(rolePermission => rolePermission.Permission.Name.ToUpper() == permissionKey),
+                cancellationToken);
     }
 
     private async Task<bool> CanRunGeneratedDocumentWorkflowActionAsync(

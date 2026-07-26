@@ -183,7 +183,7 @@ public class LandAcquisitionsController : ControllerBase
                 StageOrder = 0,
                 CurrentStage = AcquisitionProcedure.LandIdentification,
                 Status = LandAcquisitionStatus.PendingIdentification,
-                ProjectReference = await GenerateProjectReferenceAsync(tenantId, cancellationToken),
+                ProjectReference = GenerateProjectReference(),
                 Location = "Unspecified"
             };
             _context.LandAcquisitions.Add(acquisition);
@@ -644,6 +644,16 @@ public class LandAcquisitionsController : ControllerBase
             stepInstance.AssignedToId.Value != userId)
         {
             return Forbid();
+        }
+
+        var missingInputs = GetMissingStageInputs(acquisition, acquisition.StageOrder);
+        if (missingInputs.Count > 0)
+        {
+            return BadRequest(new
+            {
+                message = "Complete every required stage input before completing this workflow task.",
+                missingInputs
+            });
         }
 
         try
@@ -2221,13 +2231,8 @@ public class LandAcquisitionsController : ControllerBase
             UploadedBy = document.CreatedBy
         };
 
-    private async Task<string> GenerateProjectReferenceAsync(Guid tenantId, CancellationToken cancellationToken)
-    {
-        var count = await _context.LandAcquisitions
-            .Where(item => item.TenantId == tenantId)
-            .CountAsync(cancellationToken);
-        return $"ACQ-{DateTime.UtcNow:yyyy}-{count + 1:0000}";
-    }
+    private static string GenerateProjectReference()
+        => $"ACQ-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}"[..30].ToUpperInvariant();
 
     private Guid GetTenantId()
         => _currentUserService.TenantId ?? Guid.Parse("00000000-0000-0000-0000-000000000001");
