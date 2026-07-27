@@ -74,6 +74,53 @@ const formatCalculatedAmount = (value: number | null, decimals = 2): string => {
   return value.toFixed(decimals);
 };
 
+const PORTAL_RECIPIENT_FIELD_TOKENS = [
+  'portalrecipient',
+  'portalidentity',
+  'portalaccount',
+  'externalaccount',
+  'applicantemail',
+  'customeremail',
+  'clientemail',
+  'email',
+  'applicantusername',
+  'customerusername',
+  'username',
+];
+
+const isStablePortalIdentity = (value: string, fieldIdentity: string): boolean => {
+  if (value.includes('@')) {
+    return true;
+  }
+
+  const looksLikeUsernameField =
+    fieldIdentity.includes('username') ||
+    fieldIdentity.includes('portal') ||
+    fieldIdentity.includes('externalaccount');
+
+  return looksLikeUsernameField && !/\s/.test(value);
+};
+
+const resolveProcedurePortalRecipient = (procedureCase: ProcedureCaseDetail): string => {
+  for (const field of procedureCase.fields) {
+    const value = field.value?.trim();
+    if (!value) {
+      continue;
+    }
+
+    const fieldIdentity = `${field.key} ${field.label}`.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    if (
+      PORTAL_RECIPIENT_FIELD_TOKENS.some((token) => fieldIdentity.includes(token)) &&
+      isStablePortalIdentity(value, fieldIdentity)
+    ) {
+      return value;
+    }
+  }
+
+  const applicantName = procedureCase.applicantName?.trim() ?? '';
+  return applicantName.includes('@') ? applicantName : '';
+};
+
 export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: ProcedureCaseWorkspaceProps) {
   const searchParams = useSearchParams();
   const requestedCaseId = searchParams.get('caseId');
@@ -451,7 +498,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
       setDispatchDetails((current) => ({
         ...current,
         channel: result.template.defaultDispatchChannel || current.channel,
-        recipient: selectedCase.applicantName || current.recipient,
+        recipient: resolveProcedurePortalRecipient(selectedCase) || current.recipient,
       }));
       setIsGeneratedViewerOpen(true);
     } catch (err) {
@@ -465,6 +512,11 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     action: 'SubmitForApproval' | 'Approve' | 'Sign' | 'Dispatch' | 'Return'
   ) => {
     if (!generatedDocument) {
+      return;
+    }
+
+    if (action === 'Dispatch' && !dispatchDetails.recipient.trim()) {
+      setError('Enter the portal recipient email or username before dispatching this document.');
       return;
     }
 
@@ -771,7 +823,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
                           }
                         />
                         <Input
-                          placeholder="Recipient"
+                          placeholder="Portal email / username"
                           value={dispatchDetails.recipient}
                           onChange={(event) =>
                             setDispatchDetails((current) => ({

@@ -919,6 +919,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             new("referenceNumber", "Reference number", "text", null),
             new("procedureType", "Procedure", "text", [procedure.Title]),
             new("applicantName", "Applicant / lessee / client name", "text", null),
+            new("portalRecipientIdentity", "Portal recipient email / username", "text", null),
             new("propertyNumber", "Property / plot / house number", "text", null),
             new("fileReference", "Estate file reference", "text", null),
             new("schedule", "Estate schedule", "select", ["Registry", "Records", "Serviced Plots", "Lands / Partially Serviced", "Housing", "Traditional Lands", "Regularisation", "Facilities"]),
