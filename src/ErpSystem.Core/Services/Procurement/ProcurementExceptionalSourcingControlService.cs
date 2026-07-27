@@ -456,8 +456,13 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         if (negotiation.TenderBidId != request.BidId)
             throw Validation("EXCEPTIONAL_RECOMMENDATION_BID_MISMATCH", "The recommendation must use the bid whose negotiation was completed.");
         var bid = await LoadBidAsync(tenderId, request.BidId, cancellationToken);
-        var supplier = await _supplierValidation.ValidateForTenderAsync(
-            bid.BusinessPartnerId, control.Tender.RequiresPrequalification, control.Tender.MinimumPerformanceRating);
+        var supplier = await _supplierValidation.EvaluateEligibilityAsync(new SupplierEligibilityEvaluationRequest
+        {
+            BusinessPartnerId = bid.BusinessPartnerId,
+            Boundary = SupplierEligibilityBoundary.Award,
+            RequiresPrequalification = control.Tender.RequiresPrequalification,
+            MinimumPerformanceRating = control.Tender.MinimumPerformanceRating
+        }, cancellationToken);
         if (!supplier.IsValid) throw Validation("EXCEPTIONAL_RECOMMENDATION_SUPPLIER_INELIGIBLE", string.Join("; ", supplier.Errors));
         var now = DateTime.UtcNow;
         control.RecommendedBidId = bid.Id;
@@ -498,8 +503,13 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         }, correlation, cancellationToken);
         if (!sod.Allowed) throw new ProcurementExceptionalSourcingAuthorizationException(sod.Message);
         var bid = await LoadBidAsync(tenderId, request.BidId, cancellationToken);
-        var supplier = await _supplierValidation.ValidateForTenderAsync(
-            bid.BusinessPartnerId, control.Tender.RequiresPrequalification, control.Tender.MinimumPerformanceRating);
+        var supplier = await _supplierValidation.EvaluateEligibilityAsync(new SupplierEligibilityEvaluationRequest
+        {
+            BusinessPartnerId = bid.BusinessPartnerId,
+            Boundary = SupplierEligibilityBoundary.Award,
+            RequiresPrequalification = control.Tender.RequiresPrequalification,
+            MinimumPerformanceRating = control.Tender.MinimumPerformanceRating
+        }, cancellationToken);
         if (!supplier.IsValid) throw Validation("EXCEPTIONAL_AWARD_SUPPLIER_INELIGIBLE", string.Join("; ", supplier.Errors));
         await _awardReadiness.EnsureAwardReadyAsync(
             ProcurementAwardReadinessSourceType.ExceptionalSourcing,

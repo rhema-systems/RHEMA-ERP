@@ -47,4 +47,61 @@ describe('procurement decision form registry', () => {
   it('rejects an unregistered decision key', () => {
     expect(() => createDecisionFormValue('DEC-999')).toThrow('Unknown procurement decision key DEC-999');
   });
+
+  it('captures the complete DEC-007 fee, Finance, exemption, and receipt contract', () => {
+    const definition = procurementDecisionFormRegistry['DEC-007'];
+    expect(definition.fields.map(field => field.key)).toEqual(expect.arrayContaining([
+      'mode',
+      'feeType',
+      'amount',
+      'currencyCode',
+      'taxPercent',
+      'paymentChannels',
+      'revenueAccountId',
+      'taxAccountId',
+      'exemptionWorkflowDefinitionId',
+      'receiptNumberFormat',
+      'exemptionRule',
+      'refundRule',
+      'renewalRule',
+      'effectiveFrom',
+      'effectiveTo',
+    ]));
+    expect(createDecisionFormValue('DEC-007')).toMatchObject({
+      mode: 'paid',
+      currencyCode: 'GHS',
+      paymentChannels: [],
+    });
+  });
+
+  it('captures the complete DEC-011 risk, exposure, and award-action contract', () => {
+    const definition = procurementDecisionFormRegistry['DEC-011'];
+    expect(definition.fields.map(field => field.key)).toEqual(expect.arrayContaining([
+      'reviewFrequencyMonths',
+      'exposureWindowMonths',
+      'riskDimensions',
+      'riskBands',
+      'concentrationLimitPercent',
+      'minimumScore',
+      'eligibilityAction',
+      'performanceWindowMonths',
+      'performanceDimensions',
+      'performanceBands',
+      'minimumPerformanceDataCoveragePercent',
+      'responseTargetHours',
+      'performanceEligibilityAction',
+      'effectiveFrom',
+      'effectiveTo',
+    ]));
+    expect(definition.fields.find(field => field.key === 'eligibilityAction'))
+      .toMatchObject({ type: 'select', required: true });
+    expect(createDecisionFormValue('DEC-011')).toMatchObject({
+      eligibilityAction: 'alertOnly',
+      riskDimensions: [],
+      riskBands: [],
+      performanceDimensions: [],
+      performanceBands: [],
+      performanceEligibilityAction: 'alertOnly',
+    });
+  });
 });

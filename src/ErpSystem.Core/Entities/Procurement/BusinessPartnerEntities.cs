@@ -133,6 +133,24 @@ public class BusinessPartner : TenantEntity
     [MaxLength(200)]
     public string? GeographicCoverage { get; set; }
 
+    // Controlled supplier ownership and compliance master data.
+    [Column(TypeName = "nvarchar(max)")]
+    public string? BeneficialOwnershipJson { get; set; }
+
+    public DateTime? OwnershipVerifiedAtUtc { get; set; }
+
+    [MaxLength(50)]
+    public string? ComplianceStatus { get; set; }
+
+    public DateTime? ComplianceReviewDateUtc { get; set; }
+    public DateTime? ComplianceValidUntilUtc { get; set; }
+
+    [MaxLength(2000)]
+    public string? ComplianceNotes { get; set; }
+
+    [NotMapped]
+    public List<Guid> CategoryIds { get; set; } = new();
+
     // Status & Approval
     [Required]
     [MaxLength(50)]
@@ -673,6 +691,8 @@ public class BusinessPartnerRegistration : TenantEntity
     public virtual ICollection<BusinessPartnerRegistrationDocument> Documents { get; set; } = new List<BusinessPartnerRegistrationDocument>();
     public virtual ICollection<BusinessPartnerRegistrationStatusHistory> StatusHistory { get; set; } = new List<BusinessPartnerRegistrationStatusHistory>();
     public virtual ProcurementSupplierRegistrationEvidencePackBinding? EvidencePackBinding { get; set; }
+    public virtual ProcurementSupplierOnboardingToken? OnboardingToken { get; set; }
+    public virtual ProcurementSupplierApplicantAccess? ApplicantAccess { get; set; }
 }
 
 /// <summary>
@@ -682,6 +702,8 @@ public class BusinessPartnerRegistrationDocument : TenantEntity
 {
     [Required]
     public Guid RegistrationId { get; set; }
+
+    public Guid? FileUploadRecordId { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -728,6 +750,7 @@ public class BusinessPartnerRegistrationDocument : TenantEntity
 
     // Navigation Properties
     public virtual BusinessPartnerRegistration Registration { get; set; } = null!;
+    public virtual FileUploadRecord? FileUploadRecord { get; set; }
     public virtual ApplicationUser? VerifiedBy { get; set; }
 }
 

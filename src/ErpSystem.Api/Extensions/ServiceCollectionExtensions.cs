@@ -869,6 +869,15 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementTenderControlService, ErpSystem.Core.Services.Procurement.ProcurementTenderControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementTenderDocumentControlService, ErpSystem.Core.Services.Procurement.ProcurementTenderDocumentControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierEvidencePackService, ErpSystem.Core.Services.Procurement.ProcurementSupplierEvidencePackService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierOnboardingTokenService, ErpSystem.Core.Services.Procurement.ProcurementSupplierOnboardingTokenService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierApplicantAccessService, ErpSystem.Core.Services.Procurement.ProcurementSupplierApplicantAccessService>();
+            services.AddScoped<ErpSystem.Api.Services.IProcurementSupplierApplicantJwtService, ErpSystem.Api.Services.ProcurementSupplierApplicantJwtService>();
+            services.AddTransient<ErpSystem.Api.Middleware.SupplierApplicantAccessMiddleware>();
+            services.AddTransient<ErpSystem.Api.Middleware.TemporaryPasswordChangeMiddleware>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierDueDiligenceService, ErpSystem.Core.Services.Procurement.ProcurementSupplierDueDiligenceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierAvlService, ErpSystem.Core.Services.Procurement.ProcurementSupplierAvlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierRiskService, ErpSystem.Core.Services.Procurement.ProcurementSupplierRiskService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierPerformanceScorecardService, ErpSystem.Core.Services.Procurement.ProcurementSupplierPerformanceScorecardService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementEvaluationCommitteeControlService, ErpSystem.Core.Services.Procurement.ProcurementEvaluationCommitteeControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAwardReadinessService, ErpSystem.Core.Services.Procurement.ProcurementAwardReadinessService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementBidderCommunicationService, ErpSystem.Core.Services.Procurement.ProcurementBidderCommunicationService>();
@@ -944,6 +953,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Notification dispatcher background service - sends pending notifications on schedule with dead-letter support
             services.AddHostedService<ErpSystem.Api.Services.NotificationDispatcherBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.ProcurementCalendarBackgroundService>();
+            services.AddHostedService<ErpSystem.Api.Services.ProcurementSupplierDueDiligenceBackgroundService>();
+            services.AddHostedService<ErpSystem.Api.Services.ProcurementSupplierAvlBackgroundService>();
 
             // Blacklist expiry background service
             services.AddHostedService<ErpSystem.Core.Services.Procurement.BlacklistExpiryBackgroundService>();
@@ -999,6 +1010,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
                         ctx.User.IsInRole(Constants.Roles.ExternalUser)))
+                .AddPolicy("SupplierApplicantOnly", policy =>
+                    policy.RequireAssertion(ctx =>
+                        ctx.User?.Identity?.IsAuthenticated == true &&
+                        ctx.User.HasClaim(claim =>
+                            claim.Type == "supplier_applicant_session") &&
+                        ctx.User.HasClaim(
+                            "auth_provider", "ApplicantToken")))
                 .AddPolicy("InternalOnly", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
@@ -1419,6 +1437,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Phase 2 baseline: virus scan hook (no-op by default; can be replaced with a real provider)
             services.AddSingleton<IFileVirusScanService, ErpSystem.Api.Services.NoOpFileVirusScanService>();
+            services.AddScoped<ErpSystem.Api.Services.IControlledFileUploadService,
+                ErpSystem.Api.Services.ControlledFileUploadService>();
 
             // Configure multipart body length limit for file uploads
             services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>

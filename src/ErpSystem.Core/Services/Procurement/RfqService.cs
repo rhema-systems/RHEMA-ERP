@@ -27,6 +27,7 @@ public class RfqService : IRfqService
     private readonly IProcurementSourcingCaseService _sourcingCaseService;
     private readonly IProcurementRfqControlService _rfqControlService;
     private readonly IProcurementTenderDocumentControlService _tenderDocumentControlService;
+    private readonly ISupplierValidationService _supplierValidation;
     private readonly ILogger<RfqService> _logger;
 
     public RfqService(
@@ -45,6 +46,7 @@ public class RfqService : IRfqService
         IProcurementSourcingCaseService sourcingCaseService,
         IProcurementRfqControlService rfqControlService,
         IProcurementTenderDocumentControlService tenderDocumentControlService,
+        ISupplierValidationService supplierValidation,
         ILogger<RfqService> logger)
     {
         _rfqRepository = rfqRepository;
@@ -62,6 +64,7 @@ public class RfqService : IRfqService
         _sourcingCaseService = sourcingCaseService;
         _rfqControlService = rfqControlService;
         _tenderDocumentControlService = tenderDocumentControlService;
+        _supplierValidation = supplierValidation;
         _logger = logger;
     }
 
@@ -632,6 +635,25 @@ public class RfqService : IRfqService
                 var groups = selections
                     .GroupBy(x => x.Quote.BusinessPartnerId)
                     .ToList();
+
+                foreach (var group in groups)
+                {
+                    var eligibility = await _supplierValidation.EvaluateEligibilityAsync(
+                        new SupplierEligibilityEvaluationRequest
+                        {
+                            BusinessPartnerId = group.Key,
+                            Boundary = SupplierEligibilityBoundary.Award,
+                            SourceType = "RequestForQuotation",
+                            SourceId = rfq.Id,
+                            SourceReference = rfq.RfqNumber,
+                            CorrelationId = awardCorrelationId
+                        });
+                    if (!eligibility.IsValid)
+                        throw new SupplierEligibilityException(
+                            eligibility.ValidationCode,
+                            $"RFQ award supplier is ineligible: {string.Join("; ", eligibility.Errors)}",
+                            eligibility);
+                }
 
                 // Create PO headers first (save immediately) to avoid:
                 // - OrderNumber duplicate race

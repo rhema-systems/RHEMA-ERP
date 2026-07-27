@@ -129,7 +129,15 @@ public sealed class ProcurementMasterDataChangesControllerTests
             ("/api/inventory/warehouse-locations", new[] { ProcurementMasterDataResourceType.WarehouseLocation }, "WarehouseLocation.Create"),
             ("/api/inventory/units-of-measure", new[] { ProcurementMasterDataResourceType.UnitOfMeasure }, "UnitOfMeasure.Create"),
             ("/api/Suppliers", new[] { ProcurementMasterDataResourceType.SupplierProfile, ProcurementMasterDataResourceType.SupplierTaxDetails }, "LegacySupplier.Create"),
-            ("/api/procurement/business-partners", new[] { ProcurementMasterDataResourceType.SupplierProfile, ProcurementMasterDataResourceType.SupplierBankDetails, ProcurementMasterDataResourceType.SupplierTaxDetails }, "BusinessPartner.Create")
+            ("/api/procurement/business-partners", new[]
+            {
+                ProcurementMasterDataResourceType.SupplierProfile,
+                ProcurementMasterDataResourceType.SupplierBankDetails,
+                ProcurementMasterDataResourceType.SupplierTaxDetails,
+                ProcurementMasterDataResourceType.SupplierOwnershipDetails,
+                ProcurementMasterDataResourceType.SupplierCategoryAssignments,
+                ProcurementMasterDataResourceType.SupplierComplianceStatus
+            }, "BusinessPartner.Create")
         };
 
         foreach (var endpoint in endpoints)
@@ -147,6 +155,46 @@ public sealed class ProcurementMasterDataChangesControllerTests
                     It.IsAny<CancellationToken>()),
                 Times.Once);
         }
+    }
+
+    [Fact]
+    public async Task ProtectedSupplierSuspendAndActivateRequireComplianceStaging()
+    {
+        var supplierId = Guid.NewGuid();
+        var service = new Mock<IProcurementMasterDataChangeService>();
+        service.Setup(item => item.CheckDirectMutationAsync(
+                It.IsAny<IReadOnlyCollection<ProcurementMasterDataResourceType>>(),
+                supplierId,
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementMasterDataDirectMutationDecisionDto
+            {
+                Allowed = false,
+                Code = "STAGED_CHANGE_REQUIRED",
+                Message = "Protected supplier compliance must use a staged change request.",
+                CorrelationId = "supplier-status"
+            });
+        using var factory = CreateDirectMutationFactory(service);
+        using var client = factory.CreateClient();
+
+        using var suspend = await client.PostAsync(
+            $"/api/procurement/business-partners/{supplierId}/suspend",
+            new StringContent("{\"suspensionReason\":\"Compliance review\"}", Encoding.UTF8, "application/json"));
+        using var activate = await client.PostAsync(
+            $"/api/procurement/business-partners/{supplierId}/activate",
+            new StringContent("{}", Encoding.UTF8, "application/json"));
+
+        suspend.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        activate.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        service.Verify(item => item.CheckDirectMutationAsync(
+                It.Is<IReadOnlyCollection<ProcurementMasterDataResourceType>>(types =>
+                    types.SequenceEqual(new[] { ProcurementMasterDataResourceType.SupplierComplianceStatus })),
+                supplierId,
+                It.Is<string>(source => source == "BusinessPartner.Suspend" || source == "BusinessPartner.Activate"),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
     }
 
     private static ProcurementMasterDataChangesController Controller(Mock<IProcurementMasterDataChangeService> service, string traceIdentifier) =>

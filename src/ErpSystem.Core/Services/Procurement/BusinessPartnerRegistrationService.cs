@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -26,7 +27,9 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
     private readonly IEmailService? _emailService;
     private readonly INotificationService? _notificationService;
     private readonly IAppEventBus _appEventBus;
+    private readonly IProcurementAccessControlService _accessControl;
     private readonly IProcurementSupplierEvidencePackService? _evidencePackService;
+    private readonly IProcurementSupplierOnboardingTokenService? _onboardingTokenService;
 
     public BusinessPartnerRegistrationService(
         IBusinessPartnerRegistrationRepository registrationRepository,
@@ -40,10 +43,12 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         IAppEventBus appEventBus,
+        IProcurementAccessControlService accessControl,
         ILogger<BusinessPartnerRegistrationService> logger,
         IEmailService? emailService = null,
         INotificationService? notificationService = null,
-        IProcurementSupplierEvidencePackService? evidencePackService = null)
+        IProcurementSupplierEvidencePackService? evidencePackService = null,
+        IProcurementSupplierOnboardingTokenService? onboardingTokenService = null)
     {
         _registrationRepository = registrationRepository;
         _documentRepository = documentRepository;
@@ -56,10 +61,12 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _appEventBus = appEventBus;
+        _accessControl = accessControl;
         _logger = logger;
         _emailService = emailService;
         _notificationService = notificationService;
         _evidencePackService = evidencePackService;
+        _onboardingTokenService = onboardingTokenService;
     }
 
     public async Task<BusinessPartnerRegistrationDetailDto?> GetByIdAsync(Guid id)
@@ -323,18 +330,15 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         // Validate required fields before submission
         var validationErrors = new List<string>();
 
-        if (string.IsNullOrWhiteSpace(registration.ApplicantEmail))
+        if (string.IsNullOrWhiteSpace(registration.ApplicantEmail) &&
+            string.IsNullOrWhiteSpace(registration.ApplicantPhone))
         {
-            validationErrors.Add("Email is required for submission");
+            validationErrors.Add("A verified email address or phone number is required for submission");
         }
-        else if (!IsValidEmail(registration.ApplicantEmail))
+        else if (!string.IsNullOrWhiteSpace(registration.ApplicantEmail) &&
+                 !IsValidEmail(registration.ApplicantEmail))
         {
             validationErrors.Add("Please provide a valid email address");
-        }
-
-        if (string.IsNullOrWhiteSpace(registration.ApplicantPhone))
-        {
-            validationErrors.Add("Phone number is required for submission");
         }
 
         // Parse registration data to check for additional required fields
@@ -489,6 +493,9 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
     public async Task ReviewRegistrationAsync(ReviewBusinessPartnerRegistrationDto dto, Guid reviewedById)
     {
         var registration = await _registrationRepository.GetByIdAsync(dto.RegistrationId) ?? throw new InvalidOperationException($"Registration with ID {dto.RegistrationId} not found");
+        await EnsureInternalCapabilityAsync(
+            "procurement.supplier.review", registration, reviewedById,
+            $"supplier-registration-review-{dto.RegistrationId:N}");
         if (registration.Status != "Submitted")
         {
             throw new InvalidOperationException($"Cannot review registration in {registration.Status} status");
@@ -500,6 +507,9 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
     public async Task ApproveRegistrationAsync(Guid id, Guid approvedById, string? notes = null)
     {
         var registration = await _registrationRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Registration with ID {id} not found");
+        await EnsureInternalCapabilityAsync(
+            "procurement.supplier.approve", registration, approvedById,
+            $"supplier-registration-approve-{id:N}");
         if (registration.Status != "Submitted" && registration.Status != "UnderReview")
         {
             throw new InvalidOperationException($"Cannot approve registration in {registration.Status} status");
@@ -557,6 +567,18 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             CreatedAt = DateTime.UtcNow
         };
         await _statusHistoryRepository.CreateAsync(history);
+
+        // Persist the terminal application state before the token hard-stop verifies
+        // it across tables. The token transition itself remains separately atomic.
+        await _unitOfWork.SaveChangesAsync();
+        if (_onboardingTokenService != null)
+        {
+            await _onboardingTokenService.ExpireForTerminalRegistrationAsync(
+                id,
+                "Approved",
+                approvedById,
+                $"registration-approved-{id:N}");
+        }
 
         // Save all changes using Unit of Work (business partner, contacts, documents, financials, registration update, status history)
         _logger.LogInformation("Saving all changes for registration {RegistrationId} approval...", id);
@@ -664,12 +686,24 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
     public async Task RejectRegistrationAsync(Guid id, Guid rejectedById, string reason)
     {
         var registration = await _registrationRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Registration with ID {id} not found");
+        await EnsureInternalCapabilityAsync(
+            "procurement.supplier.approve", registration, rejectedById,
+            $"supplier-registration-reject-{id:N}");
         if (registration.Status != "Submitted" && registration.Status != "UnderReview")
         {
             throw new InvalidOperationException($"Cannot reject registration in {registration.Status} status");
         }
 
         await _registrationRepository.UpdateStatusAsync(id, "Rejected", rejectedById, reason);
+        await _unitOfWork.SaveChangesAsync();
+        if (_onboardingTokenService != null)
+        {
+            await _onboardingTokenService.ExpireForTerminalRegistrationAsync(
+                id,
+                "Rejected",
+                rejectedById,
+                $"registration-rejected-{id:N}");
+        }
 
         // Publish events for admin-configurable notification topics (best-effort).
         try
@@ -769,6 +803,9 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
     public async Task RequestMoreInfoAsync(Guid id, Guid requestedById, string notes)
     {
         var registration = await _registrationRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Registration with ID {id} not found");
+        await EnsureInternalCapabilityAsync(
+            "procurement.supplier.review", registration, requestedById,
+            $"supplier-registration-more-info-{id:N}");
         if (registration.Status != "Submitted" && registration.Status != "UnderReview")
         {
             throw new InvalidOperationException($"Cannot request more info for registration in {registration.Status} status");
@@ -851,6 +888,8 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         {
             Id = d.Id,
             RegistrationId = d.RegistrationId,
+            FileUploadRecordId = d.FileUploadRecordId,
+            VirusScanStatus = d.FileUploadRecord?.VirusScanStatus,
             DocumentType = d.DocumentType,
             DocumentName = d.DocumentName,
             FilePath = d.DocumentPath,
@@ -873,23 +912,80 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
     public async Task<BusinessPartnerRegistrationDocumentDto> UploadDocumentAsync(Guid registrationId, CreateBusinessPartnerDocumentDto dto, Guid userId)
     {
         var registration = await _registrationRepository.GetByIdAsync(registrationId) ?? throw new InvalidOperationException($"Registration with ID {registrationId} not found");
-        if (registration.CreatedById.HasValue && registration.CreatedById.Value != userId &&
-            !_currentUserProvider.Roles.Contains("Admin") &&
-            !_currentUserProvider.Roles.Contains("BusinessPartnerAdmin"))
+        if (_currentUserProvider.IsExternalUser)
         {
-            throw new UnauthorizedAccessException(
-                "You do not have permission to upload evidence for this registration.");
+            if (!registration.CreatedById.HasValue ||
+                registration.CreatedById.Value != userId)
+            {
+                throw new UnauthorizedAccessException(
+                    "You do not have permission to upload evidence for this registration.");
+            }
+        }
+        else
+        {
+            await EnsureInternalCapabilityAsync(
+                "procurement.supplier.review", registration, userId,
+                $"supplier-registration-document-upload-{registrationId:N}");
         }
         if (registration.Status is not ("Draft" or "MoreInfoRequired"))
         {
             throw new InvalidOperationException(
                 $"Cannot upload registration evidence in {registration.Status} status");
         }
+        if (!dto.FileUploadRecordId.HasValue || dto.FileUploadRecordId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "Registration evidence must reference a controlled file-upload record.");
+        }
+        var fileRecord = await _unitOfWork.Repository<Entities.FileUploadRecord>()
+            .GetQueryable(item =>
+                item.Id == dto.FileUploadRecordId.Value &&
+                item.TenantId == registration.TenantId &&
+                !item.IsDeleted)
+            .SingleOrDefaultAsync()
+            ?? throw new InvalidOperationException(
+                "The controlled file-upload record was not found for this tenant.");
+        if (fileRecord.UploadedByUserId != userId)
+        {
+            throw new UnauthorizedAccessException(
+                "The controlled file-upload record belongs to a different actor.");
+        }
+        if (fileRecord.VirusScanStatus is Enums.FileVirusScanStatus.Pending or
+            Enums.FileVirusScanStatus.Infected or
+            Enums.FileVirusScanStatus.Error)
+        {
+            throw new InvalidOperationException(
+                "Registration evidence does not have an acceptable virus-scan result.");
+        }
+        var requestedPath = (dto.DocumentPath ?? dto.FilePath ?? string.Empty)
+            .Replace('\\', '/');
+        if (!string.Equals(
+                fileRecord.FilePath.Replace('\\', '/'),
+                requestedPath,
+                StringComparison.OrdinalIgnoreCase) ||
+            fileRecord.FileSize != dto.FileSize)
+        {
+            throw new InvalidOperationException(
+                "Registration evidence metadata does not match the controlled upload.");
+        }
+        var alreadyBound = await _unitOfWork
+            .Repository<Entities.Procurement.BusinessPartnerRegistrationDocument>()
+            .GetQueryable(item =>
+                item.TenantId == registration.TenantId &&
+                item.FileUploadRecordId == fileRecord.Id &&
+                !item.IsDeleted)
+            .AnyAsync();
+        if (alreadyBound)
+        {
+            throw new InvalidOperationException(
+                "The controlled upload is already bound to registration evidence.");
+        }
         var document = new Entities.Procurement.BusinessPartnerRegistrationDocument
         {
             Id = Guid.NewGuid(),
             TenantId = registration.TenantId, // Set TenantId from registration
             RegistrationId = registrationId,
+            FileUploadRecordId = fileRecord.Id,
             DocumentType = dto.DocumentType,
             DocumentName = dto.DocumentName,
             DocumentPath = dto.DocumentPath ?? dto.FilePath ?? string.Empty,
@@ -913,6 +1009,8 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         {
             Id = created.Id,
             RegistrationId = created.RegistrationId,
+            FileUploadRecordId = created.FileUploadRecordId,
+            VirusScanStatus = fileRecord.VirusScanStatus,
             DocumentType = created.DocumentType,
             DocumentName = created.DocumentName,
             FilePath = created.DocumentPath,
@@ -936,12 +1034,20 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
     {
         var registration = await _registrationRepository.GetByIdAsync(registrationId) ??
             throw new InvalidOperationException($"Registration with ID {registrationId} not found");
-        if (registration.CreatedById.HasValue && registration.CreatedById.Value != userId &&
-            !_currentUserProvider.Roles.Contains("Admin") &&
-            !_currentUserProvider.Roles.Contains("BusinessPartnerAdmin"))
+        if (_currentUserProvider.IsExternalUser)
         {
-            throw new UnauthorizedAccessException(
-                "You do not have permission to delete evidence from this registration.");
+            if (!registration.CreatedById.HasValue ||
+                registration.CreatedById.Value != userId)
+            {
+                throw new UnauthorizedAccessException(
+                    "You do not have permission to delete evidence from this registration.");
+            }
+        }
+        else
+        {
+            await EnsureInternalCapabilityAsync(
+                "procurement.supplier.review", registration, userId,
+                $"supplier-registration-document-delete-{documentId:N}");
         }
         if (registration.Status is not ("Draft" or "MoreInfoRequired"))
         {
@@ -964,6 +1070,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         }
 
         await _documentRepository.DeleteAsync(documentId);
+        await _unitOfWork.SaveChangesAsync();
     }
 
     public async Task VerifyDocumentAsync(Guid registrationId, Guid documentId, Guid verifiedById)
@@ -973,6 +1080,11 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         {
             throw new InvalidOperationException($"Document with ID {documentId} not found for registration {registrationId}");
         }
+        var registration = await _registrationRepository.GetByIdAsync(registrationId) ??
+            throw new InvalidOperationException($"Registration with ID {registrationId} not found");
+        await EnsureInternalCapabilityAsync(
+            "procurement.supplier.review", registration, verifiedById,
+            $"supplier-registration-document-verify-{documentId:N}");
 
         await _documentRepository.VerifyDocumentAsync(documentId, verifiedById);
         await _unitOfWork.SaveChangesAsync();
@@ -988,6 +1100,11 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         {
             throw new InvalidOperationException($"Document with ID {documentId} not found for registration {registrationId}");
         }
+        var registration = await _registrationRepository.GetByIdAsync(registrationId) ??
+            throw new InvalidOperationException($"Registration with ID {registrationId} not found");
+        await EnsureInternalCapabilityAsync(
+            "procurement.supplier.review", registration, rejectedById,
+            $"supplier-registration-document-reject-{documentId:N}");
 
         // Mark document as rejected
         document.IsRejected = true;
@@ -1012,6 +1129,11 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         {
             throw new InvalidOperationException($"Document with ID {documentId} not found for registration {registrationId}");
         }
+        var registration = await _registrationRepository.GetByIdAsync(registrationId) ??
+            throw new InvalidOperationException($"Registration with ID {registrationId} not found");
+        await EnsureInternalCapabilityAsync(
+            "procurement.supplier.review", registration, userId,
+            $"supplier-registration-document-revert-{documentId:N}");
 
         // Revert rejection
         document.IsRejected = false;
@@ -1043,6 +1165,8 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         {
             Id = document.Id,
             RegistrationId = document.RegistrationId,
+            FileUploadRecordId = document.FileUploadRecordId,
+            VirusScanStatus = document.FileUploadRecord?.VirusScanStatus,
             DocumentType = document.DocumentType,
             DocumentName = document.DocumentName,
             FilePath = document.DocumentPath,
@@ -1363,6 +1487,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         return new BusinessPartnerRegistrationDto
         {
             Id = registration.Id,
+            BusinessPartnerId = registration.BusinessPartnerId,
             ApplicationNumber = registration.RegistrationNumber,
             CompanyName = registration.ApplicantName,
             Email = registration.ApplicantEmail,
@@ -1385,6 +1510,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         var dto = new BusinessPartnerRegistrationDetailDto
         {
             Id = registration.Id,
+            BusinessPartnerId = registration.BusinessPartnerId,
             ApplicationNumber = registration.RegistrationNumber,
             CompanyName = registration.ApplicantName,
             Email = registration.ApplicantEmail,
@@ -1511,6 +1637,8 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             {
                 Id = d.Id,
                 RegistrationId = d.RegistrationId,
+                FileUploadRecordId = d.FileUploadRecordId,
+                VirusScanStatus = d.FileUploadRecord?.VirusScanStatus,
                 DocumentType = d.DocumentType,
                 DocumentName = d.DocumentName,
                 FilePath = d.DocumentPath,
@@ -2049,6 +2177,54 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             }
         }
         return null;
+    }
+
+    private async Task EnsureInternalCapabilityAsync(
+        string permissionCode,
+        Entities.Procurement.BusinessPartnerRegistration registration,
+        Guid actorUserId,
+        string correlationId)
+    {
+        if (!_currentUserProvider.IsAuthenticated ||
+            _currentUserProvider.UserId == Guid.Empty ||
+            _currentUserProvider.TenantId == Guid.Empty)
+        {
+            throw new ProcurementAccessAuthorizationException(
+                "An authenticated tenant user is required for supplier review actions.");
+        }
+        if (_currentUserProvider.IsExternalUser)
+        {
+            throw new ProcurementAccessAuthorizationException(
+                "Supplier portal users cannot perform internal supplier review actions.");
+        }
+        if (actorUserId != _currentUserProvider.UserId)
+        {
+            throw new ProcurementAccessAuthorizationException(
+                "The supplier review actor must be derived from the authenticated user.");
+        }
+        if (registration.TenantId != _currentUserProvider.TenantId)
+        {
+            throw new ProcurementAccessAuthorizationException(
+                "The supplier registration belongs to a different tenant.");
+        }
+        if (_currentUserProvider.HasRole(Constants.Roles.SuperAdmin) ||
+            _currentUserProvider.HasRole("TenantAdmin"))
+        {
+            return;
+        }
+
+        var decision = await _accessControl.EnforceCapabilityAsync(
+            new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = permissionCode,
+                SourceType = "SupplierRegistration",
+                SourceReference = registration.RegistrationNumber ?? registration.Id.ToString()
+            },
+            correlationId);
+        if (!decision.Allowed)
+        {
+            throw new ProcurementAccessAuthorizationException(decision.Message);
+        }
     }
 
     #endregion

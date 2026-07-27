@@ -643,8 +643,13 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 item.Disposition == ProcurementTenderSubmissionDisposition.OnTimeAccepted)
             .Select(item => item.TenderBid).SingleOrDefault(item => item.Id == request.BidId)
             ?? throw Validation("TENDER_AWARD_BID_INVALID", "The recommended on-time opened bid was not found.");
-        var supplier = await _supplierValidation.ValidateForTenderAsync(
-            bid.BusinessPartnerId, control.Tender.RequiresPrequalification, control.Tender.MinimumPerformanceRating);
+        var supplier = await _supplierValidation.EvaluateEligibilityAsync(new SupplierEligibilityEvaluationRequest
+        {
+            BusinessPartnerId = bid.BusinessPartnerId,
+            Boundary = SupplierEligibilityBoundary.Award,
+            RequiresPrequalification = control.Tender.RequiresPrequalification,
+            MinimumPerformanceRating = control.Tender.MinimumPerformanceRating
+        }, cancellationToken);
         if (!supplier.IsValid) throw Validation("TENDER_AWARD_SUPPLIER_INELIGIBLE", string.Join("; ", supplier.Errors));
         await _awardReadiness.EnsureAwardReadyAsync(
             ProcurementAwardReadinessSourceType.Tender,

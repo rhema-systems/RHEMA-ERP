@@ -58,6 +58,31 @@ public static class ProcurementMasterDataResourceRegistry
                 [ProcurementMasterDataTargetKind.LegacySupplier] = Fields("TaxId")
             }, source: "SUP-010; E2E-017"),
         Define(
+            ProcurementMasterDataResourceType.SupplierOwnershipDetails,
+            "SUPPLIER_OWNERSHIP",
+            "Supplier ownership",
+            "Controlled beneficial-owner declarations, verification date, and parent ownership relationship.",
+            One(ProcurementMasterDataTargetKind.BusinessPartner, Fields(
+                "BeneficialOwnershipJson", "OwnershipVerifiedAtUtc", "ParentId")),
+            source: "SUP-010; E2E-017"),
+        Define(
+            ProcurementMasterDataResourceType.SupplierCategoryAssignments,
+            "SUPPLIER_CATEGORIES",
+            "Supplier category assignments",
+            "Controlled replacement of current supplier category membership using current-tenant active categories.",
+            One(ProcurementMasterDataTargetKind.BusinessPartner, Fields("CategoryIds")),
+            source: "SUP-010; E2E-017"),
+        Define(
+            ProcurementMasterDataResourceType.SupplierComplianceStatus,
+            "SUPPLIER_COMPLIANCE",
+            "Supplier compliance status",
+            "Controlled supplier registration, activation, blacklist, risk, and compliance-review attributes.",
+            One(ProcurementMasterDataTargetKind.BusinessPartner, Fields(
+                "RegistrationStatus", "ApprovalStatus", "IsActive", "IsBlacklisted",
+                "BlacklistReason", "BlacklistDate", "BlacklistExpiryDate", "RiskLevel",
+                "ComplianceStatus", "ComplianceReviewDateUtc", "ComplianceValidUntilUtc", "ComplianceNotes")),
+            source: "SUP-010; E2E-017"),
+        Define(
             ProcurementMasterDataResourceType.InventoryItem,
             "INVENTORY_ITEM",
             "Inventory item",

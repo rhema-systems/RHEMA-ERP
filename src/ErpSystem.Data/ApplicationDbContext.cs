@@ -625,6 +625,21 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProcurementSupplierEvidencePackVersion> ProcurementSupplierEvidencePackVersions { get; set; }
     public DbSet<ProcurementSupplierEvidenceRequirement> ProcurementSupplierEvidenceRequirements { get; set; }
     public DbSet<ProcurementSupplierRegistrationEvidencePackBinding> ProcurementSupplierRegistrationEvidencePackBindings { get; set; }
+    public DbSet<ProcurementSupplierOnboardingToken> ProcurementSupplierOnboardingTokens { get; set; }
+    public DbSet<ProcurementSupplierOnboardingPayment> ProcurementSupplierOnboardingPayments { get; set; }
+    public DbSet<ProcurementSupplierOnboardingExemption> ProcurementSupplierOnboardingExemptions { get; set; }
+    public DbSet<ProcurementSupplierApplicantAccess> ProcurementSupplierApplicantAccesses { get; set; }
+    public DbSet<ProcurementSupplierApplicantSession> ProcurementSupplierApplicantSessions { get; set; }
+    public DbSet<ProcurementSupplierDueDiligenceReview> ProcurementSupplierDueDiligenceReviews { get; set; }
+    public DbSet<ProcurementSupplierDueDiligenceCheck> ProcurementSupplierDueDiligenceChecks { get; set; }
+    public DbSet<ProcurementSupplierDueDiligenceEvidenceLink> ProcurementSupplierDueDiligenceEvidenceLinks { get; set; }
+    public DbSet<ProcurementSupplierAvlRegister> ProcurementSupplierAvlRegisters { get; set; }
+    public DbSet<ProcurementSupplierAvlEntry> ProcurementSupplierAvlEntries { get; set; }
+    public DbSet<ProcurementSupplierAvlEntryStatusHistory> ProcurementSupplierAvlEntryStatusHistories { get; set; }
+    public DbSet<ProcurementSupplierAvlPublicationSnapshot> ProcurementSupplierAvlPublicationSnapshots { get; set; }
+    public DbSet<ProcurementSupplierRiskAssessment> ProcurementSupplierRiskAssessments { get; set; }
+    public DbSet<ProcurementSupplierRiskAlert> ProcurementSupplierRiskAlerts { get; set; }
+    public DbSet<ProcurementSupplierPerformanceScorecard> ProcurementSupplierPerformanceScorecards { get; set; }
     public DbSet<ProcurementTenderDocumentTemplateMethod> ProcurementTenderDocumentTemplateMethods { get; set; }
     public DbSet<ProcurementTenderDocumentRegister> ProcurementTenderDocumentRegisters { get; set; }
     public DbSet<ProcurementTenderDocumentIssuance> ProcurementTenderDocumentIssuances { get; set; }
@@ -1015,6 +1030,21 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProcurementSupplierEvidencePackVersionConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierEvidenceRequirementConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierRegistrationEvidencePackBindingConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierOnboardingTokenConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierOnboardingPaymentConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierOnboardingExemptionConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierApplicantAccessConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierApplicantSessionConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceReviewConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceCheckConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceEvidenceLinkConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlRegisterConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlEntryConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlEntryStatusHistoryConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlPublicationSnapshotConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierRiskAssessmentConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierRiskAlertConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierPerformanceScorecardConfiguration());
         builder.ApplyConfiguration(new ProcurementEvaluationCommitteeControlConfiguration());
         builder.ApplyConfiguration(new ProcurementEvaluationCommitteeRoleRequirementConfiguration());
         builder.ApplyConfiguration(new ProcurementEvaluationCommitteeAppointmentConfiguration());
@@ -7127,6 +7157,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Configure BusinessPartner entity
         builder.Entity<BusinessPartner>(entity =>
         {
+            entity.ToTable("BusinessPartners", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_BusinessPartners_BeneficialOwnershipJson",
+                    "[BeneficialOwnershipJson] IS NULL OR ISJSON([BeneficialOwnershipJson]) = 1");
+                table.HasCheckConstraint(
+                    "CK_BusinessPartners_CompliancePeriod",
+                    "[ComplianceReviewDateUtc] IS NULL OR [ComplianceValidUntilUtc] IS NULL OR [ComplianceValidUntilUtc] >= [ComplianceReviewDateUtc]");
+                table.HasCheckConstraint(
+                    "CK_BusinessPartners_BlacklistEvidence",
+                    "[IsBlacklisted] = 0 OR (NULLIF(LTRIM(RTRIM([BlacklistReason])), '') IS NOT NULL AND [BlacklistDate] IS NOT NULL)");
+            });
+
             entity.HasIndex(bp => bp.PartnerCode).IsUnique();
             entity.HasIndex(bp => bp.PartnerName);
             entity.HasIndex(bp => bp.PartnerType);
@@ -7315,7 +7358,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Configure BusinessPartnerRegistrationDocument entity
         builder.Entity<BusinessPartnerRegistrationDocument>(entity =>
         {
+            entity.ToTable("BusinessPartnerRegistrationDocuments", table =>
+                table.HasTrigger("TR_BusinessPartnerRegistrationDocuments_ControlledFileGuard"));
             entity.HasIndex(bprd => bprd.RegistrationId);
+            entity.HasIndex(bprd => new { bprd.TenantId, bprd.FileUploadRecordId });
             entity.HasIndex(bprd => bprd.DocumentType);
             entity.HasIndex(bprd => bprd.IsVerified);
 
@@ -7323,6 +7369,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(r => r.Documents)
                 .HasForeignKey(bprd => bprd.RegistrationId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(bprd => bprd.FileUploadRecord)
+                .WithMany()
+                .HasForeignKey(bprd => bprd.FileUploadRecordId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(bprd => bprd.VerifiedBy)
                 .WithMany()

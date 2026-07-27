@@ -14,6 +14,18 @@ public interface IDocumentNumberingService
         Guid? entityId = null,
         CancellationToken cancellationToken = default);
 
+    Task<string> GenerateConfiguredAsync(
+        string module,
+        string documentType,
+        string name,
+        string format,
+        string resetPolicy,
+        Guid? tenantId = null,
+        DateTime? documentDate = null,
+        string? entityType = null,
+        Guid? entityId = null,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<DocumentSequenceDefinitionDto>> GetDefinitionsAsync(
         string? module = null,
         Guid? tenantId = null,
@@ -30,6 +42,7 @@ public interface IDocumentNumberingService
 public static class DocumentNumberingModules
 {
     public const string Finance = "Finance";
+    public const string Procurement = "Procurement";
     public const string Sales = "Sales";
 }
 

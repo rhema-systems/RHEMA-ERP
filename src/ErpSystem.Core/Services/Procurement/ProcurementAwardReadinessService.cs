@@ -1131,6 +1131,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                 errors.Add("Business partner is not eligible for procurement award.");
             if (partner.RiskLevel is "High" or "Critical")
                 warnings.Add($"Supplier risk is {partner.RiskLevel}.");
+            await AddSupplierRiskAsync(partner, errors, warnings, cancellationToken);
             var supplier = new ProcurementAwardReadinessSupplierDto
             {
                 BusinessPartnerId = partner.Id,
@@ -1198,6 +1199,71 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                 "SUPPLIER_CHANGED_AFTER_RECOMMENDATION", false,
                 "A recommended supplier changed after the recommendation was completed.",
                 "Revalidate and re-approve the recommendation.");
+    }
+
+    private async Task AddSupplierRiskAsync(
+        BusinessPartner partner,
+        ICollection<string> errors,
+        ICollection<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var policies = await _unitOfWork.Repository<ProcurementConfigurationDecision>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                item.DecisionKey == "DEC-011" && !item.IsDeleted &&
+                item.Profile.LifecycleStatus == ProcurementConfigurationProfileStatus.Published &&
+                item.Profile.EffectiveFrom <= now &&
+                (!item.Profile.EffectiveTo.HasValue || item.Profile.EffectiveTo.Value >= now) &&
+                item.Status == ProcurementConfigurationDecisionStatus.Approved &&
+                item.ApprovalStatus == ProcurementConfigurationApprovalStatus.Approved &&
+                item.EvidenceStatus == ProcurementConfigurationEvidenceStatus.Verified &&
+                (!item.EffectiveFrom.HasValue || item.EffectiveFrom.Value <= now) &&
+                (!item.EffectiveTo.HasValue || item.EffectiveTo.Value >= now))
+            .AsNoTracking().ToListAsync(cancellationToken);
+        if (policies.Count != 1)
+        {
+            errors.Add("A unique Published/effective/approved/evidenced DEC-011 supplier-risk policy is required.");
+            return;
+        }
+        var policy = policies[0];
+        var assessment = await _unitOfWork.Repository<ProcurementSupplierRiskAssessment>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                item.BusinessPartnerId == partner.Id && !item.IsDeleted)
+            .Include(item => item.Alerts.Where(alert => !alert.IsDeleted))
+            .AsNoTracking().OrderByDescending(item => item.AssessedAtUtc)
+            .ThenByDescending(item => item.AssessmentSequence)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (assessment is null)
+        {
+            errors.Add("A current supplier-risk and concentration assessment is required.");
+            return;
+        }
+        var policyHash = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(policy.ValueJson)));
+        if (assessment.PolicyDecisionId != policy.Id ||
+            !string.Equals(assessment.PolicyValueHash, policyHash,
+                StringComparison.OrdinalIgnoreCase))
+            errors.Add("The supplier-risk assessment is bound to a stale DEC-011 policy.");
+        if (assessment.NextReviewDueAtUtc <= now)
+            errors.Add("The supplier-risk assessment has reached its policy-derived review date.");
+        if (!assessment.DataComplete)
+            errors.Add("The supplier-risk assessment is incomplete.");
+        var breach = assessment.MinimumScoreBreached ||
+            assessment.ConcentrationBreached ||
+            assessment.SingleSourceDependency ||
+            !assessment.DataComplete;
+        var unresolved = assessment.Alerts.Any(item =>
+            item.Status != ProcurementSupplierRiskAlertStatus.Resolved);
+        if (assessment.EligibilityAction ==
+                ProcurementSupplierRiskEligibilityAction.AwardHardStop && breach)
+            errors.Add("DEC-011 applies an award hard stop to the current supplier-risk breach.");
+        else if (assessment.EligibilityAction ==
+                     ProcurementSupplierRiskEligibilityAction.EscalationRequired &&
+                 unresolved)
+            errors.Add("DEC-011 requires all current supplier-risk alerts to complete escalation before award.");
+        else if (assessment.EligibilityAction ==
+                     ProcurementSupplierRiskEligibilityAction.AlertOnly && breach)
+            warnings.Add("DEC-011 records the current supplier-risk breach as alert-only.");
     }
 
     private async Task AddAwardVerificationAsync(

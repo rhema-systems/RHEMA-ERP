@@ -100,7 +100,7 @@ export default function BusinessPartnerPage() {
         </div>
         <Button
           size="lg"
-          onClick={() => router.push('/register/business-partner')}
+          onClick={() => router.push('/supplier-application')}
         >
           <Plus className="mr-2 h-5 w-5" />
           New Registration
@@ -187,7 +187,7 @@ export default function BusinessPartnerPage() {
 	            <div className="text-center py-12">
 	              <h3 className="text-lg font-semibold mb-2 text-red-600">Failed to load registrations</h3>
 	              <p className="text-gray-600 mb-4">{error}</p>
-	              <Button onClick={() => router.push('/register/business-partner')}>
+	              <Button onClick={() => router.push('/supplier-application')}>
 	                <Plus className="mr-2 h-4 w-4" />
 	                Start New Registration
 	              </Button>
@@ -199,7 +199,7 @@ export default function BusinessPartnerPage() {
 	              <p className="text-gray-600 mb-6">
 	                Start by creating your first business partner registration
 	              </p>
-	              <Button onClick={() => router.push('/register/business-partner')}>
+	              <Button onClick={() => router.push('/supplier-application')}>
 	                <Plus className="mr-2 h-4 w-4" />
 	                Create Registration
 	              </Button>

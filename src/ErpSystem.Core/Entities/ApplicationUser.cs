@@ -33,6 +33,9 @@ public class ApplicationUser : IdentityUser<Guid>, IAuditable
 
     public DateTime? LastLoginDate { get; set; }
     public string? ProfilePictureUrl { get; set; }
+    public bool MustChangePassword { get; set; }
+    public DateTime? TemporaryPasswordExpiresAtUtc { get; set; }
+    public DateTime? PasswordChangedAtUtc { get; set; }
 
     // Employee Link - Links this user account to an Employee record
     public Guid? EmployeeId { get; set; }

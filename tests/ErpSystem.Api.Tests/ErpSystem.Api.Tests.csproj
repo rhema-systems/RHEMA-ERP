@@ -26,7 +26,7 @@
     <ProjectReference Include="..\..\src\ErpSystem.Data\ErpSystem.Data.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
     <Compile Include="Authorization\FinancePermissionAuthorizationHandlerTests.cs" />
     <Compile Include="Authorization\StructuredAuthorizationMiddlewareResultHandlerTests.cs" />
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
@@ -65,6 +65,14 @@
     <Compile Include="Controllers\Procurement\ProcurementBidderCommunicationsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementGhanepsExchangesControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementSupplierEvidencePacksControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierOnboardingTokensControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierDueDiligenceControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierAvlControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierRiskControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierPerformanceScorecardsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\SupplierValidationControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\SupplierApplicantAccessSecurityTests.cs" />
+    <Compile Include="Controllers\Procurement\SupplierApplicantLifecycleControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TenderEvaluationsCommitteeGuardControllerTests.cs" />
     <Compile Include="Controllers\Procurement\TendersCommitteeGuardControllerTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
@@ -112,7 +120,13 @@
     <Compile Include="Services\Finance\FixedAssetDepreciationServiceTests.cs" />
     <Compile Include="Services\Finance\FixedAssetServiceImportTests.cs" />
     <Compile Include="Services\TenantSettingsServiceTests.cs" />
+    <Compile Include="Services\ControlledFileUploadServiceTests.cs" />
     <Compile Include="Services\WorkflowDefinitionServiceAdapterCloneTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">
+    <Compile Include="$(TdcFocusedTestFile)" />
+    <Compile Include="$(TdcFocusedTestSupportFile)" Condition="'$(TdcFocusedTestSupportFile)' != ''" />
   </ItemGroup>
 
 </Project>

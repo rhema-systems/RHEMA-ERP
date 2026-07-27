@@ -66,6 +66,8 @@ export interface UserInfo {
   lastLoginAt?: string;
   tenantId?: string;
   authenticationProvider?: 'Local' | 'LDAP';
+  mustChangePassword?: boolean;
+  temporaryPasswordExpiresAtUtc?: string;
 }
 
 export interface UserTenantInfo {

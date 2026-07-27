@@ -1,5 +1,6 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -18,19 +19,22 @@ public partial class UserController : ControllerBase
     private readonly IAuditLogService _auditLogService;
     private readonly ICurrentUserService _currentUserService;
     private readonly ISettingsService _settingsService;
+    private readonly IProcurementSupplierApplicantAccessService _supplierApplicantAccess;
 
     public UserController(
         IUserService userService,
         ILogger<UserController> logger,
         IAuditLogService auditLogService,
         ICurrentUserService currentUserService,
-        ISettingsService settingsService)
+        ISettingsService settingsService,
+        IProcurementSupplierApplicantAccessService supplierApplicantAccess)
     {
         _userService = userService;
         _logger = logger;
         _auditLogService = auditLogService;
         _currentUserService = currentUserService;
         _settingsService = settingsService;
+        _supplierApplicantAccess = supplierApplicantAccess;
     }
 
     /// <summary>
@@ -624,7 +628,14 @@ public partial class UserController : ControllerBase
 
             // Hash new password
             user.PasswordHash = passwordHasher.HashPassword(user, request.NewPassword);
+            user.MustChangePassword = false;
+            user.TemporaryPasswordExpiresAtUtc = null;
+            user.PasswordChangedAtUtc = DateTime.UtcNow;
             await _userService.UpdateUserAsync(user);
+            await _supplierApplicantAccess.CompleteCredentialActivationAsync(
+                user.Id,
+                $"supplier-credential-activation-{user.Id:N}",
+                HttpContext.RequestAborted);
 
             // Log audit trail for password change
             try

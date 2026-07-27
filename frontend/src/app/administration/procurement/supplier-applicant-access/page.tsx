@@ -1,0 +1,226 @@
+'use client';
+
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  CheckCircle2,
+  Clock3,
+  KeyRound,
+  RefreshCw,
+  RotateCw,
+  ShieldAlert,
+  Users,
+} from 'lucide-react';
+import { toast } from 'sonner';
+
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { useAuth } from '@/hooks/use-auth';
+import { supplierApplicantAccessService as service } from '@/services/procurement-supplier-applicant-access.service';
+
+const dateTime = (value?: string) =>
+  value ? new Date(value).toLocaleString() : '—';
+
+export default function SupplierApplicantAccessAdministrationPage() {
+  const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission('procurement.supplier.manage');
+  const [busyId, setBusyId] = useState<string>();
+  const summary = useQuery({
+    queryKey: ['supplier-applicant-access-summary'],
+    queryFn: service.adminSummary,
+  });
+  const history = useQuery({
+    queryKey: ['supplier-applicant-access-history'],
+    queryFn: service.adminHistory,
+  });
+
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: ['supplier-applicant-access-summary'],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['supplier-applicant-access-history'],
+      }),
+    ]);
+  };
+
+  const run = async (
+    registrationId: string,
+    action: 'resend' | 'retry'
+  ) => {
+    setBusyId(`${registrationId}-${action}`);
+    try {
+      if (action === 'resend') await service.resend(registrationId);
+      else await service.retryActivation(registrationId);
+      toast.success(
+        action === 'resend'
+          ? 'Temporary credential reissued through the verified channel.'
+          : 'Supplier account activation retried.'
+      );
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Action failed.');
+    } finally {
+      setBusyId(undefined);
+    }
+  };
+
+  const cards = [
+    ['Applications', summary.data?.totalApplications ?? 0, Users],
+    ['In progress', summary.data?.applicationInProgress ?? 0, Clock3],
+    ['Credentials sent', summary.data?.credentialDelivered ?? 0, KeyRound],
+    ['Activated', summary.data?.activated ?? 0, CheckCircle2],
+    ['Activation failed', summary.data?.activationFailed ?? 0, ShieldAlert],
+  ] as const;
+
+  return (
+    <div className="space-y-6 p-6" data-testid="supplier-applicant-access-admin">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Supplier applicant access</h1>
+          <p className="text-sm text-muted-foreground">
+            Shared control for verified applications, terminal token closure,
+            credential delivery and first-login activation.
+          </p>
+        </div>
+        <Button variant="outline" onClick={() => void refresh()}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Refresh
+        </Button>
+      </div>
+
+      <Alert>
+        <ShieldAlert className="h-4 w-4" />
+        <AlertTitle>Separated access lifecycle</AlertTitle>
+        <AlertDescription>
+          Applicant sessions expose only application, document, payment and
+          status functions. Approved portal privileges begin only after
+          credential activation.
+        </AlertDescription>
+      </Alert>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        {cards.map(([label, value, Icon]) => (
+          <Card key={label}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">{label}</CardTitle>
+              <Icon className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent className="text-2xl font-semibold">{value}</CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Applicant access history</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Application</TableHead>
+                <TableHead>Verified contact</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Credential</TableHead>
+                <TableHead>Notification</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(history.data || []).map((item) => {
+                const status = String(item.status);
+                const canResend =
+                  canManage &&
+                  ['CredentialDelivered', 'ApprovedPendingCredentialDelivery', '4', '2'].includes(
+                    status
+                  );
+                const canRetry =
+                  canManage &&
+                  ['ActivationFailed', 'ApprovedPendingCredentialDelivery', '6', '2'].includes(
+                    status
+                  );
+                return (
+                  <TableRow key={item.id}>
+                    <TableCell>
+                      <div className="font-medium">{item.companyName}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {item.registrationNumber}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div>{item.verifiedContactMasked}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {item.verifiedChannel}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{status}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div>{item.loginIdentifier || 'Not provisioned'}</div>
+                      <div className="text-xs text-muted-foreground">
+                        Expires {dateTime(item.temporaryCredentialExpiresAtUtc)}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div>{item.lastNotificationStatus || 'Not attempted'}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {item.notificationAttemptCount} attempt(s)
+                      </div>
+                    </TableCell>
+                    <TableCell className="space-x-2 text-right">
+                      {canRetry && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={Boolean(busyId)}
+                          onClick={() => void run(item.registrationId, 'retry')}
+                        >
+                          <RotateCw className="mr-2 h-3.5 w-3.5" />
+                          Retry
+                        </Button>
+                      )}
+                      {canResend && (
+                        <Button
+                          size="sm"
+                          disabled={Boolean(busyId)}
+                          onClick={() => void run(item.registrationId, 'resend')}
+                        >
+                          <KeyRound className="mr-2 h-3.5 w-3.5" />
+                          Resend
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {!history.isLoading && !history.data?.length && (
+                <TableRow>
+                  <TableCell
+                    colSpan={6}
+                    className="py-10 text-center text-muted-foreground"
+                  >
+                    No token-gated supplier applications have been issued.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

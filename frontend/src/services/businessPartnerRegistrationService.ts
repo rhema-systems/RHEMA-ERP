@@ -38,6 +38,8 @@ export interface BusinessPartnerRegistrationDetailDto
 export interface BusinessPartnerRegistrationDocumentDto {
   id: string;
   registrationId: string;
+  fileUploadRecordId?: string;
+  virusScanStatus?: number;
   documentType: string;
   documentName: string;
   filePath: string;

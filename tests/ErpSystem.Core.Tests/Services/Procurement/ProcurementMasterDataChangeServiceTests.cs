@@ -21,14 +21,16 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementMasterDataChangeServiceTests
 {
     [Fact]
-    public async Task RegistryCoversNineProtectedFamiliesAndExcludesInventoryTransactionFields()
+    public async Task RegistryCoversTwelveProtectedFamiliesAndExcludesInventoryTransactionFields()
     {
         await using var fixture = new Fixture();
         fixture.Switch(fixture.MakerUserId, "TDC_PROCUREMENT_OFFICER");
 
         var registry = await fixture.Service.GetRegistryAsync();
 
-        registry.Should().HaveCount(9).And.OnlyHaveUniqueItems(item => item.ResourceType);
+        registry.Should().HaveCount(12).And.OnlyHaveUniqueItems(item => item.ResourceType);
+        registry.Where(item => item.ResourceType.ToString().StartsWith("Supplier"))
+            .Should().HaveCount(6);
         registry.Single(item => item.ResourceType == ProcurementMasterDataResourceType.InventoryItem)
             .AllowedFields.Should().NotContain(new[] { "CurrentStock", "AvailableStock", "AllocatedStock", "OnOrderStock", "AverageCost", "LastPurchaseCost" });
         registry.Single(item => item.ResourceType == ProcurementMasterDataResourceType.WarehouseLocation)
@@ -100,6 +102,88 @@ public sealed class ProcurementMasterDataChangeServiceTests
         applied.AppliedAfterHash.Should().MatchRegex("^[0-9A-F]{64}$");
         (await fixture.Context.BusinessPartners.SingleAsync(item => item.Id == fixture.PartnerId)).PartnerName.Should().Be("Controlled Supplier");
         (await fixture.Context.ProcurementControlEvents.CountAsync(item => item.EventType == "MasterDataChange")).Should().Be(4);
+        fixture.Notifications.Verify(item => item.PublishAsync(
+            It.Is<NotificationTopicEvent>(value =>
+                value.TopicKey == "procurement.supplier-master-change.applied" &&
+                value.EntityId == applied.Id),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task BeneficialOwnershipRejectsIncompletePercentagesBeforeWritingDraft()
+    {
+        await using var fixture = new Fixture();
+        await fixture.AddActivePolicyAsync(ProcurementMasterDataResourceType.SupplierOwnershipDetails);
+        fixture.Switch(fixture.MakerUserId, "TDC_PROCUREMENT_OFFICER");
+        var request = ChangeRequest(fixture.PartnerId);
+        request.ResourceType = ProcurementMasterDataResourceType.SupplierOwnershipDetails;
+        request.ProposedChangesJson =
+            "{\"BeneficialOwnershipJson\":\"[{\\\"name\\\":\\\"Ada Holdings\\\",\\\"ownershipPercent\\\":60}]\"}";
+
+        var action = () => fixture.Service.SaveDraftAsync(null, request, "trace-ownership-invalid");
+
+        (await action.Should().ThrowAsync<ProcurementMasterDataChangeValidationException>())
+            .Which.Code.Should().Be("OWNERSHIP_TOTAL_INVALID");
+        (await fixture.Context.ProcurementMasterDataChangeRequests.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SupplierCategoryLifecycleReplacesAssignmentsWithCurrentTenantCategories()
+    {
+        await using var fixture = new Fixture();
+        var first = new PartnerCategory
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            CategoryCode = "GOODS", CategoryName = "Goods", CategoryType = "Supplier", IsActive = true
+        };
+        var second = new PartnerCategory
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            CategoryCode = "WORKS", CategoryName = "Works", CategoryType = "Supplier", IsActive = true
+        };
+        fixture.Context.PartnerCategories.AddRange(first, second);
+        fixture.Context.BusinessPartnerCategories.Add(new BusinessPartnerCategory
+        {
+            Id = Guid.NewGuid(), BusinessPartnerId = fixture.PartnerId, CategoryId = first.Id, IsPrimary = true
+        });
+        await fixture.Context.SaveChangesAsync();
+        await fixture.AddActivePolicyAsync(ProcurementMasterDataResourceType.SupplierCategoryAssignments);
+        fixture.Switch(fixture.MakerUserId, "TDC_PROCUREMENT_OFFICER");
+        var request = ChangeRequest(fixture.PartnerId);
+        request.ResourceType = ProcurementMasterDataResourceType.SupplierCategoryAssignments;
+        request.ProposedChangesJson = $"{{\"CategoryIds\":[\"{second.Id}\"]}}";
+        var draft = await fixture.Service.SaveDraftAsync(null, request, "trace-category-create");
+        await fixture.SetRequestRowVersionAsync(draft.Id);
+        var submitted = await fixture.Service.SubmitAsync(draft.Id,
+            new ProcurementMasterDataChangeLifecycleRequest { RowVersion = fixture.RowVersion }, "trace-category-submit");
+        fixture.Switch(fixture.CheckerUserId, "TDC_HEAD_OF_PROCUREMENT");
+        var approved = await fixture.Service.ApproveAsync(submitted.Id,
+            new ProcurementMasterDataChangeDecisionRequest { RowVersion = fixture.RowVersion, Comment = "Approved category replacement" },
+            "trace-category-approve");
+
+        var applied = await fixture.Service.ApplyAsync(approved.Id,
+            new ProcurementMasterDataChangeLifecycleRequest { RowVersion = fixture.RowVersion }, "trace-category-apply");
+
+        applied.Status.Should().Be(ProcurementMasterDataChangeStatus.Applied);
+        (await fixture.Context.BusinessPartnerCategories.Where(item => item.BusinessPartnerId == fixture.PartnerId)
+            .Select(item => item.CategoryId).ToListAsync()).Should().Equal(second.Id);
+        applied.AppliedAfterJson.Should().Contain(second.Id.ToString());
+    }
+
+    [Fact]
+    public async Task BlacklistComplianceChangeRequiresReasonAndDate()
+    {
+        await using var fixture = new Fixture();
+        await fixture.AddActivePolicyAsync(ProcurementMasterDataResourceType.SupplierComplianceStatus);
+        fixture.Switch(fixture.MakerUserId, "TDC_PROCUREMENT_OFFICER");
+        var request = ChangeRequest(fixture.PartnerId);
+        request.ResourceType = ProcurementMasterDataResourceType.SupplierComplianceStatus;
+        request.ProposedChangesJson = "{\"IsBlacklisted\":true,\"RegistrationStatus\":\"Blacklisted\"}";
+
+        var action = () => fixture.Service.SaveDraftAsync(null, request, "trace-blacklist-invalid");
+
+        (await action.Should().ThrowAsync<ProcurementMasterDataChangeValidationException>())
+            .Which.Code.Should().Be("BLACKLIST_EVIDENCE_REQUIRED");
     }
 
     [Fact]
@@ -309,8 +393,10 @@ public sealed class ProcurementMasterDataChangeServiceTests
             _currentUser.Setup(item => item.HasRole(It.IsAny<string>())).Returns((string role) => _roles.Contains(role));
             _unitOfWork = new UnitOfWork(Context);
             var events = new ProcurementControlEventService(_unitOfWork, _currentUser.Object, NullLogger<ProcurementControlEventService>.Instance);
+            Notifications = new Mock<INotificationTopicPublisher>();
             Service = new ProcurementMasterDataChangeService(_unitOfWork, _currentUser.Object, events,
-                new Mock<IWorkflowInstanceService>().Object, NullLogger<ProcurementMasterDataChangeService>.Instance);
+                new Mock<IWorkflowInstanceService>().Object, Notifications.Object,
+                NullLogger<ProcurementMasterDataChangeService>.Instance);
         }
 
         public string RowVersion => Convert.ToBase64String(new byte[] { 1, 2, 3, 4 });
@@ -321,6 +407,7 @@ public sealed class ProcurementMasterDataChangeServiceTests
         public Guid PartnerId { get; }
         public ApplicationDbContext Context { get; }
         public ProcurementMasterDataChangeService Service { get; }
+        public Mock<INotificationTopicPublisher> Notifications { get; }
 
         public void Switch(Guid userId, params string[] roles)
         {
@@ -330,12 +417,13 @@ public sealed class ProcurementMasterDataChangeServiceTests
         }
         public void SwitchTenant(Guid tenantId) => _tenantId = tenantId;
 
-        public async Task AddActivePolicyAsync()
+        public async Task AddActivePolicyAsync(
+            ProcurementMasterDataResourceType resourceType = ProcurementMasterDataResourceType.SupplierProfile)
         {
             Context.ProcurementMasterDataControlPolicies.Add(new ProcurementMasterDataControlPolicy
             {
                 TenantId = TenantId,
-                ResourceType = ProcurementMasterDataResourceType.SupplierProfile,
+                ResourceType = resourceType,
                 Name = "Controlled supplier profiles",
                 Version = 1,
                 Status = ProcurementMasterDataPolicyStatus.Active,

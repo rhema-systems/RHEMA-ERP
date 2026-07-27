@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
@@ -2027,6 +2028,10 @@ public sealed class ProcurementGhanepsExchangeServiceTests
         public int SaveChanges() => inner.SaveChanges();
         public Task BeginTransactionAsync(CancellationToken cancellationToken = default) =>
             inner.BeginTransactionAsync(cancellationToken);
+        public Task BeginTransactionAsync(
+            IsolationLevel isolationLevel,
+            CancellationToken cancellationToken = default) =>
+            inner.BeginTransactionAsync(isolationLevel, cancellationToken);
         public Task CommitAsync(CancellationToken cancellationToken = default) =>
             inner.CommitAsync(cancellationToken);
         public Task RollbackAsync(CancellationToken cancellationToken = default) =>

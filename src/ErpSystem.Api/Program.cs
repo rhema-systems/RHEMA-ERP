@@ -243,6 +243,9 @@ builder.Services.AddErpSystemDatabase(builder.Configuration);
 builder.Services.AddErpSystemIdentity();
 builder.Services.AddErpSystemRepositories();
 builder.Services.AddErpSystemServices();
+builder.Services.Configure<ErpSystem.Core.DTOs.Procurement.SupplierApplicantAccessOptions>(
+    builder.Configuration.GetSection(
+        ErpSystem.Core.DTOs.Procurement.SupplierApplicantAccessOptions.SectionName));
 builder.Services.AddErpSystemFinanceServices();
 builder.Services.AddErpSystemJwtAuthentication(builder.Configuration);
 builder.Services.AddErpSystemAuthorization();
@@ -376,6 +379,8 @@ app.UseMiddleware<JwtBlacklistMiddleware>();
 // Auth endpoints remain anonymous here, so login/password-reset throttling still applies by IP.
 app.UseRateLimiter();
 
+app.UseMiddleware<SupplierApplicantAccessMiddleware>();
+app.UseMiddleware<TemporaryPasswordChangeMiddleware>();
 app.UseMiddleware<ExternalUserAccessMiddleware>();
 app.UseAuthorization();
 

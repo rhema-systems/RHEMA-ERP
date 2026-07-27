@@ -18,6 +18,7 @@ public class ContractService : IContractService
     private readonly ITenderBidRepository _bidRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ISupplierValidationService _supplierValidation;
     private readonly ILogger<ContractService> _logger;
 
     public ContractService(
@@ -30,6 +31,7 @@ public class ContractService : IContractService
         ITenderBidRepository bidRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        ISupplierValidationService supplierValidation,
         ILogger<ContractService> logger)
     {
         _contractRepository = contractRepository;
@@ -41,6 +43,7 @@ public class ContractService : IContractService
         _bidRepository = bidRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _supplierValidation = supplierValidation;
         _logger = logger;
     }
 
@@ -172,6 +175,18 @@ public class ContractService : IContractService
 
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
+
+            await _supplierValidation.EnforceEligibilityAsync(new SupplierEligibilityEvaluationRequest
+            {
+                BusinessPartnerId = award.BusinessPartnerId,
+                Boundary = SupplierEligibilityBoundary.Contract,
+                RequiresLicenses = string.Equals(dto.ContractType, "Works", StringComparison.OrdinalIgnoreCase),
+                RecordAudit = true,
+                SourceType = "TenderAward",
+                SourceId = award.Id,
+                SourceReference = tender.TenderNumber,
+                CorrelationId = $"contract-{dto.TenderAwardId:N}"
+            });
 
             var contract = new Contract
             {
@@ -995,4 +1010,3 @@ public class ContractService : IContractService
 
     #endregion
 }
-

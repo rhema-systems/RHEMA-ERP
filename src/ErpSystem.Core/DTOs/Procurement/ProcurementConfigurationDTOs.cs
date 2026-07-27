@@ -306,15 +306,62 @@ public sealed class ProcurementExceptionPrerequisiteDecisionValueDto : Effective
 
 public sealed class ProcurementSupplierFeeDecisionValueDto : EffectiveDatedDecisionValueDto
 {
+    public ProcurementSupplierOnboardingFeeMode Mode { get; set; } =
+        ProcurementSupplierOnboardingFeeMode.Paid;
     [Required, StringLength(150)] public string FeeType { get; set; } = string.Empty;
     [Range(typeof(decimal), "0", "9999999999999999")] public decimal Amount { get; set; }
     [Required, StringLength(3), RegularExpression("^[A-Z]{3}$")] public string CurrencyCode { get; set; } = "GHS";
     [Range(typeof(decimal), "0", "100")] public decimal TaxPercent { get; set; }
-    [MinLength(1)] public List<string> PaymentChannels { get; set; } = new();
-    [Required, StringLength(200)] public string ReceiptNumberFormat { get; set; } = string.Empty;
+    public List<string> PaymentChannels { get; set; } = new();
+    public Guid? RevenueAccountId { get; set; }
+    public Guid? TaxAccountId { get; set; }
+    public Guid? ExemptionWorkflowDefinitionId { get; set; }
+    [Required, StringLength(50)] public string ReceiptNumberFormat { get; set; } = string.Empty;
     [Required, StringLength(1000)] public string ExemptionRule { get; set; } = string.Empty;
     [Required, StringLength(1000)] public string RefundRule { get; set; } = string.Empty;
     [Required, StringLength(1000)] public string RenewalRule { get; set; } = string.Empty;
+
+    public override IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        foreach (var result in base.Validate(validationContext)) yield return result;
+
+        if (Mode == ProcurementSupplierOnboardingFeeMode.Free)
+        {
+            if (Amount != 0)
+                yield return new ValidationResult(
+                    "A free supplier-onboarding token must have a zero amount.",
+                    new[] { nameof(Amount) });
+            if (TaxPercent != 0)
+                yield return new ValidationResult(
+                    "A free supplier-onboarding token cannot carry tax.",
+                    new[] { nameof(TaxPercent) });
+        }
+        else
+        {
+            if (Amount <= 0)
+                yield return new ValidationResult(
+                    "A paid supplier-onboarding token must have a positive amount.",
+                    new[] { nameof(Amount) });
+            if (PaymentChannels.Count == 0)
+                yield return new ValidationResult(
+                    "A paid supplier-onboarding token requires at least one payment-method code.",
+                    new[] { nameof(PaymentChannels) });
+            if (!RevenueAccountId.HasValue || RevenueAccountId == Guid.Empty)
+                yield return new ValidationResult(
+                    "A paid supplier-onboarding token requires a revenue GL account.",
+                    new[] { nameof(RevenueAccountId) });
+            if (TaxPercent > 0 && (!TaxAccountId.HasValue || TaxAccountId == Guid.Empty))
+                yield return new ValidationResult(
+                    "A taxed supplier-onboarding token requires a tax payable GL account.",
+                    new[] { nameof(TaxAccountId) });
+        }
+
+        if (!ReceiptNumberFormat.Contains("{SEQ}", StringComparison.OrdinalIgnoreCase) &&
+            !System.Text.RegularExpressions.Regex.IsMatch(ReceiptNumberFormat, @"\{#+\}"))
+            yield return new ValidationResult(
+                "Receipt number format must contain {SEQ} or a {####} sequence token.",
+                new[] { nameof(ReceiptNumberFormat) });
+    }
 }
 
 public sealed class ProcurementSignatureDecisionValueDto : EffectiveDatedDecisionValueDto
@@ -351,11 +398,185 @@ public sealed class ProcurementNegativeStockDecisionValueDto : EffectiveDatedDec
 public sealed class ProcurementSupplierRiskDecisionValueDto : EffectiveDatedDecisionValueDto
 {
     [Range(1, 120)] public int ReviewFrequencyMonths { get; set; } = 12;
+    [Range(1, 120)] public int ExposureWindowMonths { get; set; }
     [MinLength(1)] public List<string> RiskDimensions { get; set; } = new();
     [MinLength(1)] public List<string> RiskBands { get; set; } = new();
     [Range(typeof(decimal), "0", "100")] public decimal ConcentrationLimitPercent { get; set; }
     [Range(typeof(decimal), "0", "100")] public decimal MinimumScore { get; set; }
-    [Required, StringLength(500)] public string EligibilityAction { get; set; } = string.Empty;
+    public ProcurementSupplierRiskEligibilityAction EligibilityAction { get; set; } =
+        ProcurementSupplierRiskEligibilityAction.AlertOnly;
+    [Range(1, 120)] public int PerformanceWindowMonths { get; set; }
+    [MinLength(7)] public List<string> PerformanceDimensions { get; set; } = new();
+    [MinLength(1)] public List<string> PerformanceBands { get; set; } = new();
+    [Range(typeof(decimal), "1", "100")]
+    public decimal MinimumPerformanceDataCoveragePercent { get; set; }
+    [Range(typeof(decimal), "1", "8760")] public decimal ResponseTargetHours { get; set; }
+    public ProcurementSupplierRiskEligibilityAction PerformanceEligibilityAction { get; set; } =
+        ProcurementSupplierRiskEligibilityAction.AlertOnly;
+
+    public override IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        foreach (var result in base.Validate(validationContext)) yield return result;
+
+        var dimensions = new List<(string Name, decimal Weight)>();
+        foreach (var value in RiskDimensions)
+        {
+            var parts = value.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) ||
+                !decimal.TryParse(parts[1],
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var weight) ||
+                weight <= 0 || weight > 100)
+            {
+                yield return new ValidationResult(
+                    "Risk dimensions must use Metric=WeightPercent with a weight above 0 and not above 100.",
+                    new[] { nameof(RiskDimensions) });
+                continue;
+            }
+            dimensions.Add((parts[0], weight));
+        }
+        if (dimensions.GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .Any(group => group.Count() > 1))
+            yield return new ValidationResult(
+                "Risk dimension names must be unique.",
+                new[] { nameof(RiskDimensions) });
+        if (dimensions.Count == RiskDimensions.Count &&
+            dimensions.Sum(item => item.Weight) != 100)
+            yield return new ValidationResult(
+                "Risk dimension weights must total exactly 100 percent.",
+                new[] { nameof(RiskDimensions) });
+
+        var bands = new List<(string Name, decimal Minimum, decimal Maximum)>();
+        foreach (var value in RiskBands)
+        {
+            var nameAndRange = value.Split('=', 2, StringSplitOptions.TrimEntries);
+            var bounds = nameAndRange.Length == 2
+                ? nameAndRange[1].Split('-', 2, StringSplitOptions.TrimEntries)
+                : Array.Empty<string>();
+            if (nameAndRange.Length != 2 || string.IsNullOrWhiteSpace(nameAndRange[0]) ||
+                bounds.Length != 2 ||
+                !decimal.TryParse(bounds[0],
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var minimum) ||
+                !decimal.TryParse(bounds[1],
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var maximum) ||
+                minimum < 0 || maximum > 100 || maximum <= minimum)
+            {
+                yield return new ValidationResult(
+                    "Risk bands must use BandName=Minimum-Maximum within 0 to 100.",
+                    new[] { nameof(RiskBands) });
+                continue;
+            }
+            bands.Add((nameAndRange[0], minimum, maximum));
+        }
+        if (bands.GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .Any(group => group.Count() > 1))
+            yield return new ValidationResult(
+                "Risk band names must be unique.",
+                new[] { nameof(RiskBands) });
+        if (bands.Count == RiskBands.Count && bands.Count > 0)
+        {
+            var ordered = bands.OrderBy(item => item.Minimum).ToList();
+            if (ordered[0].Minimum != 0 || ordered[^1].Maximum != 100 ||
+                ordered.Zip(ordered.Skip(1), (left, right) =>
+                        left.Maximum == right.Minimum)
+                    .Any(contiguous => !contiguous))
+                yield return new ValidationResult(
+                    "Risk bands must provide contiguous coverage from 0 through 100.",
+                    new[] { nameof(RiskBands) });
+        }
+
+        var performanceDimensions = new List<(string Name, decimal Weight)>();
+        foreach (var value in PerformanceDimensions)
+        {
+            var parts = value.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) ||
+                !Enum.TryParse<ProcurementSupplierPerformanceMetricKey>(
+                    parts[0], true, out _) ||
+                !decimal.TryParse(parts[1],
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var weight) ||
+                weight <= 0 || weight > 100)
+            {
+                yield return new ValidationResult(
+                    "Performance dimensions must use a supported Metric=WeightPercent value with a weight above 0 and not above 100.",
+                    new[] { nameof(PerformanceDimensions) });
+                continue;
+            }
+            performanceDimensions.Add((parts[0], weight));
+        }
+        if (performanceDimensions.GroupBy(item => item.Name,
+                StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+            yield return new ValidationResult(
+                "Performance dimension names must be unique.",
+                new[] { nameof(PerformanceDimensions) });
+        var requiredPerformanceDimensions =
+            Enum.GetNames<ProcurementSupplierPerformanceMetricKey>();
+        if (performanceDimensions.Count == PerformanceDimensions.Count &&
+            (performanceDimensions.Count != requiredPerformanceDimensions.Length ||
+             requiredPerformanceDimensions.Except(
+                 performanceDimensions.Select(item => item.Name),
+                 StringComparer.OrdinalIgnoreCase).Any()))
+            yield return new ValidationResult(
+                "Performance dimensions must configure DeliveryTimeliness, GrnQuality, RejectionRate, PriceCompetitiveness, Responsiveness, ComplaintResolution, and ContractCompletion exactly once.",
+                new[] { nameof(PerformanceDimensions) });
+        if (performanceDimensions.Count == PerformanceDimensions.Count &&
+            performanceDimensions.Sum(item => item.Weight) != 100)
+            yield return new ValidationResult(
+                "Performance dimension weights must total exactly 100 percent.",
+                new[] { nameof(PerformanceDimensions) });
+
+        var performanceBands =
+            new List<(string Name, decimal Minimum, decimal Maximum)>();
+        foreach (var value in PerformanceBands)
+        {
+            var nameAndRange = value.Split('=', 2, StringSplitOptions.TrimEntries);
+            var bounds = nameAndRange.Length == 2
+                ? nameAndRange[1].Split('-', 2, StringSplitOptions.TrimEntries)
+                : Array.Empty<string>();
+            if (nameAndRange.Length != 2 ||
+                string.IsNullOrWhiteSpace(nameAndRange[0]) ||
+                bounds.Length != 2 ||
+                !decimal.TryParse(bounds[0],
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var minimum) ||
+                !decimal.TryParse(bounds[1],
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var maximum) ||
+                minimum < 0 || maximum > 100 || maximum <= minimum)
+            {
+                yield return new ValidationResult(
+                    "Performance bands must use BandName=Minimum-Maximum within 0 to 100.",
+                    new[] { nameof(PerformanceBands) });
+                continue;
+            }
+            performanceBands.Add((nameAndRange[0], minimum, maximum));
+        }
+        if (performanceBands.GroupBy(item => item.Name,
+                StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+            yield return new ValidationResult(
+                "Performance band names must be unique.",
+                new[] { nameof(PerformanceBands) });
+        if (performanceBands.Count == PerformanceBands.Count &&
+            performanceBands.Count > 0)
+        {
+            var ordered = performanceBands.OrderBy(item => item.Minimum).ToList();
+            if (ordered[0].Minimum != 0 || ordered[^1].Maximum != 100 ||
+                ordered.Zip(ordered.Skip(1), (left, right) =>
+                        left.Maximum == right.Minimum)
+                    .Any(contiguous => !contiguous))
+                yield return new ValidationResult(
+                    "Performance bands must provide contiguous coverage from 0 through 100.",
+                    new[] { nameof(PerformanceBands) });
+        }
+    }
 }
 
 public sealed class ProcurementCutoverDecisionValueDto : EffectiveDatedDecisionValueDto

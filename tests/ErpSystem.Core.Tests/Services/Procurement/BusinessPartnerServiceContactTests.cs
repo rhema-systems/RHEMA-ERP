@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
 using FluentAssertions;
@@ -88,6 +89,7 @@ public class BusinessPartnerServiceContactTests
         private readonly Mock<ICurrentUserProvider> _currentUserProvider = new();
         private readonly Mock<IWorkflowIntegrationService> _workflowIntegrationService = new();
         private readonly Mock<IWorkflowStatusAdapterRegistry> _workflowStatusAdapterRegistry = new();
+        private readonly Mock<IPaymentTermRepository> _paymentTermRepository = new();
 
         public BusinessPartnerContactFixture()
         {
@@ -162,6 +164,7 @@ public class BusinessPartnerServiceContactTests
                 _currentUserProvider.Object,
                 _workflowIntegrationService.Object,
                 _workflowStatusAdapterRegistry.Object,
+                _paymentTermRepository.Object,
                 NullLogger<BusinessPartnerService>.Instance);
 
         public BusinessPartnerContact AddContact(

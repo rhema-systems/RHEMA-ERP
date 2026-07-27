@@ -643,6 +643,9 @@ public class BusinessPartnerDocumentDto
 public class CreateBusinessPartnerDocumentDto
 {
     [Required]
+    public Guid? FileUploadRecordId { get; set; }
+
+    [Required]
     [MaxLength(100)]
     public string DocumentType { get; set; } = string.Empty;
 
@@ -732,6 +735,7 @@ public class CreateBusinessPartnerFinancialDto
 public class BusinessPartnerRegistrationDto
 {
     public Guid Id { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public string ApplicationNumber { get; set; } = string.Empty;
     public string PartnerType { get; set; } = "Supplier";
     public ProcurementSupplierRegistrationCategory? RegistrationCategory { get; set; }
@@ -915,6 +919,8 @@ public class BusinessPartnerRegistrationDocumentDto
 {
     public Guid Id { get; set; }
     public Guid RegistrationId { get; set; }
+    public Guid? FileUploadRecordId { get; set; }
+    public FileVirusScanStatus? VirusScanStatus { get; set; }
     public string DocumentType { get; set; } = string.Empty;
     public string DocumentName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;

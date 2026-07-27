@@ -34,4 +34,21 @@
     <Compile Remove="Migrations\20260207050009_AddSystemExceptionLogs.Designer.cs" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(TdcFastEfBuild)' == 'true'">
+    <!--
+      The accumulated EF designer history is about 278 MB of generated C#.
+      This opt-in design-time path keeps the current snapshot and latest
+      migration metadata while avoiding historical designer recompilation.
+      Normal production builds continue to compile the complete history.
+    -->
+    <Compile Remove="Migrations\*.Designer.cs" />
+    <Compile Include="Migrations\20260725111657_AddProcurementSupplierOnboardingTokens.Designer.cs" />
+    <Compile Include="Migrations\20260726101435_AddProcurementSupplierDueDiligence.Designer.cs" />
+    <Compile Include="Migrations\20260726174311_AddProcurementSupplierAvlLifecycle.Designer.cs" />
+    <Compile Include="Migrations\20260726224147_AddProcurementSupplierRiskAndConcentration.Designer.cs" />
+    <Compile Include="Migrations\20260727005601_AddProcurementSupplierPerformanceScorecards.Designer.cs" />
+    <Compile Include="Migrations\20260727101510_AddProcurementSupplierMasterChangeRollout.Designer.cs" />
+    <Compile Include="Migrations\20260727113854_AddProcurementSupplierApplicantAccess.Designer.cs" />
+  </ItemGroup>
+
 </Project>
