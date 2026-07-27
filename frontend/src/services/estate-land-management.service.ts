@@ -234,23 +234,31 @@ const assetMatchesQuery = (
   (query.availableForSale === undefined ||
     asset.isAvailableForSale === query.availableForSale);
 
+const buildManagedAssetQueryParams = (query: EstateManagedAssetQuery) => ({
+  search: query.search || undefined,
+  assetType:
+    query.assetType === undefined ? undefined : assetTypeNames[query.assetType],
+  status: query.status === undefined ? undefined : assetStatusNames[query.status],
+  availableForLease: query.availableForLease,
+  availableForSale: query.availableForSale,
+  take: query.take || 250,
+});
+
 export class EstateLandManagementService {
   async getLandBank(search?: string): Promise<EstateManagedAsset[]> {
+    const query: EstateManagedAssetQuery = {
+      search,
+      assetType: EstateManagedAssetType.Land,
+      status: EstateManagedAssetStatus.LandBank,
+      take: 250,
+    };
     const response = await apiService.get<ApiListResponse<EstateManagedAsset>>(
       '/estate/managed-assets',
-      {
-        search: search || undefined,
-        take: 250,
-      }
+      buildManagedAssetQueryParams(query)
     );
 
     return Array.isArray(response.data)
-      ? response.data.filter((asset) =>
-          assetMatchesQuery(asset, {
-            assetType: EstateManagedAssetType.Land,
-            status: EstateManagedAssetStatus.LandBank,
-          })
-        )
+      ? response.data.filter((asset) => assetMatchesQuery(asset, query))
       : [];
   }
 
@@ -259,10 +267,7 @@ export class EstateLandManagementService {
   ): Promise<EstateManagedAsset[]> {
     const response = await apiService.get<ApiListResponse<EstateManagedAsset>>(
       '/estate/managed-assets',
-      {
-        search: query.search || undefined,
-        take: query.take || 250,
-      }
+      buildManagedAssetQueryParams(query)
     );
 
     return Array.isArray(response.data)
