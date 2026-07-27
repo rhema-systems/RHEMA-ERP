@@ -140,9 +140,10 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 registrationId, documentId, actorId))
             .Returns(Task.CompletedTask);
 
+        var unitOfWork = TransactionalUnitOfWork();
         var controller = Controller(
             access.Object, tokens.Object, registrations.Object,
-            controlledFiles.Object, sessionReference);
+            controlledFiles.Object, sessionReference, unitOfWork.Object);
 
         var methodsResult = await controller.GetPaymentMethods(CancellationToken.None);
         methodsResult.Should().BeOfType<OkObjectResult>()
@@ -193,6 +194,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
         capturedDocument!.FileUploadRecordId.Should().Be(fileRecordId);
         capturedDocument.ChecksumSha256.Should().Be(new string('a', 64));
         capturedDocument.EvidenceRequirementCode.Should().Be("SUP-TAX");
+        capturedDocument.ClassificationCode.Should().Be("Restricted");
+        capturedDocument.IssueDate.Should().Be(new DateTime(2026, 7, 1));
+        capturedDocument.ExpiryDate.Should().Be(new DateTime(2027, 7, 1));
 
         var deleteResult = await controller.DeleteDocument(
             documentId, CancellationToken.None);
@@ -202,6 +206,95 @@ public sealed class SupplierApplicantLifecycleControllerTests
         controlledFiles.Verify(item => item.DeleteAsync(
             tenantId, fileRecordId, actorId, It.IsAny<CancellationToken>()),
             Times.Once);
+        unitOfWork.Verify(item => item.BeginTransactionAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+        unitOfWork.Verify(item => item.CommitAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+        unitOfWork.Verify(item => item.RollbackAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task StorageDeleteFailureRollsBackDocumentDeleteAndCanBeRetried()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        var sessionReference = Guid.NewGuid();
+        var fileRecordId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.ValidateSessionAsync(
+                sessionReference,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupplierApplicantSessionDto
+            {
+                SessionReference = sessionReference,
+                SystemActorUserId = actorId,
+                TenantId = tenantId,
+                RegistrationId = registrationId,
+                TokenId = Guid.NewGuid(),
+                ExpiresAtUtc = DateTime.UtcNow.AddHours(1),
+                PaymentOnly = false
+            });
+        var document = new BusinessPartnerRegistrationDocumentDto
+        {
+            Id = documentId,
+            RegistrationId = registrationId,
+            FileUploadRecordId = fileRecordId,
+            DocumentType = "TaxClearance",
+            DocumentName = "evidence.pdf",
+            FilePath = "supplier-registration-evidence/evidence.pdf",
+            FileSize = 14
+        };
+        var registrations = new Mock<IBusinessPartnerRegistrationService>();
+        registrations.Setup(item => item.GetDocumentByIdAsync(
+                registrationId, documentId))
+            .ReturnsAsync(document);
+        registrations.Setup(item => item.DeleteDocumentAsync(
+                registrationId, documentId, actorId))
+            .Returns(Task.CompletedTask);
+        var controlledFiles = new Mock<IControlledFileUploadService>();
+        controlledFiles.SetupSequence(item => item.DeleteAsync(
+                tenantId,
+                fileRecordId,
+                actorId,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ControlledFileUploadException(
+                "FILE_STORAGE_DELETE_FAILED",
+                "The stored file could not be removed.",
+                StatusCodes.Status502BadGateway))
+            .Returns(Task.CompletedTask);
+        var unitOfWork = TransactionalUnitOfWork();
+        var controller = Controller(
+            access.Object,
+            Mock.Of<IProcurementSupplierOnboardingTokenService>(),
+            registrations.Object,
+            controlledFiles.Object,
+            sessionReference,
+            unitOfWork.Object);
+
+        var failed = await controller.DeleteDocument(
+            documentId, CancellationToken.None);
+        failed.Should().BeOfType<ObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status502BadGateway);
+
+        var retried = await controller.DeleteDocument(
+            documentId, CancellationToken.None);
+        retried.Should().BeOfType<NoContentResult>();
+
+        registrations.Verify(item => item.DeleteDocumentAsync(
+            registrationId, documentId, actorId), Times.Exactly(2));
+        controlledFiles.Verify(item => item.DeleteAsync(
+            tenantId, fileRecordId, actorId, It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+        unitOfWork.Verify(item => item.BeginTransactionAsync(
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+        unitOfWork.Verify(item => item.RollbackAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+        unitOfWork.Verify(item => item.CommitAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -427,12 +520,96 @@ public sealed class SupplierApplicantLifecycleControllerTests
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task TemporaryCredentialExpiryIsRevalidatedInsideTransaction()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        const string temporaryPassword = "Temporary#Password123";
+        var outerUser = new ApplicationUser
+        {
+            Id = userId,
+            TenantId = tenantId,
+            UserName = "approved@example.test",
+            FirstName = "Approved",
+            LastName = "Supplier",
+            IsActive = true,
+            MustChangePassword = true,
+            TemporaryPasswordExpiresAtUtc = DateTime.UtcNow.AddMinutes(5)
+        };
+        outerUser.PasswordHash =
+            new PasswordHasher<ApplicationUser>().HashPassword(
+                outerUser, temporaryPassword);
+        var transactionalUser = new ApplicationUser
+        {
+            Id = userId,
+            TenantId = tenantId,
+            UserName = outerUser.UserName,
+            FirstName = outerUser.FirstName,
+            LastName = outerUser.LastName,
+            IsActive = true,
+            MustChangePassword = true,
+            TemporaryPasswordExpiresAtUtc = DateTime.UtcNow.AddSeconds(-1),
+            PasswordHash = outerUser.PasswordHash
+        };
+
+        var users = new Mock<IUserService>();
+        users.SetupSequence(item => item.GetUserByIdAsync(userId))
+            .ReturnsAsync(outerUser)
+            .ReturnsAsync(transactionalUser);
+        var current = new Mock<ICurrentUserService>();
+        current.SetupGet(item => item.UserId).Returns(userId.ToString());
+        current.SetupGet(item => item.UserName).Returns(outerUser.UserName);
+        var settings = new Mock<ISettingsService>();
+        settings.Setup(item => item.GetSecuritySettingsAsync(tenantId))
+            .ReturnsAsync((Security?)null);
+        var applicantAccess =
+            new Mock<IProcurementSupplierApplicantAccessService>();
+        var unitOfWork = TransactionalUnitOfWork();
+        var controller = new UserController(
+            users.Object,
+            NullLogger<UserController>.Instance,
+            Mock.Of<IAuditLogService>(),
+            current.Object,
+            settings.Object,
+            applicantAccess.Object,
+            unitOfWork.Object)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = AuthenticatedContext(userId)
+            }
+        };
+
+        var result = await controller.ChangePassword(new ChangePasswordRequest
+        {
+            CurrentPassword = temporaryPassword,
+            NewPassword = "Permanent#Password456"
+        });
+
+        result.Should().BeOfType<ObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status410Gone);
+        users.Verify(item => item.UpdateUserAsync(
+            It.IsAny<ApplicationUser>()), Times.Never);
+        applicantAccess.Verify(item => item.CompleteCredentialActivationAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        unitOfWork.Verify(item => item.BeginTransactionAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+        unitOfWork.Verify(item => item.RollbackAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+        unitOfWork.Verify(item => item.CommitAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private static SupplierApplicantAccessController Controller(
         IProcurementSupplierApplicantAccessService access,
         IProcurementSupplierOnboardingTokenService tokens,
         IBusinessPartnerRegistrationService registrations,
         IControlledFileUploadService controlledFiles,
-        Guid sessionReference) =>
+        Guid sessionReference,
+        IUnitOfWork? unitOfWork = null) =>
         new(
             access,
             tokens,
@@ -444,6 +621,7 @@ public sealed class SupplierApplicantLifecycleControllerTests
             Mock.Of<ICaptchaVerificationService>(),
             Mock.Of<IProcurementSupplierApplicantJwtService>(),
             controlledFiles,
+            unitOfWork ?? TransactionalUnitOfWork().Object,
             NullLogger<SupplierApplicantAccessController>.Instance)
         {
             ControllerContext = new ControllerContext
@@ -451,6 +629,24 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 HttpContext = ApplicantContext(sessionReference)
             }
         };
+
+    private static Mock<IUnitOfWork> TransactionalUnitOfWork()
+    {
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(item => item.ExecuteInStrategyAsync(
+                It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>()))
+            .Returns((Func<Task> operation, CancellationToken _) => operation());
+        unitOfWork.Setup(item => item.BeginTransactionAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        unitOfWork.Setup(item => item.CommitAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        unitOfWork.Setup(item => item.RollbackAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        return unitOfWork;
+    }
 
     private static DefaultHttpContext ApplicantContext(Guid sessionReference)
     {

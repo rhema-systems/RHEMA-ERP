@@ -56,6 +56,7 @@ describe('supplier applicant access client', () => {
     await service.requestChallenge({
       channel: 'Email',
       contact: 'supplier@example.com',
+      recaptchaToken: 'captcha-request',
     });
     await service.verifyAndIssue({
       channel: 'Email',
@@ -63,13 +64,24 @@ describe('supplier applicant access client', () => {
       otpCode: '123456',
       companyName: 'Supplier Ltd',
       registrationCategory: 'Goods',
+      recaptchaToken: 'captcha-verify',
     });
-    await service.startSession({ applicationToken: 'application-token' });
+    await service.startSession({
+      applicationToken: 'application-token',
+      recaptchaToken: 'captcha-session',
+    });
 
     expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
       expect.stringContaining('/verification-challenges'),
       expect.stringContaining('/verified-applications'),
       expect.stringContaining('/sessions'),
+    ]);
+    expect(fetch.mock.calls.map(([, init]) =>
+      JSON.parse(String(init?.body)) as { recaptchaToken: string }
+    )).toEqual([
+      expect.objectContaining({ recaptchaToken: 'captcha-request' }),
+      expect.objectContaining({ recaptchaToken: 'captcha-verify' }),
+      expect.objectContaining({ recaptchaToken: 'captcha-session' }),
     ]);
   });
 

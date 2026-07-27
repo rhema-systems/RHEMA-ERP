@@ -30,6 +30,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
     private readonly ICaptchaVerificationService _captcha;
     private readonly IProcurementSupplierApplicantJwtService _jwt;
     private readonly IControlledFileUploadService _controlledFiles;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SupplierApplicantAccessController> _logger;
 
     public SupplierApplicantAccessController(
@@ -43,6 +44,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         ICaptchaVerificationService captcha,
         IProcurementSupplierApplicantJwtService jwt,
         IControlledFileUploadService controlledFiles,
+        IUnitOfWork unitOfWork,
         ILogger<SupplierApplicantAccessController> logger)
     {
         _applicantAccess = applicantAccess;
@@ -55,6 +57,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         _captcha = captcha;
         _jwt = jwt;
         _controlledFiles = controlledFiles;
+        _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
@@ -421,16 +424,39 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                     code = "SUPPLIER_APPLICANT_DOCUMENT_NOT_FOUND",
                     message = "The registration document was not found."
                 });
-            await _registrations.DeleteDocumentAsync(
-                session.RegistrationId, documentId, session.SystemActorUserId);
-            if (document.FileUploadRecordId.HasValue)
+            await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
-                await _controlledFiles.DeleteAsync(
-                    session.TenantId,
-                    document.FileUploadRecordId.Value,
-                    session.SystemActorUserId,
-                    cancellationToken);
-            }
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    await _registrations.DeleteDocumentAsync(
+                        session.RegistrationId,
+                        documentId,
+                        session.SystemActorUserId);
+                    if (document.FileUploadRecordId.HasValue)
+                    {
+                        await _controlledFiles.DeleteAsync(
+                            session.TenantId,
+                            document.FileUploadRecordId.Value,
+                            session.SystemActorUserId,
+                            cancellationToken);
+                    }
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    try
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // CommitAsync already rolled back and released the
+                        // transaction after a persistence failure.
+                    }
+                    throw;
+                }
+            }, cancellationToken);
             return NoContent();
         }
         catch (Exception exception)

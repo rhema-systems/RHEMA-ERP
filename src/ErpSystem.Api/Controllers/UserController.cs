@@ -577,6 +577,10 @@ public partial class UserController : ControllerBase
             {
                 return NotFound("User not found");
             }
+            if (HasExpiredTemporaryCredential(user, DateTime.UtcNow))
+            {
+                return TemporaryCredentialExpired();
+            }
 
             // Verify current password
             var passwordHasher = new PasswordHasher<ApplicationUser>();
@@ -631,6 +635,10 @@ public partial class UserController : ControllerBase
 
             async Task ReplacePasswordAndActivateAsync(ApplicationUser target)
             {
+                if (HasExpiredTemporaryCredential(target, DateTime.UtcNow))
+                {
+                    throw new TemporaryCredentialExpiredException();
+                }
                 target.PasswordHash = passwordHasher.HashPassword(
                     target, request.NewPassword);
                 target.MustChangePassword = false;
@@ -694,11 +702,39 @@ public partial class UserController : ControllerBase
 
             return Ok(new { message = "Password changed successfully" });
         }
+        catch (TemporaryCredentialExpiredException)
+        {
+            return TemporaryCredentialExpired();
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error changing password");
             return StatusCode(500, "An error occurred while changing the password");
         }
+    }
+
+    private static bool HasExpiredTemporaryCredential(
+        ApplicationUser user,
+        DateTime nowUtc) =>
+        user.MustChangePassword &&
+        user.TemporaryPasswordExpiresAtUtc.HasValue &&
+        user.TemporaryPasswordExpiresAtUtc.Value <= nowUtc;
+
+    private ObjectResult TemporaryCredentialExpired()
+    {
+        _logger.LogWarning(
+            "Expired temporary credential rejected for user {UserId}",
+            _currentUserService.UserId);
+        return StatusCode(StatusCodes.Status410Gone, new
+        {
+            code = "TEMPORARY_CREDENTIAL_EXPIRED",
+            message =
+                "The temporary password has expired. Request a new temporary credential."
+        });
+    }
+
+    private sealed class TemporaryCredentialExpiredException : Exception
+    {
     }
 
     /// <summary>

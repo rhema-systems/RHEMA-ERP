@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,12 @@ import type {
   SupplierRegistrationCategory,
 } from '@/types/procurement-supplier-applicant-access';
 
+function formatFileSize(bytes: number) {
+  if (!bytes) return 'configured size';
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function SupplierApplicantPortalPage() {
   const router = useRouter();
   const [portal, setPortal] = useState<SupplierApplicantPortal | null>(null);
@@ -45,8 +51,12 @@ export default function SupplierApplicantPortalPage() {
   const [country, setCountry] = useState('Ghana');
   const [paymentMethodId, setPaymentMethodId] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
-  const [documentType, setDocumentType] = useState('');
+  const [evidenceRequirementCode, setEvidenceRequirementCode] = useState('');
+  const [classificationCode, setClassificationCode] = useState('');
+  const [issueDate, setIssueDate] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
 
   const hydrate = useCallback((value: SupplierApplicantPortal) => {
     setPortal(value);
@@ -54,6 +64,21 @@ export default function SupplierApplicantPortalPage() {
     setCategory(value.registrationCategory || 'Goods');
     setEmail(value.email || '');
     setPhone(value.phone || '');
+    setEvidenceRequirementCode((current) => {
+      const requirements = value.evidenceReadiness?.requirements || [];
+      if (requirements.some((requirement) => requirement.requirementCode === current)) {
+        return current;
+      }
+      return (
+        requirements.find(
+          (requirement) => requirement.isMandatory && !requirement.isSatisfied
+        )?.requirementCode ||
+        requirements.find((requirement) => !requirement.isSatisfied)
+          ?.requirementCode ||
+        requirements[0]?.requirementCode ||
+        ''
+      );
+    });
     try {
       const raw = JSON.parse(value.registrationData || '{}');
       const data =
@@ -122,6 +147,33 @@ export default function SupplierApplicantPortalPage() {
     ]
   );
 
+  const evidenceRequirements = portal?.evidenceReadiness?.requirements || [];
+  const selectedEvidenceRequirement = evidenceRequirements.find(
+    (requirement) => requirement.requirementCode === evidenceRequirementCode
+  );
+  const documentType =
+    selectedEvidenceRequirement?.documentType?.trim() ||
+    selectedEvidenceRequirement?.name?.trim() ||
+    '';
+  const requiresClassification =
+    selectedEvidenceRequirement?.kind === 'Classification' ||
+    selectedEvidenceRequirement?.kind === 'DocumentAndClassification';
+  const requiresExpiry =
+    selectedEvidenceRequirement?.validityMode === 'CurrentOnSubmission' ||
+    selectedEvidenceRequirement?.validityMode === 'MinimumRemainingDays';
+  const requirementFileLimit =
+    selectedEvidenceRequirement?.maxFileSizeBytes || 0;
+  const exceedsRequirementFileLimit =
+    file !== null && requirementFileLimit > 0 && file.size > requirementFileLimit;
+  const uploadReady =
+    Boolean(portal?.canEdit) &&
+    Boolean(file) &&
+    Boolean(selectedEvidenceRequirement) &&
+    Boolean(documentType) &&
+    (!requiresClassification || Boolean(classificationCode)) &&
+    (!requiresExpiry || Boolean(expiryDate)) &&
+    !exceedsRequirementFileLimit;
+
   const save = async () => {
     setBusy(true);
     try {
@@ -181,15 +233,31 @@ export default function SupplierApplicantPortalPage() {
   };
 
   const upload = async () => {
-    if (!file || !documentType) return;
+    if (!file || !selectedEvidenceRequirement || !uploadReady) return;
     setBusy(true);
     try {
       const form = new FormData();
       form.append('file', file);
       form.append('documentType', documentType);
+      form.append(
+        'evidenceRequirementCode',
+        selectedEvidenceRequirement.requirementCode
+      );
+      if (classificationCode) {
+        form.append('classificationCode', classificationCode);
+      }
+      if (issueDate) {
+        form.append('issueDate', issueDate);
+      }
+      if (expiryDate) {
+        form.append('expiryDate', expiryDate);
+      }
       await service.uploadDocument(form);
       setFile(null);
-      setDocumentType('');
+      setClassificationCode('');
+      setIssueDate('');
+      setExpiryDate('');
+      setFileInputKey((current) => current + 1);
       await load();
       toast.success('Document uploaded.');
     } catch (uploadError) {
@@ -349,20 +417,225 @@ export default function SupplierApplicantPortalPage() {
                 <CardTitle>Application evidence</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-4">
-                <div className="grid gap-3 rounded-lg border p-4 md:grid-cols-3">
-                  <Input
-                    placeholder="Document type"
-                    value={documentType}
-                    onChange={(event) => setDocumentType(event.target.value)}
-                  />
-                  <Input
-                    type="file"
-                    onChange={(event) => setFile(event.target.files?.[0] || null)}
-                  />
-                  <Button disabled={busy || !file || !documentType} onClick={upload}>
-                    Upload document
-                  </Button>
-                </div>
+                {evidenceRequirements.length ? (
+                  <>
+                    <div className="grid gap-3 rounded-lg border p-4 md:grid-cols-2">
+                      <div className="grid gap-2 md:col-span-2">
+                        <Label htmlFor="evidence-requirement">
+                          Evidence requirement
+                        </Label>
+                        <select
+                          id="evidence-requirement"
+                          className="h-10 rounded-md border bg-white px-3"
+                          value={evidenceRequirementCode}
+                          disabled={busy || !portal?.canEdit}
+                          onChange={(event) => {
+                            setEvidenceRequirementCode(event.target.value);
+                            setClassificationCode('');
+                            setIssueDate('');
+                            setExpiryDate('');
+                            setFile(null);
+                            setFileInputKey((current) => current + 1);
+                          }}
+                        >
+                          {evidenceRequirements.map((requirement) => (
+                            <option
+                              key={requirement.requirementCode}
+                              value={requirement.requirementCode}
+                            >
+                              {requirement.name}
+                              {requirement.isMandatory ? ' (required)' : ' (optional)'}
+                              {requirement.isSatisfied ? ' — supplied' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {selectedEvidenceRequirement && (
+                        <div className="grid gap-2 rounded-md bg-slate-50 p-3 text-sm md:col-span-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge
+                              variant={
+                                selectedEvidenceRequirement.isSatisfied
+                                  ? 'default'
+                                  : 'outline'
+                              }
+                            >
+                              {selectedEvidenceRequirement.isSatisfied
+                                ? 'Requirement satisfied'
+                                : 'Evidence needed'}
+                            </Badge>
+                            <span className="font-medium">
+                              {selectedEvidenceRequirement.requirementCode}
+                            </span>
+                            <span className="text-slate-500">
+                              {documentType}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-600">
+                            Maximum {formatFileSize(
+                              selectedEvidenceRequirement.maxFileSizeBytes
+                            )}
+                            {selectedEvidenceRequirement.allowedMimeTypes.length
+                              ? ` · ${selectedEvidenceRequirement.allowedMimeTypes.join(', ')}`
+                              : ''}
+                            {selectedEvidenceRequirement.validityMode ===
+                            'MinimumRemainingDays'
+                              ? ` · Must remain valid for at least ${selectedEvidenceRequirement.minimumRemainingDays || 0} days`
+                              : selectedEvidenceRequirement.validityMode ===
+                                  'CurrentOnSubmission'
+                                ? ' · Must be current on submission'
+                                : ''}
+                          </div>
+                          {selectedEvidenceRequirement.issues.length > 0 && (
+                            <div className="text-xs text-amber-700">
+                              {selectedEvidenceRequirement.issues.join('; ')}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {requiresClassification && selectedEvidenceRequirement && (
+                        <div className="grid gap-2">
+                          <Label htmlFor="evidence-classification">
+                            {selectedEvidenceRequirement.classificationScheme ||
+                              'Evidence'}{' '}
+                            classification
+                          </Label>
+                          {selectedEvidenceRequirement.allowedClassifications.length ? (
+                            <select
+                              id="evidence-classification"
+                              className="h-10 rounded-md border bg-white px-3"
+                              value={classificationCode}
+                              disabled={busy || !portal?.canEdit}
+                              onChange={(event) =>
+                                setClassificationCode(event.target.value)
+                              }
+                            >
+                              <option value="">Select classification</option>
+                              {selectedEvidenceRequirement.allowedClassifications.map(
+                                (classification) => (
+                                  <option key={classification} value={classification}>
+                                    {classification}
+                                  </option>
+                                )
+                              )}
+                            </select>
+                          ) : (
+                            <Input
+                              id="evidence-classification"
+                              value={classificationCode}
+                              disabled={busy || !portal?.canEdit}
+                              onChange={(event) =>
+                                setClassificationCode(event.target.value)
+                              }
+                            />
+                          )}
+                        </div>
+                      )}
+
+                      <div className="grid gap-2">
+                        <Label htmlFor="evidence-issue-date">Issue date</Label>
+                        <Input
+                          id="evidence-issue-date"
+                          type="date"
+                          value={issueDate}
+                          disabled={busy || !portal?.canEdit}
+                          onChange={(event) => setIssueDate(event.target.value)}
+                        />
+                      </div>
+
+                      {requiresExpiry && (
+                        <div className="grid gap-2">
+                          <Label htmlFor="evidence-expiry-date">
+                            Expiry date
+                          </Label>
+                          <Input
+                            id="evidence-expiry-date"
+                            type="date"
+                            value={expiryDate}
+                            disabled={busy || !portal?.canEdit}
+                            onChange={(event) => setExpiryDate(event.target.value)}
+                          />
+                        </div>
+                      )}
+
+                      <div className="grid gap-2 md:col-span-2">
+                        <Label htmlFor="evidence-file">Evidence file</Label>
+                        <Input
+                          key={fileInputKey}
+                          id="evidence-file"
+                          type="file"
+                          accept={
+                            selectedEvidenceRequirement?.allowedMimeTypes.join(',') ||
+                            undefined
+                          }
+                          disabled={
+                            busy ||
+                            !portal?.canEdit ||
+                            !selectedEvidenceRequirement
+                          }
+                          onChange={(event) =>
+                            setFile(event.target.files?.[0] || null)
+                          }
+                        />
+                        {exceedsRequirementFileLimit && (
+                          <span className="text-xs text-destructive">
+                            This file exceeds the requirement&apos;s{' '}
+                            {formatFileSize(
+                              selectedEvidenceRequirement?.maxFileSizeBytes || 0
+                            )}{' '}
+                            limit.
+                          </span>
+                        )}
+                      </div>
+
+                      <Button
+                        className="w-fit md:col-span-2"
+                        disabled={busy || !uploadReady}
+                        onClick={upload}
+                      >
+                        Upload evidence
+                      </Button>
+                    </div>
+
+                    <div className="grid gap-2">
+                      {evidenceRequirements.map((requirement) => (
+                        <div
+                          key={requirement.requirementCode}
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
+                        >
+                          <div>
+                            <div className="font-medium">{requirement.name}</div>
+                            <div className="text-xs text-slate-500">
+                              {requirement.requirementCode}
+                              {requirement.matchedDocumentName
+                                ? ` · ${requirement.matchedDocumentName}`
+                                : ''}
+                            </div>
+                          </div>
+                          <Badge
+                            variant={requirement.isSatisfied ? 'default' : 'outline'}
+                          >
+                            {requirement.isSatisfied
+                              ? 'Satisfied'
+                              : requirement.isMandatory
+                                ? 'Required'
+                                : 'Optional'}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <Alert className="border-amber-300 bg-amber-50">
+                    <AlertDescription>
+                      Evidence requirements are not available for the selected
+                      supplier category. Save the application category and refresh
+                      before uploading documents.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 {(portal?.documents || []).map((document) => (
                   <div
                     key={document.id}
@@ -375,6 +648,9 @@ export default function SupplierApplicantPortalPage() {
                         <div className="text-xs text-slate-500">
                           {document.documentType} ·{' '}
                           {Math.ceil(document.fileSize / 1024)} KB
+                          {document.evidenceRequirementCode
+                            ? ` · ${document.evidenceRequirementCode}`
+                            : ''}
                         </div>
                       </div>
                     </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,12 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { KeyRound, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  PublicCaptchaChallenge,
+  type PublicCaptchaChallengeHandle,
+} from '@/components/security/PublicCaptchaChallenge';
 import { supplierApplicantAccessService as service } from '@/services/procurement-supplier-applicant-access.service';
+import { settingsService } from '@/services/settings';
 import type {
   SupplierApplicantChannel,
   SupplierApplicantIssueResult,
@@ -41,21 +46,76 @@ export default function SupplierApplicationAccessPage() {
     useState<SupplierRegistrationCategory>('Goods');
   const [otpCode, setOtpCode] = useState('');
   const [applicationToken, setApplicationToken] = useState('');
+  const [captchaLoading, setCaptchaLoading] = useState(true);
+  const [captchaEnabled, setCaptchaEnabled] = useState(false);
+  const [captchaProvider, setCaptchaProvider] =
+    useState<'recaptcha' | 'hcaptcha'>('recaptcha');
+  const [recaptchaSiteKey, setRecaptchaSiteKey] = useState<string | null>(null);
+  const [hCaptchaSiteKey, setHCaptchaSiteKey] = useState<string | null>(null);
+  const [applyCaptchaToken, setApplyCaptchaToken] = useState<string | null>(null);
+  const [loginCaptchaToken, setLoginCaptchaToken] = useState<string | null>(null);
+  const applyCaptchaRef = useRef<PublicCaptchaChallengeHandle>(null);
+  const loginCaptchaRef = useRef<PublicCaptchaChallengeHandle>(null);
+
+  useEffect(() => {
+    let active = true;
+    settingsService.getPublicSecuritySettings()
+      .then((settings) => {
+        if (!active) return;
+        setCaptchaEnabled(Boolean(settings.captchaEnabled));
+        setCaptchaProvider(
+          settings.captchaProvider === 'hcaptcha' ? 'hcaptcha' : 'recaptcha'
+        );
+        setRecaptchaSiteKey(settings.recaptchaSiteKey ?? null);
+        setHCaptchaSiteKey(settings.hCaptchaSiteKey ?? null);
+      })
+      .finally(() => {
+        if (active) setCaptchaLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const resetApplyCaptcha = () => {
+    setApplyCaptchaToken(null);
+    applyCaptchaRef.current?.reset();
+  };
+
+  const resetLoginCaptcha = () => {
+    setLoginCaptchaToken(null);
+    loginCaptchaRef.current?.reset();
+  };
 
   const requestCode = async () => {
+    if (captchaLoading) return;
+    if (captchaEnabled && !applyCaptchaToken) {
+      toast.error('Complete the CAPTCHA verification before continuing.');
+      return;
+    }
     setBusy(true);
     try {
-      await service.requestChallenge({ channel, contact });
+      await service.requestChallenge({
+        channel,
+        contact,
+        recaptchaToken: applyCaptchaToken ?? undefined,
+      });
       setChallengeSent(true);
       toast.success('Verification code sent.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not send code.');
     } finally {
+      resetApplyCaptcha();
       setBusy(false);
     }
   };
 
   const verifyAndIssue = async () => {
+    if (captchaLoading) return;
+    if (captchaEnabled && !applyCaptchaToken) {
+      toast.error('Complete a fresh CAPTCHA verification before continuing.');
+      return;
+    }
     setBusy(true);
     try {
       const result = await service.verifyAndIssue({
@@ -64,6 +124,7 @@ export default function SupplierApplicationAccessPage() {
         otpCode,
         companyName,
         registrationCategory: category,
+        recaptchaToken: applyCaptchaToken ?? undefined,
       });
       setIssued(result);
       setApplicationToken(result.applicationToken);
@@ -73,14 +134,23 @@ export default function SupplierApplicationAccessPage() {
         error instanceof Error ? error.message : 'Verification could not be completed.'
       );
     } finally {
+      resetApplyCaptcha();
       setBusy(false);
     }
   };
 
   const login = async () => {
+    if (captchaLoading) return;
+    if (captchaEnabled && !loginCaptchaToken) {
+      toast.error('Complete the CAPTCHA verification before continuing.');
+      return;
+    }
     setBusy(true);
     try {
-      const session = await service.startSession({ applicationToken });
+      const session = await service.startSession({
+        applicationToken,
+        recaptchaToken: loginCaptchaToken ?? undefined,
+      });
       service.setSessionToken(session.sessionToken);
       router.push('/supplier-application/portal');
     } catch (error) {
@@ -88,6 +158,7 @@ export default function SupplierApplicationAccessPage() {
         error instanceof Error ? error.message : 'The application token was not accepted.'
       );
     } finally {
+      resetLoginCaptcha();
       setBusy(false);
     }
   };
@@ -140,8 +211,11 @@ export default function SupplierApplicationAccessPage() {
               <CardContent className="grid gap-5">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="grid gap-2">
-                    <Label className="text-slate-200">Verification channel</Label>
+                    <Label htmlFor="supplier-verification-channel" className="text-slate-200">
+                      Verification channel
+                    </Label>
                     <select
+                      id="supplier-verification-channel"
                       className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3"
                       value={channel}
                       onChange={(event) =>
@@ -153,10 +227,11 @@ export default function SupplierApplicationAccessPage() {
                     </select>
                   </div>
                   <div className="grid gap-2">
-                    <Label className="text-slate-200">
+                    <Label htmlFor="supplier-contact" className="text-slate-200">
                       {channel === 'Email' ? 'Email address' : 'Phone number'}
                     </Label>
                     <Input
+                      id="supplier-contact"
                       className="border-slate-700 bg-slate-950"
                       value={contact}
                       onChange={(event) => setContact(event.target.value)}
@@ -166,16 +241,22 @@ export default function SupplierApplicationAccessPage() {
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label className="text-slate-200">Company name</Label>
+                    <Label htmlFor="supplier-company-name" className="text-slate-200">
+                      Company name
+                    </Label>
                     <Input
+                      id="supplier-company-name"
                       className="border-slate-700 bg-slate-950"
                       value={companyName}
                       onChange={(event) => setCompanyName(event.target.value)}
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label className="text-slate-200">Registration category</Label>
+                    <Label htmlFor="supplier-registration-category" className="text-slate-200">
+                      Registration category
+                    </Label>
                     <select
+                      id="supplier-registration-category"
                       className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3"
                       value={category}
                       onChange={(event) =>
@@ -191,20 +272,43 @@ export default function SupplierApplicationAccessPage() {
                   </div>
                 </div>
 
+                {captchaLoading ? (
+                  <p className="text-sm text-slate-400">
+                    Loading the security challenge…
+                  </p>
+                ) : (
+                  <PublicCaptchaChallenge
+                    ref={applyCaptchaRef}
+                    id="supplier-apply-captcha"
+                    enabled={captchaEnabled}
+                    provider={captchaProvider}
+                    recaptchaSiteKey={recaptchaSiteKey}
+                    hCaptchaSiteKey={hCaptchaSiteKey}
+                    onChange={setApplyCaptchaToken}
+                  />
+                )}
+
                 {!challengeSent ? (
                   <Button
                     className="w-fit bg-emerald-600 hover:bg-emerald-500"
-                    disabled={busy || !contact || !companyName}
+                    disabled={
+                      busy ||
+                      captchaLoading ||
+                      !contact ||
+                      !companyName ||
+                      (captchaEnabled && !applyCaptchaToken)
+                    }
                     onClick={requestCode}
                   >
                     Send verification code
                   </Button>
                 ) : (
                   <div className="grid gap-3 rounded-lg border border-slate-700 p-4">
-                    <Label className="text-slate-200">
+                    <Label htmlFor="supplier-verification-code" className="text-slate-200">
                       Six-digit verification code
                     </Label>
                     <Input
+                      id="supplier-verification-code"
                       className="max-w-xs border-slate-700 bg-slate-950 tracking-[0.35em]"
                       value={otpCode}
                       maxLength={6}
@@ -212,7 +316,12 @@ export default function SupplierApplicationAccessPage() {
                     />
                     <Button
                       className="w-fit bg-emerald-600 hover:bg-emerald-500"
-                      disabled={busy || otpCode.length !== 6}
+                      disabled={
+                        busy ||
+                        captchaLoading ||
+                        otpCode.length !== 6 ||
+                        (captchaEnabled && !applyCaptchaToken)
+                      }
                       onClick={verifyAndIssue}
                     >
                       Verify and issue token
@@ -259,17 +368,40 @@ export default function SupplierApplicationAccessPage() {
               </CardHeader>
               <CardContent className="grid gap-4">
                 <div className="grid gap-2">
-                  <Label className="text-slate-200">Application token</Label>
+                  <Label htmlFor="supplier-application-token" className="text-slate-200">
+                    Application token
+                  </Label>
                   <Input
+                    id="supplier-application-token"
                     className="border-slate-700 bg-slate-950"
                     value={applicationToken}
                     onChange={(event) => setApplicationToken(event.target.value)}
                     autoComplete="off"
                   />
                 </div>
+                {captchaLoading ? (
+                  <p className="text-sm text-slate-400">
+                    Loading the security challenge…
+                  </p>
+                ) : (
+                  <PublicCaptchaChallenge
+                    ref={loginCaptchaRef}
+                    id="supplier-login-captcha"
+                    enabled={captchaEnabled}
+                    provider={captchaProvider}
+                    recaptchaSiteKey={recaptchaSiteKey}
+                    hCaptchaSiteKey={hCaptchaSiteKey}
+                    onChange={setLoginCaptchaToken}
+                  />
+                )}
                 <Button
                   className="w-fit bg-sky-600 hover:bg-sky-500"
-                  disabled={busy || !applicationToken}
+                  disabled={
+                    busy ||
+                    captchaLoading ||
+                    !applicationToken ||
+                    (captchaEnabled && !loginCaptchaToken)
+                  }
                   onClick={login}
                 >
                   Open application

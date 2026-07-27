@@ -1,3 +1,5 @@
+import type { SupplierEvidenceReadiness } from './procurement-supplier-evidence-pack';
+
 export type SupplierApplicantChannel = 'Email' | 'Sms';
 export type SupplierRegistrationCategory = 'Goods' | 'Works' | 'Services';
 
@@ -29,6 +31,10 @@ export interface SupplierApplicantDocument {
   documentName: string;
   fileSize: number;
   mimeType?: string;
+  evidenceRequirementCode?: string;
+  classificationCode?: string;
+  issuedAtUtc?: string;
+  expiresAtUtc?: string;
   isVerified: boolean;
   isRejected: boolean;
   rejectionReason?: string;
@@ -66,16 +72,7 @@ export interface SupplierApplicantPortal {
   paymentOnly: boolean;
   documents: SupplierApplicantDocument[];
   statusHistory: SupplierApplicantStatusHistory[];
-  evidenceReadiness?: {
-    ready: boolean;
-    blockingReasons: string[];
-    requirements?: Array<{
-      requirementCode: string;
-      name: string;
-      satisfied: boolean;
-      blockingReason?: string;
-    }>;
-  };
+  evidenceReadiness?: SupplierEvidenceReadiness;
 }
 
 export interface SupplierApplicantPaymentMethod {
