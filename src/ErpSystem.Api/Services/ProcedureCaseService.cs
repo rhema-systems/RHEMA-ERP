@@ -466,6 +466,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         return ToDetailDto((await LoadCaseAsync(id, asTracking: false))!);
     }
 
+    public Task SyncFromWorkflowRuntimeAsync(Guid procedureCaseId, Guid workflowInstanceId, Guid actorUserId, string? notes = null)
+        => SyncCaseFromWorkflowRuntimeAsync(procedureCaseId, workflowInstanceId, actorUserId, notes);
+
     public async Task<ProcedureCaseDetailDto?> UploadDocumentAsync(
         Guid id,
         Guid documentId,

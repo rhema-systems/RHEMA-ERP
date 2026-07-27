@@ -124,8 +124,7 @@ export function CentralDocumentViewerDialog({
   onGenerateRendition,
   onDownload,
 }: CentralDocumentViewerDialogProps) {
-  void enableAnnotations;
-  const annotationsEnabled = false;
+  const annotationsEnabled = enableAnnotations;
   const [localFile, setLocalFile] =
     React.useState<CentralDocumentViewerFile | null>(file);
   const [previewObjectUrl, setPreviewObjectUrl] = React.useState<string | null>(
@@ -136,6 +135,7 @@ export function CentralDocumentViewerDialog({
   const [downloadingFormat, setDownloadingFormat] = React.useState<
     'pdf' | 'word' | null
   >(null);
+  const [openingSource, setOpeningSource] = React.useState(false);
   const [generateError, setGenerateError] = React.useState<string | null>(null);
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
 
@@ -183,14 +183,14 @@ export function CentralDocumentViewerDialog({
     setIsLoadingPreview(true);
     const loadPreview = async () => {
       try {
-        const blob = currentFile?.versionId
+        const blob = secureApiUrl
+          ? await rawApiService.downloadBlob(toApiEndpoint(secureApiUrl))
+          : currentFile?.versionId
           ? await documentManagementService.downloadVersionFile(
               currentFile.documentRecordId!,
               currentFile.versionId,
               'pdf'
             )
-          : secureApiUrl
-          ? await rawApiService.downloadBlob(toApiEndpoint(secureApiUrl))
           : await documentManagementService.downloadRecordContent(
               currentFile!.documentRecordId!
             );
@@ -267,6 +267,41 @@ export function CentralDocumentViewerDialog({
       );
     } finally {
       setDownloadingFormat(null);
+    }
+  };
+
+  const handleOpenSourceFile = async () => {
+    if (!localFile || !view.originalUrl) return;
+
+    const sourceUrl = view.originalUrl;
+    setOpeningSource(true);
+    setDownloadError(null);
+    try {
+      if (sourceUrl.startsWith('/api/')) {
+        const blob = await rawApiService.downloadBlob(toApiEndpoint(sourceUrl));
+        const objectUrl = URL.createObjectURL(blob);
+        const opened = window.open(objectUrl, '_blank', 'noopener,noreferrer');
+        if (!opened) {
+          const link = document.createElement('a');
+          link.href = objectUrl;
+          link.download = localFile.fileName || `${title}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+        }
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+        return;
+      }
+
+      window.open(sourceUrl, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      setDownloadError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to open the source file.'
+      );
+    } finally {
+      setOpeningSource(false);
     }
   };
 
@@ -384,17 +419,20 @@ export function CentralDocumentViewerDialog({
                     {generateError}
                   </p>
                 ) : null}
-                {view.originalUrl &&
-                !view.originalUrl.startsWith('/api/document-management/') ? (
-                  <Button asChild variant="outline" className="mt-4">
-                    <a
-                      href={view.originalUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <ExternalLink className="mr-2 h-4 w-4" />
-                      Open source file
-                    </a>
+                {view.originalUrl ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-4"
+                    disabled={openingSource}
+                    onClick={() => void handleOpenSourceFile()}
+                  >
+                    <ExternalLink
+                      className={`mr-2 h-4 w-4 ${
+                        openingSource ? 'animate-spin' : ''
+                      }`}
+                    />
+                    Open source file
                   </Button>
                 ) : null}
               </div>

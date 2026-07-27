@@ -8435,6 +8435,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.ToTable("StampDutyPayments");
             entity.Property(item => item.AmountPaid).HasPrecision(18, 2);
+            entity.HasIndex(item => new { item.TenantId, item.AccountsPayableInvoiceId });
+            entity.HasIndex(item => new { item.TenantId, item.AccountsPayablePaymentId });
         });
 
         builder.Entity<LandRegistration>().ToTable("LandRegistrations");

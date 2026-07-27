@@ -13,4 +13,5 @@ public interface IProcedureCaseService
     Task<ProcedureCaseDetailDto?> UploadDocumentAsync(Guid id, Guid documentId, Stream fileStream, string fileName, string contentType, long fileSize, string? notes);
     Task<ProcedureCaseDocumentContentDto?> GetDocumentContentAsync(Guid id, Guid documentId);
     Task<ProcedureCaseDetailDto?> CompleteCurrentStageAsync(Guid id, CompleteProcedureCaseStageRequest request);
+    Task SyncFromWorkflowRuntimeAsync(Guid procedureCaseId, Guid workflowInstanceId, Guid actorUserId, string? notes = null);
 }

@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
+using ErpSystem.Core.Models;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -164,13 +165,27 @@ public sealed class EstateManagedAssetsController : ControllerBase
             return NotFound(new { success = false, message = "Estate asset was not found." });
         }
 
-        var folder = $"estate/managed-assets/{id:N}";
         await using var stream = file.OpenReadStream();
-        var filePath = await _fileStorageService.UploadFileAsync(stream, file.FileName, folder);
+        // PR review: managed-asset evidence and listing images are served through authorized endpoints, not static uploads.
+        var upload = await _fileStorageService.UploadFileAsync(new FileUploadRequest
+        {
+            FileStream = stream,
+            FileName = file.FileName,
+            ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+            FileSize = file.Length,
+            Category = "estate-managed-asset-documents",
+            TenantId = tenantId.ToString(),
+            OverwriteExisting = false
+        });
+        if (!upload.Success)
+        {
+            return BadRequest(new { success = false, message = upload.ErrorMessage ?? "Estate asset file upload failed." });
+        }
+
         var document = await _managedAssetService.RegisterDocumentAsync(id, new RegisterEstateManagedAssetDocumentDto
         {
             FileName = file.FileName,
-            FilePath = filePath,
+            FilePath = upload.FilePath,
             DocumentType = documentType,
             DocumentName = documentName,
             ContentType = file.ContentType,

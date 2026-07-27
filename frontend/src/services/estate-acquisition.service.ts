@@ -199,16 +199,16 @@ export const ACQUISITION_STAGES: LandAcquisitionStageDefinition[] = [
   stage(1, 'Suitability Approval', 'suitability-approval', '/LandParcel/SuitabilityApprovalView', 'Review planning fit, access, environmental constraints, and acquisition suitability.', 'Approve Suitability', 'Reject Suitability', 'Estate Manager', 12),
   stage(2, 'Cadastral Survey', 'cadastral-survey', '/LandParcel/CadastralSurvey', 'Capture cadastral survey plan, coordinates, demarcation details, and survey documents.', 'Submit for Survey Verification', 'Return Survey', 'Survey Officer', 24),
   stage(3, 'Cadastral Survey Verification', 'cadastral-verification', '/LandParcel/CadastralSurveyVerifcation', 'Verify cadastral match, boundary consistency, encumbrances, and survey overlap checks.', 'Approve Survey Verification', 'Reject Survey Verification', 'Senior Surveyor', 16),
-  stage(4, 'Ownership Classification', 'ownership-classification', '/LandParcel/OwnershipClassification', 'Classify ownership as stool, family, private, state, allodial, or mixed interest.', 'Submit Ownership Classification', 'Return Classification', 'Legal Officer', 8),
+  stage(4, 'Ownership Classification', 'ownership-classification', '/LandParcel/OwnershipClassification', 'Classify ownership as stool, family, private, state, allodial, or mixed interest.', 'Submit for Ownership Verification', 'Return Classification', 'Legal Officer', 8),
   stage(5, 'Ownership Verification', 'ownership-verification', '/LandParcel/OwnershipVerification', 'Verify title documents, identity, searches, authority to sell, and ownership history.', 'Approve Ownership Verification', 'Reject Ownership Verification', 'Legal Manager', 24, 'POST', 5),
-  stage(6, 'Agreement Negotiation', 'agreement-negotiation', '/LandParcel/AgreementNegotiation', 'Record offers, counteroffers, negotiated value, conditions, and negotiation notes.', 'Approve Negotiation', 'Return Negotiation', 'Acquisition Committee', 32, 'POST', 6),
+  stage(6, 'Agreement Negotiation', 'agreement-negotiation', '/LandParcel/AgreementNegotiation', 'Record offers, counteroffers, negotiated value, conditions, and negotiation notes.', 'Submit for Agreement Approval', 'Return Negotiation', 'Acquisition Committee', 32, 'POST', 6),
   stage(7, 'Agreement Approval', 'agreement-approval', '/LandParcel/AgreementApproval', 'Approve negotiated agreement terms before land instrument execution.', 'Approve Agreement', 'Reject Agreement', 'Executive Approver', 16, 'POST', 7),
   stage(8, 'Land Instrument Execution', 'execution', '/LandParcel/Execution', 'Capture execution details for the conveyance, assignment, lease, or acquisition instrument.', 'Submit Executed Instrument', 'Return Execution', 'Legal Officer', 16, 'GET', 8),
   stage(9, 'Statutory Consent', 'statutory-consent', '/LandParcel/StatutoryConsent', 'Prepare and submit statutory consent application to the appropriate authority.', 'Submit Statutory Consent', 'Return Consent Application', 'Lands Commission Liaison', 24, 'GET', 9),
   stage(10, 'Statutory Consent Approval', 'statutory-consent-approval', '/LandParcel/StatutoryConsentApproval', 'Review statutory consent approval reference, conditions, approval date, and documents.', 'Approve Statutory Consent', 'Reject Statutory Consent', 'Legal Manager', 12, 'GET', 10),
   stage(11, 'Stamp Duty Assessment', 'stamp-duty-assessment', '/LandParcel/StampDutyAssessment', 'Record valuation, assessed value, stamp duty amount, and assessment reference.', 'Submit Stamp Duty Assessment', 'Return Assessment', 'Finance Officer', 12, 'GET', 11),
   stage(12, 'Stamp Duty Approval', 'stamp-duty-approval', '/LandParcel/StampDutyApproval', 'Approve the stamp duty assessment before payment is processed.', 'Approve Stamp Duty Assessment', 'Reject Stamp Duty Assessment', 'Finance Manager', 8, 'GET', 12),
-  stage(13, 'Stamp Duty Payment', 'stamp-duty-payment', '/LandParcel/StampDutyPaymentPage', 'Capture payment receipt, payment date, amount paid, and payment evidence.', 'Submit Stamp Duty Payment', 'Return Payment', 'Accounts Payable', 8, 'GET', 13),
+  stage(13, 'Stamp Duty Payment', 'stamp-duty-payment', '/LandParcel/StampDutyPaymentPage', 'Track the linked Accounts Payable request and continue after its payment is processed.', 'Confirm Accounts Payable Payment', 'Return Payment', 'Accounts Payable', 8, 'GET', 13),
   stage(14, 'Registration', 'registration', '/LandParcel/RegistrationStage', 'Capture registry, registration number, volume, folio, instrument date, and archive details.', 'Submit Registration', 'Return Registration', 'Land Registry Officer', 24, 'GET', 14),
   stage(15, 'Asset Creation', 'asset-creation', '/LandParcel/AssetCreation', 'Create the estate asset, assign asset code, GL account, capitalization value, and custodian.', 'Create Estate Asset', 'Return Asset Creation', 'Fixed Asset Officer', 12, 'GET', 15),
 ];
@@ -403,22 +403,7 @@ const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequirement> = {
       tf('isAccepted', 'Offer Accepted', WorkflowFieldType.Boolean),
       tf('agreementGenerated', 'Agreement Generated', WorkflowFieldType.Boolean),
       tf('negotiationNotes', 'Negotiation Notes', WorkflowFieldType.TextArea),
-    ],
-  },
-  7: {
-    documents: [
-      { key: 'approved-agreement-draft', name: 'Approved Agreement Draft', type: 'Agreement' },
-      { key: 'finance-review-memo', name: 'Finance Review Memo', type: 'Finance' },
-      { key: 'board-approval', name: 'Board / Management Approval', type: 'Approval' },
-    ],
-    checklist: [
-      { name: 'Legal review complete', description: 'Legal review has been completed and root of title is recorded.' },
-      { name: 'Finance and approval references complete', description: 'Finance review, payment schedule, and approval reference are recorded.' },
-    ],
-    fields: [
       tf('agreementDate', 'Agreement Date', WorkflowFieldType.Date),
-      tf('isFamilyLand', 'Family Land', WorkflowFieldType.Boolean),
-      tf('isStoolLand', 'Stool Land', WorkflowFieldType.Boolean),
       tf('rootOfTitle', 'Root Of Title', WorkflowFieldType.TextArea),
       tf('specialConditions', 'Special Conditions', WorkflowFieldType.TextArea),
       tf('grantorName', 'Grantor / Seller Name'),
@@ -435,6 +420,19 @@ const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequirement> = {
       tf('agreementWitness1Address', 'Agreement Witness 1 Address', WorkflowFieldType.TextArea),
       tf('agreementWitness2Name', 'Agreement Witness 2 Name'),
       tf('agreementWitness2Address', 'Agreement Witness 2 Address', WorkflowFieldType.TextArea),
+    ],
+  },
+  7: {
+    documents: [
+      { key: 'approved-agreement-draft', name: 'Approved Agreement Draft', type: 'Agreement' },
+      { key: 'finance-review-memo', name: 'Finance Review Memo', type: 'Finance' },
+      { key: 'board-approval', name: 'Board / Management Approval', type: 'Approval' },
+    ],
+    checklist: [
+      { name: 'Legal review complete', description: 'Legal review has been completed and root of title is recorded.' },
+      { name: 'Finance and approval references complete', description: 'Finance review, payment schedule, and approval reference are recorded.' },
+    ],
+    fields: [
       tf('legalReviewComplete', 'Legal Review Complete', WorkflowFieldType.Boolean),
       tf('financeReviewComplete', 'Finance Review Complete', WorkflowFieldType.Boolean),
       tf('boardApprovalReference', 'Board Approval Reference'),
@@ -532,10 +530,14 @@ const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequirement> = {
       { key: 'stamped-instrument-copy', name: 'Stamped Instrument Copy', type: 'Instrument' },
     ],
     checklist: [
-      { name: 'Payment captured', description: 'Receipt number, payment reference, date, amount, and method are recorded.' },
+      { name: 'Accounts Payable payment processed', description: 'The linked AP invoice has been fully paid through Accounts Payable.' },
       { name: 'Payment evidence attached', description: 'Receipt and payment evidence are attached before registration.' },
     ],
     fields: [
+      tf('accountsPayableInvoiceNumber', 'Accounts Payable Invoice'),
+      tf('accountsPayableInvoiceStatus', 'Invoice Status'),
+      tf('accountsPayablePaymentNumber', 'Accounts Payable Payment'),
+      tf('accountsPayablePaymentStatus', 'Payment Status'),
       tf('receiptNumber', 'Receipt Number'),
       tf('paymentReference', 'Payment Reference'),
       tf('paymentDate', 'Payment Date', WorkflowFieldType.Date),
@@ -688,6 +690,21 @@ export class EstateAcquisitionService {
   async getWorkspace(acquisitionId: string, procedureId: number): Promise<WorkspaceData> {
     const response = await apiService.get<MaybeApiResponse<WorkspaceData>>(
       `/estate/land-acquisitions/${acquisitionId}/workspace/${procedureId}`
+    );
+    const data = response.data ?? (response as unknown as WorkspaceData);
+    return {
+      acquisitionId: data.acquisitionId,
+      procedureId: data.procedureId,
+      values: data.values || {},
+      stageInputsComplete: data.stageInputsComplete === true,
+      missingInputs: data.missingInputs || [],
+    };
+  }
+
+  async ensureAccountsPayableRequest(acquisitionId: string): Promise<WorkspaceData> {
+    const response = await apiService.post<MaybeApiResponse<WorkspaceData>>(
+      `/estate/land-acquisitions/${acquisitionId}/accounts-payable-request`,
+      {}
     );
     const data = response.data ?? (response as unknown as WorkspaceData);
     return {

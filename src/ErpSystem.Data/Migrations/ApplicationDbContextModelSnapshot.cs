@@ -6345,6 +6345,15 @@ namespace ErpSystem.Data.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<Guid?>("AccountsPayableInvoiceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AccountsPayablePaymentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AccountsPayableSupplierId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -6406,6 +6415,10 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique();
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("TenantId", "AccountsPayableInvoiceId");
+
+                    b.HasIndex("TenantId", "AccountsPayablePaymentId");
 
                     b.ToTable("StampDutyPayments", (string)null);
                 });

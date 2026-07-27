@@ -14,6 +14,7 @@ import {
   Clock3,
   Download,
   Eye,
+  ExternalLink,
   FileArchive,
   FileClock,
   FileCheck2,
@@ -104,6 +105,7 @@ interface WorkspaceField {
   type: FieldType;
   options?: string[];
   span?: 1 | 2;
+  readOnly?: boolean;
 }
 
 interface WorkspaceSection {
@@ -164,13 +166,15 @@ const field = (
   label: string,
   type: FieldType = 'text',
   options?: string[],
-  span: 1 | 2 = 1
+  span: 1 | 2 = 1,
+  readOnly = false
 ): WorkspaceField => ({
   key,
   label,
   type,
   options,
   span,
+  readOnly,
 });
 
 const SUITABILITY_CAPTURE_FIELDS: WorkspaceField[] = [
@@ -359,7 +363,6 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     ]),
     field('ownershipStartDate', 'Ownership Start Date', 'date'),
     field('ownershipEndDate', 'Ownership End Date', 'date'),
-    field('percentage', 'Ownership Percentage'),
     field('isCurrentOwner', 'Current Owner', 'check'),
     field('identificationType', 'Identification Type', 'select', [
       'Ghana Card',
@@ -451,11 +454,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('isAccepted', 'Offer Accepted', 'check'),
     field('agreementGenerated', 'Agreement Generated', 'check'),
     field('negotiationNotes', 'Negotiation Notes', 'textarea', undefined, 2),
-  ],
-  'agreement-approval': [
     field('agreementDate', 'Agreement Date', 'date'),
-    field('isFamilyLand', 'Family Land', 'check'),
-    field('isStoolLand', 'Stool Land', 'check'),
     field('rootOfTitle', 'Root Of Title', 'textarea', undefined, 2),
     field('specialConditions', 'Special Conditions', 'textarea', undefined, 2),
     field('partyDetails', 'Party Details', 'textarea'),
@@ -495,6 +494,8 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
       'Agreement Witness 2 Address',
       'textarea'
     ),
+  ],
+  'agreement-approval': [
     field('legalReviewComplete', 'Legal Review Complete', 'check'),
     field('financeReviewComplete', 'Finance Review Complete', 'check'),
     field('boardApprovalReference', 'Board Approval Reference'),
@@ -569,19 +570,17 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('approvalNotes', 'Approval Notes', 'textarea', undefined, 2),
   ],
   'stamp-duty-payment': [
-    field('documentName', 'Payment Document Name'),
-    field('receiptNumber', 'Receipt Number'),
-    field('paymentReference', 'Payment Reference'),
-    field('paymentDate', 'Payment Date', 'date'),
-    field('amountPaid', 'Amount Paid'),
-    field('paymentMethod', 'Payment Method', 'select', [
-      'Bank Transfer',
-      'Cheque',
-      'Cash',
-      'Mobile Money',
-    ]),
-    field('isPaid', 'Paid', 'check'),
-    field('paymentNotes', 'Payment Notes', 'textarea', undefined, 2),
+    field('accountsPayableInvoiceNumber', 'AP Invoice', 'text', undefined, 1, true),
+    field('accountsPayableInvoiceStatus', 'Invoice Status', 'text', undefined, 1, true),
+    field('accountsPayablePaymentNumber', 'AP Payment', 'text', undefined, 1, true),
+    field('accountsPayablePaymentStatus', 'Payment Status', 'text', undefined, 1, true),
+    field('receiptNumber', 'Receipt Number', 'text', undefined, 1, true),
+    field('paymentReference', 'Payment Reference', 'text', undefined, 1, true),
+    field('paymentDate', 'Payment Date', 'date', undefined, 1, true),
+    field('amountPaid', 'Amount Paid', 'text', undefined, 1, true),
+    field('paymentMethod', 'Payment Method', 'text', undefined, 1, true),
+    field('isPaid', 'Paid', 'check', undefined, 1, true),
+    field('paymentNotes', 'Payment Notes', 'textarea', undefined, 2, true),
   ],
   registration: [
     field('registryOffice', 'Registry Office'),
@@ -781,7 +780,6 @@ const WORKSPACE_SECTIONS: Partial<
         'tenureType',
         'ownershipStartDate',
         'ownershipEndDate',
-        'percentage',
         'interestHeld',
         'classificationRisk',
         'dateGapReason',
@@ -875,8 +873,9 @@ const WORKSPACE_SECTIONS: Partial<
     {
       title: 'Agreement preparation',
       description:
-        'Capture agreement date parts, acceptance, generated status, and negotiation notes.',
+        'Capture agreement date, acceptance, generated status, and negotiation notes.',
       keys: [
+        'agreementDate',
         'agreementDay',
         'agreementMonth',
         'agreementYear',
@@ -885,16 +884,11 @@ const WORKSPACE_SECTIONS: Partial<
         'negotiationNotes',
       ],
     },
-  ],
-  'agreement-approval': [
     {
       title: 'Agreement terms',
       description:
-        'Review root of title, parties, payment schedule, special conditions, and witnesses.',
+        'Capture root of title, parties, payment schedule, special conditions, and witnesses.',
       keys: [
-        'agreementDate',
-        'isFamilyLand',
-        'isStoolLand',
         'rootOfTitle',
         'specialConditions',
         'partyDetails',
@@ -903,9 +897,9 @@ const WORKSPACE_SECTIONS: Partial<
       ],
     },
     {
-      title: 'Approval controls',
+      title: 'Agreement parties and payment',
       description:
-        'Capture the parties, payment, witnesses, and approval controls for the agreement.',
+        'Record the grantor, grantee, consideration, payment terms, and witnesses for the draft agreement.',
       keys: [
         'grantorName',
         'grantorAddress',
@@ -921,6 +915,15 @@ const WORKSPACE_SECTIONS: Partial<
         'agreementWitness1Address',
         'agreementWitness2Name',
         'agreementWitness2Address',
+      ],
+    },
+  ],
+  'agreement-approval': [
+    {
+      title: 'Approval controls',
+      description:
+        'Capture legal review, finance review, board reference, and approval conditions before approval.',
+      keys: [
         'legalReviewComplete',
         'financeReviewComplete',
         'boardApprovalReference',
@@ -1007,11 +1010,21 @@ const WORKSPACE_SECTIONS: Partial<
   ],
   'stamp-duty-payment': [
     {
-      title: 'Payment evidence',
+      title: 'Accounts Payable status',
       description:
-        'Capture payment receipt, reference, date, amount, method, and notes.',
+        'Payment details are synchronized from the linked Accounts Payable invoice and payment.',
       keys: [
-        'documentName',
+        'accountsPayableInvoiceNumber',
+        'accountsPayableInvoiceStatus',
+        'accountsPayablePaymentNumber',
+        'accountsPayablePaymentStatus',
+      ],
+    },
+    {
+      title: 'Processed payment',
+      description:
+        'Receipt and transaction values become available after Accounts Payable processes the payment.',
+      keys: [
         'receiptNumber',
         'paymentReference',
         'paymentDate',
@@ -1119,6 +1132,13 @@ function defaultsFor(
 }
 
 function missingWorkspaceInputs(kind: AcquisitionWorkspaceKind, values: WorkspaceValues) {
+  if (kind === 'stamp-duty-payment') {
+    const invoiceId = `${values.accountsPayableInvoiceId ?? ''}`.trim();
+    const paid = values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true';
+    if (!invoiceId) return [field('accountsPayableRequest', 'Accounts Payable Request')];
+    return paid ? [] : [field('accountsPayablePayment', 'Accounts Payable Payment')];
+  }
+
   const missing = WORKSPACE_FIELDS[kind].filter((config) => {
     const value = values[config.key];
     return typeof value === 'boolean' ? false : !`${value ?? ''}`.trim();
@@ -1133,6 +1153,7 @@ function missingWorkspaceInputs(kind: AcquisitionWorkspaceKind, values: Workspac
 
   if (kind === 'ownership-classification') {
     let conditional = [...missing];
+    const pastOwners = parsePastOwners(values.pastOwnersJson);
     if (values.isCurrentOwner === true) {
       conditional = conditional.filter(
         (config) =>
@@ -1143,7 +1164,6 @@ function missingWorkspaceInputs(kind: AcquisitionWorkspaceKind, values: Workspac
             'identificationType',
             'identificationNumber',
             'ownershipEndDate',
-            'dateGapReason',
           ].includes(config.key)
       );
 
@@ -1160,10 +1180,112 @@ function missingWorkspaceInputs(kind: AcquisitionWorkspaceKind, values: Workspac
     ) {
       conditional.push(field('ownershipEndDate', 'Ownership End Date', 'date'));
     }
+    if (!hasOwnershipDateGap(values)) {
+      conditional = conditional.filter(
+        (config) => config.key !== 'dateGapReason'
+      );
+    }
+    conditional = conditional.filter(
+      (config) => !WITNESS_OATH_FIELD_KEYS.has(config.key)
+    );
+    if (!hasCompleteWitnessOath(values)) {
+      conditional.push(field('witnessOath', 'Witness Oath'));
+    }
+    if (hasIncompletePastOwners(pastOwners)) {
+      conditional.push(field('pastOwnersJson', 'Past Owners'));
+    }
     return conditional;
   }
 
   return missing;
+}
+
+const WITNESS_OATH_FIELD_KEYS = new Set([
+  'witnessSwornOath1',
+  'witnessOathSwornBefore1',
+  'witnessOathSwornDate1',
+  'witnessSwornOath2',
+  'witnessOathSwornBefore2',
+  'witnessOathSwornDate2',
+]);
+
+function requiredMarker(config: WorkspaceField) {
+  return WITNESS_OATH_FIELD_KEYS.has(config.key) ? null : (
+    <span className="text-destructive">*</span>
+  );
+}
+
+function hasCompleteWitnessOath(values: WorkspaceValues) {
+  return [1, 2].some((witnessNumber) => {
+    const sworn = values[`witnessSwornOath${witnessNumber}`] === true;
+    const swornBefore = `${values[`witnessOathSwornBefore${witnessNumber}`] ?? ''}`.trim();
+    const swornDate = `${values[`witnessOathSwornDate${witnessNumber}`] ?? ''}`.trim();
+    return sworn && swornBefore && swornDate;
+  });
+}
+
+function workspaceDate(value: string | boolean | undefined): Date | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function hasOwnershipDateGap(values: WorkspaceValues) {
+  const pastOwners = parsePastOwners(values.pastOwnersJson);
+  const latestPastOwnerEnd = [...pastOwners]
+    .map((owner) => workspaceDate(owner.ownershipEndDate))
+    .filter((date): date is Date => Boolean(date))
+    .sort((left, right) => right.getTime() - left.getTime())[0];
+  const previousEnd =
+    latestPastOwnerEnd ||
+    workspaceDate(values.previousOwnerEndDate) ||
+    workspaceDate(values.previousOwnershipEndDate) ||
+    workspaceDate(values.priorOwnerEndDate) ||
+    workspaceDate(values.precedingOwnerEndDate);
+  const nextStart = workspaceDate(values.ownershipStartDate);
+
+  if (!previousEnd || !nextStart) return false;
+
+  const previousEndDay = Date.UTC(
+    previousEnd.getUTCFullYear(),
+    previousEnd.getUTCMonth(),
+    previousEnd.getUTCDate()
+  );
+  const nextStartDay = Date.UTC(
+    nextStart.getUTCFullYear(),
+    nextStart.getUTCMonth(),
+    nextStart.getUTCDate()
+  );
+
+  return nextStartDay > previousEndDay;
+}
+
+function hasPastOwnerDateGap(owners: PastOwnerDraft[], index: number) {
+  if (index <= 0) return false;
+
+  const previousEnd = workspaceDate(owners[index - 1]?.ownershipEndDate);
+  const nextStart = workspaceDate(owners[index]?.ownershipStartDate);
+  if (!previousEnd || !nextStart) return false;
+
+  return nextStart.getTime() > previousEnd.getTime();
+}
+
+function hasIncompletePastOwners(owners: PastOwnerDraft[]) {
+  return owners.some((owner, index) => {
+    const missingRequired =
+      !owner.ownerName.trim() ||
+      !owner.contactNumber.trim() ||
+      !owner.address.trim() ||
+      !owner.identificationType.trim() ||
+      !owner.identificationNumber.trim() ||
+      !owner.ownershipStartDate ||
+      !owner.ownershipEndDate;
+
+    return (
+      missingRequired ||
+      (hasPastOwnerDateGap(owners, index) && !owner.dateGapReason.trim())
+    );
+  });
 }
 
 function inputLabels(kind: AcquisitionWorkspaceKind, keys: string[]) {
@@ -1172,6 +1294,7 @@ function inputLabels(kind: AcquisitionWorkspaceKind, keys: string[]) {
   );
   labels.set('vendorId', 'Linked Vendor / Owner');
   labels.set('stageDocuments', 'Stage Documents');
+  labels.set('witnessOath', 'Witness Oath');
   return keys.map((key) => labels.get(key) || key);
 }
 
@@ -1181,18 +1304,40 @@ const normalizeDocumentValue = (value?: string) =>
 const normalizeDocumentNameWithoutExtension = (value?: string) =>
   normalizeDocumentValue(value).replace(/\.[^/.\\]+$/, '');
 
+const normalizedDocumentCandidates = (...values: Array<string | undefined>) =>
+  values
+    .flatMap((value) => [
+      normalizeDocumentValue(value),
+      normalizeDocumentNameWithoutExtension(value),
+    ])
+    .filter(Boolean);
+
 const matchesRequirement = (
-  document: Pick<LandAcquisitionDocument, 'documentName' | 'documentType'>,
+  document: Pick<LandAcquisitionDocument, 'documentName' | 'documentType'> & {
+    fileName?: string;
+  },
   requirement: LandAcquisitionStageDocumentRequirement
-) =>
-  [
-    normalizeDocumentValue(document.documentName),
-    normalizeDocumentNameWithoutExtension(document.documentName),
-  ].includes(normalizeDocumentValue(requirement.documentName)) ||
-  (!!document.documentType &&
+) => {
+  const requirementNames = normalizedDocumentCandidates(
+    requirement.documentName,
+    requirement.requirementKey
+  );
+  const documentNames = normalizedDocumentCandidates(
+    document.documentName,
+    document.fileName
+  );
+
+  if (requirementNames.length > 0) {
+    return requirementNames.some((name) => documentNames.includes(name));
+  }
+
+  return (
+    !!document.documentType &&
     !!requirement.documentType &&
     normalizeDocumentValue(document.documentType) ===
-      normalizeDocumentValue(requirement.documentType));
+      normalizeDocumentValue(requirement.documentType)
+  );
+};
 
 const BUSINESS_PARTNER_CURRENT_OWNER_FIELDS = new Set([
   'contactNumber',
@@ -1200,8 +1345,60 @@ const BUSINESS_PARTNER_CURRENT_OWNER_FIELDS = new Set([
   'identificationType',
   'identificationNumber',
   'ownershipEndDate',
-  'dateGapReason',
 ]);
+
+interface PastOwnerDraft {
+  ownerName: string;
+  contactNumber: string;
+  address: string;
+  identificationType: string;
+  identificationNumber: string;
+  ownershipStartDate: string;
+  ownershipEndDate: string;
+  dateGapReason: string;
+}
+
+const emptyPastOwner = (): PastOwnerDraft => ({
+  ownerName: '',
+  contactNumber: '',
+  address: '',
+  identificationType: 'Ghana Card',
+  identificationNumber: '',
+  ownershipStartDate: '',
+  ownershipEndDate: '',
+  dateGapReason: '',
+});
+
+function parsePastOwners(value: string | boolean | undefined): PastOwnerDraft[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.map((item) => ({
+      ...emptyPastOwner(),
+      ...item,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function serializePastOwners(owners: PastOwnerDraft[]) {
+  const cleaned = owners.map((owner) => ({
+    ownerName: owner.ownerName.trim(),
+    contactNumber: owner.contactNumber.trim(),
+    address: owner.address.trim(),
+    identificationType: owner.identificationType.trim(),
+    identificationNumber: owner.identificationNumber.trim(),
+    ownershipStartDate: owner.ownershipStartDate,
+    ownershipEndDate: owner.ownershipEndDate,
+    dateGapReason: owner.dateGapReason.trim(),
+  }));
+
+  return cleaned.length ? JSON.stringify(cleaned) : '';
+}
 
 function completedWorkflowActionLabel(action: string) {
   if (action.startsWith('Submit for ')) {
@@ -1376,11 +1573,26 @@ export default function LandAcquisitionPage() {
       return allItems.find((item) => item.id === selectedItemId) || null;
     return selectedStage?.items[0] || allItems[0] || null;
   }, [allItems, selectedItemId, selectedStage]);
+  const selectedItemStage =
+    (selectedItem &&
+      stages.find((stage) => stage.order === selectedItem.stageOrder)) ||
+    selectedStage;
 
   React.useEffect(() => {
     if (!selectedItem && selectedStage?.items[0])
       setSelectedItemId(selectedStage.items[0].id);
   }, [selectedItem, selectedStage]);
+
+  React.useEffect(() => {
+    if (
+      selectedItem &&
+      selectedItemStage &&
+      selectedStage &&
+      selectedItem.stageOrder !== selectedStage.order
+    ) {
+      setSelectedStageId(selectedItemStage.id);
+    }
+  }, [selectedItem, selectedItemStage, selectedStage]);
 
   const filteredItems = React.useMemo(() => {
     const items = selectedStage?.items || [];
@@ -1417,9 +1629,17 @@ export default function LandAcquisitionPage() {
     'TenantAdmin',
     'WorkflowAdmin',
   ]);
+  const selectedItemIsAssignedApprovalStage = Boolean(
+    selectedItem &&
+      selectedItemStage &&
+      selectedItem.stageOrder === selectedItemStage.order &&
+      ACQUISITION_APPROVAL_STAGE_IDS.has(selectedItemStage.id) &&
+      selectedItemStage.items.some((item) => item.id === selectedItem.id)
+  );
   const canEditSelectedStage =
     canManageWorkflows ||
-    (selectedStage ? hasAnyRole([selectedStage.requiredRole]) : false);
+    (selectedItemStage ? hasAnyRole([selectedItemStage.requiredRole]) : false) ||
+    selectedItemIsAssignedApprovalStage;
   const canCreateAcquisition = stages.some((stage) => stage.order === 0);
   const requestedAcquisitionId = searchParams.get('acquisitionId');
   const requestedStage = searchParams.get('stage');
@@ -1586,13 +1806,17 @@ export default function LandAcquisitionPage() {
     pendingDocuments: PendingAcquisitionDocument[] = []
   ) => {
     const item = draftItem || selectedItem;
-    if (!item || !selectedStage) return;
+    const stage =
+      draftItem || !selectedItem
+        ? selectedStage
+        : selectedItemStage || selectedStage;
+    if (!item || !stage) return;
     try {
       setSavingWorkspace(true);
       const result = await estateAcquisitionService.saveWorkspace({
         acquisitionId: item.id || undefined,
-        procedureId: selectedStage.id,
-        workspaceKind: selectedStage.workspaceKind,
+        procedureId: stage.id,
+        workspaceKind: stage.workspaceKind,
         values: workspaceValues,
       });
       if (pendingDocuments.length > 0) {
@@ -1600,7 +1824,7 @@ export default function LandAcquisitionPage() {
           pendingDocuments.map((document) =>
             estateAcquisitionService.uploadDocument(
               result.acquisitionId,
-              selectedStage.id,
+              stage.id,
               document.file,
               document.documentType,
               document.documentName
@@ -1773,24 +1997,24 @@ export default function LandAcquisitionPage() {
         </section>
 
         <section className="rounded-lg border bg-card text-card-foreground shadow-sm">
-          {selectedItem && selectedStage ? (
+          {selectedItem && selectedItemStage ? (
             <AcquisitionDetail
               item={selectedItem}
-              stage={selectedStage}
+              stage={selectedItemStage}
               onOpenWorkspace={() => openWorkspace(selectedItem)}
               onPrimary={(comments) =>
-                runAction(selectedItem, selectedStage, 'primary', comments)
+                runAction(selectedItem, selectedItemStage, 'primary', comments)
               }
               onReject={(comments) =>
-                runAction(selectedItem, selectedStage, 'reject', comments)
+                runAction(selectedItem, selectedItemStage, 'reject', comments)
               }
               onCompleteTask={(stepInstanceId, comments) =>
                 completeWorkflowTask(selectedItem, stepInstanceId, comments)
               }
               onReload={reload}
               documentRequirements={
-                stageDocumentRequirements[selectedStage.id] ||
-                stageDocumentRequirements[selectedStage.order] ||
+                stageDocumentRequirements[selectedItemStage.id] ||
+                stageDocumentRequirements[selectedItemStage.order] ||
                 []
               }
               onOpenWorkflows={() =>
@@ -1808,7 +2032,7 @@ export default function LandAcquisitionPage() {
         </section>
       </div>
 
-      {(draftItem || selectedItem) && selectedStage && (
+      {(draftItem || selectedItem) && (draftItem ? selectedStage : selectedItemStage) && (
         <WorkspaceDialog
           open={workspaceOpen}
           onOpenChange={(open) => {
@@ -1816,10 +2040,14 @@ export default function LandAcquisitionPage() {
             if (!open) setDraftItem(null);
           }}
           item={(draftItem || selectedItem) as LandAcquisitionItem}
-          stage={selectedStage}
+          stage={(draftItem ? selectedStage : selectedItemStage) as LandAcquisitionStage}
           documentRequirements={
-            stageDocumentRequirements[selectedStage.id] ||
-            stageDocumentRequirements[selectedStage.order] ||
+            stageDocumentRequirements[
+              ((draftItem ? selectedStage : selectedItemStage) as LandAcquisitionStage).id
+            ] ||
+            stageDocumentRequirements[
+              ((draftItem ? selectedStage : selectedItemStage) as LandAcquisitionStage).order
+            ] ||
             []
           }
           values={workspaceValues}
@@ -2528,6 +2756,232 @@ function CoordinateComparisonPanel({
   );
 }
 
+function PastOwnersPanel({
+  owners,
+  disabled,
+  onChange,
+}: {
+  owners: PastOwnerDraft[];
+  disabled: boolean;
+  onChange: (owners: PastOwnerDraft[]) => void;
+}) {
+  const updateOwner = (
+    index: number,
+    patch: Partial<PastOwnerDraft>
+  ) => {
+    onChange(
+      owners.map((owner, row) =>
+        row === index ? { ...owner, ...patch } : owner
+      )
+    );
+  };
+
+  const addOwner = () => onChange([...owners, emptyPastOwner()]);
+  const removeOwner = (index: number) =>
+    onChange(owners.filter((_, row) => row !== index));
+
+  return (
+    <section className="rounded-lg border bg-card p-4">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">
+            Ownership History / Past Owners
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Add previous owners in chronological order. Gap reason is required
+            when one owner&apos;s start date is later than the previous
+            owner&apos;s end date.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={addOwner}
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          Add Past Owner
+        </Button>
+      </div>
+
+      {owners.length === 0 ? (
+        <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+          No past owners added yet.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {owners.map((owner, index) => {
+            const gapRequired = hasPastOwnerDateGap(owners, index);
+
+            return (
+              <div key={index} className="rounded-md border p-4">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <h4 className="text-sm font-semibold text-foreground">
+                    Past Owner {index + 1}
+                  </h4>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => removeOwner(index)}
+                  >
+                    <Ban className="mr-2 h-4 w-4" />
+                    Remove
+                  </Button>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>
+                      Owner Name <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      value={owner.ownerName}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        updateOwner(index, { ownerName: event.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>
+                      Contact Number <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      value={owner.contactNumber}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        updateOwner(index, {
+                          contactNumber: event.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>
+                      Address <span className="text-destructive">*</span>
+                    </Label>
+                    <Textarea
+                      value={owner.address}
+                      disabled={disabled}
+                      rows={2}
+                      onChange={(event) =>
+                        updateOwner(index, { address: event.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>
+                      Identification Type{' '}
+                      <span className="text-destructive">*</span>
+                    </Label>
+                    <Select
+                      value={owner.identificationType || 'Ghana Card'}
+                      disabled={disabled}
+                      onValueChange={(value) =>
+                        updateOwner(index, { identificationType: value })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[
+                          'Ghana Card',
+                          'Passport',
+                          'Voter ID',
+                          'Driver License',
+                          'Other',
+                        ].map((option) => (
+                          <SelectItem key={option} value={option}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>
+                      Identification Number{' '}
+                      <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      value={owner.identificationNumber}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        updateOwner(index, {
+                          identificationNumber: event.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>
+                      Ownership Start Date{' '}
+                      <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      type="date"
+                      value={owner.ownershipStartDate}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        updateOwner(index, {
+                          ownershipStartDate: event.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>
+                      Ownership End Date{' '}
+                      <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      type="date"
+                      value={owner.ownershipEndDate}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        updateOwner(index, {
+                          ownershipEndDate: event.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>
+                      Date Gap Reason{' '}
+                      {gapRequired && (
+                        <span className="text-destructive">*</span>
+                      )}
+                    </Label>
+                    <Textarea
+                      value={owner.dateGapReason}
+                      disabled={disabled}
+                      rows={2}
+                      onChange={(event) =>
+                        updateOwner(index, {
+                          dateGapReason: event.target.value,
+                        })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {gapRequired
+                        ? 'Required because this start date is later than the previous owner end date.'
+                        : 'Required only when this owner starts after the previous owner ended.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function WorkspaceDialog({
   open,
   onOpenChange,
@@ -2546,13 +3000,14 @@ function WorkspaceDialog({
   stage: LandAcquisitionStage;
   documentRequirements: LandAcquisitionStageDocumentRequirement[];
   values: WorkspaceValues;
-  onChange: (values: WorkspaceValues) => void;
+  onChange: React.Dispatch<React.SetStateAction<WorkspaceValues>>;
   onSave: (pendingDocuments?: PendingAcquisitionDocument[]) => Promise<void>;
   saving: boolean;
   canEdit: boolean;
 }) {
+  const router = useRouter();
   const setValue = (key: string, value: string | boolean) =>
-    onChange({ ...values, [key]: value });
+    onChange((current) => ({ ...current, [key]: value }));
   const sections = workspaceSectionsFor(stage.workspaceKind);
   const missingInputs = missingWorkspaceInputs(stage.workspaceKind, values);
   const [documents, setDocuments] = React.useState<LandAcquisitionDocument[]>(
@@ -2566,6 +3021,7 @@ function WorkspaceDialog({
   const [vendors, setVendors] = React.useState<BusinessPartnerDto[]>([]);
   const [vendorsLoading, setVendorsLoading] = React.useState(false);
   const [vendorsError, setVendorsError] = React.useState<string | null>(null);
+  const [syncingPayable, setSyncingPayable] = React.useState(false);
   const [preview, setPreview] = React.useState<{
     url: string;
     name: string;
@@ -2574,10 +3030,75 @@ function WorkspaceDialog({
     React.useState<WorkspaceValues>({});
   const [classificationComparisonValues, setClassificationComparisonValues] =
     React.useState<WorkspaceValues>({});
-  const assignmentMessage = `You are not assigned to ${stage.title}. Required role: ${stage.requiredRole}.`;
+  const assignmentMessage = ACQUISITION_APPROVAL_STAGE_IDS.has(stage.id)
+    ? `You are not assigned to ${stage.title}. Required role: ${stage.requiredRole} or the active workflow assignee.`
+    : `You are not assigned to ${stage.title}. Required role: ${stage.requiredRole}.`;
+  const accountsPayableInvoiceId = `${values.accountsPayableInvoiceId || ''}`.trim();
+  const accountsPayableSupplierId = `${values.accountsPayableSupplierId || ''}`.trim();
+  const accountsPayablePaymentId = `${values.accountsPayablePaymentId || ''}`.trim();
+  const accountsPayablePaid =
+    Boolean(accountsPayableInvoiceId) &&
+    (values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true');
+
+  const refreshAccountsPayableStatus = async () => {
+    if (!item.id) return;
+    try {
+      setSyncingPayable(true);
+      const workspace = await estateAcquisitionService.getWorkspace(item.id, stage.id);
+      onChange(workspace.values);
+      toast.success(
+        workspace.values.isPaid === true
+          ? 'Accounts Payable payment synchronized.'
+          : 'Accounts Payable status refreshed.'
+      );
+    } catch (error: any) {
+      toast.error(error?.message || 'Unable to refresh Accounts Payable status.');
+    } finally {
+      setSyncingPayable(false);
+    }
+  };
+
+  const createAccountsPayableRequest = async () => {
+    if (!item.id || !canEdit) return;
+    try {
+      setSyncingPayable(true);
+      const workspace =
+        await estateAcquisitionService.ensureAccountsPayableRequest(item.id);
+      onChange(workspace.values);
+      toast.success('Accounts Payable request created.');
+    } catch (error: any) {
+      toast.error(error?.message || 'Unable to create the Accounts Payable request.');
+    } finally {
+      setSyncingPayable(false);
+    }
+  };
+
+  const openAccountsPayable = () => {
+    if (accountsPayablePaymentId) {
+      router.push(`/finance/ap/payments/${accountsPayablePaymentId}`);
+      return;
+    }
+
+    if (!accountsPayableInvoiceId || !accountsPayableSupplierId) return;
+    const params = new URLSearchParams({
+      supplierId: accountsPayableSupplierId,
+      invoiceId: accountsPayableInvoiceId,
+      amount: `${values.amountDue || ''}`,
+      referenceNumber: item.projectReference,
+      description: `Stamp duty payment for ${item.projectReference}`,
+    });
+    router.push(`/finance/ap/payments/create?${params.toString()}`);
+  };
 
   React.useEffect(() => {
-    if (!open || stage.workspaceKind !== 'parcel-identification') return;
+    if (
+      !open ||
+      !['parcel-identification', 'ownership-classification'].includes(
+        stage.workspaceKind
+      )
+    ) {
+      return;
+    }
 
     let cancelled = false;
     const loadVendors = async () => {
@@ -2658,9 +3179,11 @@ function WorkspaceDialog({
     if (
       !open ||
       !item.id ||
-      !['ownership-classification', 'ownership-verification'].includes(
-        stage.workspaceKind
-      )
+      ![
+        'cadastral-verification',
+        'ownership-classification',
+        'ownership-verification',
+      ].includes(stage.workspaceKind)
     ) {
       return;
     }
@@ -2822,9 +3345,16 @@ function WorkspaceDialog({
                 </p>
               </div>
             )}
-            {(stage.workspaceKind === 'cadastral-survey' ||
-              stage.workspaceKind === 'cadastral-verification') && (
+            {stage.workspaceKind === 'cadastral-survey' && (
               <CadastralMapPanel values={values} onChange={onChange} />
+            )}
+            {stage.workspaceKind === 'cadastral-verification' && (
+              <CadastralMapPanel
+                values={cadastralComparisonValues}
+                readOnly
+                title="Cadastral Survey Boundary"
+                description="Review the saved beacon coordinates captured during the Cadastral Survey stage."
+              />
             )}
             {stage.workspaceKind === 'ownership-classification' && (
               <CoordinateComparisonPanel
@@ -2847,6 +3377,84 @@ function WorkspaceDialog({
                   classificationValues={classificationComparisonValues}
                 />
               </>
+            )}
+            {stage.workspaceKind === 'ownership-classification' && (
+              <PastOwnersPanel
+                owners={parsePastOwners(values.pastOwnersJson)}
+                disabled={!canEdit}
+                onChange={(owners) =>
+                  setValue('pastOwnersJson', serializePastOwners(owners))
+                }
+              />
+            )}
+            {stage.workspaceKind === 'stamp-duty-payment' && (
+              <section className="rounded-lg border bg-card p-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold text-foreground">
+                        Accounts Payable request
+                      </h3>
+                      <Badge variant={accountsPayablePaid ? 'secondary' : 'outline'}>
+                        {accountsPayablePaid
+                          ? 'Paid'
+                          : accountsPayableInvoiceId
+                            ? `${values.accountsPayablePaymentStatus || 'Pending payment'}`
+                            : 'Not linked'}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {accountsPayableInvoiceId
+                        ? `Invoice ${values.accountsPayableInvoiceNumber || accountsPayableInvoiceId} is the payment source for this acquisition.`
+                        : 'Create the payable from the approved stamp duty assessment before processing payment.'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {accountsPayableInvoiceId ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={openAccountsPayable}
+                        disabled={syncingPayable}
+                      >
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        {accountsPayablePaymentId
+                          ? 'View AP Payment'
+                          : 'Process in Accounts Payable'}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void createAccountsPayableRequest()}
+                        disabled={syncingPayable || !canEdit}
+                        title={!canEdit ? assignmentMessage : undefined}
+                      >
+                        {syncingPayable ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Plus className="mr-2 h-4 w-4" />
+                        )}
+                        Create AP Request
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void refreshAccountsPayableStatus()}
+                      disabled={syncingPayable}
+                    >
+                      {syncingPayable ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      Refresh Status
+                    </Button>
+                  </div>
+                </div>
+              </section>
             )}
             <section className="rounded-lg border bg-card p-4">
               <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -3172,11 +3780,11 @@ function WorkspaceDialog({
                             const vendor = vendors.find(
                               (candidate) => candidate.id === vendorId
                             );
-                            onChange({
-                              ...values,
+                            onChange((current) => ({
+                              ...current,
                               vendorId,
                               vendorName: vendor?.partnerName || '',
-                            });
+                            }));
                           }}
                         >
                           <SelectTrigger>
@@ -3215,15 +3823,75 @@ function WorkspaceDialog({
                       <div key={config.key} className="space-y-2">
                         <Label>
                           {values.isCurrentOwner === true
-                            ? 'Linked Current Owner'
+                            ? 'Business Partner / Current Owner'
                             : 'Past Owner Name'}{' '}
                           <span className="text-destructive">*</span>
                         </Label>
                         {values.isCurrentOwner === true ? (
-                          <div className="rounded-md border bg-muted px-3 py-2 text-sm text-foreground">
-                            {`${values.vendorName || values.ownerName || ''}`.trim() ||
-                              'No vendor was selected during Parcel Identification.'}
-                          </div>
+                          <>
+                            <Select
+                              value={`${values.vendorId || ''}`}
+                              disabled={vendorsLoading || !canEdit}
+                              onValueChange={(vendorId) => {
+                                const vendor = vendors.find(
+                                  (candidate) => candidate.id === vendorId
+                                );
+                                onChange((current) => ({
+                                  ...current,
+                                  vendorId,
+                                  vendorName: vendor?.partnerName || '',
+                                  ownerName: vendor?.partnerName || '',
+                                  contactNumber:
+                                    vendor?.phone ||
+                                    `${current.contactNumber || ''}`,
+                                  address:
+                                    vendor?.physicalAddress ||
+                                    `${current.address || ''}`,
+                                  identificationType: '',
+                                  identificationNumber: '',
+                                  ownershipEndDate: '',
+                                  dateGapReason: '',
+                                }));
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue
+                                  placeholder={
+                                    vendorsLoading
+                                      ? 'Loading business partners...'
+                                      : 'Select business partner'
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {vendors.map((vendor) => (
+                                  <SelectItem key={vendor.id} value={vendor.id}>
+                                    {vendor.partnerName} ({vendor.partnerCode})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {vendorsError && (
+                              <p className="text-xs text-destructive">
+                                {vendorsError}
+                              </p>
+                            )}
+                            {!vendorsLoading &&
+                              !vendorsError &&
+                              vendors.length === 0 && (
+                                <p className="text-xs text-muted-foreground">
+                                  No active approved business partners are
+                                  available for current-owner classification.
+                                </p>
+                              )}
+                            {`${values.vendorName || values.ownerName || ''}`.trim() && (
+                              <p className="text-xs text-muted-foreground">
+                                Owner details and identity are sourced from the
+                                selected Business Partner and are not required
+                                again in this stage.
+                              </p>
+                            )}
+                          </>
                         ) : values.isCurrentOwner === false ? (
                           <Input
                             value={`${values.ownerName || ''}`}
@@ -3257,26 +3925,69 @@ function WorkspaceDialog({
                             : 'Sourced from Business Partner record'}
                         </div>
                       </div>
+                    ) : stage.workspaceKind === 'ownership-classification' &&
+                      config.key === 'dateGapReason' ? (
+                      <div key={config.key} className="space-y-2 md:col-span-2">
+                        <Label>
+                          Date Gap Reason{' '}
+                          {hasOwnershipDateGap(values) && (
+                            <span className="text-destructive">*</span>
+                          )}
+                        </Label>
+                        <Textarea
+                          value={`${values.dateGapReason || ''}`}
+                          disabled={!canEdit}
+                          onChange={(event) =>
+                            setValue('dateGapReason', event.target.value)
+                          }
+                          rows={4}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Required only when the previous owner&apos;s end date
+                          and this owner&apos;s start date leave a timeline gap.
+                        </p>
+                      </div>
                     ) : (
                       <WorkspaceControl
                         key={config.key}
                         config={config}
                         value={values[config.key]}
-                        disabled={!canEdit}
+                        disabled={!canEdit || config.readOnly}
                         onChange={(value) => {
-                          if (!canEdit) return;
+                          if (!canEdit || config.readOnly) return;
                           if (config.key === 'isCurrentOwner') {
                             const currentOwner = value === true;
-                            onChange({
-                              ...values,
+                            onChange((current) => ({
+                              ...current,
                               isCurrentOwner: currentOwner,
                               ownerName: currentOwner
-                                ? `${values.vendorName || ''}`
+                                ? `${current.vendorName || ''}`
                                 : '',
+                              vendorId: currentOwner
+                                ? `${current.vendorId || ''}`
+                                : '',
+                              vendorName: currentOwner
+                                ? `${current.vendorName || ''}`
+                                : '',
+                              contactNumber: currentOwner
+                                ? `${current.contactNumber || ''}`
+                                : '',
+                              address: currentOwner
+                                ? `${current.address || ''}`
+                                : '',
+                              identificationType: currentOwner
+                                ? ''
+                                : `${current.identificationType || ''}`,
+                              identificationNumber: currentOwner
+                                ? ''
+                                : `${current.identificationNumber || ''}`,
                               ownershipEndDate: currentOwner
                                 ? ''
-                                : `${values.ownershipEndDate || ''}`,
-                            });
+                                : `${current.ownershipEndDate || ''}`,
+                              dateGapReason: currentOwner
+                                ? ''
+                                : `${current.dateGapReason || ''}`,
+                            }));
                             return;
                           }
                           setValue(config.key, value);
@@ -3312,18 +4023,32 @@ function WorkspaceDialog({
             <Ban className="mr-2 h-4 w-4" />
             Close
           </Button>
-          <Button
-            onClick={() => onSave(pendingDocuments)}
-            disabled={saving || !canEdit}
-            title={!canEdit ? assignmentMessage : undefined}
-          >
-            {saving ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="mr-2 h-4 w-4" />
-            )}
-            Save Workspace
-          </Button>
+          {stage.workspaceKind === 'stamp-duty-payment' ? (
+            <Button
+              onClick={() => void refreshAccountsPayableStatus()}
+              disabled={syncingPayable}
+            >
+              {syncingPayable ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh Payment Status
+            </Button>
+          ) : (
+            <Button
+              onClick={() => onSave(pendingDocuments)}
+              disabled={saving || !canEdit}
+              title={!canEdit ? assignmentMessage : undefined}
+            >
+              {saving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              Save Workspace
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -3348,7 +4073,7 @@ function WorkspaceControl({
       <label className="flex items-center gap-3 rounded-md border bg-card p-3 text-sm font-medium text-foreground">
         <div className="min-w-0 flex-1">
           <Label>
-            {config.label} <span className="text-destructive">*</span>
+            {config.label} {requiredMarker(config)}
           </Label>
         </div>
         <Select
@@ -3372,7 +4097,7 @@ function WorkspaceControl({
     return (
       <div className={className}>
         <Label>
-          {config.label} <span className="text-destructive">*</span>
+          {config.label} {requiredMarker(config)}
         </Label>
         <Textarea
           value={`${value || ''}`}
@@ -3388,7 +4113,7 @@ function WorkspaceControl({
     return (
       <div className={className}>
         <Label>
-          {config.label} <span className="text-destructive">*</span>
+          {config.label} {requiredMarker(config)}
         </Label>
         <Select
           value={`${value || ''}`}
@@ -3413,7 +4138,7 @@ function WorkspaceControl({
   return (
     <div className={className}>
       <Label>
-        {config.label} <span className="text-destructive">*</span>
+        {config.label} {requiredMarker(config)}
       </Label>
       <Input
         type={config.type === 'date' ? 'date' : 'text'}

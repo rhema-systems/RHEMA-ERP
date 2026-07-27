@@ -168,6 +168,8 @@ export default function ExternalEstateDocumentsPage() {
         file={
           selectedDocument
             ? {
+                documentRecordId: selectedDocument.documentRecordId,
+                versionId: selectedDocument.versionId,
                 title: selectedDocument.title,
                 fileName: selectedDocument.fileName,
                 repositoryPath: selectedDocument.repositoryPath,

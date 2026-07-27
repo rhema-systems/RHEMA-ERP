@@ -11,6 +11,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Core.Services.Workflow;
@@ -51,6 +52,7 @@ public class WorkflowController : ControllerBase
     private readonly IFileStorageService _fileStorageService;
     private readonly ICurrentUserService _currentUserService;
     private readonly IProcurementRequisitionBudgetControlService _requisitionBudgetControlService;
+    private readonly IProcedureCaseService _procedureCaseService;
     private readonly ILogger<WorkflowController> _logger;
 
     public WorkflowController(
@@ -74,6 +76,7 @@ public class WorkflowController : ControllerBase
         IFileStorageService fileStorageService,
         ICurrentUserService currentUserService,
         IProcurementRequisitionBudgetControlService requisitionBudgetControlService,
+        IProcedureCaseService procedureCaseService,
         ILogger<WorkflowController> logger)
     {
         _workflowEngine = workflowEngine;
@@ -96,6 +99,7 @@ public class WorkflowController : ControllerBase
         _fileStorageService = fileStorageService;
         _currentUserService = currentUserService;
         _requisitionBudgetControlService = requisitionBudgetControlService;
+        _procedureCaseService = procedureCaseService;
         _logger = logger;
     }
 
@@ -2544,6 +2548,25 @@ public class WorkflowController : ControllerBase
             var entityType = instance?.EntityType;
             if (instance == null || entityType == null)
             {
+                return;
+            }
+
+            // PR review: generic workflow approvals must resync module-owned procedure cases after approver actions.
+            var procedureCaseId = await _db.ProcedureCases
+                .AsNoTracking()
+                .Where(item => item.TenantId == instance.TenantId
+                    && item.Id == instance.EntityId
+                    && item.WorkflowInstanceId == instance.Id
+                    && !item.IsDeleted)
+                .Select(item => (Guid?)item.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (procedureCaseId.HasValue)
+            {
+                await _procedureCaseService.SyncFromWorkflowRuntimeAsync(
+                    procedureCaseId.Value,
+                    instance.Id,
+                    actorUserId,
+                    request.Comments);
                 return;
             }
 

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import {
+  Annotation,
   BookmarkView,
   Inject,
   LinkAnnotation,
@@ -26,7 +27,6 @@ export default function CentralDocumentPdfViewer({
   fileName,
   enableAnnotations = false,
 }: CentralDocumentPdfViewerProps) {
-  void enableAnnotations;
   const viewerId = React.useMemo(
     () => `central-dms-pdf-${Math.random().toString(36).slice(2)}`,
     []
@@ -51,13 +51,13 @@ export default function CentralDocumentPdfViewer({
           enableThumbnail
           enableTextSearch
           enableTextSelection
-          enableAnnotation={false}
-          enableAnnotationToolbar={false}
-          enableTextMarkupAnnotation={false}
-          enableShapeAnnotation={false}
-          enableStampAnnotations={false}
-          enableStickyNotesAnnotation={false}
-          enableInkAnnotation={false}
+          enableAnnotation={enableAnnotations}
+          enableAnnotationToolbar={enableAnnotations}
+          enableTextMarkupAnnotation={enableAnnotations}
+          enableShapeAnnotation={enableAnnotations}
+          enableStampAnnotations={enableAnnotations}
+          enableStickyNotesAnnotation={enableAnnotations}
+          enableInkAnnotation={enableAnnotations}
           style={{ display: 'block', height: '100%', width: '100%' }}
         >
           <Inject
@@ -66,6 +66,7 @@ export default function CentralDocumentPdfViewer({
               Magnification,
               Navigation,
               LinkAnnotation,
+              Annotation,
               BookmarkView,
               ThumbnailView,
               Print,

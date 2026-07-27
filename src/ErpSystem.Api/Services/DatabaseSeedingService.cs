@@ -7098,6 +7098,11 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write"
                 },
+                ["Accounts Payable"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.AP.Payments.Process"
+                },
                 ["Accounts Receivable Officer"] = new[]
                 {
                     "Finance.Read",

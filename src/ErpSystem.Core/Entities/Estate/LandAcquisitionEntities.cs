@@ -402,6 +402,10 @@ public class StampDutyPayment : TenantEntity
     public Guid LandAcquisitionId { get; set; }
     public LandAcquisition LandAcquisition { get; set; } = null!;
 
+    public Guid? AccountsPayableSupplierId { get; set; }
+    public Guid? AccountsPayableInvoiceId { get; set; }
+    public Guid? AccountsPayablePaymentId { get; set; }
+
     [MaxLength(120)]
     public string? ReceiptNumber { get; set; }
 
