@@ -3,6 +3,7 @@ using ErpSystem.Api.Services.Notifications;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Procedures;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
@@ -811,7 +812,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                     index,
                     step.Name,
                     step.RequiredRole,
-                    step.RequiredRole ?? ExtractAssignedRole(step.AssignmentConfiguration) ?? step.Name,
+                    ResolveStepAssignmentLabel(step, null) ?? step.Name,
                     step.Id,
                     [step.Description ?? $"Complete {step.Name}."])
                 {
@@ -1546,6 +1547,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
 
         var assignedTokens = SplitAssignedRoles(procedureCase.CurrentAssignedRole);
+        if (Guid.TryParse(_currentUser.UserId, out var userId)
+            && assignedTokens.Any(token => IsAssignedUserToken(token, userId)))
+        {
+            return true;
+        }
 
         return _currentUser.Roles.Any(role =>
             assignedTokens.Any(token => string.Equals(token, role, StringComparison.OrdinalIgnoreCase)));
@@ -1554,6 +1560,14 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private static string[] SplitAssignedRoles(string assignedRole)
         => assignedRole
             .Split(['/', ',', ';', '|'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+    private static bool IsAssignedUserToken(string token, Guid userId)
+    {
+        const string UserPrefix = "User:";
+        return token.StartsWith(UserPrefix, StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(token[UserPrefix.Length..].Trim(), out var assignedUserId)
+            && assignedUserId == userId;
+    }
 
     private static bool IsPrivateProcedureDocumentPath(string fileUrl)
         => fileUrl.Replace('\\', '/').TrimStart('/')
@@ -1818,7 +1832,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         var assignedRole = currentStep is null
             ? null
-            : currentStep.RequiredRole ?? ExtractAssignedRole(currentStep.AssignmentConfiguration) ?? currentStep.Name;
+            : await ResolveCurrentWorkflowAssignmentLabelAsync(tenantId, workflowInstanceId, currentStep, instance.Data ?? instance.DataContext);
 
         await _db.ProcedureCases
             .IgnoreQueryFilters()
@@ -1839,6 +1853,194 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCaseId, "Workflow synced", currentStep?.Name ?? "Completed", notes));
         await _db.SaveChangesAsync();
     }
+
+    private async Task<string?> ResolveCurrentWorkflowAssignmentLabelAsync(
+        Guid tenantId,
+        Guid workflowInstanceId,
+        WorkflowStep currentStep,
+        string? contextJson)
+    {
+        var labels = new List<string>();
+        var activeStepInstance = await _db.WorkflowStepInstances
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && item.WorkflowInstanceId == workflowInstanceId
+                && item.WorkflowStepId == currentStep.Id
+                && (item.Status == WorkflowStepInstanceStatus.Pending || item.Status == WorkflowStepInstanceStatus.InProgress))
+            .OrderByDescending(item => item.StartedDate ?? item.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (activeStepInstance is not null)
+        {
+            if (activeStepInstance.AssignedToId.HasValue)
+            {
+                labels.Add(UserAssignmentToken(activeStepInstance.AssignedToId.Value));
+            }
+
+            var pendingApprovals = await _db.WorkflowApprovals
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId
+                    && item.StepInstanceId == activeStepInstance.Id
+                    && item.Status == WorkflowApprovalStatus.Pending)
+                .Select(item => new
+                {
+                    item.ApproverId,
+                    item.ApproverRole
+                })
+                .ToListAsync();
+
+            foreach (var approval in pendingApprovals)
+            {
+                if (approval.ApproverId.HasValue)
+                {
+                    labels.Add(UserAssignmentToken(approval.ApproverId.Value));
+                }
+
+                if (!string.IsNullOrWhiteSpace(approval.ApproverRole))
+                {
+                    labels.Add(approval.ApproverRole.Trim());
+                }
+            }
+        }
+
+        labels.AddRange(SplitAssignmentLabels(ResolveStepAssignmentLabel(currentStep, contextJson)));
+        labels.Add(currentStep.Name);
+
+        return JoinAssignmentLabels(labels);
+    }
+
+    private static string? ResolveStepAssignmentLabel(WorkflowStep step, string? contextJson)
+    {
+        var labels = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(step.RequiredRole))
+        {
+            labels.Add(step.RequiredRole.Trim());
+        }
+
+        var config = DeserializeStepConfiguration(step.Configuration);
+        labels.AddRange(ResolveAssignmentRuleLabels(config?.AssignmentRules, contextJson));
+        labels.AddRange(SplitAssignmentLabels(ExtractAssignedRole(step.AssignmentConfiguration)));
+
+        return JoinAssignmentLabels(labels);
+    }
+
+    private static IEnumerable<string> ResolveAssignmentRuleLabels(
+        IEnumerable<WorkflowAssignmentRuleDto>? rules,
+        string? contextJson)
+    {
+        if (rules is null)
+        {
+            yield break;
+        }
+
+        foreach (var rule in rules.OrderByDescending(item => item.Priority))
+        {
+            switch (rule.AssignmentType)
+            {
+                case WorkflowAssignmentType.User when rule.UserId.HasValue:
+                    yield return UserAssignmentToken(rule.UserId.Value);
+                    break;
+                case WorkflowAssignmentType.Role when !string.IsNullOrWhiteSpace(rule.Role):
+                    yield return rule.Role.Trim();
+                    break;
+                case WorkflowAssignmentType.Dynamic when TryResolveGuidFromContextJson(contextJson, rule.DynamicExpression, out var dynamicUserId):
+                    yield return UserAssignmentToken(dynamicUserId);
+                    break;
+                case WorkflowAssignmentType.RequestorManager when TryResolveGuidFromContextJson(contextJson, "requestorManagerId", out var managerId):
+                    yield return UserAssignmentToken(managerId);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    private static bool TryResolveGuidFromContextJson(string? contextJson, string? expression, out Guid value)
+    {
+        value = Guid.Empty;
+        if (string.IsNullOrWhiteSpace(contextJson) || string.IsNullOrWhiteSpace(expression))
+        {
+            return false;
+        }
+
+        var key = expression.Trim()
+            .Trim('$')
+            .Trim('.')
+            .Split('.', StringSplitOptions.RemoveEmptyEntries)
+            .LastOrDefault();
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(contextJson);
+            if (!TryGetJsonProperty(doc.RootElement, key, out var element))
+            {
+                return false;
+            }
+
+            var text = element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
+            return Guid.TryParse(text, out value);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetJsonProperty(JsonElement element, string key, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+
+                if (TryGetJsonProperty(property.Value, key, out value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var child in element.EnumerateArray())
+            {
+                if (TryGetJsonProperty(child, key, out value))
+                {
+                    return true;
+                }
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static IReadOnlyList<string> SplitAssignmentLabels(string? labels)
+        => string.IsNullOrWhiteSpace(labels)
+            ? []
+            : labels.Split(['/', ',', ';', '|'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+    private static string? JoinAssignmentLabels(IEnumerable<string?> labels)
+    {
+        var distinct = labels
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return distinct.Count == 0 ? null : string.Join(" / ", distinct);
+    }
+
+    private static string UserAssignmentToken(Guid userId) => $"User:{userId}";
 
     private sealed record WorkspaceSeed(
         string Title,

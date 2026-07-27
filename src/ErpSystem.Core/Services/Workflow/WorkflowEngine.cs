@@ -1821,6 +1821,21 @@ public class WorkflowEngine : IWorkflowEngine
 
         if (configured.Count > 0)
         {
+            if ((taskConfig.RequiresDocument ||
+                    string.Equals(taskConfig.TaskActionType, "document", StringComparison.OrdinalIgnoreCase)) &&
+                configured.All(requirement => !requirement.IsRequired))
+            {
+                configured.Add(new WorkflowDocumentRequirementDto
+                {
+                    Id = "document-required",
+                    RequirementKey = string.Empty,
+                    DocumentName = string.IsNullOrWhiteSpace(taskConfig.DocumentName)
+                        ? "at least one stage document"
+                        : taskConfig.DocumentName.Trim(),
+                    IsRequired = true,
+                });
+            }
+
             return configured;
         }
 

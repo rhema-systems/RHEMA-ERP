@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.DocumentManagement;
@@ -12,6 +11,9 @@ using ErpSystem.Api.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
 using CentralDocumentMetadataTemplateEntity = ErpSystem.Core.Entities.DocumentManagement.CentralDocumentMetadataTemplate;
 
 namespace ErpSystem.Api.Controllers.DocumentManagement;
@@ -2830,96 +2832,56 @@ public sealed class DocumentManagementController : ControllerBase
 
     private static byte[] BuildSimplePdf(string title, string content)
     {
-        var lines = WrapPdfLines($"{title}\n\n{content}", 88).Take(58).ToList();
-        var contentStream = new StringBuilder();
-        contentStream.AppendLine("BT");
-        contentStream.AppendLine("/F1 10 Tf");
-        contentStream.AppendLine("50 790 Td");
+        QuestPDF.Settings.License = LicenseType.Community;
 
-        foreach (var line in lines)
+        // DMS generation: paginate tenant-editable templates and keep Unicode text intact in the PDF rendition.
+        return Document.Create(container =>
         {
-            contentStream.Append('(').Append(EscapePdfText(line)).AppendLine(") Tj");
-            contentStream.AppendLine("0 -14 Td");
-        }
+            container.Page(page =>
+            {
+                page.Size(PageSizes.A4);
+                page.Margin(50);
+                page.DefaultTextStyle(text => text
+                    .FontFamily("Times New Roman")
+                    .FontSize(10)
+                    .FontColor(Colors.Black));
 
-        contentStream.AppendLine("ET");
-        var streamBytes = Encoding.ASCII.GetBytes(contentStream.ToString());
-        var objects = new List<string>
-        {
-            "<< /Type /Catalog /Pages 2 0 R >>",
-            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-            $"<< /Length {streamBytes.Length} >>\nstream\n{contentStream}endstream"
-        };
+                page.Content().Column(column =>
+                {
+                    column.Spacing(8);
+                    column.Item().Text(title).FontSize(14).Bold();
 
-        var pdf = new StringBuilder();
-        var offsets = new List<int> { 0 };
-        pdf.AppendLine("%PDF-1.4");
+                    foreach (var paragraph in SplitPdfParagraphs(content))
+                    {
+                        if (string.IsNullOrWhiteSpace(paragraph))
+                        {
+                            column.Item().Height(6);
+                            continue;
+                        }
 
-        foreach (var obj in objects.Select((value, index) => new { value, number = index + 1 }))
-        {
-            offsets.Add(Encoding.ASCII.GetByteCount(pdf.ToString()));
-            pdf.Append(obj.number).AppendLine(" 0 obj");
-            pdf.AppendLine(obj.value);
-            pdf.AppendLine("endobj");
-        }
+                        column.Item().Text(paragraph);
+                    }
+                });
 
-        var xrefOffset = Encoding.ASCII.GetByteCount(pdf.ToString());
-        pdf.AppendLine("xref");
-        pdf.AppendLine($"0 {objects.Count + 1}");
-        pdf.AppendLine("0000000000 65535 f ");
-        foreach (var offset in offsets.Skip(1))
-        {
-            pdf.Append(offset.ToString("0000000000")).AppendLine(" 00000 n ");
-        }
-
-        pdf.AppendLine("trailer");
-        pdf.AppendLine($"<< /Size {objects.Count + 1} /Root 1 0 R >>");
-        pdf.AppendLine("startxref");
-        pdf.AppendLine(xrefOffset.ToString());
-        pdf.AppendLine("%%EOF");
-
-        return Encoding.ASCII.GetBytes(pdf.ToString());
+                page.Footer()
+                    .AlignCenter()
+                    .Text(text =>
+                    {
+                        text.CurrentPageNumber();
+                        text.Span(" / ");
+                        text.TotalPages();
+                    });
+            });
+        }).GeneratePdf();
     }
 
-    private static IEnumerable<string> WrapPdfLines(string value, int maxLength)
+    private static IEnumerable<string> SplitPdfParagraphs(string value)
     {
         foreach (var rawLine in value.Replace("\r", string.Empty).Split('\n'))
         {
-            var words = rawLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (words.Length == 0)
-            {
-                yield return string.Empty;
-                continue;
-            }
-
-            var line = new StringBuilder();
-            foreach (var word in words)
-            {
-                if (line.Length + word.Length + 1 > maxLength)
-                {
-                    yield return line.ToString();
-                    line.Clear();
-                }
-
-                if (line.Length > 0)
-                {
-                    line.Append(' ');
-                }
-
-                line.Append(word);
-            }
-
-            yield return line.ToString();
+            yield return rawLine.TrimEnd();
         }
     }
-
-    private static string EscapePdfText(string value) =>
-        value
-            .Replace("\\", "\\\\", StringComparison.Ordinal)
-            .Replace("(", "\\(", StringComparison.Ordinal)
-            .Replace(")", "\\)", StringComparison.Ordinal);
 
     private static string SafeFileName(string value)
     {
