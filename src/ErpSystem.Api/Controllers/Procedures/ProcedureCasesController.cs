@@ -41,6 +41,10 @@ public sealed class ProcedureCasesController : ControllerBase
             var procedureCase = await _procedureCaseService.CreateCaseAsync(request);
             return CreatedAtAction(nameof(GetCase), new { id = procedureCase.Id }, new { success = true, data = procedureCase });
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { success = false, message = ex.Message });

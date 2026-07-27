@@ -11,6 +11,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Models;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -27,8 +28,8 @@ public class LandAcquisitionsController : ControllerBase
     private const double OwnershipCoordinateToleranceFeet = 5d;
     private static readonly IReadOnlyDictionary<int, string[]> RequiredStageInputs = new Dictionary<int, string[]>
     {
-        [0] = ["projectReference", "parcelLocation", "estimatedSize", "coordinates", "vendorId", "vendorName", "acquisitionType", "intendedUse", "openingNotes"],
-        [1] = ["inspectionDate", "inspectionOfficer", "soilType", "topography", "hasAccessRoad", "hasUtilities", "siteAccessRoute", "drainageCondition", "existingDevelopment", "zoningClassification", "planningSchemeReference", "isFloodProne", "planningCompatible", "accessConfirmed", "environmentalClearance", "utilityAvailability", "encumbranceObserved", "assessmentRecommendation", "approvalNotes"],
+        [0] = ["projectReference", "parcelLocation", "estimatedSize", "coordinates", "vendorId", "vendorName", "acquisitionType", "intendedUse", "openingNotes", "inspectionDate", "inspectionOfficer", "soilType", "topography", "hasAccessRoad", "hasUtilities", "siteAccessRoute", "drainageCondition", "existingDevelopment", "zoningClassification", "planningSchemeReference", "isFloodProne", "planningCompatible", "accessConfirmed", "environmentalClearance", "utilityAvailability", "encumbranceObserved"],
+        [1] = ["assessmentRecommendation", "approvalNotes"],
         [2] = ["cadastreDescription", "regionId", "districtId", "townId", "totalArea", "areaUnit", "beacon1Index", "beacon1NorthingFeet", "beacon1EastingFeet", "beacon1Bearing", "beacon1DistanceFeet", "beacon2Index", "beacon2NorthingFeet", "beacon2EastingFeet", "beacon2Bearing", "beacon2DistanceFeet", "beacon3Index", "beacon3NorthingFeet", "beacon3EastingFeet", "beacon3Bearing", "beacon3DistanceFeet", "beacon4Index", "beacon4NorthingFeet", "beacon4EastingFeet", "beacon4Bearing", "beacon4DistanceFeet", "boundaryCoordinates", "surveyorName", "licensedSurveyor", "surveyDate", "surveyorSignedDate", "surveyPlanNumber", "mapSheetNumber", "surveyStatus", "isCertified", "beaconCount", "regionalSurveyorName", "regionalSurveyorSignedDate", "mainPortion", "coordinateReference", "surveyNotes"],
         [3] = ["cadastralMatch", "cadastralMatchVerified", "overlapCleared", "boundaryConfirmed", "verificationReference", "verificationOfficer", "verificationDate", "verificationNotes"],
         [4] = ["ownershipType", "ownerName", "contactNumber", "address", "acquisitionMethod", "tenureType", "ownershipStartDate", "percentage", "isCurrentOwner", "identificationType", "identificationNumber", "interestHeld", "classificationRisk", "dateGapReason", "ownerRegionId", "ownerDistrictId", "ownerTownId", "ownerBeacon1NorthingFeet", "ownerBeacon1EastingFeet", "ownerBeacon2NorthingFeet", "ownerBeacon2EastingFeet", "ownerBeacon3NorthingFeet", "ownerBeacon3EastingFeet", "ownerBeacon4NorthingFeet", "ownerBeacon4EastingFeet", "witnessName1", "witnessContact1", "witnessRelation1", "witnessAddress1", "witnessSwornOath1", "witnessOathSwornBefore1", "witnessOathSwornDate1", "witnessName2", "witnessContact2", "witnessRelation2", "witnessAddress2", "witnessSwornOath2", "witnessOathSwornBefore2", "witnessOathSwornDate2", "classificationNotes"],
@@ -44,7 +45,6 @@ public class LandAcquisitionsController : ControllerBase
         [14] = ["registryOffice", "registrationNumber", "volume", "folio", "registrationDate", "isRegistered", "documentName", "registrationNotes"],
         [15] = ["assetCode", "assetNumber", "parcelIdentifier", "registrationNumber", "ownerName", "assetLocation", "assetCategory", "size", "sizeUnit", "assetStatus", "purpose", "zoningClassification", "ownershipVerification", "capitalizationValue", "glAccount", "custodian", "assetNotes"]
     };
-    private static readonly ISet<int> StagesRequiringDocuments = new HashSet<int>(RequiredStageInputs.Keys);
     private static readonly ISet<int> ApprovalStageOrders = new HashSet<int>
     {
         (int)AcquisitionProcedure.SuitabilityApproval,
@@ -103,6 +103,7 @@ public class LandAcquisitionsController : ControllerBase
 
         var isAdministrator = IsWorkflowAdministrator();
         var userId = GetUserId();
+        var documentRequirementsByStage = await GetActiveWorkflowDocumentRequirementsByStageAsync(tenantId, cancellationToken);
         var visibleByStage = new Dictionary<int, List<LandAcquisition>>();
         foreach (var acquisition in acquisitions)
         {
@@ -122,7 +123,7 @@ public class LandAcquisitionsController : ControllerBase
             .Select(stage =>
             {
                 var items = visibleByStage.TryGetValue(stage.Order, out var visible)
-                    ? visible.Select(ToItemDto).ToList()
+                    ? visible.Select(item => ToItemDto(item, documentRequirementsByStage)).ToList()
                     : [];
                 return new LandAcquisitionStageDto(
                 stage.Id,
@@ -196,13 +197,14 @@ public class LandAcquisitionsController : ControllerBase
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        var missingInputs = GetMissingStageInputs(acquisition, request.ProcedureId);
+        var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
+        var missingInputs = GetMissingStageInputs(acquisition, request.ProcedureId, documentRequirementsByStage);
         return Ok(new LandAcquisitionWorkspaceResponse
         {
             Success = true,
             Message = "Land acquisition workspace saved.",
             AcquisitionId = acquisition.Id,
-            Item = ToItemDto(acquisition),
+            Item = ToItemDto(acquisition, documentRequirementsByStage),
             StageInputsComplete = missingInputs.Count == 0,
             MissingInputs = missingInputs
         });
@@ -252,7 +254,8 @@ public class LandAcquisitionsController : ControllerBase
             await PopulateAgreementSellerDefaultsAsync(acquisition, snapshots, responseValues, cancellationToken);
         }
 
-        var missingInputs = GetMissingStageInputs(acquisition, procedureId);
+        var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
+        var missingInputs = GetMissingStageInputs(acquisition, procedureId, documentRequirementsByStage);
         return Ok(new LandAcquisitionWorkspaceDataResponse
         {
             AcquisitionId = id,
@@ -373,21 +376,57 @@ public class LandAcquisitionsController : ControllerBase
             return ForbiddenStageAccess(procedureId, "upload documents for this workspace");
         }
 
-        var folder = $"estate/land-acquisitions/{id:N}/{procedureId}";
         await using var stream = file.OpenReadStream();
-        var filePath = await _fileStorageService.UploadFileAsync(stream, file.FileName, folder);
+        var upload = await _fileStorageService.UploadFileAsync(new FileUploadRequest
+        {
+            FileStream = stream,
+            FileName = file.FileName,
+            ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+            FileSize = file.Length,
+            Category = "estate-land-acquisition-documents",
+            TenantId = tenantId.ToString(),
+            OverwriteExisting = false,
+            Metadata =
+            {
+                ["LandAcquisitionId"] = acquisition.Id.ToString(),
+                ["ProcedureId"] = procedureId.ToString(CultureInfo.InvariantCulture)
+            }
+        });
+
+        if (!upload.Success)
+        {
+            return BadRequest(new { success = false, message = upload.ErrorMessage ?? "Land acquisition document upload failed." });
+        }
+
         var document = new LandAcquisitionDocument
         {
             TenantId = tenantId,
             LandAcquisitionId = acquisition.Id,
-            FileName = NormalizeDocumentFileName(file.FileName, documentName),
-            FilePath = filePath,
+            FileName = NormalizeDocumentFileName(upload.OriginalFileName, documentName),
+            FilePath = upload.FilePath,
             DocumentType = string.IsNullOrWhiteSpace(documentType) ? "Other" : documentType.Trim(),
             Procedure = (AcquisitionProcedure)procedureId,
             CreatedById = userId,
             CreatedBy = _currentUserService.UserName,
             CreatedAt = DateTime.UtcNow
         };
+
+        _context.FileUploadRecords.Add(new FileUploadRecord
+        {
+            TenantId = tenantId,
+            Category = upload.Category,
+            FilePath = upload.FilePath,
+            StoredFileName = upload.FileName,
+            OriginalFileName = upload.OriginalFileName,
+            ContentType = upload.ContentType,
+            FileSize = upload.FileSize,
+            StorageProvider = upload.StorageProvider,
+            UploadedByUserId = userId,
+            VirusScanStatus = FileVirusScanStatus.Skipped,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName,
+            CreatedById = userId
+        });
 
         // Add the stage document directly; updating the parent acquisition is not required for document counts and can conflict with workflow handoff writes.
         _context.Set<LandAcquisitionDocument>().Add(document);
@@ -499,9 +538,10 @@ public class LandAcquisitionsController : ControllerBase
             return Forbid();
         }
 
+        var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
         if (!IsReject(request.ActionType))
         {
-            var missingInputs = GetMissingStageInputs(acquisition, acquisition.StageOrder);
+            var missingInputs = GetMissingStageInputs(acquisition, acquisition.StageOrder, documentRequirementsByStage);
             if (missingInputs.Count > 0)
             {
                 return BadRequest(new
@@ -602,7 +642,7 @@ public class LandAcquisitionsController : ControllerBase
                     ? "Land acquisition was rejected by workflow."
                     : "Land acquisition workflow action completed.",
                 WorkflowOutcome = workflowOutcome.ToString(),
-                Item = ToItemDto(acquisition)
+                Item = ToItemDto(acquisition, documentRequirementsByStage)
             });
         }
         catch (Exception ex)
@@ -646,7 +686,8 @@ public class LandAcquisitionsController : ControllerBase
             return Forbid();
         }
 
-        var missingInputs = GetMissingStageInputs(acquisition, acquisition.StageOrder);
+        var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
+        var missingInputs = GetMissingStageInputs(acquisition, acquisition.StageOrder, documentRequirementsByStage);
         if (missingInputs.Count > 0)
         {
             return BadRequest(new
@@ -689,7 +730,7 @@ public class LandAcquisitionsController : ControllerBase
                 Success = true,
                 Message = "Land acquisition workflow task completed.",
                 WorkflowOutcome = outcome.ToString(),
-                Item = ToItemDto(acquisition)
+                Item = ToItemDto(acquisition, documentRequirementsByStage)
             });
         }
         catch (Exception ex)
@@ -727,7 +768,8 @@ public class LandAcquisitionsController : ControllerBase
             return Forbid();
         }
 
-        var missingInputs = GetMissingStageInputs(acquisition, assetCreationStage.Order);
+        var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
+        var missingInputs = GetMissingStageInputs(acquisition, assetCreationStage.Order, documentRequirementsByStage);
         if (missingInputs.Count > 0)
         {
             return BadRequest(new
@@ -809,6 +851,7 @@ public class LandAcquisitionsController : ControllerBase
                 acquisition.IntendedUse = Text(values, "intendedUse") ?? acquisition.IntendedUse;
                 acquisition.EstimatedSize = Decimal(values, "estimatedSize") ?? acquisition.EstimatedSize;
                 acquisition.Coordinates = Text(values, "coordinates") ?? acquisition.Coordinates;
+                ApplyPhysicalAssessment(acquisition, values);
                 var openingNotes = Text(values, "openingNotes");
                 if (!string.IsNullOrWhiteSpace(openingNotes) && acquisition.Notes.All(note => note.Note != openingNotes))
                 {
@@ -824,19 +867,7 @@ public class LandAcquisitionsController : ControllerBase
                 break;
 
             case AcquisitionProcedure.SuitabilityApproval:
-                acquisition.PhysicalAssessment ??= Child(new LandPhysicalAssessment(), acquisition);
-                acquisition.PhysicalAssessment.PlanningCompatible = Bool(values, "planningCompatible");
-                acquisition.PhysicalAssessment.AccessConfirmed = Bool(values, "accessConfirmed");
-                acquisition.PhysicalAssessment.EnvironmentalClearance = Bool(values, "environmentalClearance");
-                acquisition.PhysicalAssessment.UtilityAvailability = Bool(values, "utilityAvailability");
-                acquisition.PhysicalAssessment.IsFloodProne = Bool(values, "isFloodProne") || Bool(values, "floodProne");
-                acquisition.PhysicalAssessment.SoilType = Text(values, "soilType") ?? acquisition.PhysicalAssessment.SoilType;
-                acquisition.PhysicalAssessment.Topography = Text(values, "topography") ?? acquisition.PhysicalAssessment.Topography;
-                acquisition.PhysicalAssessment.ZoningClassification =
-                    Text(values, "zoningClassification") ?? Text(values, "classification") ?? acquisition.PhysicalAssessment.ZoningClassification;
-                acquisition.PhysicalAssessment.Notes = Text(values, "approvalNotes") ?? Text(values, "assessmentNotes") ?? Text(values, "notes");
-                acquisition.PlanningUploaded = acquisition.PhysicalAssessment.PlanningCompatible;
-                acquisition.SuitableForDueDiligence = acquisition.PhysicalAssessment.PlanningCompatible && acquisition.PhysicalAssessment.AccessConfirmed;
+                ApplyPhysicalAssessment(acquisition, values);
                 break;
 
             case AcquisitionProcedure.CadastralSurvey:
@@ -1068,6 +1099,61 @@ public class LandAcquisitionsController : ControllerBase
         acquisition.WorkspaceDataJson = JsonSerializer.Serialize(snapshots);
     }
 
+    private void ApplyPhysicalAssessment(
+        LandAcquisition acquisition,
+        Dictionary<string, object?> values)
+    {
+        var hasPhysicalAssessmentInput =
+            values.ContainsKey("planningCompatible") ||
+            values.ContainsKey("accessConfirmed") ||
+            values.ContainsKey("environmentalClearance") ||
+            values.ContainsKey("utilityAvailability") ||
+            values.ContainsKey("isFloodProne") ||
+            values.ContainsKey("floodProne") ||
+            values.ContainsKey("soilType") ||
+            values.ContainsKey("topography") ||
+            values.ContainsKey("zoningClassification") ||
+            values.ContainsKey("classification") ||
+            values.ContainsKey("approvalNotes") ||
+            values.ContainsKey("assessmentNotes") ||
+            values.ContainsKey("notes");
+
+        if (!hasPhysicalAssessmentInput)
+        {
+            return;
+        }
+
+        acquisition.PhysicalAssessment ??= Child(new LandPhysicalAssessment(), acquisition);
+        if (values.ContainsKey("planningCompatible"))
+        {
+            acquisition.PhysicalAssessment.PlanningCompatible = Bool(values, "planningCompatible");
+        }
+        if (values.ContainsKey("accessConfirmed"))
+        {
+            acquisition.PhysicalAssessment.AccessConfirmed = Bool(values, "accessConfirmed");
+        }
+        if (values.ContainsKey("environmentalClearance"))
+        {
+            acquisition.PhysicalAssessment.EnvironmentalClearance = Bool(values, "environmentalClearance");
+        }
+        if (values.ContainsKey("utilityAvailability"))
+        {
+            acquisition.PhysicalAssessment.UtilityAvailability = Bool(values, "utilityAvailability");
+        }
+        if (values.ContainsKey("isFloodProne") || values.ContainsKey("floodProne"))
+        {
+            acquisition.PhysicalAssessment.IsFloodProne = Bool(values, "isFloodProne") || Bool(values, "floodProne");
+        }
+        acquisition.PhysicalAssessment.SoilType = Text(values, "soilType") ?? acquisition.PhysicalAssessment.SoilType;
+        acquisition.PhysicalAssessment.Topography = Text(values, "topography") ?? acquisition.PhysicalAssessment.Topography;
+        acquisition.PhysicalAssessment.ZoningClassification =
+            Text(values, "zoningClassification") ?? Text(values, "classification") ?? acquisition.PhysicalAssessment.ZoningClassification;
+        acquisition.PhysicalAssessment.Notes =
+            Text(values, "approvalNotes") ?? Text(values, "assessmentNotes") ?? Text(values, "notes") ?? acquisition.PhysicalAssessment.Notes;
+        acquisition.PlanningUploaded = acquisition.PhysicalAssessment.PlanningCompatible;
+        acquisition.SuitableForDueDiligence = acquisition.PhysicalAssessment.PlanningCompatible && acquisition.PhysicalAssessment.AccessConfirmed;
+    }
+
     private async Task PopulateAgreementSellerDefaultsAsync(
         LandAcquisition acquisition,
         IReadOnlyDictionary<int, Dictionary<string, JsonElement>> snapshots,
@@ -1128,7 +1214,153 @@ public class LandAcquisitionsController : ControllerBase
             partner?.SecondaryPhone);
     }
 
-    private static IReadOnlyList<string> GetMissingStageInputs(LandAcquisition acquisition, int procedureId)
+    private async Task<IReadOnlyDictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>>> GetWorkflowDocumentRequirementsByStageAsync(
+        LandAcquisition acquisition,
+        CancellationToken cancellationToken)
+    {
+        var definition = await GetWorkflowDefinitionForAcquisitionAsync(acquisition, cancellationToken);
+        return BuildWorkflowDocumentRequirementsByStage(definition);
+    }
+
+    private async Task<IReadOnlyDictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>>> GetActiveWorkflowDocumentRequirementsByStageAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var definition = await _context.WorkflowDefinitions
+            .Include(definition => definition.EntityType)
+            .Include(definition => definition.Steps)
+            .Where(definition =>
+                !definition.IsDeleted &&
+                definition.TenantId == tenantId &&
+                definition.IsActive &&
+                (definition.EntityType.Code == WorkflowEntityType ||
+                 definition.EntityType.Name == WorkflowEntityType ||
+                 definition.Name.Contains("Land Acquisition")))
+            .OrderByDescending(definition => definition.Version)
+            .ThenByDescending(definition => definition.UpdatedAt ?? definition.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return BuildWorkflowDocumentRequirementsByStage(definition);
+    }
+
+    private async Task<WorkflowDefinition?> GetWorkflowDefinitionForAcquisitionAsync(
+        LandAcquisition acquisition,
+        CancellationToken cancellationToken)
+    {
+        if (acquisition.WorkflowInstanceId.HasValue)
+        {
+            var workflowDefinitionId = await _context.WorkflowInstances
+                .Where(instance =>
+                    instance.Id == acquisition.WorkflowInstanceId.Value &&
+                    instance.EntityId == acquisition.Id &&
+                    instance.TenantId == acquisition.TenantId &&
+                    !instance.IsDeleted)
+                .Select(instance => (Guid?)instance.WorkflowDefinitionId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (workflowDefinitionId.HasValue)
+            {
+                var instanceDefinition = await _context.WorkflowDefinitions
+                    .Include(definition => definition.Steps)
+                    .FirstOrDefaultAsync(definition =>
+                        definition.Id == workflowDefinitionId.Value &&
+                        definition.TenantId == acquisition.TenantId &&
+                        !definition.IsDeleted,
+                        cancellationToken);
+
+                if (instanceDefinition != null)
+                {
+                    return instanceDefinition;
+                }
+            }
+        }
+
+        return await _context.WorkflowDefinitions
+            .Include(definition => definition.EntityType)
+            .Include(definition => definition.Steps)
+            .Where(definition =>
+                !definition.IsDeleted &&
+                definition.TenantId == acquisition.TenantId &&
+                definition.IsActive &&
+                (definition.EntityType.Code == WorkflowEntityType ||
+                 definition.EntityType.Name == WorkflowEntityType ||
+                 definition.Name.Contains("Land Acquisition")))
+            .OrderByDescending(definition => definition.Version)
+            .ThenByDescending(definition => definition.UpdatedAt ?? definition.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private static IReadOnlyDictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>> BuildWorkflowDocumentRequirementsByStage(
+        WorkflowDefinition? definition)
+    {
+        if (definition == null)
+        {
+            return new Dictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>>();
+        }
+
+        var byStage = new Dictionary<int, List<WorkflowDocumentRequirementDto>>();
+        foreach (var step in definition.Steps
+                     .Where(step => !step.IsDeleted)
+                     .OrderBy(step => step.Order))
+        {
+            var stageOrder = ResolveWorkflowStepStageOrder(step);
+            if (!stageOrder.HasValue)
+            {
+                continue;
+            }
+
+            var requirements = ReadWorkflowStageDocumentRequirements(ReadWorkflowStepConfiguration(step.Configuration));
+            if (requirements.Count == 0)
+            {
+                continue;
+            }
+
+            if (!byStage.TryGetValue(stageOrder.Value, out var stageRequirements))
+            {
+                stageRequirements = [];
+                byStage[stageOrder.Value] = stageRequirements;
+            }
+
+            foreach (var requirement in requirements)
+            {
+                if (!stageRequirements.Any(existing =>
+                        string.Equals(existing.DocumentName, requirement.DocumentName, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(existing.DocumentType, requirement.DocumentType, StringComparison.OrdinalIgnoreCase)))
+                {
+                    stageRequirements.Add(requirement);
+                }
+            }
+        }
+
+        return byStage.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<WorkflowDocumentRequirementDto>)pair.Value);
+    }
+
+    private static int? ResolveWorkflowStepStageOrder(WorkflowStep step)
+    {
+        var matched = StageDefinitions.FirstOrDefault(stage =>
+            string.Equals(stage.Title, step.Name, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(stage.WorkflowStepName, step.Name, StringComparison.OrdinalIgnoreCase));
+
+        if (matched != null)
+        {
+            return matched.Order;
+        }
+
+        if (step.Order == 0)
+        {
+            return 0;
+        }
+
+        var zeroBasedOrder = step.Order - 1;
+        return zeroBasedOrder is >= 0 and <= 15 ? zeroBasedOrder : null;
+    }
+
+    private static IReadOnlyList<string> GetMissingStageInputs(
+        LandAcquisition acquisition,
+        int procedureId,
+        IReadOnlyDictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>>? documentRequirementsByStage = null)
     {
         if (!RequiredStageInputs.TryGetValue(procedureId, out var requiredInputs))
         {
@@ -1154,8 +1386,13 @@ public class LandAcquisitionsController : ControllerBase
             .Where(key => !values.TryGetValue(key, out var value) || !HasInputValue(value))
             .ToList();
 
-        if (StagesRequiringDocuments.Contains(procedureId) &&
-            acquisition.Documents.All(document => document.IsDeleted || (int)document.Procedure != procedureId))
+        if (documentRequirementsByStage != null &&
+            documentRequirementsByStage.TryGetValue(procedureId, out var documentRequirements) &&
+            documentRequirements.Where(requirement => requirement.IsRequired).Any(requirement =>
+                !acquisition.Documents.Any(document =>
+                    !document.IsDeleted &&
+                    (int)document.Procedure == procedureId &&
+                    MatchesWorkflowDocumentRequirement(document, requirement))))
         {
             missing.Add("stageDocuments");
         }
@@ -1407,7 +1644,7 @@ public class LandAcquisitionsController : ControllerBase
             })
             .ToList() ?? [];
 
-        var taskAttachments = BuildStageTaskAttachments(acquisition, stepConfig.TaskConfig, userId);
+        var taskAttachments = BuildStageTaskAttachments(acquisition, stepConfig, userId);
 
         if (qualityResponses.Count == 0 && taskAttachments.Count == 0)
         {
@@ -1431,7 +1668,7 @@ public class LandAcquisitionsController : ControllerBase
     {
         var stepInstance = await GetActiveStepInstanceAsync(acquisition, null, cancellationToken);
         var stepConfig = ReadWorkflowStepConfiguration(stepInstance?.WorkflowStep?.Configuration);
-        if (stepInstance == null || stepConfig?.TaskConfig == null || !IsDocumentTask(stepConfig.TaskConfig))
+        if (stepInstance == null || stepConfig == null || !IsDocumentTask(stepConfig))
         {
             return null;
         }
@@ -1439,7 +1676,7 @@ public class LandAcquisitionsController : ControllerBase
         await StoreWorkflowStepEvidenceAsync(acquisition, userId, cancellationToken);
 
         stepInstance = await GetActiveStepInstanceAsync(acquisition, stepInstance.Id, cancellationToken);
-        if (stepInstance == null || !HasRequiredWorkflowTaskAttachments(stepConfig.TaskConfig, stepInstance.ResultData))
+        if (stepInstance == null || !HasRequiredWorkflowTaskAttachments(stepConfig, stepInstance.ResultData))
         {
             return null;
         }
@@ -1540,21 +1777,20 @@ public class LandAcquisitionsController : ControllerBase
 
     private List<WorkflowTaskAttachmentDto> BuildStageTaskAttachments(
         LandAcquisition acquisition,
-        WorkflowTaskConfigDto? taskConfig,
+        WorkflowStepConfigurationDto? stepConfig,
         Guid userId)
     {
         var stageDocuments = acquisition.Documents
             .Where(document => !document.IsDeleted && (int)document.Procedure == acquisition.StageOrder)
             .OrderByDescending(document => document.CreatedAt)
             .ToList();
-        var documentRequirements = ReadWorkflowDocumentRequirements(taskConfig);
+        var documentRequirements = ReadWorkflowStageDocumentRequirements(stepConfig);
 
         return documentRequirements
             .Select((requirement, index) =>
             {
                 var document = stageDocuments.FirstOrDefault(candidate =>
-                        !string.IsNullOrWhiteSpace(requirement.DocumentType) &&
-                        string.Equals(candidate.DocumentType, requirement.DocumentType, StringComparison.OrdinalIgnoreCase)) ??
+                        MatchesWorkflowDocumentRequirement(candidate, requirement)) ??
                     stageDocuments.ElementAtOrDefault(Math.Min(index, Math.Max(stageDocuments.Count - 1, 0)));
 
                 if (document == null)
@@ -1579,6 +1815,49 @@ public class LandAcquisitionsController : ControllerBase
             })
             .Where(attachment => attachment != null)
             .Cast<WorkflowTaskAttachmentDto>()
+            .ToList();
+    }
+
+    private static IReadOnlyList<WorkflowDocumentRequirementDto> ReadWorkflowStageDocumentRequirements(WorkflowStepConfigurationDto? stepConfig)
+    {
+        if (stepConfig == null)
+        {
+            return [];
+        }
+
+        var taskRequirements = ReadWorkflowDocumentRequirements(stepConfig.TaskConfig);
+        var qualityRequirements = stepConfig.QualityConfig?.QualityChecks?
+            .Where(check =>
+                check.IsRequired &&
+                check.RequiresDocument &&
+                (!string.IsNullOrWhiteSpace(check.DocumentName) || !string.IsNullOrWhiteSpace(check.Name)))
+            .Select((check, index) => new WorkflowDocumentRequirementDto
+            {
+                Id = string.IsNullOrWhiteSpace(check.Id) ? $"quality-document-{index + 1}" : check.Id,
+                RequirementKey = string.IsNullOrWhiteSpace(check.Id)
+                    ? BuildWorkflowRequirementKey(check.DocumentName ?? check.Name, index)
+                    : check.Id.Trim(),
+                DocumentName = string.IsNullOrWhiteSpace(check.DocumentName)
+                    ? check.Name.Trim()
+                    : check.DocumentName.Trim(),
+                DocumentType = string.IsNullOrWhiteSpace(check.DocumentType) ? null : check.DocumentType.Trim(),
+                IsRequired = true
+            })
+            .ToList() ?? [];
+
+        return taskRequirements
+            .Concat(qualityRequirements)
+            .Where(requirement =>
+                requirement.IsRequired &&
+                (!string.IsNullOrWhiteSpace(requirement.DocumentName) ||
+                 !string.IsNullOrWhiteSpace(requirement.DocumentType) ||
+                 !string.IsNullOrWhiteSpace(requirement.RequirementKey)))
+            .GroupBy(requirement => new
+            {
+                Name = NormalizeDocumentValue(requirement.DocumentName),
+                Type = NormalizeDocumentValue(requirement.DocumentType)
+            })
+            .Select(group => group.First())
             .ToList();
     }
 
@@ -1636,16 +1915,21 @@ public class LandAcquisitionsController : ControllerBase
         return [];
     }
 
-    private static bool IsDocumentTask(WorkflowTaskConfigDto taskConfig)
-        => taskConfig.RequiresDocument ||
-           string.Equals(taskConfig.TaskActionType, "document", StringComparison.OrdinalIgnoreCase) ||
-           !string.IsNullOrWhiteSpace(taskConfig.DocumentName) ||
-           (taskConfig.DocumentRequirements?.Any(requirement => requirement.IsRequired) ?? false);
+    private static bool IsDocumentTask(WorkflowStepConfigurationDto stepConfig)
+    {
+        var taskConfig = stepConfig.TaskConfig;
+        return ReadWorkflowStageDocumentRequirements(stepConfig).Count > 0 ||
+               (taskConfig != null &&
+                (taskConfig.RequiresDocument ||
+                 string.Equals(taskConfig.TaskActionType, "document", StringComparison.OrdinalIgnoreCase) ||
+                 !string.IsNullOrWhiteSpace(taskConfig.DocumentName) ||
+                 (taskConfig.DocumentRequirements?.Any(requirement => requirement.IsRequired) ?? false)));
+    }
 
-    private static bool HasRequiredWorkflowTaskAttachments(WorkflowTaskConfigDto taskConfig, string? resultData)
+    private static bool HasRequiredWorkflowTaskAttachments(WorkflowStepConfigurationDto stepConfig, string? resultData)
     {
         var attachments = ReadWorkflowTaskAttachments(resultData);
-        return ReadWorkflowDocumentRequirements(taskConfig)
+        return ReadWorkflowStageDocumentRequirements(stepConfig)
             .Where(requirement => requirement.IsRequired)
             .All(requirement => attachments.Any(attachment =>
                 string.Equals(attachment.RequirementKey, requirement.RequirementKey, StringComparison.OrdinalIgnoreCase)));
@@ -1696,6 +1980,24 @@ public class LandAcquisitionsController : ControllerBase
 
         return string.IsNullOrWhiteSpace(key) ? $"document-{index + 1}" : key;
     }
+
+    private static bool MatchesWorkflowDocumentRequirement(
+        LandAcquisitionDocument document,
+        WorkflowDocumentRequirementDto requirement)
+    {
+        var requirementName = NormalizeDocumentValue(requirement.DocumentName);
+        var documentName = NormalizeDocumentValue(document.FileName);
+        var documentNameWithoutExtension = NormalizeDocumentValue(Path.GetFileNameWithoutExtension(document.FileName));
+        var requirementType = NormalizeDocumentValue(requirement.DocumentType);
+        var documentType = NormalizeDocumentValue(document.DocumentType);
+
+        return (!string.IsNullOrWhiteSpace(requirementName) &&
+                (documentName == requirementName || documentNameWithoutExtension == requirementName)) ||
+               (!string.IsNullOrWhiteSpace(requirementType) && documentType == requirementType);
+    }
+
+    private static string NormalizeDocumentValue(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToLowerInvariant();
 
     private static string MergeWorkflowStepResultData(string? existingResultData, object payload)
     {
@@ -2181,7 +2483,9 @@ public class LandAcquisitionsController : ControllerBase
         return Math.Min(workflowStageOrder, Math.Min(15, currentStageOrder + 1));
     }
 
-    private LandAcquisitionItemDto ToItemDto(LandAcquisition item)
+    private LandAcquisitionItemDto ToItemDto(
+        LandAcquisition item,
+        IReadOnlyDictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>>? documentRequirementsByStage = null)
     {
         var owner = item.OwnershipHistories.FirstOrDefault();
         var snapshots = ReadWorkspaceSnapshots(item);
@@ -2196,7 +2500,7 @@ public class LandAcquisitionsController : ControllerBase
                                         acquisitionTypeValue.ValueKind == JsonValueKind.String
             ? acquisitionTypeValue.GetString()
             : null;
-        var missingInputs = GetMissingStageInputs(item, item.StageOrder);
+        var missingInputs = GetMissingStageInputs(item, item.StageOrder, documentRequirementsByStage);
         return new LandAcquisitionItemDto(
             item.Id,
             item.ProjectReference,

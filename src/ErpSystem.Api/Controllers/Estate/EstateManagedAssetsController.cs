@@ -315,7 +315,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
             FileName = document.FileName,
             ContentType = document.ContentType,
             FileSize = document.FileSize,
-            FileUploadRecordId = document.Id,
+            FileUploadRecordId = null,
             CreatedByUserId = GetUserId(),
             PublishedAt = now,
             PublishedById = GetUserId(),

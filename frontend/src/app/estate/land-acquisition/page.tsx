@@ -173,6 +173,63 @@ const field = (
   span,
 });
 
+const SUITABILITY_CAPTURE_FIELDS: WorkspaceField[] = [
+  field('inspectionDate', 'Inspection Date', 'date'),
+  field('inspectionOfficer', 'Inspection Officer'),
+  field('soilType', 'Soil Type', 'select', [
+    'Sandy',
+    'Clay',
+    'Loamy',
+    'Rocky',
+    'Mixed',
+  ]),
+  field('topography', 'Topography', 'select', [
+    'Flat',
+    'Gentle Slope',
+    'Steep Slope',
+    'Hilly',
+  ]),
+  field('hasAccessRoad', 'Has Access Road', 'check'),
+  field('hasUtilities', 'Has Utilities', 'check'),
+  field('siteAccessRoute', 'Site Access Route'),
+  field('drainageCondition', 'Drainage Condition', 'select', [
+    'Good',
+    'Fair',
+    'Poor',
+    'Requires Drainage Works',
+  ]),
+  field(
+    'existingDevelopment',
+    'Existing Development / Occupation',
+    'textarea',
+    undefined,
+    2
+  ),
+  field('zoningClassification', 'Zoning Classification'),
+  field('planningSchemeReference', 'Planning Scheme Reference'),
+  field('isFloodProne', 'Flood Prone', 'check'),
+  field('planningCompatible', 'Planning Compatible', 'check'),
+  field('accessConfirmed', 'Access Confirmed', 'check'),
+  field('environmentalClearance', 'Environmental Clearance', 'check'),
+  field('utilityAvailability', 'Utility Availability', 'check'),
+  field('encumbranceObserved', 'Encumbrance Observed On Site', 'check'),
+];
+
+const SUITABILITY_DECISION_FIELDS: WorkspaceField[] = [
+  field('assessmentRecommendation', 'Assessment Recommendation', 'select', [
+    'Proceed to Cadastral Survey',
+    'Return for More Information',
+    'Reject Site',
+  ]),
+  field(
+    'approvalNotes',
+    'Physical Assessment Notes',
+    'textarea',
+    undefined,
+    2
+  ),
+];
+
 const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
   'parcel-identification': [
     field('projectReference', 'Project Reference'),
@@ -194,59 +251,10 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
       'Government',
     ]),
     field('openingNotes', 'Opening Notes', 'textarea', undefined, 2),
+    ...SUITABILITY_CAPTURE_FIELDS,
   ],
   'suitability-approval': [
-    field('inspectionDate', 'Inspection Date', 'date'),
-    field('inspectionOfficer', 'Inspection Officer'),
-    field('soilType', 'Soil Type', 'select', [
-      'Sandy',
-      'Clay',
-      'Loamy',
-      'Rocky',
-      'Mixed',
-    ]),
-    field('topography', 'Topography', 'select', [
-      'Flat',
-      'Gentle Slope',
-      'Steep Slope',
-      'Hilly',
-    ]),
-    field('hasAccessRoad', 'Has Access Road', 'check'),
-    field('hasUtilities', 'Has Utilities', 'check'),
-    field('siteAccessRoute', 'Site Access Route'),
-    field('drainageCondition', 'Drainage Condition', 'select', [
-      'Good',
-      'Fair',
-      'Poor',
-      'Requires Drainage Works',
-    ]),
-    field(
-      'existingDevelopment',
-      'Existing Development / Occupation',
-      'textarea',
-      undefined,
-      2
-    ),
-    field('zoningClassification', 'Zoning Classification'),
-    field('planningSchemeReference', 'Planning Scheme Reference'),
-    field('isFloodProne', 'Flood Prone', 'check'),
-    field('planningCompatible', 'Planning Compatible', 'check'),
-    field('accessConfirmed', 'Access Confirmed', 'check'),
-    field('environmentalClearance', 'Environmental Clearance', 'check'),
-    field('utilityAvailability', 'Utility Availability', 'check'),
-    field('encumbranceObserved', 'Encumbrance Observed On Site', 'check'),
-    field('assessmentRecommendation', 'Assessment Recommendation', 'select', [
-      'Proceed to Cadastral Survey',
-      'Return for More Information',
-      'Reject Site',
-    ]),
-    field(
-      'approvalNotes',
-      'Physical Assessment Notes',
-      'textarea',
-      undefined,
-      2
-    ),
+    ...SUITABILITY_DECISION_FIELDS,
   ],
   'cadastral-survey': [
     field('cadastreDescription', 'Cadastre Description'),
@@ -637,8 +645,6 @@ const WORKSPACE_SECTIONS: Partial<
         'Record why the land is being acquired and any opening comments.',
       keys: ['intendedUse', 'openingNotes'],
     },
-  ],
-  'suitability-approval': [
     {
       title: 'Physical inspection',
       description:
@@ -670,10 +676,12 @@ const WORKSPACE_SECTIONS: Partial<
         'encumbranceObserved',
       ],
     },
+  ],
+  'suitability-approval': [
     {
-      title: 'Assessment decision',
+      title: 'Suitability review',
       description:
-        'State the recommendation and notes that justify the decision.',
+        'Review the captured parcel assessment and record the approval decision.',
       keys: ['assessmentRecommendation', 'approvalNotes'],
     },
   ],
@@ -1170,12 +1178,17 @@ function inputLabels(kind: AcquisitionWorkspaceKind, keys: string[]) {
 const normalizeDocumentValue = (value?: string) =>
   (value || '').trim().toLowerCase();
 
+const normalizeDocumentNameWithoutExtension = (value?: string) =>
+  normalizeDocumentValue(value).replace(/\.[^/.\\]+$/, '');
+
 const matchesRequirement = (
   document: Pick<LandAcquisitionDocument, 'documentName' | 'documentType'>,
   requirement: LandAcquisitionStageDocumentRequirement
 ) =>
-  normalizeDocumentValue(document.documentName) ===
-    normalizeDocumentValue(requirement.documentName) ||
+  [
+    normalizeDocumentValue(document.documentName),
+    normalizeDocumentNameWithoutExtension(document.documentName),
+  ].includes(normalizeDocumentValue(requirement.documentName)) ||
   (!!document.documentType &&
     !!requirement.documentType &&
     normalizeDocumentValue(document.documentType) ===

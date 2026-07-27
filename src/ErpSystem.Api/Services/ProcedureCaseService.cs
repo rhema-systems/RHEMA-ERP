@@ -107,6 +107,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var now = DateTime.UtcNow;
         var module = NormalizeModule(request.Module);
         var entityType = request.EntityType.Trim();
+        EnsureCanCreateProcedureCase(module);
         var workspace = await BuildWorkspaceSeedAsync(module, entityType);
         var firstStage = workspace.Stages.FirstOrDefault() ?? new StageSeed(0, "Open", null, null, null, []);
 
@@ -1441,6 +1442,16 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
     }
 
+    private void EnsureCanCreateProcedureCase(string module)
+    {
+        if (!string.Equals(module, "Legal", StringComparison.OrdinalIgnoreCase) || CanCreateLegalProcedureCase())
+        {
+            return;
+        }
+
+        throw new UnauthorizedAccessException("The current user is not allowed to open Legal procedure cases.");
+    }
+
     private bool CanEdit(ProcedureCase procedureCase)
     {
         if (IsWorkflowAdmin())
@@ -1450,6 +1461,17 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         return UserHasAssignedProcedureRole(procedureCase);
     }
+
+    private bool CanCreateLegalProcedureCase()
+        => IsWorkflowAdmin() || _currentUser.Roles.Any(role =>
+            string.Equals(role, "Legal", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "Legal Officer", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "Legal Manager", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "Head of Legal", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "Legal Admin Assistant", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "Secretary", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "Registry", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, "Legal Registry", StringComparison.OrdinalIgnoreCase));
 
     private bool CanView(ProcedureCase procedureCase)
         => IsWorkflowAdmin() || UserOwnsCase(procedureCase) || UserHasAssignedProcedureRole(procedureCase);

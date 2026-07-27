@@ -718,22 +718,6 @@ export class EstateAcquisitionService {
   }
 
   async getActiveWorkflowDocumentRequirements(): Promise<Record<number, LandAcquisitionStageDocumentRequirement[]>> {
-    const catalogRequirements = ACQUISITION_STAGES.reduce<Record<number, LandAcquisitionStageDocumentRequirement[]>>((acc, stage) => {
-      const requirements = requirementsFor(stage).documents.map((item, index) => ({
-        id: `${stage.workspaceKind}-${item.key || index + 1}`,
-        requirementKey: item.key || `${stage.workspaceKind}-document-${index + 1}`,
-        documentName: item.name,
-        documentType: item.type,
-        isRequired: true,
-      }));
-
-      if (requirements.length > 0) {
-        acc[stage.id] = requirements;
-      }
-
-      return acc;
-    }, {});
-
     try {
       const definitions = await workflowApiService.getWorkflowDefinitions({
         page: 1,
@@ -748,7 +732,7 @@ export class EstateAcquisitionService {
         definitions.data.find((item) => item.isActive && item.entityType === 'LandAcquisition') ||
         definitions.data[0];
 
-      if (!definition) return catalogRequirements;
+      if (!definition) return {};
 
       const detail = await workflowApiService.getWorkflowDefinition(definition.id);
       const workflowRequirements = (detail.steps || []).reduce<Record<number, LandAcquisitionStageDocumentRequirement[]>>(
@@ -778,9 +762,13 @@ export class EstateAcquisitionService {
               ) === index
             );
 
-          if (requirements.length > 0) {
-            acc[step.order - 1] = requirements;
-            acc[step.order] = requirements;
+          const stageDefinition = ACQUISITION_STAGES.find((stage) =>
+            stage.title.toLowerCase() === step.name.toLowerCase()
+          );
+          const stageOrder = stageDefinition?.order ?? (step.order > 0 ? step.order - 1 : step.order);
+
+          if (requirements.length > 0 && stageOrder >= 0) {
+            acc[stageOrder] = requirements;
           }
 
           return acc;
@@ -788,12 +776,9 @@ export class EstateAcquisitionService {
         {}
       );
 
-      return {
-        ...catalogRequirements,
-        ...workflowRequirements,
-      };
+      return workflowRequirements;
     } catch {
-      return catalogRequirements;
+      return {};
     }
   }
 
@@ -869,6 +854,13 @@ export class EstateAcquisitionService {
             requiresDocument: requirements.documents.length > 0,
             documentRequirementKey: `${item.workspaceKind}-documents`,
             documentName: `${item.title} Documents`,
+            documentRequirements: requirements.documents.map((doc, index) => ({
+              id: `${item.workspaceKind}-${doc.key || index + 1}`,
+              requirementKey: doc.key || `${item.workspaceKind}-document-${index + 1}`,
+              documentName: doc.name,
+              documentType: doc.type,
+              isRequired: true,
+            })),
             instructions: `Attach all required documents for ${item.title}: ${requirements.documents.map((doc) => doc.name).join(', ')}.`,
           },
           qualityConfig: {

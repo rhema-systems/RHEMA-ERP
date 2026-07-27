@@ -1009,6 +1009,15 @@ public sealed class DocumentManagementController : ControllerBase
             return Forbid();
         }
 
+        if (!string.IsNullOrWhiteSpace(request.RepositoryPath))
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "Create the DMS record first, then upload a document version to link repository content."
+            });
+        }
+
         var record = new CentralDocumentRecord
         {
             TenantId = tenantId,
@@ -1025,7 +1034,7 @@ public sealed class DocumentManagementController : ControllerBase
             SourceRecordId = request.SourceRecordId,
             MetadataTemplateCode = request.MetadataTemplateCode,
             RepositoryStatus = request.RepositoryStatus ?? "Not linked",
-            RepositoryPath = request.RepositoryPath,
+            RepositoryPath = null,
             ExternalDocumentUrl = request.ExternalDocumentUrl,
             CurrentVersion = request.CurrentVersion,
             VersionStatus = request.VersionStatus ?? "Draft",
@@ -1082,7 +1091,27 @@ public sealed class DocumentManagementController : ControllerBase
         record.SourceRecordId = request.SourceRecordId ?? record.SourceRecordId;
         record.MetadataTemplateCode = request.MetadataTemplateCode ?? record.MetadataTemplateCode;
         record.RepositoryStatus = request.RepositoryStatus ?? record.RepositoryStatus;
-        record.RepositoryPath = request.RepositoryPath ?? record.RepositoryPath;
+        if (request.RepositoryPath is not null)
+        {
+            var repositoryPath = TrimToNull(request.RepositoryPath);
+            if (repositoryPath is null)
+            {
+                record.RepositoryPath = null;
+            }
+            else if (!IsRecordContentPath(record.Id, repositoryPath))
+            {
+                if (!await IsRepositoryPathOwnedByRecordAsync(tenantId, record.Id, record.RepositoryPath, repositoryPath, cancellationToken))
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "The repository path is not available for this DMS document."
+                    });
+                }
+
+                record.RepositoryPath = repositoryPath;
+            }
+        }
         record.ExternalDocumentUrl = request.ExternalDocumentUrl ?? record.ExternalDocumentUrl;
         record.CurrentVersion = request.CurrentVersion ?? record.CurrentVersion;
         record.VersionStatus = request.VersionStatus ?? record.VersionStatus;
@@ -1133,7 +1162,25 @@ public sealed class DocumentManagementController : ControllerBase
 
         record.MetadataTemplateCode = TrimToNull(request.MetadataTemplateCode);
         record.RepositoryStatus = TrimOrDefault(request.RepositoryStatus, "Not linked");
-        record.RepositoryPath = TrimToNull(request.RepositoryPath);
+        var requestedRepositoryPath = TrimToNull(request.RepositoryPath);
+        if (!string.IsNullOrWhiteSpace(requestedRepositoryPath)
+            && !IsRecordContentPath(record.Id, requestedRepositoryPath))
+        {
+            if (!await IsRepositoryPathOwnedByRecordAsync(tenantId, record.Id, record.RepositoryPath, requestedRepositoryPath, cancellationToken))
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "The repository path is not available for this DMS document."
+                });
+            }
+
+            record.RepositoryPath = requestedRepositoryPath;
+        }
+        else if (requestedRepositoryPath is null)
+        {
+            record.RepositoryPath = null;
+        }
         record.ExternalDocumentUrl = TrimToNull(request.ExternalDocumentUrl);
         record.CurrentVersion = TrimToNull(request.CurrentVersion);
         record.VersionStatus = TrimOrDefault(request.VersionStatus, "Draft");
@@ -1309,18 +1356,71 @@ public sealed class DocumentManagementController : ControllerBase
             return Forbid();
         }
 
+        FileUploadRecord? uploadRecord = null;
+        if (request.FileUploadRecordId.HasValue)
+        {
+            uploadRecord = await ResolveAuthorizedVersionUploadRecordAsync(
+                tenantId,
+                record,
+                request.FileUploadRecordId.Value,
+                cancellationToken);
+
+            if (uploadRecord is null)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "The supplied upload record is not available for this DMS document."
+                });
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.RepositoryPath)
+                && !StoragePathsEqual(request.RepositoryPath, uploadRecord.FilePath))
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "The repository path must match the supplied upload record."
+                });
+            }
+        }
+
+        var repositoryPath = uploadRecord?.FilePath ?? TrimToNull(request.RepositoryPath);
+        if (uploadRecord is null
+            && !string.IsNullOrWhiteSpace(repositoryPath)
+            && !await IsRepositoryPathOwnedByRecordAsync(tenantId, record.Id, record.RepositoryPath, repositoryPath, cancellationToken))
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "The repository path is not available for this DMS document."
+            });
+        }
+
+        var renditionPath = TrimToNull(request.RenditionPath);
+        if (!string.IsNullOrWhiteSpace(renditionPath)
+            && !StoragePathsEqual(renditionPath, repositoryPath)
+            && !await IsRepositoryPathOwnedByRecordAsync(tenantId, record.Id, record.RepositoryPath, renditionPath, cancellationToken))
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "The rendition path is not available for this DMS document."
+            });
+        }
+
         var version = new CentralDocumentVersion
         {
             TenantId = tenantId,
             DocumentRecordId = record.Id,
             VersionNumber = string.IsNullOrWhiteSpace(request.VersionNumber) ? "v1.0" : request.VersionNumber.Trim(),
             Status = request.Status ?? "Draft",
-            RepositoryPath = request.RepositoryPath,
-            RenditionPath = request.RenditionPath,
-            FileName = request.FileName,
-            ContentType = request.ContentType,
-            FileSize = request.FileSize,
-            FileUploadRecordId = request.FileUploadRecordId,
+            RepositoryPath = repositoryPath,
+            RenditionPath = renditionPath,
+            FileName = request.FileName ?? uploadRecord?.OriginalFileName,
+            ContentType = request.ContentType ?? uploadRecord?.ContentType,
+            FileSize = request.FileSize ?? uploadRecord?.FileSize,
+            FileUploadRecordId = uploadRecord?.Id,
             ChangeSummary = request.ChangeSummary,
             CreatedByUserId = GetUserId(),
             CreatedAt = DateTime.UtcNow,
@@ -1410,7 +1510,19 @@ public sealed class DocumentManagementController : ControllerBase
         _db.FileUploadRecords.Add(uploadRecord);
 
         var isPdf = IsPdfFile(storageResult.ContentType, storageResult.OriginalFileName);
-        var pdfRenditionPath = isPdf ? storageResult.FilePath : TrimToNull(renditionPath);
+        var clientRenditionPath = TrimToNull(renditionPath);
+        if (!isPdf
+            && !string.IsNullOrWhiteSpace(clientRenditionPath)
+            && !await IsRepositoryPathOwnedByRecordAsync(tenantId, record.Id, record.RepositoryPath, clientRenditionPath, cancellationToken))
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "The supplied rendition path is not available for this DMS document."
+            });
+        }
+
+        var pdfRenditionPath = isPdf ? storageResult.FilePath : clientRenditionPath;
         CentralDocumentRenditionResult? renditionResult = null;
 
         if (!isPdf && string.IsNullOrWhiteSpace(pdfRenditionPath))
@@ -1507,6 +1619,15 @@ public sealed class DocumentManagementController : ControllerBase
             return BadRequest(new { success = false, message = "A PDF rendition path is required." });
         }
 
+        if (!await IsRepositoryPathOwnedByRecordAsync(tenantId, record.Id, record.RepositoryPath, renditionPathValue, cancellationToken))
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "The supplied rendition path is not available for this DMS document."
+            });
+        }
+
         version.RenditionPath = renditionPathValue;
         version.ChangeSummary = string.IsNullOrWhiteSpace(request.ChangeSummary)
             ? version.ChangeSummary
@@ -1570,31 +1691,21 @@ public sealed class DocumentManagementController : ControllerBase
             return Ok(new { success = true, data = ToVersionDto(version) });
         }
 
-        if (!version.FileUploadRecordId.HasValue)
+        var sourceFile = await OpenVersionSourceFileAsync(version, tenantId, cancellationToken);
+        if (!sourceFile.Success || sourceFile.Stream is null)
         {
             return BadRequest(new
             {
                 success = false,
-                message = "This DMS version does not have a stored source file that can be converted."
+                message = sourceFile.ErrorMessage ?? "This DMS version does not have a stored source file that can be converted."
             });
         }
 
-        var uploadRecord = await _db.FileUploadRecords
-            .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == version.FileUploadRecordId.Value
-                && item.TenantId == tenantId
-                && !item.IsDeleted, cancellationToken);
-
-        if (uploadRecord is null)
-        {
-            return NotFound(new { success = false, message = "The stored source file was not found." });
-        }
-
-        await using var sourceStream = await _fileStorageService.DownloadFileAsync(uploadRecord.FilePath, uploadRecord.Id);
+        await using var sourceStream = sourceFile.Stream;
         var renditionResult = await _renditionService.CreatePdfRenditionAsync(new CentralDocumentRenditionRequest(
             sourceStream,
-            uploadRecord.OriginalFileName,
-            uploadRecord.ContentType ?? version.ContentType ?? "application/octet-stream",
+            sourceFile.FileName ?? version.FileName,
+            sourceFile.ContentType ?? version.ContentType ?? "application/octet-stream",
             tenantId,
             record.Id,
             record.DocumentReference,
@@ -3493,6 +3604,90 @@ public sealed class DocumentManagementController : ControllerBase
         }
 
         return false;
+    }
+
+    private async Task<FileUploadRecord?> ResolveAuthorizedVersionUploadRecordAsync(
+        Guid tenantId,
+        CentralDocumentRecord record,
+        Guid fileUploadRecordId,
+        CancellationToken cancellationToken)
+    {
+        var uploadRecord = await _db.FileUploadRecords
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == fileUploadRecordId
+                && item.TenantId == tenantId
+                && !item.IsDeleted, cancellationToken);
+
+        if (uploadRecord is null)
+        {
+            return null;
+        }
+
+        if (StoragePathsEqual(uploadRecord.FilePath, record.RepositoryPath))
+        {
+            return uploadRecord;
+        }
+
+        var belongsToRecord = await _db.CentralDocumentVersions
+            .AsNoTracking()
+            .AnyAsync(item => item.TenantId == tenantId
+                && item.DocumentRecordId == record.Id
+                && item.FileUploadRecordId == fileUploadRecordId
+                && !item.IsDeleted, cancellationToken);
+
+        return belongsToRecord ? uploadRecord : null;
+    }
+
+    private async Task<bool> IsRepositoryPathOwnedByRecordAsync(
+        Guid tenantId,
+        Guid documentRecordId,
+        string? currentRecordPath,
+        string repositoryPath,
+        CancellationToken cancellationToken)
+    {
+        if (StoragePathsEqual(repositoryPath, currentRecordPath))
+        {
+            return true;
+        }
+
+        var existingPaths = await _db.CentralDocumentVersions
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && item.DocumentRecordId == documentRecordId
+                && !item.IsDeleted)
+            .Select(item => new { item.RepositoryPath, item.RenditionPath })
+            .ToListAsync(cancellationToken);
+
+        return existingPaths.Any(item =>
+            StoragePathsEqual(item.RepositoryPath, repositoryPath) ||
+            StoragePathsEqual(item.RenditionPath, repositoryPath));
+    }
+
+    private static bool StoragePathsEqual(string? first, string? second)
+        => !string.IsNullOrWhiteSpace(first)
+            && !string.IsNullOrWhiteSpace(second)
+            && string.Equals(
+                first.Replace('\\', '/').TrimStart('/'),
+                second.Replace('\\', '/').TrimStart('/'),
+                StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsRecordContentPath(Guid recordId, string? value)
+    {
+        var normalized = TrimToNull(value)?.Replace('\\', '/').Trim();
+        if (normalized is null)
+        {
+            return false;
+        }
+
+        if (Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
+        {
+            normalized = uri.AbsolutePath;
+        }
+
+        return string.Equals(
+            normalized.TrimStart('/'),
+            RecordContentUrl(recordId).TrimStart('/'),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<bool> CanAssignAccessProfileAsync(

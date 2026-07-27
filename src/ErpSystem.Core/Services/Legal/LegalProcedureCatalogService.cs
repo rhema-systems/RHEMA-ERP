@@ -118,11 +118,11 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Stage("Dispatch and records", "Legal Admin Assistant / Estate Records", "Release completed documents and return the file for records update.", "Date and seal final documents.", "Dispatch applicant, court, or Lands Commission copies.", "Return the file to Estate or Registry for records amendment.")
             ],
             [
-                Doc("Request memo", "Originating department", true),
-                Doc("Property file or court docket", "Estate / Registry", true),
-                Doc("Payment evidence or fee approval", "Client / Finance", false),
-                Doc("Cadastral plan, site report, or schedule", "Estate", false),
-                Doc("Draft instrument or court process", "Legal team", true)
+                Doc("Request memo", "Receive and register", true),
+                Doc("Property file or court docket", "Receive and register", true),
+                Doc("Payment evidence or fee approval", "Due diligence", false),
+                Doc("Cadastral plan, site report, or schedule", "Due diligence", false),
+                Doc("Draft instrument or court process", "Draft and vet", true)
             ],
             CommonFields("Procedure type"),
             ["Approved legal instrument or court process", "Signed dispatch copy", "Updated legal register", "Returned property file or court docket"],
@@ -140,11 +140,11 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Stage("Release and return file", "Legal Admin Assistant", "Date, seal, release the consent to the client, and return the file to Estate.", "Date and seal final consent.", "Call client for collection.", "Record dispatch and return file to Estate.")
             ],
             [
-                Doc("Property file", "Estate", true),
-                Doc("Consent to mortgage request", "Client / Estate", true),
-                Doc("Payment receipt", "Client / Finance", true),
-                Doc("Existing lease document", "Estate Records", true),
-                Doc("Mortgagee details", "Client", true)
+                Doc("Property file", "Receive mortgage file", true),
+                Doc("Consent to mortgage request", "Receive mortgage file", true),
+                Doc("Payment receipt", "Client payment follow-up", true),
+                Doc("Existing lease document", "Receive mortgage file", true),
+                Doc("Mortgagee details", "Receive mortgage file", true)
             ],
             MortgageFields("Mortgagee / bank name"),
             ["Consent to mortgage letter", "Signed and sealed client copy", "File return note to Estate"],
@@ -161,10 +161,10 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Stage("Finalize and sign", "Head of Legal", "Print the finalized letter and obtain Head of Legal signature.", "Prepare final letterhead copy.", "Obtain signature.", "Release response and update file.")
             ],
             [
-                Doc("Property file", "Estate", true),
-                Doc("Mortgage in principle request", "Client / Estate", true),
-                Doc("Payment receipt", "Client / Finance", true),
-                Doc("Lease or allocation reference", "Estate Records", true)
+                Doc("Property file", "Minute file for payment", true),
+                Doc("Mortgage in principle request", "Minute file for payment", true),
+                Doc("Payment receipt", "Payment follow-up", true),
+                Doc("Lease or allocation reference", "Minute file for payment", true)
             ],
             MortgageFields("Proposed lender"),
             ["Mortgage in principle letter", "Payment follow-up record", "Updated legal file"],
@@ -182,11 +182,11 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Stage("Monitor and close", "Legal Officer", "Track hearings, subsequent processes, and closure actions.", "Update hearing dates.", "Prepare follow-up filings.", "Close docket when the matter concludes.")
             ],
             [
-                Doc("Served court process", "Registry / Bailiff", true),
-                Doc("Court jacket or docket", "Legal Admin Assistant", true),
-                Doc("Property file", "Estate", processType == "Writ of summons"),
-                Doc("Evidence bundle", "Estate / Business unit", false),
-                Doc("Filed court copy or receipt", "Court Registry", true)
+                Doc("Served court process", "Receive court process", true),
+                Doc("Court jacket or docket", "Register and open docket", true),
+                Doc("Property file", "Prepare response", processType == "Writ of summons"),
+                Doc("Evidence bundle", "Prepare response", false),
+                Doc("Filed court copy or receipt", "File at court", true)
             ],
             CourtFields(processType),
             ["Court docket", "Filed court process", "Hearing update log", "Closure note"],
@@ -210,12 +210,12 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Stage("Final signature and records", "Head of Legal / Estate", "Obtain final Head of Legal signature and return the file for records amendment.", "Route to Head of Legal.", "Distribute signed copies.", "Return file to Estate.")
             ],
             [
-                Doc("Property file", "Estate", true),
-                Doc("Site report", "Estate / Inspection team", true),
-                Doc("Termination notice", "Legal Admin Assistant", true),
-                Doc("Notice-pasting evidence", "Legal Clerk", true),
-                Doc("Payment receipt", "Client / Finance", true),
-                Doc("Recognition or tenancy declaration", "Legal Admin Assistant", true)
+                Doc("Property file", "Due diligence and site review", true),
+                Doc("Site report", "Due diligence and site review", true),
+                Doc("Termination notice", "Draft termination notice", true),
+                Doc("Notice-pasting evidence", "Approve and paste notice", true),
+                Doc("Payment receipt", "Payment and recognition draft", true),
+                Doc("Recognition or tenancy declaration", "Payment and recognition draft", true)
             ],
             CommonFields("Recognition / termination request type"),
             ["Termination notice", "Recognition or tenancy declaration", "Signed client copies", "Estate records amendment request"],
@@ -253,12 +253,12 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Stage("Legal signatures and records", "Legal Officer / Head of Legal / Estate", "Route for internal signatures, distribute signed copies, and return file to Estate for amendment.", "Obtain Legal Officer and Legal Admin Assistant signatures.", "Obtain Head of Legal signature.", "Forward file to Estate for records amendment.")
             ],
             [
-                Doc("Property file", "Estate", true),
-                Doc("Transfer request", "Applicant", true),
-                Doc("Transfer fee approval", "Estate / Managing Director", true),
-                Doc("Payment receipt", "Client / Finance", true),
-                Doc("Transfer declaration forms", "Legal Officer", true),
-                Doc("Identity and witness details", "Applicant / Transferee", true)
+                Doc("Property file", "Due diligence", true),
+                Doc("Transfer request", "Due diligence", true),
+                Doc("Transfer fee approval", "Fee calculation and approval", true),
+                Doc("Payment receipt", "Payment and draft transfer", true),
+                Doc("Transfer declaration forms", "Payment and draft transfer", true),
+                Doc("Identity and witness details", "Client execution", true)
             ],
             CommonFields("Transfer request type"),
             ["Transfer declaration forms", "Signed transfer copies", "Estate amendment instruction", "Legal file copy"],
@@ -282,11 +282,11 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Stage("Release and records", "Legal Admin Assistant / Estate", "Date, seal, release the document, and return the property file for records update.", "Date and seal final document.", "Notify client for collection or signing.", "Return property file to Estate.")
             ],
             [
-                Doc("Property file", "Estate", true),
-                Doc($"{documentName} request", "Client / Estate", true),
-                Doc("Payment evidence", "Client / Finance", true),
-                Doc("Cadastral plan and schedule", "Estate", true),
-                Doc($"Draft {documentName.ToLowerInvariant()}", "Legal Admin Assistant / Secretary", true)
+                Doc("Property file", "Receive and minute file", true),
+                Doc($"{documentName} request", "Receive and minute file", true),
+                Doc("Payment evidence", "Due diligence", true),
+                Doc("Cadastral plan and schedule", "Due diligence", true),
+                Doc($"Draft {documentName.ToLowerInvariant()}", "Draft instrument", true)
             ],
             CommonFields("Instrument type"),
             outputs,
