@@ -1783,13 +1783,14 @@ public class LandAcquisitionsController : ControllerBase
             return;
         }
 
+        var accountsPayableInvoiceId = stampDutyPayment.AccountsPayableInvoiceId.GetValueOrDefault();
         var invoice = await _context.Set<VendorInvoice>()
             .AsNoTracking()
             .Include(item => item.PaymentAllocations)
                 .ThenInclude(allocation => allocation.VendorPayment)
             .FirstOrDefaultAsync(item =>
                 item.TenantId == acquisition.TenantId &&
-                item.Id == stampDutyPayment.AccountsPayableInvoiceId.Value &&
+                item.Id == accountsPayableInvoiceId &&
                 !item.IsDeleted,
                 cancellationToken);
         if (invoice == null)
@@ -3294,7 +3295,9 @@ public class LandAcquisitionsController : ControllerBase
         => $"ACQ-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}"[..30].ToUpperInvariant();
 
     private Guid GetTenantId()
-        => _currentUserService.TenantId ?? Guid.Parse("00000000-0000-0000-0000-000000000001");
+        => _currentUserService.TenantId is { } tenantId && tenantId != Guid.Empty
+            ? tenantId
+            : throw new UnauthorizedAccessException("Tenant context is required.");
 
     private Guid GetUserId()
         => Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : Guid.Empty;

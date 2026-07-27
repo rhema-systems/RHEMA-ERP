@@ -81,10 +81,10 @@ public sealed class DocumentManagementController : ControllerBase
     public async Task<IActionResult> GetDashboard(CancellationToken cancellationToken)
     {
         var tenantId = GetTenantId();
-        var records = await _db.CentralDocumentRecords
+        var query = _db.CentralDocumentRecords
             .AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted)
-            .ToListAsync(cancellationToken);
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted);
+        var records = await LoadViewableRecordsAsync(tenantId, query, 2000, cancellationToken);
         var recordIds = records.Select(item => item.Id).ToList();
         var templatesByCode = await GetTemplatesByCodeAsync(tenantId, cancellationToken);
         var metadataValuesByRecord = await GetMetadataValuesByRecordAsync(tenantId, recordIds, cancellationToken);
@@ -1738,9 +1738,10 @@ public sealed class DocumentManagementController : ControllerBase
         }
 
         await using var sourceStream = sourceFile.Stream;
+        var sourceFileName = sourceFile.FileName ?? version.FileName ?? $"{record.DocumentReference}.document";
         var renditionResult = await _renditionService.CreatePdfRenditionAsync(new CentralDocumentRenditionRequest(
             sourceStream,
-            sourceFile.FileName ?? version.FileName,
+            sourceFileName,
             sourceFile.ContentType ?? version.ContentType ?? "application/octet-stream",
             tenantId,
             record.Id,
@@ -2342,6 +2343,12 @@ public sealed class DocumentManagementController : ControllerBase
     [HttpGet("access-rules")]
     public async Task<IActionResult> GetAccessRules(CancellationToken cancellationToken)
     {
+        // DMS governance rules expose role and permission mappings, so reads stay admin-only like writes.
+        if (!IsDmsAccessAdministrator())
+        {
+            return Forbid();
+        }
+
         var tenantId = GetTenantId();
         var rules = await _db.CentralDocumentAccessRules
             .AsNoTracking()
@@ -2391,6 +2398,12 @@ public sealed class DocumentManagementController : ControllerBase
     [HttpGet("retention-policies")]
     public async Task<IActionResult> GetRetentionPolicies(CancellationToken cancellationToken)
     {
+        // Retention policy configuration is part of DMS governance and should not be broadly visible.
+        if (!IsDmsAccessAdministrator())
+        {
+            return Forbid();
+        }
+
         var tenantId = GetTenantId();
         var policies = await _db.CentralDocumentRetentionPolicies
             .AsNoTracking()
@@ -2916,7 +2929,9 @@ public sealed class DocumentManagementController : ControllerBase
     }
 
     private Guid GetTenantId()
-        => _currentUserService.TenantId ?? Guid.Parse("00000000-0000-0000-0000-000000000001");
+        => _currentUserService.TenantId is { } tenantId && tenantId != Guid.Empty
+            ? tenantId
+            : throw new UnauthorizedAccessException("Tenant context is required.");
 
     private Guid? GetUserId()
         => Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : null;

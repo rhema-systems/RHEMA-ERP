@@ -323,6 +323,15 @@ public partial class ProjectService
     {
         var unit = await GetProjectUnitEntityAsync(unitId);
         var project = await RequireProjectAsync(unit.ProjectId, ProjectAccessOperation.ManageFinancials);
+        var developmentProfile = project.DevelopmentProfile
+            ?? await _unitOfWork.Repository<ProjectDevelopmentProfile>()
+                .FirstOrDefaultAsync(item =>
+                    item.ProjectId == project.Id &&
+                    item.TenantId == _currentUserProvider.TenantId);
+        var siteAddress = developmentProfile?.SiteAddress?.Trim();
+        var projectLocation = string.IsNullOrWhiteSpace(siteAddress)
+            ? project.Title
+            : siteAddress;
 
         // Estate/Project integration: only released, handed-over, or occupied Project units can enter Estate management.
         var isReadyForEstate = unit.IsReleasedForMarket
@@ -359,7 +368,7 @@ public partial class ProjectService
             UnitStatus = unit.Status,
             BlockName = unit.BlockName,
             FloorLabel = unit.FloorLabel,
-            Location = project.Title,
+            Location = projectLocation,
             AreaSquareMeters = unit.AreaSquareMeters,
             ValuationAmount = unit.BasePrice,
             Currency = unit.Currency,

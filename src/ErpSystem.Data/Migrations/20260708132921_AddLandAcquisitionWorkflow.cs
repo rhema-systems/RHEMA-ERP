@@ -11,14 +11,6 @@ namespace ErpSystem.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropIndex(
-                name: "IX_WorkflowDelegations_WorkflowDefinitionId",
-                table: "WorkflowDelegations");
-
-            migrationBuilder.DropIndex(
-                name: "IX_WorkflowDelegations_WorkflowStepId",
-                table: "WorkflowDelegations");
-
             migrationBuilder.CreateTable(
                 name: "LandAcquisitions",
                 columns: table => new
@@ -838,15 +830,6 @@ namespace ErpSystem.Data.Migrations
             migrationBuilder.DropTable(
                 name: "LandAcquisitions");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_WorkflowDelegations_WorkflowDefinitionId",
-                table: "WorkflowDelegations",
-                column: "WorkflowDefinitionId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_WorkflowDelegations_WorkflowStepId",
-                table: "WorkflowDelegations",
-                column: "WorkflowStepId");
         }
     }
 }

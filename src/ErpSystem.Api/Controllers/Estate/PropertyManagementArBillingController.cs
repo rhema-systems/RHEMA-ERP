@@ -167,7 +167,9 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         };
 
     private Guid GetTenantId()
-        => _currentUserService.TenantId ?? Guid.Parse("00000000-0000-0000-0000-000000000001");
+        => _currentUserService.TenantId is { } tenantId && tenantId != Guid.Empty
+            ? tenantId
+            : throw new UnauthorizedAccessException("Tenant context is required.");
 
     private Guid? GetUserId()
         => Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : null;

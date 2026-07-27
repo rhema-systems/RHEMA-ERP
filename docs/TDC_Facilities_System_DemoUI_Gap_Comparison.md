@@ -1,6 +1,6 @@
 # TDC Facilities Requirements vs What We Have vs Gaps
 
-**Date:** 14 July 2026  
+**Date:** 14 July 2026
 **Purpose:** Compare the Facilities Management ERP module and BRS documents against the combined solution baseline: current RHEMA ERP plus DemoUI items intended to be brought into the ERP, before producing the final module-owner requirements document.
 
 ## Source Documents Reviewed

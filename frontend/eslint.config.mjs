@@ -17,6 +17,8 @@ const eslintConfig = [
       ".next/**",
       "out/**",
       "build/**",
+      "public/syncfusion/**",
+      "scripts/copy-syncfusion-pdfviewer-assets.js",
       "next-env.d.ts",
     ],
   },

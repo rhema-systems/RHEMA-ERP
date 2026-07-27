@@ -183,17 +183,22 @@ export function CentralDocumentViewerDialog({
     setIsLoadingPreview(true);
     const loadPreview = async () => {
       try {
-        const blob = secureApiUrl
-          ? await rawApiService.downloadBlob(toApiEndpoint(secureApiUrl))
-          : currentFile?.versionId
-          ? await documentManagementService.downloadVersionFile(
-              currentFile.documentRecordId!,
-              currentFile.versionId,
-              'pdf'
-            )
-          : await documentManagementService.downloadRecordContent(
-              currentFile!.documentRecordId!
-            );
+        let blob: Blob;
+        if (secureApiUrl) {
+          blob = await rawApiService.downloadBlob(toApiEndpoint(secureApiUrl));
+        } else if (currentFile?.documentRecordId && currentFile.versionId) {
+          blob = await documentManagementService.downloadVersionFile(
+            currentFile.documentRecordId,
+            currentFile.versionId,
+            'pdf'
+          );
+        } else if (currentFile?.documentRecordId) {
+          blob = await documentManagementService.downloadRecordContent(
+            currentFile.documentRecordId
+          );
+        } else {
+          return;
+        }
 
         if (cancelled) return;
 

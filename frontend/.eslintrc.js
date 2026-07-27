@@ -3,6 +3,10 @@ module.exports = {
     'next/core-web-vitals',
     '@next/next/recommended'
   ],
+  ignorePatterns: [
+    'public/syncfusion/**',
+    'scripts/copy-syncfusion-pdfviewer-assets.js'
+  ],
   rules: {
     // Disable problematic rules for development
     '@typescript-eslint/no-unused-vars': 'off',

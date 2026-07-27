@@ -200,7 +200,7 @@ export default function ExternalEstateServicesPage() {
   const [requests, setRequests] = React.useState<ExternalEstateServiceRequest[]>(
     []
   );
-  const [form, setForm] = React.useState(initialForm);
+  const [form, setForm] = React.useState<EstateServiceFormState>(initialForm);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);

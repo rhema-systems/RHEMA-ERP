@@ -1,6 +1,6 @@
 # TDC Estates Requirements vs What We Have vs Gaps
 
-**Date:** 14 July 2026  
+**Date:** 14 July 2026
 **Purpose:** Compare the TDC Estates questionnaire/SOP requirements against the combined solution baseline: current RHEMA ERP plus DemoUI items intended to be brought into the ERP, before producing the final module-owner requirements document.
 
 ## Status Legend
@@ -110,4 +110,3 @@ However, the actual `LandParcel` DemoUI screens are not present in this repo. Th
 5. Requirements to add as new development.
 6. Gaps/open decisions.
 7. Prioritized implementation phases.
-

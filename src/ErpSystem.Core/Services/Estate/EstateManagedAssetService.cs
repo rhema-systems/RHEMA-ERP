@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
+using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Estate;
@@ -23,7 +24,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         var take = Math.Clamp(query.Take <= 0 ? 100 : query.Take, 1, 500);
         var normalizedSearch = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim();
         var excludedStatuses = query.ExcludedStatuses.Distinct().ToList();
-        var assets = (await _unitOfWork.Repository<EstateManagedAsset>().FindAsync(item =>
+        var assetsQuery = _unitOfWork.Repository<EstateManagedAsset>()
+            .GetQueryable(item =>
                 item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted
                 && (!query.AssetType.HasValue || item.AssetType == query.AssetType.Value)
@@ -32,24 +34,30 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 && (!query.AvailableForLease.HasValue || item.IsAvailableForLease == query.AvailableForLease.Value)
                 && (!query.AvailableForSale.HasValue || item.IsAvailableForSale == query.AvailableForSale.Value)
                 && (!query.AvailableForSaleOrLease.HasValue
-                    || (item.IsAvailableForSale || item.IsAvailableForLease) == query.AvailableForSaleOrLease.Value)))
-            .Where(item => normalizedSearch == null
-                || Contains(item.AssetCode, normalizedSearch)
-                || Contains(item.Name, normalizedSearch)
-                || Contains(item.ProjectCode, normalizedSearch)
-                || Contains(item.ProjectTitle, normalizedSearch)
-                || Contains(item.ProjectUnitCode, normalizedSearch)
-                || Contains(item.Purpose, normalizedSearch)
-                || Contains(item.ZoningClassification, normalizedSearch)
-                || Contains(item.GisLayerReference, normalizedSearch)
-                || Contains(item.Location, normalizedSearch))
+                    || (item.IsAvailableForSale || item.IsAvailableForLease) == query.AvailableForSaleOrLease.Value));
+
+        if (normalizedSearch != null)
+        {
+            var search = $"%{normalizedSearch}%";
+            assetsQuery = assetsQuery.Where(item =>
+                (item.AssetCode != null && EF.Functions.Like(item.AssetCode, search))
+                || (item.Name != null && EF.Functions.Like(item.Name, search))
+                || (item.ProjectCode != null && EF.Functions.Like(item.ProjectCode, search))
+                || (item.ProjectTitle != null && EF.Functions.Like(item.ProjectTitle, search))
+                || (item.ProjectUnitCode != null && EF.Functions.Like(item.ProjectUnitCode, search))
+                || (item.Purpose != null && EF.Functions.Like(item.Purpose, search))
+                || (item.ZoningClassification != null && EF.Functions.Like(item.ZoningClassification, search))
+                || (item.GisLayerReference != null && EF.Functions.Like(item.GisLayerReference, search))
+                || (item.Location != null && EF.Functions.Like(item.Location, search)));
+        }
+
+        var assets = await assetsQuery
             .OrderBy(item => item.AssetCode)
             .ThenBy(item => item.Name)
             .Take(take)
-            .Select(MapToDto)
-            .ToList();
+            .ToListAsync();
 
-        return assets;
+        return assets.Select(MapToDto).ToList();
     }
 
     public async Task<EstateManagedAssetDto> PublishLandAcquisitionAsync(LandAcquisitionEstateHandoffDto handoff)
@@ -588,9 +596,6 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             .FirstOrDefault(),
         Notes = asset.Notes
     };
-
-    private static bool Contains(string? value, string search)
-        => value?.Contains(search, StringComparison.OrdinalIgnoreCase) == true;
 
     private static string? TrimOrNull(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
