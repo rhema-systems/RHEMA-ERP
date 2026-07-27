@@ -222,6 +222,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         procedureCase.Activities.Add(Activity(tenantId, userId, procedureCase.Id, "Created", firstStage.Name, "Procedure case opened."));
 
+        // Procedure cases are source records for workflow; keep creation, workflow startup, and linkage atomic.
+        await using var transaction = await _db.Database.BeginTransactionAsync();
         _db.ProcedureCases.Add(procedureCase);
         await _db.SaveChangesAsync();
 
@@ -250,6 +252,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             await _db.SaveChangesAsync();
             await SyncCaseFromWorkflowRuntimeAsync(procedureCase.Id, workflowInstance.Id, userId);
         }
+
+        await transaction.CommitAsync();
 
         return ToDetailDto((await LoadCaseAsync(procedureCase.Id, asTracking: false))!);
     }

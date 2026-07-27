@@ -566,10 +566,36 @@ public partial class LocalFileStorageService : IFileStorageService
         var normalizedPath = filePath.Replace('\\', '/').TrimStart('/');
         if (IsPrivatePath(normalizedPath))
         {
-            return Path.Combine(_privateBasePath, normalizedPath[PrivatePathPrefix.Length..]);
+            return ResolveRootedPath(_privateBasePath, normalizedPath[PrivatePathPrefix.Length..]);
         }
 
-        return Path.Combine(_basePath, normalizedPath);
+        return ResolveRootedPath(_basePath, normalizedPath);
+    }
+
+    private static string ResolveRootedPath(string storageRoot, string relativePath)
+    {
+        var normalizedRelativePath = relativePath.Replace('\\', '/').TrimStart('/');
+        if (Path.IsPathRooted(normalizedRelativePath)
+            || normalizedRelativePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Any(segment => segment == ".."))
+        {
+            throw new UnauthorizedAccessException("The requested file path is outside the configured storage root.");
+        }
+
+        var fullRoot = Path.GetFullPath(storageRoot);
+        var fullPath = Path.GetFullPath(Path.Combine(fullRoot, normalizedRelativePath));
+        if (!IsPathInsideRoot(fullPath, fullRoot))
+        {
+            throw new UnauthorizedAccessException("The requested file path is outside the configured storage root.");
+        }
+
+        return fullPath;
+    }
+
+    private static bool IsPathInsideRoot(string fullPath, string fullRoot)
+    {
+        var root = fullRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return fullPath.Equals(root, StringComparison.OrdinalIgnoreCase)
+            || fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetContentType(string extension)
