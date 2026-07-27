@@ -71,15 +71,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             query = query.Where(item => item.EntityType == entityType);
         }
 
-        var cases = await query
-            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
-            .Take(IsWorkflowAdmin() ? 100 : 500)
-            .ToListAsync();
+        var visibleCases = await LoadVisibleProcedureCasesAsync(query, mineOnly, 100);
 
-        return cases
-            .Where(procedureCase => CanView(procedureCase)
-                && (!mineOnly || UserOwnsCase(procedureCase) || UserHasAssignedProcedureRole(procedureCase)))
-            .Take(100)
+        return visibleCases
             .Select(ToSummaryDto)
             .ToList();
     }
@@ -98,6 +92,47 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
 
         return ToDetailDto(procedureCase);
+    }
+
+    private async Task<List<ProcedureCase>> LoadVisibleProcedureCasesAsync(
+        IQueryable<ProcedureCase> query,
+        bool mineOnly,
+        int take)
+    {
+        const int BatchSize = 200;
+        var visibleCases = new List<ProcedureCase>();
+        var offset = 0;
+
+        while (visibleCases.Count < take)
+        {
+            var batch = await query
+                .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                .Skip(offset)
+                .Take(BatchSize)
+                .ToListAsync();
+
+            if (batch.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var procedureCase in batch)
+            {
+                if (CanView(procedureCase)
+                    && (!mineOnly || UserOwnsCase(procedureCase) || UserHasAssignedProcedureRole(procedureCase)))
+                {
+                    visibleCases.Add(procedureCase);
+                    if (visibleCases.Count == take)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            offset += batch.Count;
+        }
+
+        return visibleCases;
     }
 
     public async Task<ProcedureCaseDetailDto> CreateCaseAsync(CreateProcedureCaseRequest request)
@@ -397,12 +432,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var userId = RequireUserId();
         var now = DateTime.UtcNow;
 
-        _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, "Completed stage", procedureCase.CurrentStageName, request.Notes));
         var completedStageName = procedureCase.CurrentStageName;
 
         if (procedureCase.WorkflowInstanceId.HasValue)
         {
-            await _db.SaveChangesAsync();
+            // PR review: only write the stage-completed audit after the workflow engine successfully advances the instance.
             var result = await _workflowEngine.ExecuteNextStepAsync(procedureCase.WorkflowInstanceId.Value, userId, new
             {
                 procedureCase.Id,
@@ -418,11 +452,15 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 throw new InvalidOperationException(result.Message ?? "Workflow step could not be completed.");
             }
 
+            _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, "Completed stage", procedureCase.CurrentStageName, request.Notes));
+            await _db.SaveChangesAsync();
             await SyncCaseFromWorkflowRuntimeAsync(procedureCase.Id, procedureCase.WorkflowInstanceId.Value, userId, request.Notes);
             var syncedCase = (await LoadCaseAsync(id, asTracking: false))!;
             await NotifyEstateProcedureHandoffsAsync(syncedCase, completedStageName, syncedCase.CurrentStageName, userId, tenantId);
             return ToDetailDto((await LoadCaseAsync(id, asTracking: false))!);
         }
+
+        _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, "Completed stage", procedureCase.CurrentStageName, request.Notes));
 
         var stages = await BuildStageSeedsAsync(procedureCase.Module, procedureCase.EntityType);
         var currentPosition = stages.FindIndex(stage => stage.Index == procedureCase.CurrentStageIndex);

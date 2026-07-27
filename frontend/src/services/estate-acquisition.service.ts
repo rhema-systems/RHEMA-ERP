@@ -213,25 +213,6 @@ export const ACQUISITION_STAGES: LandAcquisitionStageDefinition[] = [
   stage(15, 'Asset Creation', 'asset-creation', '/LandParcel/AssetCreation', 'Create the estate asset, assign asset code, GL account, capitalization value, and custodian.', 'Create Estate Asset', 'Return Asset Creation', 'Fixed Asset Officer', 12, 'GET', 15),
 ];
 
-const WORKFLOW_STEP_IDS: Record<number, string> = {
-  0: '11111111-1111-4111-8111-111111111111',
-  1: '22222222-2222-4222-8222-222222222222',
-  2: '33333333-3333-4333-8333-333333333333',
-  3: '44444444-4444-4444-8444-444444444444',
-  4: '55555555-5555-4555-8555-555555555555',
-  5: '66666666-6666-4666-8666-666666666666',
-  6: '77777777-7777-4777-8777-777777777777',
-  7: '88888888-8888-4888-8888-888888888888',
-  8: '99999999-9999-4999-8999-999999999999',
-  9: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-  10: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-  11: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-  12: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-  13: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
-  14: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
-  15: '12121212-1212-4212-8212-121212121212',
-};
-
 const tf = (
   name: string,
   label: string,
@@ -239,6 +220,18 @@ const tf = (
   isRequired = true,
   options?: string[]
 ): WorkflowTemplateField => ({ name, label, fieldType, isRequired, options });
+
+const createWorkflowStepId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
+    const random = Math.floor(Math.random() * 16);
+    const value = character === 'x' ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
 
 const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequirement> = {
   0: {
@@ -838,11 +831,14 @@ export class EstateAcquisitionService {
 
   async createWorkflowTemplate(): Promise<void> {
     const workflowStages = ACQUISITION_STAGES;
+    const workflowStepIds: Record<number, string> = {};
     const steps = workflowStages.map((item) => {
       const requirements = requirementsFor(item);
+      // PR review: every generated acquisition template needs fresh step IDs so tenants can seed the workflow independently.
+      workflowStepIds[item.order] = createWorkflowStepId();
 
       return {
-        id: WORKFLOW_STEP_IDS[item.order],
+        id: workflowStepIds[item.order],
         name: item.title,
         description: item.description,
         stepType: WorkflowStepType.Approval,

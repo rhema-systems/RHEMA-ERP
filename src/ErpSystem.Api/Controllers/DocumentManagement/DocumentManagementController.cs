@@ -824,13 +824,10 @@ public sealed class DocumentManagementController : ControllerBase
     public async Task<IActionResult> GetRegister(CancellationToken cancellationToken)
     {
         var tenantId = GetTenantId();
-        var records = await _db.CentralDocumentRecords
+        var query = _db.CentralDocumentRecords
             .AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted)
-            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
-            .Take(200)
-            .ToListAsync(cancellationToken);
-        records = await FilterViewableRecordsAsync(tenantId, records, cancellationToken);
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted);
+        var records = await LoadViewableRecordsAsync(tenantId, query, 200, cancellationToken);
         var templatesByCode = await GetTemplatesByCodeAsync(tenantId, cancellationToken);
         var metadataValuesByRecord = await GetMetadataValuesByRecordAsync(tenantId, records.Select(item => item.Id), cancellationToken);
 
@@ -864,11 +861,7 @@ public sealed class DocumentManagementController : ControllerBase
             query = query.Where(item => item.SourceModule == module);
         }
 
-        var records = await query
-            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
-            .Take(take)
-            .ToListAsync(cancellationToken);
-        records = await FilterViewableRecordsAsync(tenantId, records, cancellationToken);
+        var records = await LoadViewableRecordsAsync(tenantId, query, take, cancellationToken);
         var templatesByCode = await GetTemplatesByCodeAsync(tenantId, cancellationToken);
         var metadataValuesByRecord = await GetMetadataValuesByRecordAsync(tenantId, records.Select(item => item.Id), cancellationToken);
 
@@ -880,13 +873,10 @@ public sealed class DocumentManagementController : ControllerBase
     {
         var tenantId = GetTenantId();
         take = Math.Clamp(take, 1, 500);
-        var records = await _db.CentralDocumentRecords
+        var query = _db.CentralDocumentRecords
             .AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted)
-            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
-            .Take(take)
-            .ToListAsync(cancellationToken);
-        records = await FilterViewableRecordsAsync(tenantId, records, cancellationToken);
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted);
+        var records = await LoadViewableRecordsAsync(tenantId, query, take, cancellationToken);
         var templatesByCode = await GetTemplatesByCodeAsync(tenantId, cancellationToken);
         var metadataValuesByRecord = await GetMetadataValuesByRecordAsync(tenantId, records.Select(item => item.Id), cancellationToken);
 
@@ -922,7 +912,7 @@ public sealed class DocumentManagementController : ControllerBase
     {
         var tenantId = GetTenantId();
         take = Math.Clamp(take, 1, 500);
-        var versions = await _db.CentralDocumentVersions
+        var query = _db.CentralDocumentVersions
             .AsNoTracking()
             .Include(item => item.DocumentRecord)
             .Where(item => item.TenantId == tenantId
@@ -931,11 +921,8 @@ public sealed class DocumentManagementController : ControllerBase
                 && (item.Status == "Draft"
                     || item.Status == "Submitted"
                     || item.Status == "Published"
-                    || item.Status == "Pending Publication"))
-            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
-            .Take(take)
-            .ToListAsync(cancellationToken);
-        versions = await FilterViewableVersionsAsync(tenantId, versions, cancellationToken);
+                    || item.Status == "Pending Publication"));
+        var versions = await LoadViewableVersionsAsync(tenantId, query, take, cancellationToken);
 
         var queueItems = versions.Select(version => new
         {
@@ -2962,6 +2949,86 @@ public sealed class DocumentManagementController : ControllerBase
         return values
             .GroupBy(item => item.DocumentRecordId)
             .ToDictionary(group => group.Key, group => (IReadOnlyList<CentralDocumentMetadataValue>)group.ToList());
+    }
+
+    private async Task<List<CentralDocumentRecord>> LoadViewableRecordsAsync(
+        Guid tenantId,
+        IQueryable<CentralDocumentRecord> query,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        const int BatchSize = 200;
+        var viewableRecords = new List<CentralDocumentRecord>();
+        var offset = 0;
+
+        // PR review: enforce DMS visibility before final paging so protected newer records do not hide older accessible ones.
+        while (viewableRecords.Count < take)
+        {
+            var batch = await query
+                .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                .Skip(offset)
+                .Take(Math.Max(BatchSize, take))
+                .ToListAsync(cancellationToken);
+
+            if (batch.Count == 0)
+            {
+                break;
+            }
+
+            var allowed = await FilterViewableRecordsAsync(tenantId, batch, cancellationToken);
+            foreach (var record in allowed)
+            {
+                viewableRecords.Add(record);
+                if (viewableRecords.Count == take)
+                {
+                    break;
+                }
+            }
+
+            offset += batch.Count;
+        }
+
+        return viewableRecords;
+    }
+
+    private async Task<List<CentralDocumentVersion>> LoadViewableVersionsAsync(
+        Guid tenantId,
+        IQueryable<CentralDocumentVersion> query,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        const int BatchSize = 200;
+        var viewableVersions = new List<CentralDocumentVersion>();
+        var offset = 0;
+
+        // PR review: version queues use the same permission-first paging rule as document records.
+        while (viewableVersions.Count < take)
+        {
+            var batch = await query
+                .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                .Skip(offset)
+                .Take(Math.Max(BatchSize, take))
+                .ToListAsync(cancellationToken);
+
+            if (batch.Count == 0)
+            {
+                break;
+            }
+
+            var allowed = await FilterViewableVersionsAsync(tenantId, batch, cancellationToken);
+            foreach (var version in allowed)
+            {
+                viewableVersions.Add(version);
+                if (viewableVersions.Count == take)
+                {
+                    break;
+                }
+            }
+
+            offset += batch.Count;
+        }
+
+        return viewableVersions;
     }
 
     private async Task<List<CentralDocumentRecord>> FilterViewableRecordsAsync(
