@@ -63,13 +63,13 @@ public sealed class SupplierApplicantLifecycleControllerTests
                     IsPostingReady = true
                 }
             };
-        var paidToken = new ProcurementSupplierOnboardingTokenDto
+        var pendingToken = new ProcurementSupplierOnboardingTokenDto
         {
             Id = tokenId,
             RegistrationId = registrationId,
-            Status = ProcurementSupplierOnboardingTokenStatus.Active,
-            PaymentStatus = ProcurementSupplierOnboardingPaymentStatus.Posted,
-            RowVersion = "paid-row-version"
+            Status = ProcurementSupplierOnboardingTokenStatus.AwaitingPayment,
+            PaymentStatus = ProcurementSupplierOnboardingPaymentStatus.Pending,
+            RowVersion = "pending-verification-row-version"
         };
         var tokens = new Mock<IProcurementSupplierOnboardingTokenService>();
         tokens.Setup(item => item.GetPaymentMethodsAsync(
@@ -82,7 +82,7 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcurementSupplierOnboardingTokenIssueResultDto
             {
-                Token = paidToken
+                Token = pendingToken
             });
 
         ControlledFileUploadRequest? capturedUpload = null;
@@ -157,7 +157,7 @@ public sealed class SupplierApplicantLifecycleControllerTests
         var paymentResult = await controller.RecordPayment(
             payment, CancellationToken.None);
         paymentResult.Should().BeOfType<OkObjectResult>()
-            .Which.Value.Should().BeSameAs(paidToken);
+            .Which.Value.Should().BeSameAs(pendingToken);
         tokens.Verify(item => item.RecordPaymentAsync(
             tokenId,
             It.Is<RecordProcurementSupplierOnboardingPaymentRequest>(request =>
@@ -297,13 +297,24 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(item => item.ExecuteInStrategyAsync(
+                It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>()))
+            .Returns((Func<Task> operation, CancellationToken _) => operation());
+        unitOfWork.Setup(item => item.BeginTransactionAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        unitOfWork.Setup(item => item.CommitAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         var controller = new UserController(
             users.Object,
             NullLogger<UserController>.Instance,
             audit.Object,
             current.Object,
             settings.Object,
-            applicantAccess.Object)
+            applicantAccess.Object,
+            unitOfWork.Object)
         {
             ControllerContext = new ControllerContext
             {
@@ -330,6 +341,90 @@ public sealed class SupplierApplicantLifecycleControllerTests
             It.Is<string>(value =>
                 value == $"supplier-credential-activation-{userId:N}"),
             It.IsAny<CancellationToken>()), Times.Once);
+        unitOfWork.Verify(item => item.BeginTransactionAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+        unitOfWork.Verify(item => item.CommitAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+        unitOfWork.Verify(item => item.RollbackAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ActivationFailureRollsBackPasswordReplacementTransaction()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        const string temporaryPassword = "Temporary#Password123";
+        var user = new ApplicationUser
+        {
+            Id = userId,
+            TenantId = tenantId,
+            UserName = "approved@example.test",
+            FirstName = "Approved",
+            LastName = "Supplier",
+            IsActive = true,
+            MustChangePassword = true,
+            TemporaryPasswordExpiresAtUtc = DateTime.UtcNow.AddDays(7)
+        };
+        user.PasswordHash =
+            new PasswordHasher<ApplicationUser>().HashPassword(
+                user, temporaryPassword);
+
+        var users = new Mock<IUserService>();
+        users.Setup(item => item.GetUserByIdAsync(userId)).ReturnsAsync(user);
+        users.Setup(item => item.UpdateUserAsync(user)).ReturnsAsync(user);
+        var current = new Mock<ICurrentUserService>();
+        current.SetupGet(item => item.UserId).Returns(userId.ToString());
+        current.SetupGet(item => item.UserName).Returns(user.UserName);
+        var settings = new Mock<ISettingsService>();
+        settings.Setup(item => item.GetSecuritySettingsAsync(tenantId))
+            .ReturnsAsync((Security?)null);
+        var applicantAccess =
+            new Mock<IProcurementSupplierApplicantAccessService>();
+        applicantAccess.Setup(item => item.CompleteCredentialActivationAsync(
+                userId,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("activation audit failed"));
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(item => item.ExecuteInStrategyAsync(
+                It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>()))
+            .Returns((Func<Task> operation, CancellationToken _) => operation());
+        unitOfWork.Setup(item => item.BeginTransactionAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        unitOfWork.Setup(item => item.RollbackAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var controller = new UserController(
+            users.Object,
+            NullLogger<UserController>.Instance,
+            Mock.Of<IAuditLogService>(),
+            current.Object,
+            settings.Object,
+            applicantAccess.Object,
+            unitOfWork.Object)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = AuthenticatedContext(userId)
+            }
+        };
+
+        var result = await controller.ChangePassword(new ChangePasswordRequest
+        {
+            CurrentPassword = temporaryPassword,
+            NewPassword = "Permanent#Password456"
+        });
+
+        var failure = result.Should().BeOfType<ObjectResult>().Subject;
+        failure.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        unitOfWork.Verify(item => item.BeginTransactionAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+        unitOfWork.Verify(item => item.RollbackAsync(
+            It.IsAny<CancellationToken>()), Times.Once);
+        unitOfWork.Verify(item => item.CommitAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private static SupplierApplicantAccessController Controller(

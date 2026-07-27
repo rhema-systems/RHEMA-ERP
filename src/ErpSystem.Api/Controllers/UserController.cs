@@ -20,6 +20,7 @@ public partial class UserController : ControllerBase
     private readonly ICurrentUserService _currentUserService;
     private readonly ISettingsService _settingsService;
     private readonly IProcurementSupplierApplicantAccessService _supplierApplicantAccess;
+    private readonly IUnitOfWork _unitOfWork;
 
     public UserController(
         IUserService userService,
@@ -27,7 +28,8 @@ public partial class UserController : ControllerBase
         IAuditLogService auditLogService,
         ICurrentUserService currentUserService,
         ISettingsService settingsService,
-        IProcurementSupplierApplicantAccessService supplierApplicantAccess)
+        IProcurementSupplierApplicantAccessService supplierApplicantAccess,
+        IUnitOfWork unitOfWork)
     {
         _userService = userService;
         _logger = logger;
@@ -35,6 +37,7 @@ public partial class UserController : ControllerBase
         _currentUserService = currentUserService;
         _settingsService = settingsService;
         _supplierApplicantAccess = supplierApplicantAccess;
+        _unitOfWork = unitOfWork;
     }
 
     /// <summary>
@@ -626,16 +629,49 @@ public partial class UserController : ControllerBase
                 }
             }
 
-            // Hash new password
-            user.PasswordHash = passwordHasher.HashPassword(user, request.NewPassword);
-            user.MustChangePassword = false;
-            user.TemporaryPasswordExpiresAtUtc = null;
-            user.PasswordChangedAtUtc = DateTime.UtcNow;
-            await _userService.UpdateUserAsync(user);
-            await _supplierApplicantAccess.CompleteCredentialActivationAsync(
-                user.Id,
-                $"supplier-credential-activation-{user.Id:N}",
-                HttpContext.RequestAborted);
+            async Task ReplacePasswordAndActivateAsync(ApplicationUser target)
+            {
+                target.PasswordHash = passwordHasher.HashPassword(
+                    target, request.NewPassword);
+                target.MustChangePassword = false;
+                target.TemporaryPasswordExpiresAtUtc = null;
+                target.PasswordChangedAtUtc = DateTime.UtcNow;
+                await _userService.UpdateUserAsync(target);
+                await _supplierApplicantAccess.CompleteCredentialActivationAsync(
+                    target.Id,
+                    $"supplier-credential-activation-{target.Id:N}",
+                    HttpContext.RequestAborted);
+            }
+
+            await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(
+                    HttpContext.RequestAborted);
+                try
+                {
+                    var transactionalUser =
+                        await _userService.GetUserByIdAsync(currentUserId.Value)
+                        ?? throw new InvalidOperationException(
+                            "User no longer exists.");
+                    await ReplacePasswordAndActivateAsync(transactionalUser);
+                    await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
+                    user = transactionalUser;
+                }
+                catch
+                {
+                    try
+                    {
+                        await _unitOfWork.RollbackAsync(
+                            HttpContext.RequestAborted);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // CommitAsync already rolled back and released the
+                        // transaction after a persistence failure.
+                    }
+                    throw;
+                }
+            }, HttpContext.RequestAborted);
 
             // Log audit trail for password change
             try

@@ -173,6 +173,30 @@ public sealed class BusinessPartnerRegistrationAuthorizationTests
     }
 
     [Fact]
+    public async Task RejectedRegistrationReplayRepairsTerminalTokenClosure()
+    {
+        var fixture = new Fixture(
+            allowedPermissions: ["procurement.supplier.approve"]);
+
+        await fixture.Service.RejectRegistrationAsync(
+            fixture.RegistrationId, fixture.ActorId, "not acceptable");
+        await fixture.Service.RejectRegistrationAsync(
+            fixture.RegistrationId, fixture.ActorId, "not acceptable");
+
+        fixture.Registrations.Verify(item => item.UpdateStatusAsync(
+            fixture.RegistrationId,
+            "Rejected",
+            fixture.ActorId,
+            "not acceptable"), Times.Once);
+        fixture.Tokens.Verify(item => item.ExpireForTerminalRegistrationAsync(
+            fixture.RegistrationId,
+            "Rejected",
+            fixture.ActorId,
+            $"registration-rejected-{fixture.RegistrationId:N}",
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
     public async Task ApprovalRejectsAnActorThatDiffersFromAuthenticatedIdentity()
     {
         var fixture = new Fixture(allowed: true);
@@ -194,6 +218,7 @@ public sealed class BusinessPartnerRegistrationAuthorizationTests
         public Guid RegistrationId { get; } = Guid.NewGuid();
         public Mock<IBusinessPartnerRegistrationRepository> Registrations { get; } = new();
         public Mock<IProcurementAccessControlService> Access { get; } = new();
+        public Mock<IProcurementSupplierOnboardingTokenService> Tokens { get; } = new();
         public ReviewBusinessPartnerRegistrationDto Request { get; }
         public BusinessPartnerRegistrationService Service { get; }
 
@@ -227,6 +252,12 @@ public sealed class BusinessPartnerRegistrationAuthorizationTests
             Registrations.Setup(item => item.UpdateStatusAsync(
                     It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid?>(),
                     It.IsAny<string?>()))
+                .Callback<Guid, string, Guid?, string?>((_, status, _, _) =>
+                    registration.Status = status)
+                .Returns(Task.CompletedTask);
+            Tokens.Setup(item => item.ExpireForTerminalRegistrationAsync(
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             var current = new Mock<ICurrentUserProvider>();
@@ -276,7 +307,8 @@ public sealed class BusinessPartnerRegistrationAuthorizationTests
                 current.Object,
                 Mock.Of<IAppEventBus>(),
                 Access.Object,
-                NullLogger<BusinessPartnerRegistrationService>.Instance);
+                NullLogger<BusinessPartnerRegistrationService>.Instance,
+                onboardingTokenService: Tokens.Object);
 
             Request = new ReviewBusinessPartnerRegistrationDto
             {

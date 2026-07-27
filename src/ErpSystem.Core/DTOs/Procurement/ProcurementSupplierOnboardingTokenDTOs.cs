@@ -150,8 +150,6 @@ public sealed class RecordProcurementSupplierOnboardingPaymentRequest
     [StringLength(200)]
     public string? PaymentReference { get; set; }
 
-    public DateTime? PaidAtUtc { get; set; }
-
     [Required]
     public string RowVersion { get; set; } = string.Empty;
 }

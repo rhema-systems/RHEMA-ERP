@@ -689,6 +689,23 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         await EnsureInternalCapabilityAsync(
             "procurement.supplier.approve", registration, rejectedById,
             $"supplier-registration-reject-{id:N}");
+        if (string.Equals(registration.Status, "Rejected",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            // A prior attempt may have committed the registration status and then
+            // failed while closing the token/session boundary. Replaying the same
+            // rejection repairs that terminal closure instead of leaving a usable
+            // applicant session with no recovery route.
+            if (_onboardingTokenService != null)
+            {
+                await _onboardingTokenService.ExpireForTerminalRegistrationAsync(
+                    id,
+                    "Rejected",
+                    rejectedById,
+                    $"registration-rejected-{id:N}");
+            }
+            return;
+        }
         if (registration.Status != "Submitted" && registration.Status != "UnderReview")
         {
             throw new InvalidOperationException($"Cannot reject registration in {registration.Status} status");

@@ -63,6 +63,11 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             "Rejected",
             fixture.UserId,
             "registration-rejected");
+        await fixture.Service.ExpireForTerminalRegistrationAsync(
+            fixture.Registration.Id,
+            "Rejected",
+            fixture.UserId,
+            "registration-rejected-recovery");
 
         var terminal = await fixture.Service.GetAsync(issued.Token.Id);
         terminal.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Expired);
@@ -71,7 +76,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
     }
 
     [Fact]
-    public async Task PaidTokenPostsBalancedFinanceEntryAndUsesConfiguredReceiptSequence()
+    public async Task PaidTokenRequiresTrustedVerificationBeforePostingAndActivation()
     {
         await using var fixture = new Fixture(paid: true);
 
@@ -81,7 +86,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
                 RegistrationId = fixture.Registration.Id
             },
             "issue-paid");
-        var paid = await fixture.Service.RecordPaymentAsync(
+        var submitted = await fixture.Service.RecordPaymentAsync(
             issued.Token.Id,
             new RecordProcurementSupplierOnboardingPaymentRequest
             {
@@ -100,13 +105,48 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             },
             "post-payment");
 
-        paid.Token.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Active);
-        paid.Token.PaymentStatus.Should()
-            .Be(ProcurementSupplierOnboardingPaymentStatus.Posted);
-        paid.Token.Payments.Should().ContainSingle(item =>
+        submitted.Token.Status.Should()
+            .Be(ProcurementSupplierOnboardingTokenStatus.AwaitingPayment);
+        submitted.Token.PaymentStatus.Should()
+            .Be(ProcurementSupplierOnboardingPaymentStatus.Pending);
+        var pending = submitted.Token.Payments.Should().ContainSingle().Subject;
+        pending.Status.Should().Be(ProcurementSupplierOnboardingPaymentStatus.Pending);
+        pending.PostingEventId.Should().BeNull();
+        pending.JournalEntryId.Should().BeNull();
+        pending.ReceiptNumber.Should().BeNull();
+        fixture.FinancePostCount.Should().Be(0);
+        replay.Token.Payments.Should().ContainSingle();
+
+        fixture.SetUser(Guid.NewGuid());
+        var verified = await fixture.Service.ReconcilePaymentAsync(
+            issued.Token.Id,
+            pending.Id,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest
+            {
+                ReconciliationReference = "PROVIDER-CONFIRM-0001",
+                Notes = "Trusted provider settlement confirmed.",
+                RowVersion = pending.RowVersion
+            },
+            "verify-payment");
+        var verificationReplay = await fixture.Service.ReconcilePaymentAsync(
+            issued.Token.Id,
+            pending.Id,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest
+            {
+                ReconciliationReference = "PROVIDER-CONFIRM-0001",
+                Notes = "Trusted provider settlement confirmed.",
+                RowVersion = pending.RowVersion
+            },
+            "verify-payment");
+
+        verified.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Active);
+        verified.PaymentStatus.Should()
+            .Be(ProcurementSupplierOnboardingPaymentStatus.Reconciled);
+        verified.Payments.Should().ContainSingle(item =>
             item.ReceiptNumber == "SUP-ONB-2026-00001" &&
             item.PostingEventId == fixture.PostingEventId &&
-            item.JournalEntryId == fixture.JournalEntryId);
+            item.JournalEntryId == fixture.JournalEntryId &&
+            item.ReconciliationReference == "PROVIDER-CONFIRM-0001");
         fixture.PostedRequest.Should().NotBeNull();
         fixture.PostedRequest!.OriginModuleCode.Should().Be("PROC");
         fixture.PostedRequest.SourceDocumentType.Should()
@@ -116,9 +156,9 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         fixture.PostedRequest.Lines.Should().Contain(item =>
             item.TransactionTag == "SupplierOnboardingFee" &&
             item.AccountId == fixture.RevenueAccount!.Id);
-        replay.Token.Payments.Should().ContainSingle();
+        verificationReplay.Payments.Should().ContainSingle();
         fixture.FinancePostCount.Should().Be(1,
-            "a correlation replay must return the posted result without a duplicate journal");
+            "verification replays must not create duplicate Finance postings");
     }
 
     [Fact]
@@ -317,7 +357,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
                 RegistrationId = fixture.Registration.Id
             },
             "issue-for-reconciliation");
-        var posted = await fixture.Service.RecordPaymentAsync(
+        var submitted = await fixture.Service.RecordPaymentAsync(
             issued.Token.Id,
             new RecordProcurementSupplierOnboardingPaymentRequest
             {
@@ -326,7 +366,20 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
                 RowVersion = issued.Token.RowVersion
             },
             "post-for-reconciliation");
-        var payment = posted.Token.Payments.Should().ContainSingle().Subject;
+        var payment = submitted.Token.Payments.Should().ContainSingle().Subject;
+        var selfVerification = () => fixture.Service.ReconcilePaymentAsync(
+            issued.Token.Id,
+            payment.Id,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest
+            {
+                ReconciliationReference = "SELF-VERIFY-REJECTED",
+                Notes = "The submitting actor cannot verify their own claim.",
+                RowVersion = payment.RowVersion
+            },
+            "self-verification");
+        await selfVerification.Should()
+            .ThrowAsync<ProcurementSupplierOnboardingTokenAuthorizationException>();
+        fixture.FinancePostCount.Should().Be(0);
         fixture.SetUser(Guid.NewGuid());
 
         var reconciled = await fixture.Service.ReconcilePaymentAsync(

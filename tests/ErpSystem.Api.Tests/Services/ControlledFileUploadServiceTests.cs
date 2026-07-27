@@ -67,6 +67,74 @@ public sealed class ControlledFileUploadServiceTests
             Times.Once);
     }
 
+    [Fact]
+    public async Task DefaultPolicyRejectsScriptableSvgBeforeStorageWrite()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = Database();
+        var storage = Storage(result: Stored(tenantId));
+        var service = Service(
+            db, storage.Object, Mock.Of<IFileVirusScanService>());
+        var content = System.Text.Encoding.UTF8.GetBytes(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>");
+
+        var act = () => service.UploadAsync(new ControlledFileUploadRequest
+        {
+            TenantId = tenantId,
+            ActorUserId = Guid.NewGuid(),
+            ActorName = "untrusted applicant",
+            Category = "supplier-registration-evidence",
+            FileName = "active-content.svg",
+            ContentType = "image/svg+xml",
+            FileSize = content.Length,
+            OpenReadStream = () => new MemoryStream(content, writable: false)
+        });
+
+        (await act.Should().ThrowAsync<ControlledFileUploadException>())
+            .Which.Code.Should().Be("FILE_ACTIVE_CONTENT_NOT_ALLOWED");
+        (await db.FileUploadRecords.CountAsync()).Should().Be(0);
+        storage.Verify(item => item.UploadFileAsync(
+            It.IsAny<FileUploadRequest>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task TenantPolicyCannotReenableScriptableSvg()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = Database();
+        db.FileUploadPolicies.Add(new FileUploadPolicy
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Category = "supplier-registration-evidence",
+            IsEnabled = true,
+            AllowedExtensionsCsv = ".svg",
+            AllowedMimeTypesCsv = "image/svg+xml"
+        });
+        await db.SaveChangesAsync();
+        var storage = Storage(result: Stored(tenantId));
+        var service = Service(
+            db, storage.Object, Mock.Of<IFileVirusScanService>());
+        var content = System.Text.Encoding.UTF8.GetBytes("<svg/>");
+
+        var act = () => service.UploadAsync(new ControlledFileUploadRequest
+        {
+            TenantId = tenantId,
+            ActorUserId = Guid.NewGuid(),
+            Category = "supplier-registration-evidence",
+            FileName = "configured-active-content.svg",
+            ContentType = "image/svg+xml",
+            FileSize = content.Length,
+            OpenReadStream = () => new MemoryStream(content, writable: false)
+        });
+
+        (await act.Should().ThrowAsync<ControlledFileUploadException>())
+            .Which.Code.Should().Be("FILE_ACTIVE_CONTENT_NOT_ALLOWED");
+        (await db.FileUploadRecords.CountAsync()).Should().Be(0);
+        storage.Verify(item => item.UploadFileAsync(
+            It.IsAny<FileUploadRequest>()), Times.Never);
+    }
+
     [Theory]
     [InlineData(FileVirusScanStatus.Infected, "FILE_VIRUS_DETECTED")]
     [InlineData(FileVirusScanStatus.Error, "FILE_VIRUS_SCAN_INCOMPLETE")]

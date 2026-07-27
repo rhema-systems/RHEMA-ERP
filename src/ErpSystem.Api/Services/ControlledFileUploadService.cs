@@ -57,16 +57,24 @@ public sealed class ControlledFileUploadException(
 /// </summary>
 public sealed class ControlledFileUploadService : IControlledFileUploadService
 {
+    private static readonly HashSet<string> ActiveContentExtensions = new(
+        [".svg", ".svgz"],
+        StringComparer.OrdinalIgnoreCase);
+
+    private static readonly HashSet<string> ActiveContentMimeTypes = new(
+        ["image/svg+xml"],
+        StringComparer.OrdinalIgnoreCase);
+
     private static readonly HashSet<string> DefaultExtensions = new(
         [
-            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico",
+            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico",
             ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt", ".rtf"
         ],
         StringComparer.OrdinalIgnoreCase);
 
     private static readonly HashSet<string> DefaultMimeTypes = new(
         [
-            "image/jpeg", "image/png", "image/gif", "image/bmp", "image/svg+xml",
+            "image/jpeg", "image/png", "image/gif", "image/bmp",
             "image/webp", "image/x-icon", "image/vnd.microsoft.icon",
             "application/pdf", "application/msword",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -115,6 +123,14 @@ public sealed class ControlledFileUploadService : IControlledFileUploadService
         if (string.IsNullOrWhiteSpace(safeName))
             throw Failure("FILE_NAME_INVALID", "The file name is invalid.", 400);
 
+        var extension = Path.GetExtension(safeName);
+        if (ActiveContentExtensions.Contains(extension) ||
+            ActiveContentMimeTypes.Contains(request.ContentType))
+            throw Failure(
+                "FILE_ACTIVE_CONTENT_NOT_ALLOWED",
+                "Active-content file formats cannot be uploaded to publicly served storage.",
+                422);
+
         var policy = await GetEffectivePolicyAsync(
             request.TenantId, category, cancellationToken);
         if (!policy.IsEnabled)
@@ -126,7 +142,6 @@ public sealed class ControlledFileUploadService : IControlledFileUploadService
             throw Failure("FILE_TOO_LARGE",
                 $"File size exceeds the maximum allowed size of {maxFileSize} bytes.", 413);
 
-        var extension = Path.GetExtension(safeName);
         if (!policy.AllowedExtensions.Contains(extension))
             throw Failure("FILE_EXTENSION_NOT_ALLOWED",
                 $"File type '{extension}' is not allowed.", 422);

@@ -168,7 +168,9 @@ export default function SupplierApplicantPortalPage() {
         rowVersion: portal.tokenRowVersion,
       });
       await load();
-      toast.success('Payment posted and the application is unlocked.');
+      toast.success(
+        'Payment submitted. Application access will unlock after trusted verification.'
+      );
     } catch (paymentError) {
       toast.error(
         paymentError instanceof Error ? paymentError.message : 'Payment failed.'
@@ -265,8 +267,9 @@ export default function SupplierApplicantPortalPage() {
         {portal?.paymentOnly && (
           <Alert className="border-amber-300 bg-amber-50">
             <AlertDescription>
-              The effective configuration requires payment before application editing
-              and document submission are unlocked.
+              The effective configuration requires a trusted provider or cashier to
+              verify payment before application editing and document submission are
+              unlocked.
             </AlertDescription>
           </Alert>
         )}

@@ -148,7 +148,6 @@ export interface SupplierOnboardingPaymentMethodOption {
 export interface RecordSupplierOnboardingPayment {
   paymentMethodId: string;
   paymentReference?: string;
-  paidAtUtc?: string;
   rowVersion: string;
 }
 

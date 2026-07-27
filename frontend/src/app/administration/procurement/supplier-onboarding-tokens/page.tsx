@@ -58,8 +58,8 @@ type Action =
 const actionTitles: Record<Action, string> = {
   issue: 'Issue supplier onboarding token',
   reissue: 'Reissue supplier onboarding token',
-  payment: 'Record token payment',
-  reconcile: 'Reconcile token payment',
+  payment: 'Submit token payment claim',
+  reconcile: 'Verify and post token payment',
   exemption: 'Request payment exemption',
   'approve-exemption': 'Approve payment exemption',
   'reject-exemption': 'Reject payment exemption',
@@ -165,7 +165,7 @@ export default function SupplierOnboardingTokensPage() {
           paymentReference: reference.trim() || undefined,
           rowVersion: detail.data.rowVersion,
         });
-        message = 'Payment posted and receipt issued';
+        message = 'Payment claim submitted for trusted verification';
       } else if (
         action === 'reconcile' &&
         detail.data &&
@@ -178,7 +178,7 @@ export default function SupplierOnboardingTokensPage() {
           notes.trim(),
           targetPayment.rowVersion
         );
-        message = 'Payment reconciled';
+        message = 'Payment verified, posted, receipted, and reconciled';
       } else if (action === 'exemption' && detail.data) {
         await service.requestExemption(detail.data.id, {
           reason: reason.trim(),
@@ -289,8 +289,8 @@ export default function SupplierOnboardingTokensPage() {
   const pendingExemption = value?.exemptions.find(
     (item) => item.status === 'PendingApproval'
   );
-  const postedPayment = value?.payments.find(
-    (item) => item.status === 'Posted'
+  const verifiablePayment = value?.payments.find(
+    (item) => item.status === 'Pending' || item.status === 'Posted'
   );
 
   return (
@@ -326,7 +326,7 @@ export default function SupplierOnboardingTokensPage() {
           ['Awaiting payment', summary.data?.awaitingPaymentCount ?? 0],
           ['Active', summary.data?.activeCount ?? 0],
           ['Expired', summary.data?.expiredCount ?? 0],
-          ['To reconcile', summary.data?.pendingReconciliationCount ?? 0],
+          ['To verify', summary.data?.pendingReconciliationCount ?? 0],
           ['Posted', money(summary.data?.postedAmount ?? 0)],
         ].map(([label, count]) => (
           <Card key={label}>
@@ -451,9 +451,11 @@ export default function SupplierOnboardingTokensPage() {
                     <RotateCw className="mr-2 h-4 w-4" />Reissue
                   </Button>
                 )}
-                {canManage && value.paymentStatus === 'Pending' && (
+                {canManage &&
+                  value.paymentStatus === 'Pending' &&
+                  value.payments.length === 0 && (
                   <Button onClick={() => setAction('payment')}>
-                    <Banknote className="mr-2 h-4 w-4" />Post payment
+                    <Banknote className="mr-2 h-4 w-4" />Submit payment
                   </Button>
                 )}
                 {canManage && value.paymentStatus === 'Pending' && !pendingExemption && (
@@ -461,15 +463,15 @@ export default function SupplierOnboardingTokensPage() {
                     Request exemption
                   </Button>
                 )}
-                {canReview && postedPayment && (
+                {canReview && verifiablePayment && (
                   <Button
                     variant="outline"
                     onClick={() => {
-                      setTargetPayment(postedPayment);
+                      setTargetPayment(verifiablePayment);
                       setAction('reconcile');
                     }}
                   >
-                    <CheckCircle2 className="mr-2 h-4 w-4" />Reconcile
+                    <CheckCircle2 className="mr-2 h-4 w-4" />Verify &amp; post
                   </Button>
                 )}
                 {canReview && pendingExemption && (
@@ -564,13 +566,13 @@ export default function SupplierOnboardingTokensPage() {
               <div><Label>{action === 'reissue' ? 'Rotation reason' : 'Exemption reason'}</Label><Textarea value={reason} onChange={(event) => setReason(event.target.value)} /></div>
             )}
             {action === 'reconcile' && (
-              <div><Label>Reconciliation reference</Label><Input value={reference} onChange={(event) => setReference(event.target.value)} /></div>
+              <div><Label>Trusted provider or cashier reference</Label><Input value={reference} onChange={(event) => setReference(event.target.value)} /></div>
             )}
             {(action === 'exemption' || action === 'approve-exemption' || action === 'reject-exemption') && (
               <div><Label>Shared evidence reference</Label><Input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Document or external evidence reference" /></div>
             )}
             {(action === 'reconcile' || action === 'approve-exemption' || action === 'reject-exemption') && (
-              <div><Label>{action === 'reconcile' ? 'Reconciliation notes' : 'Independent decision comment'}</Label><Textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></div>
+              <div><Label>{action === 'reconcile' ? 'Verification notes' : 'Independent decision comment'}</Label><Textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></div>
             )}
           </div>
           <DialogFooter>
