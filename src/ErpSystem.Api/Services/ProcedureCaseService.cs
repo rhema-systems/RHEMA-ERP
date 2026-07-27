@@ -1443,10 +1443,23 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             if (taskConfig is not null
                 && (taskConfig.RequiresDocument || string.Equals(taskConfig.TaskActionType, "document", StringComparison.OrdinalIgnoreCase)))
             {
-                var name = string.IsNullOrWhiteSpace(taskConfig.DocumentName)
-                    ? $"{step.Name} document"
-                    : taskConfig.DocumentName.Trim();
-                documents.Add(new DocumentSeed(name, step.Name, true));
+                var requirements = taskConfig.DocumentRequirements
+                    .Where(requirement => !string.IsNullOrWhiteSpace(requirement.DocumentName))
+                    .ToList();
+
+                if (requirements.Count > 0)
+                {
+                    // Workflow setup: each configured stage document must become a ProcedureCaseDocument requirement.
+                    documents.AddRange(requirements.Select(requirement =>
+                        new DocumentSeed(requirement.DocumentName.Trim(), step.Name, requirement.IsRequired)));
+                }
+                else
+                {
+                    var name = string.IsNullOrWhiteSpace(taskConfig.DocumentName)
+                        ? $"{step.Name} document"
+                        : taskConfig.DocumentName.Trim();
+                    documents.Add(new DocumentSeed(name, step.Name, true));
+                }
             }
 
             foreach (var check in config?.QualityConfig?.QualityChecks ?? [])

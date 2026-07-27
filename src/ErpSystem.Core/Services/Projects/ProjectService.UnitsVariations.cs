@@ -334,6 +334,19 @@ public partial class ProjectService
             throw new InvalidOperationException("Release or hand over the project unit before publishing it to Estate management.");
         }
 
+        var salesAgreement = unit.SalesAgreementId.HasValue
+            ? await _unitOfWork.Repository<SalesAgreement>().FirstOrDefaultAsync(item =>
+                item.Id == unit.SalesAgreementId.Value && item.TenantId == _currentUserProvider.TenantId)
+            : null;
+        var salesOrder = unit.SalesOrderId.HasValue
+            ? await _unitOfWork.Repository<SalesOrder>().FirstOrDefaultAsync(item =>
+                item.Id == unit.SalesOrderId.Value && item.TenantId == _currentUserProvider.TenantId)
+            : null;
+        var commercialStatus = DeriveProjectUnitCommercialStatus(unit, salesAgreement, salesOrder);
+        var commercialIntent = DeriveProjectUnitCommercialIntent(salesAgreement, salesOrder);
+        var isOpenMarketUnit = unit.IsReleasedForMarket
+            && ProjectUnitStatusEquals(commercialStatus, ProjectUnitStatuses.Available);
+
         var handoff = new ProjectUnitEstateHandoffDto
         {
             ProjectId = project.Id,
@@ -350,8 +363,11 @@ public partial class ProjectService
             AreaSquareMeters = unit.AreaSquareMeters,
             ValuationAmount = unit.BasePrice,
             Currency = unit.Currency,
-            IsAvailableForLease = !ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Sold),
-            IsAvailableForSale = !ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Leased),
+            // Estate handoff: publish occupied or handed-over units for management without reopening them for Sales inventory.
+            IsAvailableForLease = isOpenMarketUnit
+                && (commercialIntent is null || string.Equals(commercialIntent, ProjectUnitCommercialIntents.Lease, StringComparison.OrdinalIgnoreCase)),
+            IsAvailableForSale = isOpenMarketUnit
+                && (commercialIntent is null || string.Equals(commercialIntent, ProjectUnitCommercialIntents.Sale, StringComparison.OrdinalIgnoreCase)),
             HandoverDate = unit.HandoverDate,
             Notes = unit.Notes
         };

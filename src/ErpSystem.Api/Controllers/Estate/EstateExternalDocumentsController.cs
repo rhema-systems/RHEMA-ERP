@@ -521,10 +521,34 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     }
 
     private static CentralDocumentVersion? SelectExternalDocumentVersion(CentralDocumentRecord record)
-        => record.Versions
+    {
+        var externallyReleasedVersions = record.Versions
+            .Where(version => IsExternalDocumentVersionStatus(version.Status) && HasExternalDocumentVersionPath(version))
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(record.CurrentVersion))
+        {
+            var current = externallyReleasedVersions.FirstOrDefault(version =>
+                string.Equals(version.VersionNumber, record.CurrentVersion, StringComparison.OrdinalIgnoreCase));
+            if (current is not null)
+            {
+                return current;
+            }
+        }
+
+        // Estate external portal: dispatched recipients can only receive the version that was current/published externally.
+        return externallyReleasedVersions
             .OrderByDescending(item => item.PublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
-            .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item.RenditionPath)
-                || !string.IsNullOrWhiteSpace(item.RepositoryPath));
+            .FirstOrDefault();
+    }
+
+    private static bool IsExternalDocumentVersionStatus(string? status)
+        => string.Equals(status, "Current", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "Published", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasExternalDocumentVersionPath(CentralDocumentVersion version)
+        => !string.IsNullOrWhiteSpace(version.RenditionPath)
+            || !string.IsNullOrWhiteSpace(version.RepositoryPath);
 
     private static string? SelectExternalDocumentPath(CentralDocumentRecord record, CentralDocumentVersion? version)
     {
@@ -538,7 +562,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return version.RepositoryPath;
         }
 
-        return record.RepositoryPath;
+        return string.Equals(record.VersionStatus, "Current", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(record.VersionStatus, "Published", StringComparison.OrdinalIgnoreCase)
+            ? record.RepositoryPath
+            : null;
     }
 
     private static string ResolveExternalContentType(CentralDocumentVersion? version, CentralDocumentRecord record)
