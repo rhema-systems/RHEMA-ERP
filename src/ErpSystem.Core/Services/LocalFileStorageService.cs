@@ -45,7 +45,7 @@ public partial class LocalFileStorageService : IFileStorageService
                 ? _options.Local.BasePath
                 : Path.Combine(_environment.ContentRootPath, _options.Local.BasePath);
         }
-        _privateBasePath = Path.Combine(_environment.ContentRootPath, "secure-file-storage");
+        _privateBasePath = ResolvePrivateBasePath();
 
         // Configure base URL
         _baseUrl = _options.Local.BaseUrl ?? $"/{_options.Local.BasePath}";
@@ -537,6 +537,29 @@ public partial class LocalFileStorageService : IFileStorageService
     private static bool IsPrivatePath(string? filePath)
         => !string.IsNullOrWhiteSpace(filePath)
             && filePath.Replace('\\', '/').TrimStart('/').StartsWith(PrivatePathPrefix, StringComparison.OrdinalIgnoreCase);
+
+    private string ResolvePrivateBasePath()
+    {
+        if (!string.IsNullOrWhiteSpace(_options.Local.PrivateBasePath))
+        {
+            return Path.IsPathRooted(_options.Local.PrivateBasePath)
+                ? _options.Local.PrivateBasePath
+                : Path.Combine(_environment.ContentRootPath, _options.Local.PrivateBasePath);
+        }
+
+        // Estate/DMS private uploads must follow persistent storage when BasePath is external, while staying out of the public URL folder.
+        if (Path.IsPathRooted(_options.Local.BasePath))
+        {
+            return Path.Combine(Path.GetDirectoryName(Path.GetFullPath(_basePath)) ?? _environment.ContentRootPath, "secure-file-storage");
+        }
+
+        if (!_options.Local.UseWebRoot && _options.Local.BasePath.Contains(Path.DirectorySeparatorChar))
+        {
+            return Path.Combine(Path.GetDirectoryName(Path.GetFullPath(_basePath)) ?? _environment.ContentRootPath, "secure-file-storage");
+        }
+
+        return Path.Combine(_environment.ContentRootPath, "secure-file-storage");
+    }
 
     private string ResolvePhysicalPath(string filePath)
     {

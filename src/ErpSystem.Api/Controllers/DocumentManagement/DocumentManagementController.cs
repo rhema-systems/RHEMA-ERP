@@ -580,9 +580,17 @@ public sealed class DocumentManagementController : ControllerBase
             .Select(item => item.TemplateCode)
             .ToListAsync(cancellationToken);
         var existing = existingCodes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingDefinitions = GeneratedDocumentTemplates
+            .Where(definition => !existing.Contains(definition.TemplateCode))
+            .ToList();
+        if (missingDefinitions.Count == 0)
+        {
+            return;
+        }
+
         var now = DateTime.UtcNow;
 
-        foreach (var definition in GeneratedDocumentTemplates.Where(definition => !existing.Contains(definition.TemplateCode)))
+        foreach (var definition in missingDefinitions)
         {
             _db.CentralDocumentGenerationTemplates.Add(new CentralDocumentGenerationTemplate
             {
@@ -607,7 +615,48 @@ public sealed class DocumentManagementController : ControllerBase
             });
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            DetachPendingGenerationTemplateSeeds();
+
+            // DMS setup can be hit by parallel first requests; if another request inserted the defaults, reload instead of returning a 500.
+            if (!await DefaultGenerationTemplatesExistAsync(tenantId, cancellationToken))
+            {
+                throw;
+            }
+        }
+    }
+
+    private async Task<bool> DefaultGenerationTemplatesExistAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var expectedCodes = GeneratedDocumentTemplates
+            .Select(definition => definition.TemplateCode)
+            .ToList();
+        var existingCount = await _db.CentralDocumentGenerationTemplates
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && expectedCodes.Contains(item.TemplateCode))
+            .Select(item => item.TemplateCode)
+            .Distinct()
+            .CountAsync(cancellationToken);
+
+        return existingCount == expectedCodes.Count;
+    }
+
+    private void DetachPendingGenerationTemplateSeeds()
+    {
+        var entries = _db.ChangeTracker
+            .Entries<CentralDocumentGenerationTemplate>()
+            .Where(entry => entry.State == EntityState.Added)
+            .ToList();
+
+        foreach (var entry in entries)
+        {
+            entry.State = EntityState.Detached;
+        }
     }
 
     private static IReadOnlyList<UpsertDocumentMetadataValueRequest> WorkflowMetadata(

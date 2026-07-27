@@ -295,14 +295,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedListingType = NormalizeListingType(listingType);
         var limit = Math.Clamp(take <= 0 ? 100 : take, 1, 200);
 
-        var query = _db.EstateManagedAssets
+        var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
             .AsNoTracking()
-            .Include(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage))
+            .Include(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage)))
             .Where(asset => asset.TenantId == tenantId
-                && !asset.IsDeleted
-                && asset.IsPublishedToExternalPortal
-                && asset.ExternalListingStatus == "Published"
-                && (asset.Status == EstateManagedAssetStatus.Available || asset.Status == EstateManagedAssetStatus.LandBank)
                 && (asset.AssetType == EstateManagedAssetType.Land
                     || asset.AssetType == EstateManagedAssetType.Property
                     || asset.AssetType == EstateManagedAssetType.Facility));
@@ -361,7 +357,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && !item.IsDeleted
                 && item.IsListingImage
                 && item.EstateManagedAsset.IsPublishedToExternalPortal
-                && item.EstateManagedAsset.ExternalListingStatus == "Published", cancellationToken);
+                && item.EstateManagedAsset.ExternalListingStatus == "Published"
+                && (item.EstateManagedAsset.Status == EstateManagedAssetStatus.Available
+                    || item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank), cancellationToken);
 
         if (document == null)
         {
@@ -379,13 +377,12 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
-        var asset = await _db.EstateManagedAssets
-            .AsNoTracking()
+        var asset = await WhereExternallyAvailableListings(_db.EstateManagedAssets.AsNoTracking())
             .FirstOrDefaultAsync(item => item.Id == listingId
                 && item.TenantId == tenantId
-                && !item.IsDeleted
-                && item.IsPublishedToExternalPortal
-                && item.ExternalListingStatus == "Published", cancellationToken);
+                && (item.AssetType == EstateManagedAssetType.Land
+                    || item.AssetType == EstateManagedAssetType.Property
+                    || item.AssetType == EstateManagedAssetType.Facility), cancellationToken);
 
         if (asset == null)
         {
@@ -760,6 +757,13 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         return normalized == "Sale" ? "Purchase" : "Lease";
     }
+
+    private static IQueryable<EstateManagedAsset> WhereExternallyAvailableListings(IQueryable<EstateManagedAsset> query)
+        // Estate external portal: keep GET listings and POST requests on the same availability gate so stale listing IDs cannot start procedures.
+        => query.Where(asset => !asset.IsDeleted
+            && asset.IsPublishedToExternalPortal
+            && asset.ExternalListingStatus == "Published"
+            && (asset.Status == EstateManagedAssetStatus.Available || asset.Status == EstateManagedAssetStatus.LandBank));
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();

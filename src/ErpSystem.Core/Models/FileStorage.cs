@@ -124,6 +124,7 @@ public enum StorageProviderType
 public class LocalStorageOptions
 {
     public string BasePath { get; set; } = "uploads";
+    public string? PrivateBasePath { get; set; }
     public string? BaseUrl { get; set; }
     public bool UseWebRoot { get; set; } = true;
     public bool CreateDirectoryIfNotExists { get; set; } = true;
