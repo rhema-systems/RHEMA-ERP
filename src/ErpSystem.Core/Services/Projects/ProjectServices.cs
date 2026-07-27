@@ -412,10 +412,8 @@ public partial class ProjectService : IProjectService
         await ValidatePortfolioProgramAsync(dto.PortfolioId, dto.ProgramId);
         var slackMonths = NormalizeSlackMonths(dto.SlackMonths);
         EnsureChronologicalDateRange(dto.StartDate, dto.TargetEndDate, "project schedule");
-        if (dto.DevelopmentProfile != null)
-        {
-            dto.DevelopmentProfile.LandReference = await ResolveReadyProjectLandReferenceAsync(dto.DevelopmentProfile.LandReference);
-        }
+        // Estate integration: update-time land validation is handled inside the development profile upsert
+        // so unchanged legacy references do not block unrelated Project Management edits.
 
         project.Title = dto.Title.Trim();
         project.Summary = dto.Summary;

@@ -166,9 +166,11 @@ public class EstateManagedAssetQuery
 {
     public EstateManagedAssetType? AssetType { get; set; }
     public EstateManagedAssetStatus? Status { get; set; }
+    public List<EstateManagedAssetStatus> ExcludedStatuses { get; set; } = new();
     public string? Search { get; set; }
     public bool? AvailableForLease { get; set; }
     public bool? AvailableForSale { get; set; }
+    public bool? AvailableForSaleOrLease { get; set; }
     public int Take { get; set; } = 100;
 }
 

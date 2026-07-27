@@ -22,13 +22,17 @@ public class EstateManagedAssetService : IEstateManagedAssetService
     {
         var take = Math.Clamp(query.Take <= 0 ? 100 : query.Take, 1, 500);
         var normalizedSearch = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim();
+        var excludedStatuses = query.ExcludedStatuses.Distinct().ToList();
         var assets = (await _unitOfWork.Repository<EstateManagedAsset>().FindAsync(item =>
                 item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted
                 && (!query.AssetType.HasValue || item.AssetType == query.AssetType.Value)
                 && (!query.Status.HasValue || item.Status == query.Status.Value)
+                && (excludedStatuses.Count == 0 || !excludedStatuses.Contains(item.Status))
                 && (!query.AvailableForLease.HasValue || item.IsAvailableForLease == query.AvailableForLease.Value)
-                && (!query.AvailableForSale.HasValue || item.IsAvailableForSale == query.AvailableForSale.Value)))
+                && (!query.AvailableForSale.HasValue || item.IsAvailableForSale == query.AvailableForSale.Value)
+                && (!query.AvailableForSaleOrLease.HasValue
+                    || (item.IsAvailableForSale || item.IsAvailableForLease) == query.AvailableForSaleOrLease.Value)))
             .Where(item => normalizedSearch == null
                 || Contains(item.AssetCode, normalizedSearch)
                 || Contains(item.Name, normalizedSearch)

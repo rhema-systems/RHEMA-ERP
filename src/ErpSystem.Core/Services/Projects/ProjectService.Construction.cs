@@ -246,9 +246,9 @@ public partial class ProjectService
 
     private async Task<ProjectDevelopmentProfile> UpsertDevelopmentProfileEntityAsync(Project project, UpsertProjectDevelopmentProfileDto dto)
     {
-        dto.LandReference = await ResolveReadyProjectLandReferenceAsync(dto.LandReference);
         var repository = _unitOfWork.Repository<ProjectDevelopmentProfile>();
         var profile = await repository.FirstOrDefaultAsync(x => x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId);
+        dto.LandReference = await ResolveDevelopmentProfileLandReferenceAsync(profile?.LandReference, dto.LandReference);
         if (profile == null)
         {
             profile = new ProjectDevelopmentProfile
@@ -273,6 +273,25 @@ public partial class ProjectService
         await _unitOfWork.SaveChangesAsync();
         project.DevelopmentProfile = profile;
         return profile;
+    }
+
+    private async Task<string?> ResolveDevelopmentProfileLandReferenceAsync(string? currentLandReference, string? requestedLandReference)
+    {
+        var normalizedCurrent = TrimOrNull(currentLandReference);
+        var normalizedRequested = TrimOrNull(requestedLandReference);
+        if (normalizedRequested == null)
+        {
+            return null;
+        }
+
+        if (normalizedCurrent != null
+            && string.Equals(normalizedCurrent, normalizedRequested, StringComparison.OrdinalIgnoreCase))
+        {
+            return normalizedCurrent;
+        }
+
+        // Estate integration: only newly selected or changed land references must resolve to ready Estate land-bank assets.
+        return await ResolveReadyProjectLandReferenceAsync(normalizedRequested);
     }
 
     private async Task<string?> ResolveReadyProjectLandReferenceAsync(string? landReference)

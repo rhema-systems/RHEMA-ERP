@@ -295,7 +295,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedListingType = NormalizeListingType(listingType);
         var limit = Math.Clamp(take <= 0 ? 100 : take, 1, 200);
 
-        var assets = await _db.EstateManagedAssets
+        var query = _db.EstateManagedAssets
             .AsNoTracking()
             .Include(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage))
             .Where(asset => asset.TenantId == tenantId
@@ -305,34 +305,47 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && (asset.Status == EstateManagedAssetStatus.Available || asset.Status == EstateManagedAssetStatus.LandBank)
                 && (asset.AssetType == EstateManagedAssetType.Land
                     || asset.AssetType == EstateManagedAssetType.Property
-                    || asset.AssetType == EstateManagedAssetType.Facility))
+                    || asset.AssetType == EstateManagedAssetType.Facility));
+
+        if (normalizedListingType != null)
+        {
+            query = query.Where(asset => asset.ExternalListingType == normalizedListingType
+                || asset.ExternalListingType == "SaleAndRent");
+        }
+
+        if (normalizedLocation != null)
+        {
+            query = query.Where(asset =>
+                (asset.Location != null && asset.Location.ToLower().Contains(normalizedLocation))
+                || (asset.Town != null && asset.Town.ToLower().Contains(normalizedLocation))
+                || (asset.District != null && asset.District.ToLower().Contains(normalizedLocation))
+                || (asset.Region != null && asset.Region.ToLower().Contains(normalizedLocation)));
+        }
+
+        if (normalizedSearch != null)
+        {
+            query = query.Where(asset =>
+                (asset.AssetCode != null && asset.AssetCode.ToLower().Contains(normalizedSearch))
+                || (asset.Name != null && asset.Name.ToLower().Contains(normalizedSearch))
+                || (asset.Description != null && asset.Description.ToLower().Contains(normalizedSearch))
+                || (asset.Location != null && asset.Location.ToLower().Contains(normalizedSearch))
+                || (asset.Town != null && asset.Town.ToLower().Contains(normalizedSearch))
+                || (asset.District != null && asset.District.ToLower().Contains(normalizedSearch))
+                || (asset.ProjectTitle != null && asset.ProjectTitle.ToLower().Contains(normalizedSearch))
+                || (asset.UnitType != null && asset.UnitType.ToLower().Contains(normalizedSearch)));
+        }
+
+        // Estate external portal: apply all listing/search filters before paging published inventory.
+        var filtered = await query
             .OrderByDescending(asset => asset.ExternalPublishedAt ?? asset.UpdatedAt ?? asset.CreatedAt)
-            .Take(500)
+            .Take(limit)
             .ToListAsync(cancellationToken);
 
-        var filtered = assets
-            .Where(asset => normalizedListingType is null
-                || asset.ExternalListingType == normalizedListingType
-                || asset.ExternalListingType == "SaleAndRent")
-            .Where(asset => normalizedLocation is null
-                || Contains(asset.Location, normalizedLocation)
-                || Contains(asset.Town, normalizedLocation)
-                || Contains(asset.District, normalizedLocation)
-                || Contains(asset.Region, normalizedLocation))
-            .Where(asset => normalizedSearch is null
-                || Contains(asset.AssetCode, normalizedSearch)
-                || Contains(asset.Name, normalizedSearch)
-                || Contains(asset.Description, normalizedSearch)
-                || Contains(asset.Location, normalizedSearch)
-                || Contains(asset.Town, normalizedSearch)
-                || Contains(asset.District, normalizedSearch)
-                || Contains(asset.ProjectTitle, normalizedSearch)
-                || Contains(asset.UnitType, normalizedSearch))
-            .Take(limit)
+        var listings = filtered
             .Select(ToExternalListingDto)
             .ToList();
 
-        return Ok(new { success = true, data = filtered });
+        return Ok(new { success = true, data = listings });
     }
 
     [HttpGet("/api/estate/external/listings/{listingId:guid}/images/{documentId:guid}")]
@@ -688,9 +701,6 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
-
-    private static bool Contains(string? value, string search)
-        => value?.Contains(search, StringComparison.OrdinalIgnoreCase) == true;
 
     private static string? NormalizeListingType(string? value)
     {
