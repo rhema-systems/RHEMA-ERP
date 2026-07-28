@@ -7,6 +7,7 @@ public interface IEstateManagedAssetService
     Task<IReadOnlyList<EstateManagedAssetDto>> GetManagedAssetsAsync(EstateManagedAssetQuery query);
     Task<EstateManagedAssetDto> PublishLandAcquisitionAsync(LandAcquisitionEstateHandoffDto handoff);
     Task<EstateManagedAssetDto> PublishProjectUnitAsync(ProjectUnitEstateHandoffDto handoff);
+    Task WithdrawProjectUnitAsync(Guid projectUnitId);
     Task<EstateManagedAssetDto> CreateManualExistingLandAsync(CreateManualExistingLandDto request);
     Task<EstateManagedAssetDto> UpdateLandDemarcationAsync(Guid assetId, UpdateEstateManagedLandDemarcationDto request);
     Task<EstateManagedAssetDto> MarkReadyForProjectManagementAsync(Guid assetId);

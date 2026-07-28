@@ -1784,6 +1784,20 @@ public class LandAcquisitionsController : ControllerBase
         }
 
         var accountsPayableInvoiceId = stampDutyPayment.AccountsPayableInvoiceId.GetValueOrDefault();
+        // GET endpoints call this sync, so only mutate the tracked payment when Accounts Payable values change.
+        var changed = false;
+
+        void SetIfChanged<T>(T currentValue, T newValue, Action<T> assign)
+        {
+            if (EqualityComparer<T>.Default.Equals(currentValue, newValue))
+            {
+                return;
+            }
+
+            assign(newValue);
+            changed = true;
+        }
+
         var invoice = await _context.Set<VendorInvoice>()
             .AsNoTracking()
             .Include(item => item.PaymentAllocations)
@@ -1795,9 +1809,18 @@ public class LandAcquisitionsController : ControllerBase
                 cancellationToken);
         if (invoice == null)
         {
-            stampDutyPayment.AccountsPayableInvoiceId = null;
-            stampDutyPayment.AccountsPayablePaymentId = null;
-            stampDutyPayment.IsPaid = false;
+            SetIfChanged(stampDutyPayment.AccountsPayableInvoiceId, (Guid?)null,
+                value => stampDutyPayment.AccountsPayableInvoiceId = value);
+            SetIfChanged(stampDutyPayment.AccountsPayablePaymentId, (Guid?)null,
+                value => stampDutyPayment.AccountsPayablePaymentId = value);
+            SetIfChanged(stampDutyPayment.IsPaid, false, value => stampDutyPayment.IsPaid = value);
+
+            if (changed)
+            {
+                stampDutyPayment.UpdatedAt = DateTime.UtcNow;
+                stampDutyPayment.UpdatedBy = "Accounts Payable Sync";
+            }
+
             return;
         }
 
@@ -1815,15 +1838,29 @@ public class LandAcquisitionsController : ControllerBase
         var vendorPayment = completedAllocation?.VendorPayment;
         var isPaid = invoice.Status == VendorInvoiceStatus.Paid && vendorPayment != null;
 
-        stampDutyPayment.AccountsPayablePaymentId = vendorPayment?.Id;
-        stampDutyPayment.ReceiptNumber = vendorPayment?.PaymentNumber;
-        stampDutyPayment.PaymentReference = vendorPayment?.TransactionReference ?? vendorPayment?.PaymentNumber;
-        stampDutyPayment.PaymentDate = vendorPayment?.PaymentDate;
-        stampDutyPayment.AmountPaid = invoice.PaidAmount;
-        stampDutyPayment.PaymentMethod = vendorPayment?.PaymentMethod.ToString();
-        stampDutyPayment.Notes = vendorPayment?.Notes ??
-                                 $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}.";
-        stampDutyPayment.IsPaid = isPaid;
+        var accountsPayablePaymentId = vendorPayment?.Id;
+        var receiptNumber = vendorPayment?.PaymentNumber;
+        var paymentReference = vendorPayment?.TransactionReference ?? vendorPayment?.PaymentNumber;
+        var paymentDate = vendorPayment?.PaymentDate;
+        var amountPaid = invoice.PaidAmount;
+        var paymentMethod = vendorPayment?.PaymentMethod.ToString();
+        var notes = vendorPayment?.Notes ?? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}.";
+
+        SetIfChanged(stampDutyPayment.AccountsPayablePaymentId, accountsPayablePaymentId,
+            value => stampDutyPayment.AccountsPayablePaymentId = value);
+        SetIfChanged(stampDutyPayment.ReceiptNumber, receiptNumber, value => stampDutyPayment.ReceiptNumber = value);
+        SetIfChanged(stampDutyPayment.PaymentReference, paymentReference, value => stampDutyPayment.PaymentReference = value);
+        SetIfChanged(stampDutyPayment.PaymentDate, paymentDate, value => stampDutyPayment.PaymentDate = value);
+        SetIfChanged(stampDutyPayment.AmountPaid, amountPaid, value => stampDutyPayment.AmountPaid = value);
+        SetIfChanged(stampDutyPayment.PaymentMethod, paymentMethod, value => stampDutyPayment.PaymentMethod = value);
+        SetIfChanged(stampDutyPayment.Notes, notes, value => stampDutyPayment.Notes = value);
+        SetIfChanged(stampDutyPayment.IsPaid, isPaid, value => stampDutyPayment.IsPaid = value);
+
+        if (!changed)
+        {
+            return;
+        }
+
         stampDutyPayment.UpdatedAt = DateTime.UtcNow;
         stampDutyPayment.UpdatedBy = "Accounts Payable Sync";
 

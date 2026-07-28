@@ -196,6 +196,40 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         return MapToDto(asset);
     }
 
+    public async Task WithdrawProjectUnitAsync(Guid projectUnitId)
+    {
+        if (projectUnitId == Guid.Empty)
+        {
+            return;
+        }
+
+        var repository = _unitOfWork.Repository<EstateManagedAsset>();
+        var asset = await repository.FirstOrDefaultAsync(item =>
+            item.TenantId == _currentUserProvider.TenantId
+            && !item.IsDeleted
+            && item.SourceType == EstateManagedAssetSourceType.ProjectUnit
+            && item.ProjectUnitId == projectUnitId);
+
+        if (asset == null)
+        {
+            return;
+        }
+
+        asset.Status = EstateManagedAssetStatus.Retired;
+        asset.IsAvailableForLease = false;
+        asset.IsAvailableForSale = false;
+        asset.IsPublishedToExternalPortal = false;
+        asset.ExternalListingStatus = "Withdrawn";
+        asset.ExternalListingType = "None";
+        asset.ExternalPublishedAt = null;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = _currentUserProvider.Username;
+        asset.LastModifiedById = _currentUserProvider.UserId;
+
+        await repository.UpdateAsync(asset);
+        await _unitOfWork.SaveChangesAsync();
+    }
+
     public async Task<EstateManagedAssetDto> CreateManualExistingLandAsync(CreateManualExistingLandDto request)
     {
         var required = new[] { request.AssetCode, request.Name, request.Location, request.Purpose, request.ZoningClassification,

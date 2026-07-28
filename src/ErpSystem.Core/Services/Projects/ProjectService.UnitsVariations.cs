@@ -232,6 +232,7 @@ public partial class ProjectService
         var (building, floor) = await ResolveProjectHierarchyAsync(entity.ProjectId, dto.ProjectBuildingId, dto.ProjectFloorId);
         var releaseBatch = await ValidateProjectUnitReleaseBatchAsync(entity.ProjectId, dto.ProjectUnitReleaseBatchId, building?.Id, floor?.Id);
         var isReleasedForMarket = dto.IsReleasedForMarket;
+        var wasReleasedForMarket = entity.IsReleasedForMarket;
         var normalizedStatus = NormalizeProjectUnitStatus(dto.Status);
         ValidateProjectUnitCommercialControls(isReleasedForMarket, normalizedStatus, dto.HandoverDate, salesAgreement, salesOrder);
         var effectiveStatus = AlignProjectUnitStatusForRelease(normalizedStatus, isReleasedForMarket);
@@ -277,6 +278,11 @@ public partial class ProjectService
         await _unitOfWork.Repository<ProjectUnit>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         await ReplaceProjectUnitAmenitiesAsync(entity.Id, resolvedAmenities);
+        if (wasReleasedForMarket && !isReleasedForMarket)
+        {
+            await _estateManagedAssetService.WithdrawProjectUnitAsync(entity.Id);
+        }
+
         return await GetProjectUnitDtoAsync(entity.ProjectId, entity.Id);
     }
 
@@ -316,6 +322,7 @@ public partial class ProjectService
 
         await _unitOfWork.Repository<ProjectUnit>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+        await _estateManagedAssetService.WithdrawProjectUnitAsync(entity.Id);
         return await GetProjectUnitDtoAsync(entity.ProjectId, entity.Id);
     }
 
