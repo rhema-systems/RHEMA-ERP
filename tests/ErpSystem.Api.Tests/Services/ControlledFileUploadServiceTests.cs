@@ -352,6 +352,91 @@ public sealed class ControlledFileUploadServiceTests
             .IsDeleted.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task DeleteCommitsMetadataAndSchedulesStorageCleanup()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        await using var db = Database();
+        var record = FileRecord(tenantId);
+        db.FileUploadRecords.Add(record);
+        await db.SaveChangesAsync();
+        var storage = Storage(result: Stored(tenantId));
+        var service = Service(
+            db, storage.Object, Mock.Of<IFileVirusScanService>());
+
+        await service.DeleteAsync(tenantId, record.Id, actorId);
+
+        var persisted = await db.FileUploadRecords
+            .IgnoreQueryFilters()
+            .SingleAsync();
+        persisted.IsDeleted.Should().BeTrue();
+        persisted.DeletedBy.Should().Be(actorId.ToString());
+        persisted.StorageDeletedAtUtc.Should().BeNull();
+        persisted.StorageDeleteNextAttemptAtUtc.Should().NotBeNull();
+        storage.Verify(item => item.DeleteFileAsync(
+            It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task StorageDeleteFalseRemainsDurablyRetryable()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = Database();
+        var record = FileRecord(tenantId);
+        record.IsDeleted = true;
+        record.DeletedAt = DateTime.UtcNow.AddMinutes(-1);
+        record.StorageDeleteNextAttemptAtUtc =
+            DateTime.UtcNow.AddSeconds(-1);
+        db.FileUploadRecords.Add(record);
+        await db.SaveChangesAsync();
+        var storage = Storage(result: Stored(tenantId));
+        storage.Setup(item => item.DeleteFileAsync(record.FilePath))
+            .ReturnsAsync(false);
+        var processor = CleanupProcessor(db, storage.Object);
+
+        var processed = await processor.ProcessPendingAsync();
+
+        processed.Should().Be(1);
+        var persisted = await db.FileUploadRecords
+            .IgnoreQueryFilters()
+            .SingleAsync();
+        persisted.StorageDeletedAtUtc.Should().BeNull();
+        persisted.StorageDeleteAttemptCount.Should().Be(1);
+        persisted.StorageDeleteLastAttemptAtUtc.Should().NotBeNull();
+        persisted.StorageDeleteNextAttemptAtUtc.Should()
+            .BeAfter(persisted.StorageDeleteLastAttemptAtUtc!.Value);
+        persisted.StorageDeleteLastError.Should().Contain(
+            "returned false");
+    }
+
+    [Fact]
+    public async Task StorageDeleteSuccessCompletesDurableCleanup()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = Database();
+        var record = FileRecord(tenantId);
+        record.IsDeleted = true;
+        record.DeletedAt = DateTime.UtcNow.AddMinutes(-1);
+        record.StorageDeleteNextAttemptAtUtc =
+            DateTime.UtcNow.AddSeconds(-1);
+        db.FileUploadRecords.Add(record);
+        await db.SaveChangesAsync();
+        var storage = Storage(result: Stored(tenantId));
+        var processor = CleanupProcessor(db, storage.Object);
+
+        var processed = await processor.ProcessPendingAsync();
+
+        processed.Should().Be(1);
+        var persisted = await db.FileUploadRecords
+            .IgnoreQueryFilters()
+            .SingleAsync();
+        persisted.StorageDeletedAtUtc.Should().NotBeNull();
+        persisted.StorageDeleteAttemptCount.Should().Be(1);
+        persisted.StorageDeleteNextAttemptAtUtc.Should().BeNull();
+        persisted.StorageDeleteLastError.Should().BeNull();
+    }
+
     private static ControlledFileUploadService Service(
         ApplicationDbContext db,
         IFileStorageService storage,
@@ -368,6 +453,18 @@ public sealed class ControlledFileUploadServiceTests
             scanner,
             db,
             NullLogger<ControlledFileUploadService>.Instance);
+
+    private static FileStorageCleanupProcessor CleanupProcessor(
+        ApplicationDbContext db,
+        IFileStorageService storage) =>
+        new(
+            db,
+            storage,
+            Options.Create(new FileUploadOptions
+            {
+                StorageCleanupBatchSize = 10
+            }),
+            NullLogger<FileStorageCleanupProcessor>.Instance);
 
     private static ControlledFileUploadRequest Request(
         Guid tenantId,
@@ -400,6 +497,19 @@ public sealed class ControlledFileUploadServiceTests
             .ReturnsAsync(true);
         return storage;
     }
+
+    private static FileUploadRecord FileRecord(Guid tenantId) => new()
+    {
+        Id = Guid.NewGuid(),
+        TenantId = tenantId,
+        Category = ControlledFileUploadCategories.SupplierRegistrationEvidence,
+        FilePath = "supplier-registration-evidence/file.pdf",
+        StoredFileName = "file.pdf",
+        OriginalFileName = "evidence.pdf",
+        FileSize = 4,
+        StorageProvider = "Test",
+        UploadedByUserId = Guid.NewGuid()
+    };
 
     private static Mock<IFileVirusScanService> CleanScanner()
     {

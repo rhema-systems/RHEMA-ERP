@@ -54,6 +54,15 @@ category, and scan status. Security-sensitive document aggregates must accept
 only an active, same-tenant record with `VirusScanStatus.Clean`; add a database
 guard when direct SQL writes must also be protected.
 
-Physical deletion should occur only after the metadata transaction commits,
-or through a durable cleanup/outbox operation, so database rollback cannot
-leave active metadata pointing to a missing object.
+`IControlledFileUploadService.DeleteAsync` soft-deletes the tenant metadata
+and schedules physical removal on that same `FileUploadRecord`. The
+`FileStorageCleanupBackgroundService` can only observe this work after the
+owning database transaction commits. It retries provider exceptions and
+`DeleteFileAsync == false` responses with durable attempt, error, and
+next-attempt metadata. Modules must not delete the physical object directly.
+
+Storage-provider implementations must make deletion idempotent: return `true`
+when the object is absent after the operation, including when it was already
+absent, and return `false` only when absence could not be ensured. This lets a
+retry finish safely if storage deletion succeeded but the cleanup-status save
+failed.

@@ -287,26 +287,26 @@ public sealed class ControlledFileUploadService : IControlledFileUploadService
                 "The tenant file record was not found.", 404);
 
         if (record.IsDeleted)
+        {
+            if (!record.StorageDeletedAtUtc.HasValue &&
+                !record.StorageDeleteNextAttemptAtUtc.HasValue)
+            {
+                record.StorageDeleteNextAttemptAtUtc = DateTime.UtcNow;
+                record.UpdatedAt = DateTime.UtcNow;
+                record.LastModifiedById = actorUserId;
+                await _db.SaveChangesAsync(cancellationToken);
+            }
             return;
-
-        try
-        {
-            await _storage.DeleteFileAsync(record.FilePath);
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(exception,
-                "Storage cleanup failed for file record {FileUploadRecordId}; metadata will remain active.",
-                fileUploadRecordId);
-            throw Failure("FILE_STORAGE_DELETE_FAILED",
-                "The stored file could not be removed.", 502);
         }
 
+        var now = DateTime.UtcNow;
         record.IsDeleted = true;
-        record.DeletedAt = DateTime.UtcNow;
+        record.DeletedAt = now;
         record.DeletedBy = actorUserId.ToString();
-        record.UpdatedAt = DateTime.UtcNow;
+        record.UpdatedAt = now;
         record.LastModifiedById = actorUserId;
+        record.StorageDeleteNextAttemptAtUtc = now;
+        record.StorageDeleteLastError = null;
         await _db.SaveChangesAsync(cancellationToken);
     }
 

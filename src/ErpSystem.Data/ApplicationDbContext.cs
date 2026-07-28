@@ -3455,6 +3455,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(x => new { x.TenantId, x.CreatedAt });
             entity.HasIndex(x => new { x.TenantId, x.FilePath }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.UploadedByUserId });
+            entity.HasIndex(x => new
+            {
+                x.IsDeleted,
+                x.StorageDeletedAtUtc,
+                x.StorageDeleteNextAttemptAtUtc
+            });
         });
 
         // Configure SecurityAlert entity

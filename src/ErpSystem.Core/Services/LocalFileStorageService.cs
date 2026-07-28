@@ -260,8 +260,10 @@ public partial class LocalFileStorageService : IFileStorageService
 
             if (!File.Exists(fullPath))
             {
-                _logger.LogWarning("Attempted to delete non-existent file: {FilePath}", filePath);
-                return false;
+                _logger.LogDebug(
+                    "File is already absent; treating storage deletion as successful: {FilePath}",
+                    filePath);
+                return true;
             }
 
             File.Delete(fullPath);

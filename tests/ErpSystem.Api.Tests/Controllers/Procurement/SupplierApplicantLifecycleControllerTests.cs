@@ -316,7 +316,7 @@ public sealed class SupplierApplicantLifecycleControllerTests
     }
 
     [Fact]
-    public async Task StorageDeleteFailureRollsBackDocumentDeleteAndCanBeRetried()
+    public async Task MetadataDeleteFailureRollsBackDocumentDeleteAndCanBeRetried()
     {
         var tenantId = Guid.NewGuid();
         var actorId = Guid.NewGuid();
@@ -363,8 +363,8 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 actorId,
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ControlledFileUploadException(
-                "FILE_STORAGE_DELETE_FAILED",
-                "The stored file could not be removed.",
+                "FILE_METADATA_DELETE_FAILED",
+                "The controlled file metadata could not be deleted.",
                 StatusCodes.Status502BadGateway))
             .Returns(Task.CompletedTask);
         var unitOfWork = TransactionalUnitOfWork();

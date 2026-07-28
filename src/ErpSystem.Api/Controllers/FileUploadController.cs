@@ -14,7 +14,6 @@ namespace ErpSystem.Api.Controllers;
 public class FileUploadController : ControllerBase
 {
     private readonly ILogger<FileUploadController> _logger;
-    private readonly IFileStorageService _storageService;
     private readonly ErpSystem.Data.ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
     private readonly IControlledFileUploadService _controlledFiles;
@@ -35,13 +34,11 @@ public class FileUploadController : ControllerBase
     };
     public FileUploadController(
         ILogger<FileUploadController> logger,
-        IFileStorageService storageService,
         ErpSystem.Data.ApplicationDbContext db,
         ICurrentUserService currentUserService,
         IControlledFileUploadService controlledFiles)
     {
         _logger = logger;
-        _storageService = storageService;
         _db = db;
         _currentUserService = currentUserService;
         _controlledFiles = controlledFiles;
@@ -221,26 +218,25 @@ public class FileUploadController : ControllerBase
                 return Forbid();
             }
 
-            // Use storage service to delete file
-            var deleted = await _storageService.DeleteFileAsync(filePath);
+            await _controlledFiles.DeleteAsync(
+                tenantId,
+                record.Id,
+                actorUserId,
+                HttpContext.RequestAborted);
 
-            if (!deleted)
-            {
-                return NotFound(new { message = "File not found or could not be deleted" });
-            }
-
-            record.IsDeleted = true;
-            record.DeletedAt = DateTime.UtcNow;
-            record.DeletedBy = _currentUserService.UserName;
-            record.LastModifiedById = actorUserId;
-            record.UpdatedAt = DateTime.UtcNow;
-            record.UpdatedBy = _currentUserService.UserName;
-            await _db.SaveChangesAsync();
-
-            _logger.LogInformation("File deleted successfully using {StorageProvider}: {FilePath}",
-                _storageService.ProviderName, filePath);
+            _logger.LogInformation(
+                "File metadata deleted and durable storage cleanup scheduled: {FilePath}",
+                filePath);
 
             return Ok(new { message = "File deleted successfully", filePath });
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new
+            {
+                code = ex.Code,
+                message = ex.Message
+            });
         }
         catch (Exception ex)
         {
@@ -272,6 +268,8 @@ public class FileUploadOptions
     public bool EnableImageOptimization { get; set; } = false;
     public int MaxImageWidth { get; set; } = 2048;
     public int MaxImageHeight { get; set; } = 2048;
+    public int StorageCleanupIntervalSeconds { get; set; } = 30;
+    public int StorageCleanupBatchSize { get; set; } = 50;
     /// <summary>
     /// Additional normalized upload categories that must obtain a clean scan.
     /// System categories declared by <see cref="ControlledFileUploadCategories"/>

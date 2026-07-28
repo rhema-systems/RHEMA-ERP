@@ -1442,6 +1442,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 ErpSystem.Api.Services.NoOpFileVirusScanService>();
             services.AddScoped<IControlledFileUploadService,
                 ErpSystem.Api.Services.ControlledFileUploadService>();
+            services.AddScoped<ErpSystem.Api.Services.FileStorageCleanupProcessor>();
+            services.AddHostedService<
+                ErpSystem.Api.Services.FileStorageCleanupBackgroundService>();
 
             // Configure multipart body length limit for file uploads
             services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
