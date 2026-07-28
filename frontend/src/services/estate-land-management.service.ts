@@ -34,6 +34,11 @@ export interface EstateManagedAsset {
   zoningClassification?: string;
   planningComplianceStatus?: string;
   gisLayerReference?: string;
+  gisProvider: string;
+  gisFeatureId?: string;
+  gisSourceCrs?: string;
+  gisSyncStatus: string;
+  gisLastSyncedAt?: string;
   boundaryVerified: boolean;
   boundaryCoordinates?: string;
   surveyPlanNumber?: string;
@@ -87,13 +92,14 @@ export interface ExistingLandOwner {
 }
 
 export interface CreateManualExistingLand {
-  assetCode: string;
+  assetCode?: string;
   name: string;
   description: string;
   location: string;
   purpose: string;
   zoningClassification: string;
   planningComplianceStatus: string;
+  gisLayerReference?: string;
   cadastreDescription: string;
   region: string;
   district: string;
@@ -223,6 +229,44 @@ const enumMatches = <T extends number>(
   return String(actual).toLowerCase() === names[expected].toLowerCase();
 };
 
+const enumValue = <T extends number>(
+  actual: T | string | null | undefined,
+  names: Record<T, string>,
+  fallback: T
+): T => {
+  if (typeof actual === 'number' && actual in names) return actual;
+  const normalized = String(actual ?? '').toLowerCase();
+  const match = Object.entries(names).find(
+    ([, name]) => String(name).toLowerCase() === normalized
+  );
+  return match ? (Number(match[0]) as T) : fallback;
+};
+
+// The API serializes enums as names; normalize them once so every Estate screen
+// can safely use the numeric TypeScript enums for counts, labels, and actions.
+const normalizeManagedAsset = (asset: EstateManagedAsset): EstateManagedAsset => ({
+  ...asset,
+  assetType: enumValue(
+    asset.assetType,
+    assetTypeNames,
+    EstateManagedAssetType.Land
+  ),
+  status: enumValue(
+    asset.status,
+    assetStatusNames,
+    EstateManagedAssetStatus.LandBank
+  ),
+  sourceType: enumValue(
+    asset.sourceType,
+    {
+      [EstateManagedAssetSourceType.Manual]: 'Manual',
+      [EstateManagedAssetSourceType.LandAcquisition]: 'LandAcquisition',
+      [EstateManagedAssetSourceType.ProjectUnit]: 'ProjectUnit',
+    },
+    EstateManagedAssetSourceType.Manual
+  ),
+});
+
 const assetMatchesQuery = (
   asset: EstateManagedAsset,
   query: EstateManagedAssetQuery
@@ -258,7 +302,9 @@ export class EstateLandManagementService {
     );
 
     return Array.isArray(response.data)
-      ? response.data.filter((asset) => assetMatchesQuery(asset, query))
+      ? response.data
+          .map(normalizeManagedAsset)
+          .filter((asset) => assetMatchesQuery(asset, query))
       : [];
   }
 
@@ -271,7 +317,9 @@ export class EstateLandManagementService {
     );
 
     return Array.isArray(response.data)
-      ? response.data.filter((asset) => assetMatchesQuery(asset, query))
+      ? response.data
+          .map(normalizeManagedAsset)
+          .filter((asset) => assetMatchesQuery(asset, query))
       : [];
   }
 
@@ -287,7 +335,7 @@ export class EstateLandManagementService {
     if (!response.data) {
       throw new Error(response.message || 'Unable to update portal listing.');
     }
-    return response.data;
+    return normalizeManagedAsset(response.data);
   }
 
   async createManualLand(
@@ -302,7 +350,7 @@ export class EstateLandManagementService {
       throw new Error(
         response.message || 'Unable to create existing land asset.'
       );
-    return response.data;
+    return normalizeManagedAsset(response.data);
   }
 
   async markReadyForProjectManagement(
@@ -317,7 +365,7 @@ export class EstateLandManagementService {
       throw new Error(
         response.message || 'Unable to make land ready for project management.'
       );
-    return response.data;
+    return normalizeManagedAsset(response.data);
   }
 
   async updateLandDemarcation(
@@ -331,7 +379,7 @@ export class EstateLandManagementService {
     }>(`/estate/managed-assets/${assetId}/demarcation`, payload);
     if (!response.data)
       throw new Error(response.message || 'Unable to update land demarcation.');
-    return response.data;
+    return normalizeManagedAsset(response.data);
   }
 
   async getDocuments(assetId: string): Promise<EstateManagedAssetDocument[]> {

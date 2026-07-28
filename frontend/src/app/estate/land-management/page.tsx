@@ -8,7 +8,9 @@ import {
   BadgeCheck,
   Building2,
   ExternalLink,
+  Globe2,
   Landmark,
+  Link2,
   Loader2,
   MapPin,
   Plus,
@@ -26,6 +28,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { useAuth } from '@/hooks/use-auth';
 import {
   estateLandManagementService,
   EstateManagedAssetSourceType,
@@ -37,9 +40,20 @@ import {
 } from '@/services/estate-acquisition.service';
 import ExistingLandDialog from './ExistingLandDialog';
 import DemarcateLandDialog from './DemarcateLandDialog';
+import GisAssetLinkDialog from './GisAssetLinkDialog';
 import LandDocumentsPanel from './LandDocumentsPanel';
 
 const LandBankMap = dynamic(() => import('./LandBankMap'), { ssr: false });
+const GIS_LINK_ROLES = [
+  'admin',
+  'Admin',
+  'SystemAdmin',
+  'SuperAdmin',
+  'TenantAdmin',
+  'Estate Manager',
+  'Land Registry Officer',
+  'Survey Officer',
+];
 
 type LandManagementRecord =
   | { key: string; type: 'asset'; asset: EstateManagedAsset }
@@ -139,6 +153,8 @@ function DetailRow({
 }
 
 export default function EstateLandManagementPage() {
+  const { hasAnyRole } = useAuth();
+  const canLinkGis = hasAnyRole(GIS_LINK_ROLES);
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [acquisitions, setAcquisitions] = React.useState<LandAcquisitionItem[]>(
     []
@@ -148,6 +164,8 @@ export default function EstateLandManagementPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [existingLandOpen, setExistingLandOpen] = React.useState(false);
   const [demarcationAsset, setDemarcationAsset] =
+    React.useState<EstateManagedAsset | null>(null);
+  const [gisLinkAsset, setGisLinkAsset] =
     React.useState<EstateManagedAsset | null>(null);
   const [markingReadyKey, setMarkingReadyKey] = React.useState<string | null>(
     null
@@ -284,6 +302,12 @@ export default function EstateLandManagementPage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link href="/estate/gis">
+              <Globe2 className="mr-2 h-4 w-4" />
+              GIS Integration
+            </Link>
+          </Button>
           <Button variant="outline" onClick={() => setExistingLandOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Add Existing Land
@@ -321,13 +345,18 @@ export default function EstateLandManagementPage() {
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
+      <div className="space-y-6">
         <Card className="border-border bg-card text-card-foreground">
-          <CardHeader>
-            <CardTitle className="text-base">Land Bank</CardTitle>
-            <CardDescription>
-              Demarcated lands available for project planning.
-            </CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle className="text-base">Land Bank</CardTitle>
+              <CardDescription>
+                Demarcated lands available for project planning.
+              </CardDescription>
+            </div>
+            <Badge variant="outline" className="shrink-0">
+              {records.length} records
+            </Badge>
           </CardHeader>
           <CardContent className="space-y-4">
             <form
@@ -356,20 +385,21 @@ export default function EstateLandManagementPage() {
               </Button>
             </form>
 
-            <div className="space-y-2">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {isLoading ? (
-                <div className="flex items-center justify-center gap-2 rounded-md border py-12 text-sm text-muted-foreground">
+                <div className="col-span-full flex items-center justify-center gap-2 rounded-md border py-12 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Loading land bank
                 </div>
               ) : null}
 
               {!isLoading && records.length === 0 ? (
-                <div className="rounded-md border py-12 text-center text-sm text-muted-foreground">
+                <div className="col-span-full rounded-md border py-12 text-center text-sm text-muted-foreground">
                   No land bank or acquisition record matched your search.
                 </div>
               ) : null}
 
+              {/* Keep several records visible while selection drives the workspace below. */}
               {!isLoading &&
                 records.map((record) => {
                   const active = selected?.key === record.key;
@@ -390,12 +420,16 @@ export default function EstateLandManagementPage() {
                       ? record.asset.boundaryVerified ||
                         hasBoundary(record.asset)
                       : acquisitionHasDemarcation(record.acquisition);
+                  const area =
+                    record.type === 'asset'
+                      ? formatArea(record.asset.areaSquareMeters)
+                      : record.acquisition.estimatedSize || 'Area not recorded';
                   return (
                     <button
                       key={record.key}
                       type="button"
                       onClick={() => setSelectedKey(record.key)}
-                      className={`w-full rounded-md border p-3 text-left transition-colors ${
+                      className={`flex min-h-36 w-full flex-col rounded-md border p-4 text-left transition-colors ${
                         active
                           ? 'border-teal-600 bg-teal-50 text-teal-950 dark:bg-teal-950/30 dark:text-teal-100'
                           : 'bg-background hover:bg-muted'
@@ -420,10 +454,18 @@ export default function EstateLandManagementPage() {
                           </Badge>
                         ) : null}
                       </div>
-                      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                      <div className="mt-auto flex items-center gap-2 pt-4 text-xs text-muted-foreground">
                         <MapPin className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">
                           {location || 'Location not recorded'}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                        <span className="truncate">{area}</span>
+                        <span className="shrink-0">
+                          {record.type === 'asset'
+                            ? sourceLabel(record.asset.sourceType)
+                            : 'Acquisition'}
                         </span>
                       </div>
                     </button>
@@ -489,6 +531,15 @@ export default function EstateLandManagementPage() {
                 </div>
               ) : selected?.type === 'asset' ? (
                 <div className="flex flex-wrap gap-2">
+                  {canLinkGis ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => setGisLinkAsset(selected.asset)}
+                    >
+                      <Link2 className="mr-2 h-4 w-4" />
+                      {selected.asset.gisFeatureId ? 'GIS Link' : 'Link GIS'}
+                    </Button>
+                  ) : null}
                   <Button
                     variant="outline"
                     onClick={() => setDemarcationAsset(selected.asset)}
@@ -535,7 +586,11 @@ export default function EstateLandManagementPage() {
             {selected?.type === 'asset' ? (
               <>
                 <LandBankMap
+                  assetId={selected.asset.id}
                   boundaryCoordinates={selected.asset.boundaryCoordinates}
+                  gisFeatureId={selected.asset.gisFeatureId}
+                  gisLayerReference={selected.asset.gisLayerReference}
+                  gisProvider={selected.asset.gisProvider}
                 />
 
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -563,6 +618,18 @@ export default function EstateLandManagementPage() {
                   <DetailRow
                     label="GIS layer"
                     value={selected.asset.gisLayerReference}
+                  />
+                  <DetailRow
+                    label="GIS provider"
+                    value={selected.asset.gisProvider}
+                  />
+                  <DetailRow
+                    label="GIS feature"
+                    value={selected.asset.gisFeatureId}
+                  />
+                  <DetailRow
+                    label="GIS sync"
+                    value={selected.asset.gisSyncStatus}
                   />
                   <DetailRow
                     label="Survey plan"
@@ -754,6 +821,18 @@ export default function EstateLandManagementPage() {
         onSaved={async (asset) => {
           await loadLandRecords(search);
           setSelectedKey(`asset:${asset.id}`);
+        }}
+      />
+      <GisAssetLinkDialog
+        asset={gisLinkAsset}
+        open={Boolean(gisLinkAsset)}
+        onOpenChange={(open) => {
+          if (!open) setGisLinkAsset(null);
+        }}
+        onLinked={async () => {
+          const assetId = gisLinkAsset?.id;
+          await loadLandRecords(search);
+          if (assetId) setSelectedKey(`asset:${assetId}`);
         }}
       />
     </div>

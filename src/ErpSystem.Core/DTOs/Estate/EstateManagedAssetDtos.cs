@@ -13,6 +13,11 @@ public class EstateManagedAssetDto
     public string? ZoningClassification { get; set; }
     public string? PlanningComplianceStatus { get; set; }
     public string? GisLayerReference { get; set; }
+    public string GisProvider { get; set; } = "GeoServer";
+    public string? GisFeatureId { get; set; }
+    public string? GisSourceCrs { get; set; }
+    public string GisSyncStatus { get; set; } = "NotLinked";
+    public DateTime? GisLastSyncedAt { get; set; }
     public bool BoundaryVerified { get; set; }
     public string? BoundaryCoordinates { get; set; }
     public string? SurveyPlanNumber { get; set; }
@@ -115,13 +120,14 @@ public class UpdateEstateManagedAssetListingDto
 
 public class CreateManualExistingLandDto
 {
-    public string AssetCode { get; set; } = string.Empty;
+    public string? AssetCode { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string Location { get; set; } = string.Empty;
     public string Purpose { get; set; } = string.Empty;
     public string ZoningClassification { get; set; } = string.Empty;
     public string PlanningComplianceStatus { get; set; } = string.Empty;
+    public string GisLayerReference { get; set; } = string.Empty;
     public string CadastreDescription { get; set; } = string.Empty;
     public string Region { get; set; } = string.Empty;
     public string District { get; set; } = string.Empty;
@@ -215,9 +221,17 @@ public class LandAcquisitionEstateHandoffDto
     public string? BoundaryCoordinates { get; set; }
     public string? SurveyPlanNumber { get; set; }
     public string? MapSheetNumber { get; set; }
+    public string? CadastreDescription { get; set; }
+    public string? Region { get; set; }
+    public string? District { get; set; }
+    public string? Town { get; set; }
     public string? ZoningClassification { get; set; }
     public string? PlanningComplianceStatus { get; set; }
     public string? GisLayerReference { get; set; }
+    public string? SurveyorName { get; set; }
+    public DateTime? SurveyDate { get; set; }
+    public int? BeaconCount { get; set; }
+    public List<ExistingLandOwnerDto> OwnershipHistory { get; set; } = [];
     public bool BoundaryVerified { get; set; }
     public bool IsReadyForProjectManagement { get; set; }
     public string? Notes { get; set; }

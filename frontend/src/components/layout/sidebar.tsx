@@ -23,6 +23,7 @@ import {
   Scale,
   Banknote,
   Globe,
+  Globe2,
   ListTree,
   Mail,
   Building,
@@ -602,6 +603,7 @@ const navigationItems: NavItem[] = [
       },
       { title: 'Land Acquisition', href: '/estate/land-acquisition', icon: Landmark },
       { title: 'Land Management', href: '/estate/land-management', icon: MapPin },
+      { title: 'GIS Integration', href: '/estate/gis', icon: Globe2 },
       {
         title: 'Core Operations',
         href: '/estate',

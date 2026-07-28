@@ -98,10 +98,15 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.ZoningClassification = TrimOrNull(handoff.ZoningClassification);
         asset.PlanningComplianceStatus = TrimOrNull(handoff.PlanningComplianceStatus) ?? "Pending";
         asset.GisLayerReference = TrimOrNull(handoff.GisLayerReference);
+        asset.GisProvider = string.IsNullOrWhiteSpace(asset.GisProvider) ? "GeoServer" : asset.GisProvider;
         asset.BoundaryVerified = handoff.BoundaryVerified;
         asset.BoundaryCoordinates = TrimOrNull(handoff.BoundaryCoordinates);
         asset.SurveyPlanNumber = TrimOrNull(handoff.SurveyPlanNumber);
         asset.MapSheetNumber = TrimOrNull(handoff.MapSheetNumber);
+        asset.CadastreDescription = TrimOrNull(handoff.CadastreDescription);
+        asset.Region = TrimOrNull(handoff.Region);
+        asset.District = TrimOrNull(handoff.District);
+        asset.Town = TrimOrNull(handoff.Town);
         asset.AssetType = EstateManagedAssetType.Land;
         asset.Status = EstateManagedAssetStatus.LandBank;
         asset.ProjectCode = handoff.ProjectReference.Trim();
@@ -109,6 +114,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.AreaSquareMeters = handoff.AreaSquareMeters;
         asset.AreaValue = handoff.AreaValue;
         asset.AreaUnit = TrimOrNull(handoff.AreaUnit);
+        asset.SurveyorName = TrimOrNull(handoff.SurveyorName);
+        asset.SurveyDate = handoff.SurveyDate;
+        asset.BeaconCount = handoff.BeaconCount;
+        // Preserve the verified acquisition ownership chain for later Estate searches and audits.
+        asset.OwnershipHistoryJson = handoff.OwnershipHistory.Count == 0
+            ? asset.OwnershipHistoryJson
+            : JsonSerializer.Serialize(handoff.OwnershipHistory);
         asset.ValuationAmount = handoff.ValuationAmount;
         asset.Currency = string.IsNullOrWhiteSpace(handoff.Currency) ? "GHS" : handoff.Currency.Trim().ToUpperInvariant();
         asset.IsAvailableForLease = false;
@@ -235,22 +247,25 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
     public async Task<EstateManagedAssetDto> CreateManualExistingLandAsync(CreateManualExistingLandDto request)
     {
-        var required = new[] { request.AssetCode, request.Name, request.Location, request.Purpose, request.ZoningClassification,
-            request.PlanningComplianceStatus, request.CadastreDescription, request.Region, request.District, request.Town,
+        var required = new[] { request.Name, request.Location, request.Purpose, request.ZoningClassification,
+            request.PlanningComplianceStatus, request.GisLayerReference, request.CadastreDescription, request.Region, request.District, request.Town,
             request.AreaUnit, request.SurveyorName, request.SurveyPlanNumber, request.MapSheetNumber, request.BoundaryCoordinates };
-        if (required.Any(string.IsNullOrWhiteSpace) || request.AreaValue <= 0 || request.AreaSquareMeters <= 0 ||
-            request.BeaconCount < 3 || request.OwnershipHistory.Count == 0)
+        if (required.Any(string.IsNullOrWhiteSpace) || request.AreaValue <= 0 || request.ValuationAmount <= 0 ||
+            request.SurveyDate == default || request.BeaconCount < 3 || request.OwnershipHistory.Count == 0)
         {
             throw new InvalidOperationException("Complete all existing-land, cadastral, beacon, and ownership fields before saving.");
         }
 
+        var currentOwnerCount = request.OwnershipHistory.Count(owner => owner.IsCurrentOwner);
         if (request.OwnershipHistory.Any(owner =>
             string.IsNullOrWhiteSpace(owner.OwnerName) || string.IsNullOrWhiteSpace(owner.OwnershipType) ||
             string.IsNullOrWhiteSpace(owner.InterestHeld) || string.IsNullOrWhiteSpace(owner.IdentificationType) ||
             string.IsNullOrWhiteSpace(owner.IdentificationNumber) || string.IsNullOrWhiteSpace(owner.ContactNumber) ||
-            string.IsNullOrWhiteSpace(owner.Address) || !owner.OwnershipStartDate.HasValue || owner.OwnershipPercentage <= 0))
+            string.IsNullOrWhiteSpace(owner.Address) || !owner.OwnershipStartDate.HasValue ||
+            (!owner.IsCurrentOwner && !owner.OwnershipEndDate.HasValue) || owner.OwnershipPercentage <= 0) ||
+            currentOwnerCount != 1)
         {
-            throw new InvalidOperationException("Complete every required current and previous owner field before saving.");
+            throw new InvalidOperationException("Complete every owner field and identify exactly one current owner before saving.");
         }
 
         if (request.IsReadyForProjectManagement && !request.BoundaryVerified)
@@ -259,29 +274,31 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         }
 
         var repository = _unitOfWork.Repository<EstateManagedAsset>();
-        var duplicate = await repository.FirstOrDefaultAsync(item => item.TenantId == _currentUserProvider.TenantId &&
-            !item.IsDeleted && item.AssetCode == request.AssetCode.Trim());
-        if (duplicate != null) throw new InvalidOperationException("An estate asset with this asset code already exists.");
-
+        var assetId = Guid.NewGuid();
+        var areaSquareMeters = ConvertAreaToSquareMeters(request.AreaValue, request.AreaUnit);
         var asset = new EstateManagedAsset
         {
+            Id = assetId,
             TenantId = _currentUserProvider.TenantId,
             CreatedBy = _currentUserProvider.Username,
             CreatedById = _currentUserProvider.UserId,
-            AssetCode = request.AssetCode.Trim(),
+            // Manual Land Bank registrations receive an immutable system identifier.
+            AssetCode = $"LAND-{DateTime.UtcNow:yyyy}-{assetId:N}"[..18].ToUpperInvariant(),
             Name = request.Name.Trim(),
             Description = request.Description.Trim(),
             Location = request.Location.Trim(),
             Purpose = request.Purpose.Trim(),
             ZoningClassification = request.ZoningClassification.Trim(),
             PlanningComplianceStatus = request.PlanningComplianceStatus.Trim(),
+            GisLayerReference = request.GisLayerReference.Trim(),
+            GisProvider = "GeoServer",
             CadastreDescription = request.CadastreDescription.Trim(),
             Region = request.Region.Trim(),
             District = request.District.Trim(),
             Town = request.Town.Trim(),
             AreaValue = request.AreaValue,
             AreaUnit = request.AreaUnit.Trim(),
-            AreaSquareMeters = request.AreaSquareMeters,
+            AreaSquareMeters = areaSquareMeters,
             SurveyorName = request.SurveyorName.Trim(),
             SurveyDate = request.SurveyDate,
             SurveyPlanNumber = request.SurveyPlanNumber.Trim(),
@@ -582,6 +599,11 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ZoningClassification = asset.ZoningClassification,
         PlanningComplianceStatus = asset.PlanningComplianceStatus,
         GisLayerReference = asset.GisLayerReference,
+        GisProvider = asset.GisProvider,
+        GisFeatureId = asset.GisFeatureId,
+        GisSourceCrs = asset.GisSourceCrs,
+        GisSyncStatus = asset.GisSyncStatus,
+        GisLastSyncedAt = asset.GisLastSyncedAt,
         BoundaryVerified = asset.BoundaryVerified,
         BoundaryCoordinates = asset.BoundaryCoordinates,
         SurveyPlanNumber = asset.SurveyPlanNumber,
@@ -639,6 +661,16 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
     private static string FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? "LAND-ASSET";
+
+    private static decimal ConvertAreaToSquareMeters(decimal value, string unit)
+        => unit.Trim().ToLowerInvariant() switch
+        {
+            "sq ft" or "sqft" or "square feet" => value * 0.09290304m,
+            "acres" or "acre" => value * 4046.8564224m,
+            "hectares" or "hectare" or "ha" => value * 10000m,
+            "sqm" or "sq m" or "square metres" or "square meters" => value,
+            _ => throw new InvalidOperationException("Select a supported survey area unit.")
+        };
 
     private static bool IsImage(EstateManagedAssetDocument document)
         => document.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true

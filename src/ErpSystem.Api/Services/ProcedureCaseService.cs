@@ -368,30 +368,60 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
-        var now = DateTime.UtcNow;
         var isContentUrlSave = IsProcedureCaseContentUrl(request.FileUrl);
-        var fileUrl = isContentUrlSave ? document.FileUrl : request.FileUrl;
 
-        if (!isContentUrlSave && !string.IsNullOrWhiteSpace(fileUrl) && !IsPrivateProcedureDocumentPath(fileUrl))
+        // File paths are assigned only by UploadDocumentAsync after managed storage accepts the file.
+        // The metadata endpoint may retain the current content URL or clear it, but cannot bind another case's path.
+        if (!isContentUrlSave && !string.IsNullOrWhiteSpace(request.FileUrl))
         {
             throw new InvalidOperationException("Upload procedure case documents through the secure procedure document upload endpoint.");
         }
 
+        return await UpdateDocumentAttachmentAsync(
+            procedureCase,
+            document,
+            request.FileName,
+            isContentUrlSave ? document.FileUrl : null,
+            request.Notes,
+            tenantId,
+            userId,
+            isUpload: false);
+    }
+
+    private async Task<ProcedureCaseDetailDto> UpdateDocumentAttachmentAsync(
+        ProcedureCase procedureCase,
+        ProcedureCaseDocument document,
+        string? fileName,
+        string? fileUrl,
+        string? notes,
+        Guid tenantId,
+        Guid userId,
+        bool isUpload)
+    {
+        var now = DateTime.UtcNow;
+        var hasFile = !string.IsNullOrWhiteSpace(fileUrl);
+        var uploadedById = !hasFile ? null : isUpload ? userId : document.UploadedById;
+        var uploadedAt = !hasFile ? null : isUpload ? now : document.UploadedAt;
+
         await _db.ProcedureCaseDocuments
             .IgnoreQueryFilters()
-            .Where(item => item.TenantId == tenantId && item.ProcedureCaseId == id && item.Id == documentId && !item.IsDeleted)
+            .Where(item =>
+                item.TenantId == tenantId
+                && item.ProcedureCaseId == procedureCase.Id
+                && item.Id == document.Id
+                && !item.IsDeleted)
             .ExecuteUpdateAsync(setters => setters
-                .SetProperty(item => item.FileName, string.IsNullOrWhiteSpace(request.FileName) ? document.FileName : request.FileName)
+                .SetProperty(item => item.FileName, string.IsNullOrWhiteSpace(fileName) ? document.FileName : fileName)
                 .SetProperty(item => item.FileUrl, fileUrl)
-                .SetProperty(item => item.Notes, request.Notes)
-                .SetProperty(item => item.UploadedById, userId)
-                .SetProperty(item => item.UploadedAt, now)
+                .SetProperty(item => item.Notes, notes)
+                .SetProperty(item => item.UploadedById, uploadedById)
+                .SetProperty(item => item.UploadedAt, uploadedAt)
                 .SetProperty(item => item.UpdatedAt, now)
                 .SetProperty(item => item.LastModifiedById, userId));
 
         await _db.ProcedureCases
             .IgnoreQueryFilters()
-            .Where(item => item.TenantId == tenantId && item.Id == id && !item.IsDeleted)
+            .Where(item => item.TenantId == tenantId && item.Id == procedureCase.Id && !item.IsDeleted)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.LastActionById, userId)
                 .SetProperty(item => item.UpdatedAt, now));
@@ -399,7 +429,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, "Attached document", procedureCase.CurrentStageName, document.Name));
         await _db.SaveChangesAsync();
 
-        return ToDetailDto((await LoadCaseAsync(id, asTracking: false))!);
+        return ToDetailDto((await LoadCaseAsync(procedureCase.Id, asTracking: false))!);
     }
 
     public async Task<ProcedureCaseDetailDto?> CompleteCurrentStageAsync(Guid id, CompleteProcedureCaseStageRequest request)
@@ -423,7 +453,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         var missingDocuments = procedureCase.Documents
             .Where(item => item.IsMandatory
-                && !item.UploadedAt.HasValue
+                && string.IsNullOrWhiteSpace(item.FileUrl)
                 && string.Equals(item.RequiredFrom, procedureCase.CurrentStageName, StringComparison.OrdinalIgnoreCase))
             .Select(item => item.Name)
             .ToList();
@@ -550,10 +580,15 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             throw new InvalidOperationException(upload.ErrorMessage ?? "Procedure case document upload failed.");
         }
 
-        return await AttachDocumentAsync(id, documentId, new AttachProcedureCaseDocumentRequest(
+        return await UpdateDocumentAttachmentAsync(
+            procedureCase,
+            document,
             upload.OriginalFileName,
             upload.FilePath,
-            notes));
+            notes,
+            RequireTenantId(),
+            RequireUserId(),
+            isUpload: true);
     }
 
     public async Task<ProcedureCaseDocumentContentDto?> GetDocumentContentAsync(Guid id, Guid documentId)
@@ -1568,10 +1603,6 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             && Guid.TryParse(token[UserPrefix.Length..].Trim(), out var assignedUserId)
             && assignedUserId == userId;
     }
-
-    private static bool IsPrivateProcedureDocumentPath(string fileUrl)
-        => fileUrl.Replace('\\', '/').TrimStart('/')
-            .StartsWith("private/procedure-case-documents/", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsProcedureCaseContentUrl(string? fileUrl)
         => !string.IsNullOrWhiteSpace(fileUrl)

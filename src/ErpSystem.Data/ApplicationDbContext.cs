@@ -833,6 +833,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<LandAsset> LandAssets { get; set; }
     public DbSet<EstateManagedAsset> EstateManagedAssets { get; set; }
     public DbSet<EstateManagedAssetDocument> EstateManagedAssetDocuments { get; set; }
+    public DbSet<EstateGisConfiguration> EstateGisConfigurations { get; set; }
     public DbSet<LandAcquisitionNote> LandAcquisitionNotes { get; set; }
     public DbSet<LandAcquisitionChecklistResponse> LandAcquisitionChecklistResponses { get; set; }
 
@@ -8458,6 +8459,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.Property(item => item.AssetType).HasConversion<string>().HasMaxLength(40);
             entity.Property(item => item.Status).HasConversion<string>().HasMaxLength(40);
             entity.Property(item => item.SourceType).HasConversion<string>().HasMaxLength(40);
+            entity.Property(item => item.GisProvider).HasDefaultValue("GeoServer");
+            entity.Property(item => item.GisSyncStatus).HasDefaultValue("NotLinked");
             entity.Property(item => item.AreaSquareMeters).HasPrecision(18, 4);
             entity.Property(item => item.AreaValue).HasPrecision(18, 4);
             entity.Property(item => item.ValuationAmount).HasPrecision(18, 2);
@@ -8466,6 +8469,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithOne(item => item.EstateManagedAsset)
                 .HasForeignKey(item => item.EstateManagedAssetId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EstateGisConfiguration>(entity =>
+        {
+            entity.ToTable("EstateGisConfigurations");
+            entity.HasIndex(item => item.TenantId).IsUnique();
         });
 
         builder.Entity<EstateManagedAssetDocument>(entity =>

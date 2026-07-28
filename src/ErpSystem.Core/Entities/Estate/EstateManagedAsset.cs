@@ -30,6 +30,20 @@ public class EstateManagedAsset : TenantEntity
     [MaxLength(160)]
     public string? GisLayerReference { get; set; }
 
+    [MaxLength(40)]
+    public string GisProvider { get; set; } = "GeoServer";
+
+    [MaxLength(240)]
+    public string? GisFeatureId { get; set; }
+
+    [MaxLength(80)]
+    public string? GisSourceCrs { get; set; }
+
+    [MaxLength(40)]
+    public string GisSyncStatus { get; set; } = "NotLinked";
+
+    public DateTime? GisLastSyncedAt { get; set; }
+
     public bool BoundaryVerified { get; set; }
 
     [MaxLength(4000)]

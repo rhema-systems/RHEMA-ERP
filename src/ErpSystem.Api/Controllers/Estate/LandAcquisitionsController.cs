@@ -909,6 +909,12 @@ public class LandAcquisitionsController : ControllerBase
             .Where(item => !item.IsDeleted)
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
             .FirstOrDefault();
+        snapshots.TryGetValue((int)AcquisitionProcedure.CadastralSurvey, out var cadastralSnapshot);
+        var cadastralValues = cadastralSnapshot?.ToDictionary(
+            pair => pair.Key,
+            pair => (object?)pair.Value,
+            StringComparer.OrdinalIgnoreCase)
+            ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
         var asset = acquisition.LandAssets
             .Where(item => !item.IsDeleted)
@@ -925,22 +931,51 @@ public class LandAcquisitionsController : ControllerBase
             Description = asset?.Notes,
             Location = asset?.Location ?? acquisition.Location,
             Purpose = asset?.Purpose ?? acquisition.IntendedUse,
-            AreaSquareMeters = survey == null
-                ? null
-                : ToSquareMeters(survey.AreaSize, survey.AreaUnit, acquisition.EstimatedSize),
+            AreaSquareMeters = ToSquareMeters(
+                survey?.AreaSize ?? Decimal(cadastralValues, "totalArea"),
+                survey?.AreaUnit ?? Text(cadastralValues, "areaUnit"),
+                acquisition.EstimatedSize),
             AreaValue = asset?.Size > 0 ? asset.Size : acquisition.EstimatedSize,
-            AreaUnit = asset?.SizeUnit,
+            AreaUnit = asset?.SizeUnit ?? survey?.AreaUnit ?? Text(cadastralValues, "areaUnit"),
             ValuationAmount = asset is { CapitalizationValue: > 0 } ? asset.CapitalizationValue : null,
-            BoundaryCoordinates = survey?.BoundaryCoordinates,
-            SurveyPlanNumber = survey?.PlanNumber,
-            MapSheetNumber = survey?.MapSheetNumber,
+            BoundaryCoordinates = survey?.BoundaryCoordinates ?? Text(cadastralValues, "boundaryCoordinates"),
+            SurveyPlanNumber = survey?.PlanNumber ?? Text(cadastralValues, "surveyPlanNumber"),
+            MapSheetNumber = survey?.MapSheetNumber ?? Text(cadastralValues, "mapSheetNumber"),
+            CadastreDescription = survey?.Description ?? Text(cadastralValues, "cadastreDescription"),
+            Region = Text(cadastralValues, "regionId"),
+            District = Text(cadastralValues, "districtId"),
+            Town = Text(cadastralValues, "townId"),
             ZoningClassification = asset?.ZoningClassification ?? acquisition.PhysicalAssessment?.ZoningClassification,
             PlanningComplianceStatus = acquisition.SuitableForDueDiligence ? "Compliant" : "Pending",
             GisLayerReference = survey?.MapSheetNumber ?? survey?.PlanNumber,
+            SurveyorName = survey?.SurveyorName ?? Text(cadastralValues, "surveyorName"),
+            SurveyDate = survey?.SurveyDate ?? Date(cadastralValues, "surveyDate"),
+            BeaconCount = Int(survey?.BeaconCount) ?? Int(Text(cadastralValues, "beaconCount")),
+            OwnershipHistory = acquisition.OwnershipHistories
+                .Where(item => !item.IsDeleted)
+                .OrderBy(item => item.OwnershipStartDate)
+                .Select(item => new ExistingLandOwnerDto
+                {
+                    OwnerName = item.OwnerName,
+                    OwnershipType = item.OwnershipType.ToString(),
+                    InterestHeld = item.InterestHeld ?? item.TenureType ?? "Not recorded",
+                    IdentificationType = item.IdentificationType ?? "Not recorded",
+                    IdentificationNumber = item.IdentificationNumber ?? "Not recorded",
+                    ContactNumber = item.ContactNumber ?? "Not recorded",
+                    Address = item.Address ?? "Not recorded",
+                    OwnershipStartDate = item.OwnershipStartDate,
+                    OwnershipEndDate = item.OwnershipEndDate,
+                    OwnershipPercentage = item.OwnershipPercentage ?? 100m,
+                    IsCurrentOwner = item.IsCurrentOwner
+                })
+                .ToList(),
             BoundaryVerified = false,
             IsReadyForProjectManagement = false,
             Notes = "Land asset published from land acquisition into Estate Land Bank for demarcation and project-readiness review."
         });
+
+        // Keep acquisition evidence available from the resulting Land Bank record without duplicating stored files.
+        await CopyAcquisitionDocumentsToManagedAssetAsync(acquisition, managedAsset.Id, userId, cancellationToken);
 
         acquisition.InternalApproved = true;
         // Land Bank publication is the final Estate/Facility acquisition outcome; keep the active board from treating it as pending work.
@@ -1743,7 +1778,6 @@ public class LandAcquisitionsController : ControllerBase
             await _context.SaveChangesAsync(cancellationToken);
         }
 
-        payment.AccountsPayableSupplierId = payee.Id;
         var sourceReference = $"LAND-STAMP-DUTY:{acquisition.Id:N}";
         var invoice = await _context.Set<VendorInvoice>()
             .Include(item => item.LineItems)
@@ -1857,6 +1891,8 @@ public class LandAcquisitionsController : ControllerBase
             }
         }
 
+        // The payable is linked to Procurement.Supplier, while the payee above is the shared business partner.
+        payment.AccountsPayableSupplierId = invoice.SupplierId;
         payment.AccountsPayableInvoiceId = invoice.Id;
         payment.AccountsPayablePaymentId = null;
         payment.IsPaid = false;
@@ -1865,7 +1901,7 @@ public class LandAcquisitionsController : ControllerBase
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.StampDutyPayment, new Dictionary<string, object?>
         {
-            ["accountsPayableSupplierId"] = payee.Id,
+            ["accountsPayableSupplierId"] = invoice.SupplierId,
             ["accountsPayableInvoiceId"] = invoice.Id,
             ["accountsPayableInvoiceNumber"] = invoice.InvoiceNumber,
             ["accountsPayableInvoiceStatus"] = invoice.Status.ToString(),
@@ -3575,6 +3611,55 @@ public class LandAcquisitionsController : ControllerBase
 
         var clean = new string(text.Where(ch => char.IsDigit(ch) || ch == '.' || ch == '-').ToArray());
         return decimal.TryParse(clean, NumberStyles.Number, CultureInfo.InvariantCulture, out var value) ? value : null;
+    }
+
+    private static int? Int(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var clean = new string(text.Where(ch => char.IsDigit(ch) || ch == '-').ToArray());
+        return int.TryParse(clean, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
+    }
+
+    private async Task CopyAcquisitionDocumentsToManagedAssetAsync(
+        LandAcquisition acquisition,
+        Guid managedAssetId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var documentSet = _context.Set<EstateManagedAssetDocument>();
+        var existingPathValues = await documentSet
+            .Where(item => item.TenantId == acquisition.TenantId
+                && item.EstateManagedAssetId == managedAssetId
+                && !item.IsDeleted)
+            .Select(item => item.FilePath)
+            .ToListAsync(cancellationToken);
+        var existingPaths = existingPathValues.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var source in acquisition.Documents.Where(item => !item.IsDeleted && !string.IsNullOrWhiteSpace(item.FilePath)))
+        {
+            if (!existingPaths.Add(source.FilePath))
+            {
+                continue;
+            }
+
+            documentSet.Add(new EstateManagedAssetDocument
+            {
+                TenantId = acquisition.TenantId,
+                EstateManagedAssetId = managedAssetId,
+                FileName = source.FileName,
+                FilePath = source.FilePath,
+                DocumentType = string.IsNullOrWhiteSpace(source.DocumentType) ? source.Procedure.ToString() : source.DocumentType,
+                DocumentName = source.FileName,
+                ContentType = ContentTypeFor(source.FileName),
+                FileSize = 0,
+                CreatedBy = User.Identity?.Name,
+                CreatedById = userId
+            });
+        }
     }
 
     private static DateTime? Date(Dictionary<string, object?> values, string key)

@@ -1,9 +1,24 @@
 'use client';
 
 import React from 'react';
-import { CRS } from 'leaflet';
-import { MapContainer, Polygon, Tooltip, useMap } from 'react-leaflet';
-import { MapPin, Ruler } from 'lucide-react';
+import { CRS, geoJSON as createGeoJsonLayer } from 'leaflet';
+import type { FeatureCollection, GeoJsonObject } from 'geojson';
+import {
+  CircleMarker,
+  GeoJSON as GeoJsonLayer,
+  MapContainer,
+  Polygon,
+  Polyline,
+  TileLayer,
+  Tooltip,
+  useMap,
+} from 'react-leaflet';
+import { Globe2, Loader2, MapPin, Ruler } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  estateGisService,
+  type EstateGisRuntimeConfiguration,
+} from '@/services/estate-gis.service';
 
 type PlanPoint = [number, number];
 
@@ -16,6 +31,13 @@ interface BeaconPoint {
 }
 
 const DEFAULT_CENTER: PlanPoint = [0, 0];
+const DEFAULT_BASE_MAP_URL =
+  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+const GRID_LINE_STYLE = {
+  color: '#94a3b8',
+  opacity: 0.5,
+  weight: 1,
+};
 
 function parseBoundary(value?: string): BeaconPoint[] {
   if (!value?.trim()) return [];
@@ -69,10 +91,62 @@ function centerOf(points: BeaconPoint[]): PlanPoint {
   return [totals.northing / points.length, totals.easting / points.length];
 }
 
+function gridStep(span: number): number {
+  if (!Number.isFinite(span) || span <= 0) return 25;
+
+  const raw = span / 6;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+  const normalized = raw / magnitude;
+
+  if (normalized <= 1) return magnitude;
+  if (normalized <= 2) return 2 * magnitude;
+  if (normalized <= 5) return 5 * magnitude;
+  return 10 * magnitude;
+}
+
+function gridLines(points: BeaconPoint[]): PlanPoint[][] {
+  if (points.length < 2) return [];
+
+  const northings = points.map((point) => point.northing);
+  const eastings = points.map((point) => point.easting);
+  const minNorth = Math.min(...northings);
+  const maxNorth = Math.max(...northings);
+  const minEast = Math.min(...eastings);
+  const maxEast = Math.max(...eastings);
+  const spanNorth = Math.max(maxNorth - minNorth, 1);
+  const spanEast = Math.max(maxEast - minEast, 1);
+  const padding = Math.max(spanNorth, spanEast) * 0.2;
+  const northStep = gridStep(spanNorth);
+  const eastStep = gridStep(spanEast);
+  const startNorth = Math.floor((minNorth - padding) / northStep) * northStep;
+  const endNorth = Math.ceil((maxNorth + padding) / northStep) * northStep;
+  const startEast = Math.floor((minEast - padding) / eastStep) * eastStep;
+  const endEast = Math.ceil((maxEast + padding) / eastStep) * eastStep;
+  const lines: PlanPoint[][] = [];
+
+  for (let northing = startNorth; northing <= endNorth; northing += northStep) {
+    lines.push([
+      [northing, startEast],
+      [northing, endEast],
+    ]);
+  }
+
+  for (let easting = startEast; easting <= endEast; easting += eastStep) {
+    lines.push([
+      [startNorth, easting],
+      [endNorth, easting],
+    ]);
+  }
+
+  return lines;
+}
+
 function MapSync({ points }: { points: BeaconPoint[] }) {
   const map = useMap();
 
   React.useEffect(() => {
+    window.setTimeout(() => map.invalidateSize(), 0);
+
     if (points.length >= 2) {
       map.fitBounds(points.map(toPlanPoint), { padding: [28, 28] });
       return;
@@ -84,25 +158,171 @@ function MapSync({ points }: { points: BeaconPoint[] }) {
   return null;
 }
 
+function GisMapSync({ geometry }: { geometry: FeatureCollection }) {
+  const map = useMap();
+
+  React.useEffect(() => {
+    window.setTimeout(() => map.invalidateSize(), 0);
+    const bounds = createGeoJsonLayer(geometry as GeoJsonObject).getBounds();
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [28, 28] });
+  }, [geometry, map]);
+
+  return null;
+}
+
 function formatPoint(point: BeaconPoint) {
   return `${point.beacon}: N ${point.northing.toFixed(2)} ft, E ${point.easting.toFixed(2)} ft`;
 }
 
-export default function LandBankMap({ boundaryCoordinates }: { boundaryCoordinates?: string }) {
+interface LandBankMapProps {
+  assetId?: string;
+  boundaryCoordinates?: string;
+  gisFeatureId?: string;
+  gisLayerReference?: string;
+  gisProvider?: string;
+}
+
+export default function LandBankMap({
+  assetId,
+  boundaryCoordinates,
+  gisFeatureId,
+  gisLayerReference,
+  gisProvider,
+}: LandBankMapProps) {
   const points = React.useMemo(() => parseBoundary(boundaryCoordinates), [boundaryCoordinates]);
   const center = React.useMemo(() => centerOf(points), [points]);
+  const surveyGridLines = React.useMemo(() => gridLines(points), [points]);
+  const isLinked = Boolean(assetId && gisFeatureId && gisLayerReference);
+  const [mode, setMode] = React.useState<'gis' | 'survey'>(
+    isLinked ? 'gis' : 'survey'
+  );
+  const [configuration, setConfiguration] =
+    React.useState<EstateGisRuntimeConfiguration | null>(null);
+  const [gisGeometry, setGisGeometry] = React.useState<FeatureCollection | null>(
+    null
+  );
+  const [gisError, setGisError] = React.useState<string | null>(null);
+  const [isLoadingGis, setIsLoadingGis] = React.useState(false);
+
+  React.useEffect(() => {
+    let active = true;
+
+    const load = async () => {
+      setGisGeometry(null);
+      setGisError(null);
+      if (!isLinked || !assetId) {
+        setMode('survey');
+        return;
+      }
+
+      setIsLoadingGis(true);
+      try {
+        const gisConfiguration =
+          await estateGisService.getRuntimeConfiguration();
+        if (!active) return;
+        setConfiguration(gisConfiguration);
+        if (!gisConfiguration.isEnabled) {
+          setGisError('Estate GIS integration is disabled.');
+          setMode('survey');
+          return;
+        }
+
+        const geometry = await estateGisService.getAssetGeometry(assetId);
+        if (!active) return;
+        setGisGeometry(geometry);
+        setMode(geometry.features.length ? 'gis' : 'survey');
+        if (!geometry.features.length)
+          setGisError('The linked GIS feature returned no geometry.');
+      } catch (error) {
+        if (!active) return;
+        setGisError(
+          error instanceof Error ? error.message : 'Unable to load GIS geometry.'
+        );
+        setMode('survey');
+      } finally {
+        if (active) setIsLoadingGis(false);
+      }
+    };
+
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [assetId, gisFeatureId, gisLayerReference, isLinked]);
 
   return (
     <div className="space-y-4">
       <div className="overflow-hidden rounded-md border bg-muted">
         <div className="flex items-center justify-between gap-3 border-b bg-background px-4 py-3">
           <div>
-            <p className="text-sm font-semibold text-foreground">Survey Plan View</p>
-            <p className="text-xs text-muted-foreground">Beacon Northing and Easting coordinates are recorded in feet.</p>
+            <p className="text-sm font-semibold text-foreground">
+              {mode === 'gis' ? 'GIS Map' : 'Survey Plan View'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {mode === 'gis'
+                ? `${gisProvider || 'GIS'} - ${gisLayerReference}`
+                : 'Beacon Northing and Easting coordinates are recorded in feet.'}
+            </p>
           </div>
-          <Ruler className="h-5 w-5 text-muted-foreground" />
+          <div className="flex items-center gap-1">
+            {isLinked ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={mode === 'gis' ? 'default' : 'ghost'}
+                  onClick={() => setMode('gis')}
+                  disabled={!gisGeometry || isLoadingGis}
+                >
+                  {isLoadingGis ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Globe2 className="mr-2 h-4 w-4" />
+                  )}
+                  GIS
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={mode === 'survey' ? 'default' : 'ghost'}
+                  onClick={() => setMode('survey')}
+                >
+                  <Ruler className="mr-2 h-4 w-4" />
+                  Survey
+                </Button>
+              </>
+            ) : (
+              <Ruler className="h-5 w-5 text-muted-foreground" />
+            )}
+          </div>
         </div>
-        {points.length >= 3 ? (
+        {mode === 'gis' && gisGeometry ? (
+          <MapContainer
+            center={[0, 0]}
+            zoom={2}
+            scrollWheelZoom
+            className="h-[420px] w-full bg-background"
+          >
+            <TileLayer
+              url={configuration?.baseMapTileUrl || DEFAULT_BASE_MAP_URL}
+              attribution={
+                configuration?.baseMapTileUrl
+                  ? undefined
+                  : '&copy; OpenStreetMap contributors'
+              }
+            />
+            <GeoJsonLayer
+              data={gisGeometry as GeoJsonObject}
+              style={{
+                color: '#0f766e',
+                fillColor: '#14b8a6',
+                fillOpacity: 0.22,
+                weight: 3,
+              }}
+            />
+            <GisMapSync geometry={gisGeometry} />
+          </MapContainer>
+        ) : points.length >= 3 ? (
           <MapContainer
             center={center}
             zoom={0}
@@ -111,9 +331,31 @@ export default function LandBankMap({ boundaryCoordinates }: { boundaryCoordinat
             crs={CRS.Simple}
             scrollWheelZoom
             className="h-[360px] w-full bg-background"
+            style={{
+              backgroundColor: '#f8fafc',
+              backgroundImage:
+                'linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px)',
+              backgroundSize: '32px 32px',
+            }}
           >
             <MapSync points={points} />
-            <Polygon positions={points.map(toPlanPoint)} pathOptions={{ color: '#0f766e', fillColor: '#14b8a6', fillOpacity: 0.2 }}>
+            {surveyGridLines.map((line, index) => (
+              <Polyline
+                key={`grid-${index}`}
+                positions={line}
+                pathOptions={GRID_LINE_STYLE}
+                interactive={false}
+              />
+            ))}
+            <Polygon
+              positions={points.map(toPlanPoint)}
+              pathOptions={{
+                color: '#0f766e',
+                fillColor: '#14b8a6',
+                fillOpacity: 0.2,
+                weight: 3,
+              }}
+            >
               <Tooltip sticky>
                 <div className="space-y-1">
                   {points.map((point) => (
@@ -122,6 +364,23 @@ export default function LandBankMap({ boundaryCoordinates }: { boundaryCoordinat
                 </div>
               </Tooltip>
             </Polygon>
+            {points.map((point) => (
+              <CircleMarker
+                key={`beacon-${point.beacon}-${point.northing}-${point.easting}`}
+                center={toPlanPoint(point)}
+                radius={5}
+                pathOptions={{
+                  color: '#0f766e',
+                  fillColor: '#ffffff',
+                  fillOpacity: 1,
+                  weight: 2,
+                }}
+              >
+                <Tooltip direction="top" permanent>
+                  {point.beacon}
+                </Tooltip>
+              </CircleMarker>
+            ))}
           </MapContainer>
         ) : (
           <div className="flex h-[360px] flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
@@ -131,6 +390,11 @@ export default function LandBankMap({ boundaryCoordinates }: { boundaryCoordinat
             <span>No verified beacon boundary has been pushed to this land bank record yet.</span>
           </div>
         )}
+        {gisError ? (
+          <div className="border-t bg-background px-4 py-2 text-xs text-amber-700">
+            {gisError}
+          </div>
+        ) : null}
       </div>
 
       {points.length ? (
