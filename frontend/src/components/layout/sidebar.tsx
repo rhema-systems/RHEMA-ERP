@@ -749,7 +749,30 @@ const navigationItems: NavItem[] = [
         icon: UserCheck,
         roles: ADMINISTRATION_ROLES,
         children: [
+          {
+            title: 'Organization',
+            href: '/administration/hr/organization',
+            icon: Building2,
+            children: [
+              { title: 'Structures', href: '/administration/hr/organization/structures', icon: Building2 },
+              { title: 'Levels', href: '/administration/hr/organization/levels', icon: ListTree },
+              { title: 'Units', href: '/administration/hr/organization/units', icon: FolderTree },
+            ],
+          },
+          {
+            title: 'Location',
+            href: '/administration/hr/location',
+            icon: MapPin,
+            children: [
+              { title: 'Structures', href: '/administration/hr/location/structures', icon: MapPin },
+              { title: 'Levels', href: '/administration/hr/location/levels', icon: ListTree },
+              { title: 'Locations', href: '/administration/hr/location/locations', icon: MapPin },
+            ],
+          },
           { title: 'Job Positions', href: '/administration/hr/positions', icon: Users },
+          { title: 'Staff Levels', href: '/administration/hr/staff-levels', icon: ListTree },
+          { title: 'Skills', href: '/administration/hr/skills', icon: Wrench },
+          { title: 'Countries', href: '/administration/hr/countries', icon: Globe },
           { title: 'Departments', href: '/administration/hr/departments', icon: Building },
           { title: 'Employee Categories', href: '/administration/hr/categories', icon: Users },
           { title: 'Leave Types', href: '/administration/hr/leave-types', icon: UserCheck },
