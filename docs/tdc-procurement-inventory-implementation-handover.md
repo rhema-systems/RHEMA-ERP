@@ -452,6 +452,15 @@ Create a dedicated administration workspace rather than extending the current Pu
 
 If any applicable item is incomplete, keep the active tracker task `In progress`; do not create a misleading `Done` state.
 
+## Current PR 16 Integrity Checkpoint
+
+- Forward migration `20260728210856_EnforceSupplierApplicantIntegrity` is the current SQL2017 `RhemaERP` test-database checkpoint after `20260728192617_AddDurableFileStorageCleanup`.
+- Shared controlled-file deletion refuses active supplier-registration evidence references in the service, and the enabled SQL trigger prevents direct/concurrent soft-delete bypass.
+- Verified application creation commits registration, onboarding token, applicant access, and control-event lineage through one serializable caller-owned transaction; the shared token service joins that transaction.
+- The filtered unique active-contact index covers access statuses `0`, `1`, `2`, and `5`, releases the contact only after `Activated` or `Rejected`, and fails migration when legacy duplicate active contacts exist.
+- Focused evidence is applicant lifecycle `6/6`, token/payment lifecycle `10/10`, controlled upload/model `20/20`, zero-error Release API build, no pending EF model changes, enabled SQL gates, and rollback-only rejection probes with zero residue.
+- The configured database contains an unrelated missing historical HR migration before the current procurement chain. Do not rewrite that old migration or repair it in a procurement slice; apply/rehearse the exact forward migration only after checking its predecessor, current history state, and duplicate active-contact count.
+
 ## Historical TDC-0210 Start Procedure
 
 1. Re-run `git status --short --branch`, upstream/divergence checks, `git diff --check`, and the diff for every already modified file the slice may touch.
@@ -524,7 +533,7 @@ The full TypeScript check currently fails in unrelated baseline files. Each next
 
 Use this prompt in the new chat after opening the repository:
 
-> Continue the TDC Procurement and Inventory implementation using `docs/tdc-procurement-inventory-implementation-handover.md` and `docs/tdc-procurement-inventory-gap-implementation-tracker.md` as the active delivery documents. Start with `TDC-0401` only. Reverify the preserved dirty worktree, local Finance-integrated baseline through `a0f18da9`, complete accepted uncommitted `TDC-0302` through `TDC-0309` implementations/evidence, and test database current through `20260728192617_AddDurableFileStorageCleanup`; preserve all existing team changes. Reuse the Core controlled-upload, malware-scanning, and durable post-commit storage-cleanup boundary for every new document path. Implement the framework agreement and governed price-list register without beginning `TDC-0402`, weakening supplier eligibility/onboarding controls, recreating workflow/evidence controls, or broadly changing PR/PO/receiving/inventory runtime; do not mark the task `Done` until every applicable acceptance gate passes.
+> Continue the TDC Procurement and Inventory implementation using `docs/tdc-procurement-inventory-implementation-handover.md` and `docs/tdc-procurement-inventory-gap-implementation-tracker.md` as the active delivery documents. Start with `TDC-0401` only. Reverify the preserved dirty worktree, local Finance-integrated baseline through `a0f18da9`, complete accepted uncommitted `TDC-0302` through `TDC-0309` implementations/evidence, and test database current through `20260728210856_EnforceSupplierApplicantIntegrity`; preserve all existing team changes. Reuse the Core controlled-upload, malware-scanning, durable post-commit storage-cleanup, active registration-evidence reference guard, and atomic verified-application transaction boundary for every new document/onboarding path. Implement the framework agreement and governed price-list register without beginning `TDC-0402`, weakening supplier eligibility/onboarding controls, recreating workflow/evidence controls, or broadly changing PR/PO/receiving/inventory runtime; do not mark the task `Done` until every applicable acceptance gate passes.
 
 ## Handover Completion Signal
 

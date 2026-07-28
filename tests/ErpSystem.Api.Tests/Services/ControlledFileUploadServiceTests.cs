@@ -1,6 +1,7 @@
 using ErpSystem.Api.Controllers;
 using ErpSystem.Api.Services;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Models;
@@ -16,6 +17,21 @@ namespace ErpSystem.Api.Tests.Services;
 
 public sealed class ControlledFileUploadServiceTests
 {
+    [Fact]
+    public void ModelEnforcesOneActiveSupplierApplicationPerTenantContact()
+    {
+        using var db = Database();
+        var entity = db.Model.FindEntityType(
+            typeof(ProcurementSupplierApplicantAccess));
+        var index = entity!.GetIndexes().Single(candidate =>
+            candidate.GetDatabaseName() ==
+            "UX_ProcurementSupplierApplicantAccesses_ActiveContact");
+
+        index.IsUnique.Should().BeTrue();
+        index.GetFilter().Should()
+            .Be("[IsDeleted] = 0 AND [Status] IN (0, 1, 2, 5)");
+    }
+
     [Fact]
     public async Task CleanControlledUploadPersistsTenantMetadataAndChecksum()
     {
@@ -350,6 +366,41 @@ public sealed class ControlledFileUploadServiceTests
             It.IsAny<string>()), Times.Never);
         (await db.FileUploadRecords.IgnoreQueryFilters().SingleAsync())
             .IsDeleted.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteRejectsFileReferencedByActiveSupplierRegistrationEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        await using var db = Database();
+        var record = FileRecord(tenantId);
+        db.FileUploadRecords.Add(record);
+        db.BusinessPartnerRegistrationDocuments.Add(
+            new BusinessPartnerRegistrationDocument
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                RegistrationId = Guid.NewGuid(),
+                FileUploadRecordId = record.Id,
+                DocumentType = "TaxClearance",
+                DocumentName = "tax-clearance.pdf",
+                DocumentPath = record.FilePath
+            });
+        await db.SaveChangesAsync();
+        var storage = Storage(result: Stored(tenantId));
+        var service = Service(
+            db, storage.Object, Mock.Of<IFileVirusScanService>());
+
+        var act = () => service.DeleteAsync(tenantId, record.Id, actorId);
+
+        (await act.Should().ThrowAsync<ControlledFileUploadException>())
+            .Which.Code.Should()
+            .Be("FILE_RECORD_REFERENCED_BY_REGISTRATION_EVIDENCE");
+        (await db.FileUploadRecords.IgnoreQueryFilters().SingleAsync())
+            .IsDeleted.Should().BeFalse();
+        storage.Verify(item => item.DeleteFileAsync(
+            It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

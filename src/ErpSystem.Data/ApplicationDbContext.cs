@@ -3451,6 +3451,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
         builder.Entity<FileUploadRecord>(entity =>
         {
+            entity.ToTable("FileUploadRecords", table =>
+                table.HasTrigger(
+                    "TR_FileUploadRecords_RegistrationEvidenceDeleteGuard"));
             entity.HasIndex(x => new { x.TenantId, x.Category });
             entity.HasIndex(x => new { x.TenantId, x.CreatedAt });
             entity.HasIndex(x => new { x.TenantId, x.FilePath }).IsUnique();

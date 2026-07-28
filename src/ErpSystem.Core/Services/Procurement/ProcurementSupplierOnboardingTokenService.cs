@@ -438,7 +438,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 free ? "Free token activated from effective DEC-007." :
                     "Paid token issued and awaiting payment.",
                 [], correlation, now, cancellationToken, systemEvent);
-        }, cancellationToken);
+        }, cancellationToken, joinCallerTransaction: systemEvent);
         if (!systemEvent)
         {
             await PublishNotificationAsync("procurement.supplier-onboarding-token.issued",
@@ -1406,8 +1406,15 @@ public sealed class ProcurementSupplierOnboardingTokenService :
 
     private async Task ExecuteAsync(
         Func<Task> action,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool joinCallerTransaction = false)
     {
+        if (joinCallerTransaction && _unitOfWork.HasActiveTransaction)
+        {
+            await action();
+            return;
+        }
+
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
             await _unitOfWork.BeginTransactionAsync(cancellationToken);

@@ -30,6 +30,24 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
     private static readonly JsonSerializerOptions DecisionJsonOptions = CreateDecisionJsonOptions();
 
     [Fact]
+    public async Task VerifiedApplicantIssueJoinsCallerOwnedTransaction()
+    {
+        await using var fixture = new Fixture(paid: false);
+        fixture.SeedSystemActor();
+        await fixture.BeginTransactionAsync();
+
+        var issued = await fixture.Service.IssueForVerifiedApplicantAsync(
+            fixture.TenantId,
+            fixture.Registration.Id,
+            "caller-owned-transaction");
+
+        issued.Token.Id.Should().NotBeEmpty();
+        fixture.HasActiveTransaction.Should().BeTrue(
+            "the applicant lifecycle must own the atomic registration, token, and access transaction");
+        await fixture.RollbackAsync();
+    }
+
+    [Fact]
     public async Task FreeTokenIsIssuedOnceRemainsActiveAndExpiresOnlyAtTerminalApplicationState()
     {
         await using var fixture = new Fixture(paid: false);
@@ -664,10 +682,36 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         public FinancePostingRequestDto? PostedRequest { get; private set; }
         public int FinancePostCount { get; private set; }
         public ProcurementSupplierOnboardingTokenService Service { get; }
+        public bool HasActiveTransaction => _unitOfWork.HasActiveTransaction;
 
         public void SetExternal(bool value) => _external = value;
         public void SetTenant(Guid value) => _tenantId = value;
         public void SetUser(Guid value) => _userId = value;
+        public Task BeginTransactionAsync() => _unitOfWork.BeginTransactionAsync();
+        public Task RollbackAsync() => _unitOfWork.RollbackAsync();
+        public void SeedSystemActor()
+        {
+            Context.Users.Add(new ApplicationUser
+            {
+                Id = UserId,
+                UserName = "tenant.admin",
+                NormalizedUserName = "TENANT.ADMIN",
+                FirstName = "Tenant",
+                LastName = "Admin",
+                TenantId = TenantId,
+                IsActive = true
+            });
+            Context.UserTenants.Add(new UserTenant
+            {
+                Id = Guid.NewGuid(),
+                UserId = UserId,
+                TenantId = TenantId,
+                Status = UserTenantStatus.Active,
+                IsDefault = true,
+                GrantedAt = DateTime.UtcNow
+            });
+            Context.SaveChanges();
+        }
 
         private Account Account(AccountType type, string code, string name) => new()
         {

@@ -155,6 +155,15 @@ public sealed class ProcurementSupplierApplicantAccessConfiguration :
             item.VerifiedContactHashSha256,
             item.Status
         });
+        builder.HasIndex(item => new
+            {
+                item.TenantId,
+                item.VerifiedContactHashSha256
+            })
+            .HasDatabaseName(
+                "UX_ProcurementSupplierApplicantAccesses_ActiveContact")
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0 AND [Status] IN (0, 1, 2, 5)");
 
         builder.HasOne(item => item.Registration).WithOne(item => item.ApplicantAccess)
             .HasForeignKey<ProcurementSupplierApplicantAccess>(item => item.RegistrationId)

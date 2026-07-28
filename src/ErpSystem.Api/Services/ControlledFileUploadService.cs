@@ -286,6 +286,20 @@ public sealed class ControlledFileUploadService : IControlledFileUploadService
             ?? throw Failure("FILE_RECORD_NOT_FOUND",
                 "The tenant file record was not found.", 404);
 
+        var isRegistrationEvidence = await _db
+            .BusinessPartnerRegistrationDocuments
+            .IgnoreQueryFilters()
+            .AnyAsync(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.FileUploadRecordId == fileUploadRecordId,
+                cancellationToken);
+        if (isRegistrationEvidence)
+            throw Failure(
+                "FILE_RECORD_REFERENCED_BY_REGISTRATION_EVIDENCE",
+                "The file cannot be deleted while it is referenced by active supplier registration evidence.",
+                409);
+
         if (record.IsDeleted)
         {
             if (!record.StorageDeletedAtUtc.HasValue &&

@@ -13,6 +13,12 @@ public interface IUnitOfWork : IDisposable
     IAccountSegmentValueRepository AccountSegmentValues { get; }
     ISegmentLookupValueRepository SegmentLookupValues { get; }
 
+    /// <summary>
+    /// Indicates that this scoped unit of work is already participating in a
+    /// caller-owned database transaction.
+    /// </summary>
+    bool HasActiveTransaction { get; }
+
 
     /// <summary>
     /// Save all pending changes to the database

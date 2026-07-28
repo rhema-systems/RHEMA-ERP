@@ -9,6 +9,7 @@ using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -415,6 +416,8 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
             _currentUserId = ActorId;
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+                .ConfigureWarnings(warnings => warnings.Ignore(
+                    InMemoryEventId.TransactionIgnoredWarning))
                 .Options;
             Context = new ApplicationDbContext(options);
             Context.Tenants.Add(new Tenant

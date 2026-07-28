@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -85,6 +86,43 @@ public sealed class ProcurementSupplierApplicantAccessService :
         string correlationId,
         CancellationToken cancellationToken = default)
     {
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            try
+            {
+                var result = await CreateVerifiedApplicationCoreAsync(
+                    request,
+                    correlationId,
+                    cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch (DbUpdateException exception)
+                when (IsActiveContactUniquenessViolation(exception))
+            {
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                _unitOfWork.ClearTrackedChanges();
+                throw ActiveApplicationExists();
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        }, cancellationToken);
+    }
+
+    private async Task<SupplierApplicantTokenIssueDto> CreateVerifiedApplicationCoreAsync(
+        VerifyAndIssueSupplierApplicantTokenRequest request,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
         if (request.TenantId == Guid.Empty)
             throw Error("SUPPLIER_APPLICANT_TENANT_REQUIRED", "A tenant is required.", 400);
         var contact = NormalizeContact(request.Channel, request.Contact);
@@ -99,8 +137,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 item.Status != ProcurementSupplierApplicantAccessStatus.Activated)
             .AnyAsync(cancellationToken);
         if (duplicate)
-            throw Error("SUPPLIER_APPLICANT_ACTIVE_APPLICATION_EXISTS",
-                "This verified contact already has an active supplier application.");
+            throw ActiveApplicationExists();
 
         var systemActor = await ResolveSystemActorAsync(request.TenantId, cancellationToken);
         var now = DateTime.UtcNow;
@@ -248,6 +285,33 @@ public sealed class ProcurementSupplierApplicantAccessService :
             CurrencyCode = issued.Token.CurrencyCode
         };
     }
+
+    private static bool IsActiveContactUniquenessViolation(
+        DbUpdateException exception)
+    {
+        var detail = exception.ToString();
+        return detail.Contains(
+                   "UX_ProcurementSupplierApplicantAccesses_ActiveContact",
+                   StringComparison.OrdinalIgnoreCase) ||
+               (detail.Contains(
+                    "ProcurementSupplierApplicantAccesses",
+                    StringComparison.OrdinalIgnoreCase) &&
+                detail.Contains(
+                    "VerifiedContactHashSha256",
+                    StringComparison.OrdinalIgnoreCase) &&
+                detail.Contains(
+                    "TenantId",
+                    StringComparison.OrdinalIgnoreCase) &&
+                detail.Contains(
+                    "UNIQUE",
+                    StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static ProcurementSupplierApplicantAccessException
+        ActiveApplicationExists() =>
+        Error(
+            "SUPPLIER_APPLICANT_ACTIVE_APPLICATION_EXISTS",
+            "This verified contact already has an active supplier application.");
 
     private static bool VerifiedContactMatchesRegistration(
         BusinessPartnerRegistration registration,
