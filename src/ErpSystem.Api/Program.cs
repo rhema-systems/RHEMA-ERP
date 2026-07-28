@@ -1,4 +1,5 @@
 using System.Text;
+using ErpSystem.Api.Configuration;
 using ErpSystem.Api.Data;
 using ErpSystem.Api.Extensions;
 using ErpSystem.Api.Middleware;
@@ -411,6 +412,13 @@ var failFastOnDatabaseInitializationError = app.Configuration.GetValue(
     "StartupInitialization:FailFastOnDatabaseInitializationError",
     true);
 var seedDevelopmentData = app.Configuration.GetValue("StartupInitialization:SeedDevelopmentData", true);
+var allowDevelopmentDataSeedingOutsideDevelopment = app.Configuration.GetValue(
+    StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
+    false);
+var developmentDataSeedingPermitted =
+    StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(
+        app.Environment.EnvironmentName,
+        allowDevelopmentDataSeedingOutsideDevelopment);
 var seedWorkflowDefinitions = app.Configuration.GetValue("StartupInitialization:SeedWorkflowDefinitions", true);
 var failFastOnDevelopmentSeedError = app.Configuration.GetValue(
     "StartupInitialization:FailFastOnDevelopmentSeedError",
@@ -472,9 +480,16 @@ if (!skipStartupInitialization)
         }
     }
 
-    // Seed demo/basic data in Development to make local testing easier.
-    if (app.Environment.IsDevelopment() && seedDevelopmentData && databaseInitializationSucceeded)
+    // Seed demo/basic data in Development, or on an explicitly opted-in non-production test host.
+    if (seedDevelopmentData && developmentDataSeedingPermitted && databaseInitializationSucceeded)
     {
+        if (!app.Environment.IsDevelopment())
+        {
+            app.Logger.LogWarning(
+                "Development data seeding is explicitly enabled outside the Development environment. " +
+                "This setting is intended only for isolated test servers.");
+        }
+
         app.Logger.LogInformation("Starting Development data seeding...");
         try
         {
@@ -490,10 +505,18 @@ if (!skipStartupInitialization)
             }
         }
     }
-    else if (app.Environment.IsDevelopment() && seedDevelopmentData)
+    else if (seedDevelopmentData && developmentDataSeedingPermitted)
     {
         app.Logger.LogWarning(
             "Skipping Development data seeding because database initialization did not complete successfully.");
+    }
+    else if (seedDevelopmentData)
+    {
+        app.Logger.LogInformation(
+            "Development data seeding was requested but is not permitted in environment {EnvironmentName}. " +
+            "Set {OverrideKey}=true only on an isolated test server.",
+            app.Environment.EnvironmentName,
+            StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey);
     }
 }
 else

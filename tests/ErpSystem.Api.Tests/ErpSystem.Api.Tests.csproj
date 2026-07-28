@@ -28,6 +28,7 @@
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
     <Compile Include="Authorization\FinancePermissionAuthorizationHandlerTests.cs" />
+    <Compile Include="Configuration\StartupInitializationPolicyTests.cs" />
     <Compile Include="Authorization\StructuredAuthorizationMiddlewareResultHandlerTests.cs" />
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
