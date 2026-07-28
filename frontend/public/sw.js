@@ -1,9 +1,9 @@
  
 // Service Worker for ERP System PWA
-const CACHE_NAME = 'erp-system-v2026-07-28-supplier-access-hardening'
-const STATIC_CACHE_NAME = 'erp-static-v2026-07-28-supplier-access-hardening'
-const RUNTIME_CACHE_NAME = 'erp-runtime-v2026-07-28-supplier-access-hardening'
-const MOBILE_SHELL_CACHE_NAME = 'erp-mobile-shell-v2026-07-28-supplier-access-hardening'
+const CACHE_NAME = 'erp-system-v2026-07-28-authenticated-api-cache-boundary'
+const STATIC_CACHE_NAME = 'erp-static-v2026-07-28-authenticated-api-cache-boundary'
+const RUNTIME_CACHE_NAME = 'erp-runtime-v2026-07-28-authenticated-api-cache-boundary'
+const MOBILE_SHELL_CACHE_NAME = 'erp-mobile-shell-v2026-07-28-authenticated-api-cache-boundary'
 const OFFLINE_PAGE = '/offline'
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
 const IS_LOCAL_DEV = LOCAL_DEV_HOSTS.has(self.location.hostname)
@@ -124,6 +124,14 @@ async function precacheStaticAssets() {
 
 // Handle API requests with network-first strategy
 async function handleApiRequest(request) {
+  // Cache Storage keys do not partition entries by bearer token unless the
+  // response explicitly varies on Authorization. Authenticated ERP responses
+  // must therefore remain network-only so one user can never receive another
+  // user's cached response in a shared browser profile.
+  if (request.headers.has('Authorization')) {
+    return fetch(request)
+  }
+
   const cache = await caches.open(RUNTIME_CACHE_NAME)
   
   try {
