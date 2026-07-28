@@ -11,6 +11,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services;
+using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -23,6 +24,106 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 
 public sealed class SupplierApplicantLifecycleControllerTests
 {
+    [Fact]
+    public async Task RetainedDraftIdentifierIsForwardedAfterContactVerification()
+    {
+        var tenantId = Guid.NewGuid();
+        var retainedRegistrationId = Guid.NewGuid();
+        VerifyAndIssueSupplierApplicantTokenRequest? captured = null;
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.CreateVerifiedApplicationAsync(
+                It.IsAny<VerifyAndIssueSupplierApplicantTokenRequest>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<VerifyAndIssueSupplierApplicantTokenRequest, string, CancellationToken>(
+                (request, _, _) => captured = request)
+            .ReturnsAsync(new SupplierApplicantTokenIssueDto
+            {
+                RegistrationId = retainedRegistrationId,
+                RegistrationNumber = "LEGACY-APP-004",
+                TokenId = Guid.NewGuid(),
+                TokenReference = "TOK-LEGACY-004",
+                PlaintextToken = "one-time-application-token",
+                FeeMode = ProcurementSupplierOnboardingFeeMode.Free,
+                TokenStatus = ProcurementSupplierOnboardingTokenStatus.Active,
+                PaymentStatus =
+                    ProcurementSupplierOnboardingPaymentStatus.NotRequired,
+                CurrencyCode = "GHS"
+            });
+        var tenants = new Mock<ITenantService>();
+        tenants.Setup(item => item.GetTenantByCodeAsync("TDC"))
+            .ReturnsAsync(new Tenant
+            {
+                Id = tenantId,
+                Code = "TDC",
+                Name = "TDC",
+                Status = TenantStatus.Active,
+                AllowSelfRegistration = true
+            });
+        var otp = new Mock<IOtpService>();
+        otp.Setup(item => item.VerifyOtpAsync(
+                tenantId,
+                OtpPurpose.SupplierApplicantVerification,
+                OtpChannel.Email,
+                "retained@example.test",
+                "123456",
+                true,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OtpVerifyResult(true, null));
+        var notifications = new Mock<INotificationService>();
+        notifications.Setup(item => item.SendEmailAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<bool>()))
+            .Returns(Task.CompletedTask);
+        var captcha = new Mock<ICaptchaVerificationService>();
+        captcha.Setup(item => item.EnsureCaptchaValidAsync(
+                tenantId,
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var controller = new SupplierApplicantAccessController(
+            access.Object,
+            Mock.Of<IProcurementSupplierOnboardingTokenService>(),
+            Mock.Of<IBusinessPartnerRegistrationService>(),
+            tenants.Object,
+            otp.Object,
+            Mock.Of<ITenantSmsSender>(),
+            notifications.Object,
+            captcha.Object,
+            Mock.Of<IProcurementSupplierApplicantJwtService>(),
+            Mock.Of<IControlledFileUploadService>(),
+            TransactionalUnitOfWork().Object,
+            NullLogger<SupplierApplicantAccessController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+
+        var result = await controller.VerifyAndIssue(
+            new SupplierApplicantVerifyAndIssueRequest
+            {
+                TenantCode = "TDC",
+                Channel = "Email",
+                Contact = "RETAINED@EXAMPLE.TEST",
+                OtpCode = "123456",
+                RetainedRegistrationId = retainedRegistrationId
+            },
+            CancellationToken.None);
+
+        result.Should().BeOfType<CreatedResult>();
+        captured.Should().NotBeNull();
+        captured!.TenantId.Should().Be(tenantId);
+        captured.Contact.Should().Be("retained@example.test");
+        captured.CompanyName.Should().BeEmpty();
+        captured.RetainedRegistrationId.Should().Be(retainedRegistrationId);
+    }
+
     [Fact]
     public async Task RestrictedApplicantExecutesPaymentAndControlledDocumentLifecycle()
     {

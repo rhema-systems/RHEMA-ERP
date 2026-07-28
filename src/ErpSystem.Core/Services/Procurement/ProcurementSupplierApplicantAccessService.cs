@@ -102,35 +102,72 @@ public sealed class ProcurementSupplierApplicantAccessService :
 
         var systemActor = await ResolveSystemActorAsync(request.TenantId, cancellationToken);
         var now = DateTime.UtcNow;
-        var registration = new BusinessPartnerRegistration
+        var retainedApplication = request.RetainedRegistrationId.HasValue;
+        Guid? originalCreatedById = null;
+        BusinessPartnerRegistration registration;
+        if (retainedApplication)
         {
-            Id = Guid.NewGuid(),
-            TenantId = request.TenantId,
-            RegistrationNumber = $"APP{now:yy}{Guid.NewGuid():N}"[..13].ToUpperInvariant(),
-            ApplicantName = request.CompanyName.Trim(),
-            ApplicantEmail = request.Channel == ProcurementSupplierApplicantVerificationChannel.Email
-                ? contact : null,
-            ApplicantPhone = request.Channel == ProcurementSupplierApplicantVerificationChannel.Sms
-                ? contact : null,
-            PartnerType = "Supplier",
-            RegistrationCategory = request.RegistrationCategory,
-            Status = "Draft",
-            RegistrationDataJson = JsonSerializer.Serialize(new
+            var retainedRegistrationId = request.RetainedRegistrationId.GetValueOrDefault();
+            registration = await Registrations.GetQueryable(item =>
+                    item.Id == retainedRegistrationId &&
+                    item.TenantId == request.TenantId &&
+                    !item.IsDeleted)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw RetainedApplicationNotEligible();
+            if (registration.PartnerType != "Supplier" ||
+                registration.Status is not ("Draft" or "MoreInfoRequired") ||
+                !VerifiedContactMatchesRegistration(
+                    registration, request.Channel, contact))
             {
-                companyName = request.CompanyName.Trim(),
-                partnerType = "Supplier",
-                registrationCategory = request.RegistrationCategory.ToString(),
-                email = request.Channel == ProcurementSupplierApplicantVerificationChannel.Email
+                throw RetainedApplicationNotEligible();
+            }
+
+            var alreadyBound = await Accesses.GetQueryable(item =>
+                    item.TenantId == request.TenantId &&
+                    item.RegistrationId == registration.Id &&
+                    !item.IsDeleted)
+                .AnyAsync(cancellationToken);
+            if (alreadyBound)
+                throw RetainedApplicationNotEligible();
+
+            originalCreatedById = registration.CreatedById;
+        }
+        else
+        {
+            var companyName = request.CompanyName?.Trim();
+            if (string.IsNullOrWhiteSpace(companyName))
+                throw Error("SUPPLIER_APPLICANT_COMPANY_REQUIRED",
+                    "A company name is required for a new supplier application.", 400);
+            registration = new BusinessPartnerRegistration
+            {
+                Id = Guid.NewGuid(),
+                TenantId = request.TenantId,
+                RegistrationNumber = $"APP{now:yy}{Guid.NewGuid():N}"[..13].ToUpperInvariant(),
+                ApplicantName = companyName,
+                ApplicantEmail = request.Channel == ProcurementSupplierApplicantVerificationChannel.Email
                     ? contact : null,
-                phone = request.Channel == ProcurementSupplierApplicantVerificationChannel.Sms
-                    ? contact : null
-            }, JsonOptions),
-            CreatedAt = now,
-            CreatedBy = "Verified Supplier Applicant",
-            CreatedById = systemActor
-        };
-        await Registrations.AddAsync(registration);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                ApplicantPhone = request.Channel == ProcurementSupplierApplicantVerificationChannel.Sms
+                    ? contact : null,
+                PartnerType = "Supplier",
+                RegistrationCategory = request.RegistrationCategory,
+                Status = "Draft",
+                RegistrationDataJson = JsonSerializer.Serialize(new
+                {
+                    companyName,
+                    partnerType = "Supplier",
+                    registrationCategory = request.RegistrationCategory.ToString(),
+                    email = request.Channel == ProcurementSupplierApplicantVerificationChannel.Email
+                        ? contact : null,
+                    phone = request.Channel == ProcurementSupplierApplicantVerificationChannel.Sms
+                        ? contact : null
+                }, JsonOptions),
+                CreatedAt = now,
+                CreatedBy = "Verified Supplier Applicant",
+                CreatedById = systemActor
+            };
+            await Registrations.AddAsync(registration);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
 
         ProcurementSupplierOnboardingTokenIssueResultDto issued;
         try
@@ -143,11 +180,14 @@ public sealed class ProcurementSupplierApplicantAccessService :
         }
         catch
         {
-            registration.IsDeleted = true;
-            registration.DeletedAt = DateTime.UtcNow;
-            registration.DeletedBy = "Verified Supplier Applicant";
-            await Registrations.UpdateAsync(registration);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            if (!retainedApplication)
+            {
+                registration.IsDeleted = true;
+                registration.DeletedAt = DateTime.UtcNow;
+                registration.DeletedBy = "Verified Supplier Applicant";
+                await Registrations.UpdateAsync(registration);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
             throw;
         }
 
@@ -181,10 +221,14 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 Channel = request.Channel.ToString(),
                 access.VerifiedContactMasked,
                 registration.RegistrationNumber,
+                RetainedApplicationMigrated = retainedApplication,
+                OriginalCreatedById = originalCreatedById,
                 TokenStatus = issued.Token.Status.ToString(),
                 PaymentStatus = issued.Token.PaymentStatus.ToString()
             },
-            "The applicant contact was verified and bound to one application token.",
+            retainedApplication
+                ? "The retained supplier draft was migrated to verified applicant-token access."
+                : "The applicant contact was verified and bound to one application token.",
             correlation,
             cancellationToken);
 
@@ -202,6 +246,28 @@ public sealed class ProcurementSupplierApplicantAccessService :
             CurrencyCode = issued.Token.CurrencyCode
         };
     }
+
+    private static bool VerifiedContactMatchesRegistration(
+        BusinessPartnerRegistration registration,
+        ProcurementSupplierApplicantVerificationChannel channel,
+        string verifiedContact)
+    {
+        var recordedContact = channel == ProcurementSupplierApplicantVerificationChannel.Email
+            ? registration.ApplicantEmail
+            : registration.ApplicantPhone;
+        if (string.IsNullOrWhiteSpace(recordedContact))
+            return false;
+        return string.Equals(
+            NormalizeContact(channel, recordedContact),
+            verifiedContact,
+            StringComparison.Ordinal);
+    }
+
+    private static ProcurementSupplierApplicantAccessException RetainedApplicationNotEligible() =>
+        Error(
+            "SUPPLIER_APPLICANT_RETAINED_APPLICATION_NOT_ELIGIBLE",
+            "The retained application cannot be migrated with the verified contact.",
+            409);
 
     public async Task<SupplierApplicantSessionDto> StartSessionAsync(
         StartSupplierApplicantSessionRequest request,

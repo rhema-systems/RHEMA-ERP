@@ -14,11 +14,13 @@ public sealed class VerifyAndIssueSupplierApplicantTokenRequest
     [Required, StringLength(200)]
     public string Contact { get; set; } = string.Empty;
 
-    [Required, StringLength(200)]
+    [StringLength(200)]
     public string CompanyName { get; set; } = string.Empty;
 
     public ProcurementSupplierRegistrationCategory RegistrationCategory { get; set; } =
         ProcurementSupplierRegistrationCategory.Goods;
+
+    public Guid? RetainedRegistrationId { get; set; }
 }
 
 public sealed class SupplierApplicantTokenIssueDto

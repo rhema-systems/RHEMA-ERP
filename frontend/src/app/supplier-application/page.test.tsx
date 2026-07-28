@@ -65,6 +65,7 @@ import SupplierApplicationAccessPage from './page';
 describe('supplier application CAPTCHA lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, '', '/supplier-application');
     mocks.getPublicSecuritySettings.mockResolvedValue({
       captchaEnabled: true,
       captchaProvider: 'recaptcha',
@@ -94,6 +95,48 @@ describe('supplier application CAPTCHA lifecycle', () => {
       expiresAtUtc: '2026-07-28T00:00:00Z',
       paymentOnly: false,
       registrationId: 'registration-1',
+    });
+  });
+
+  it('migrates a retained draft through verified contact without requesting replacement profile data', async () => {
+    const retainedRegistrationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    window.history.replaceState(
+      {},
+      '',
+      `/supplier-application?retainedRegistrationId=${retainedRegistrationId}`
+    );
+    render(<SupplierApplicationAccessPage />);
+
+    await screen.findByText(/original application data and audit ownership/i);
+    expect(screen.queryByLabelText('Company name')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Registration category')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Email address'), {
+      target: { value: 'retained@example.test' },
+    });
+    fireEvent.click(screen.getByTestId('supplier-apply-captcha-complete'));
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Send verification code',
+    }));
+    await waitFor(() => expect(mocks.requestChallenge).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText('Six-digit verification code'), {
+      target: { value: '123456' },
+    });
+    fireEvent.click(screen.getByTestId('supplier-apply-captcha-complete'));
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Verify and secure existing application',
+    }));
+
+    await waitFor(() => {
+      expect(mocks.verifyAndIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contact: 'retained@example.test',
+          companyName: '',
+          retainedRegistrationId,
+          recaptchaToken: 'response-supplier-apply-captcha',
+        })
+      );
     });
   });
 

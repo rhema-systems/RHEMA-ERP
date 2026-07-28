@@ -243,10 +243,10 @@ export default function BusinessPartnerPage() {
 	                        <Button
 	                          variant="outline"
 	                          size="sm"
-	                          onClick={() => router.push(`/register/business-partner?id=${registration.id}`)}
+	                          onClick={() => router.push(`/supplier-application?retainedRegistrationId=${registration.id}`)}
 	                        >
 	                          <FileCheck className="mr-2 h-4 w-4" />
-	                          Continue Editing
+	                          Verify Contact & Continue
 	                        </Button>
 	                      ) : (
 	                        <Button

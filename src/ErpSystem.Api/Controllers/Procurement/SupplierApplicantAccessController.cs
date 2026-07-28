@@ -153,7 +153,8 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                     Channel = channel,
                     Contact = contact,
                     CompanyName = request.CompanyName,
-                    RegistrationCategory = request.RegistrationCategory
+                    RegistrationCategory = request.RegistrationCategory,
+                    RetainedRegistrationId = request.RetainedRegistrationId
                 },
                 Correlation("verify-issue"),
                 cancellationToken);
@@ -721,11 +722,13 @@ public sealed class SupplierApplicantVerifyAndIssueRequest :
     [Required, StringLength(6, MinimumLength = 6)]
     public string OtpCode { get; set; } = string.Empty;
 
-    [Required, StringLength(200)]
+    [StringLength(200)]
     public string CompanyName { get; set; } = string.Empty;
 
     public ProcurementSupplierRegistrationCategory RegistrationCategory { get; set; } =
         ProcurementSupplierRegistrationCategory.Goods;
+
+    public Guid? RetainedRegistrationId { get; set; }
 }
 
 public sealed class SupplierApplicantLoginRequest

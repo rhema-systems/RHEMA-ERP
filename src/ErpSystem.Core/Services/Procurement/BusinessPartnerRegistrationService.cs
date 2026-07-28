@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Notifications;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.Events;
@@ -189,12 +190,28 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             throw new InvalidOperationException($"Registration with ID {id} not found");
         }
 
-        // Check if the user owns this registration (for external users)
-        // External users can only update their own draft registrations
-        if (registration.CreatedById.HasValue && registration.CreatedById.Value != userId)
+        // External users can update only an owned legacy draft or the exact
+        // application bound to their restricted applicant-token claim.
+        if (_currentUserProvider.IsExternalUser)
         {
-            // Check if current user has admin role (internal users)
-            if (!_currentUserProvider.Roles.Contains("Admin") && !_currentUserProvider.Roles.Contains("BusinessPartnerAdmin"))
+            var ownsRegistration =
+                registration.CreatedById.HasValue &&
+                registration.CreatedById.Value == userId;
+            if (!ownsRegistration &&
+                !await HasRestrictedApplicantAccessAsync(registration, userId))
+            {
+                _logger.LogWarning(
+                    "External user {UserId} attempted to update registration {RegistrationId} owned by {OwnerId}",
+                    userId, id, registration.CreatedById);
+                throw new InvalidOperationException(
+                    "You do not have permission to update this registration");
+            }
+        }
+        else if (registration.CreatedById.HasValue &&
+                 registration.CreatedById.Value != userId)
+        {
+            if (!_currentUserProvider.Roles.Contains("Admin") &&
+                !_currentUserProvider.Roles.Contains("BusinessPartnerAdmin"))
             {
                 _logger.LogWarning("User {UserId} attempted to update registration {RegistrationId} owned by {OwnerId}",
                     userId, id, registration.CreatedById);
@@ -931,8 +948,11 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         var registration = await _registrationRepository.GetByIdAsync(registrationId) ?? throw new InvalidOperationException($"Registration with ID {registrationId} not found");
         if (_currentUserProvider.IsExternalUser)
         {
-            if (!registration.CreatedById.HasValue ||
-                registration.CreatedById.Value != userId)
+            var ownsRegistration =
+                registration.CreatedById.HasValue &&
+                registration.CreatedById.Value == userId;
+            if (!ownsRegistration &&
+                !await HasRestrictedApplicantAccessAsync(registration, userId))
             {
                 throw new UnauthorizedAccessException(
                     "You do not have permission to upload evidence for this registration.");
@@ -1053,8 +1073,11 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             throw new InvalidOperationException($"Registration with ID {registrationId} not found");
         if (_currentUserProvider.IsExternalUser)
         {
-            if (!registration.CreatedById.HasValue ||
-                registration.CreatedById.Value != userId)
+            var ownsRegistration =
+                registration.CreatedById.HasValue &&
+                registration.CreatedById.Value == userId;
+            if (!ownsRegistration &&
+                !await HasRestrictedApplicantAccessAsync(registration, userId))
             {
                 throw new UnauthorizedAccessException(
                     "You do not have permission to delete evidence from this registration.");
@@ -2242,6 +2265,41 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         {
             throw new ProcurementAccessAuthorizationException(decision.Message);
         }
+    }
+
+    private async Task<bool> HasRestrictedApplicantAccessAsync(
+        Entities.Procurement.BusinessPartnerRegistration registration,
+        Guid actorUserId)
+    {
+        if (!_currentUserProvider.IsAuthenticated ||
+            !_currentUserProvider.IsExternalUser ||
+            actorUserId == Guid.Empty ||
+            actorUserId != _currentUserProvider.UserId ||
+            registration.TenantId != _currentUserProvider.TenantId ||
+            !string.Equals(
+                _currentUserProvider.AuthenticationProvider,
+                "ApplicantToken",
+                StringComparison.OrdinalIgnoreCase) ||
+            !_currentUserProvider.Claims.TryGetValue(
+                "supplier_applicant_registration",
+                out var registrationClaim) ||
+            !Guid.TryParse(registrationClaim, out var claimedRegistrationId) ||
+            claimedRegistrationId != registration.Id)
+        {
+            return false;
+        }
+
+        return await _unitOfWork
+            .Repository<Entities.Procurement.ProcurementSupplierApplicantAccess>()
+            .GetQueryable(item =>
+                item.TenantId == registration.TenantId &&
+                item.RegistrationId == registration.Id &&
+                item.CreatedById == actorUserId &&
+                item.Status ==
+                    ProcurementSupplierApplicantAccessStatus.ApplicationInProgress &&
+                !item.TerminalAtUtc.HasValue &&
+                !item.IsDeleted)
+            .AnyAsync();
     }
 
     #endregion

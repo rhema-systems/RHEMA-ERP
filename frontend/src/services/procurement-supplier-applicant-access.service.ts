@@ -67,6 +67,7 @@ export const supplierApplicantAccessService = {
     otpCode: string;
     companyName: string;
     registrationCategory: SupplierRegistrationCategory;
+    retainedRegistrationId?: string;
     recaptchaToken?: string;
   }) {
     return fetch(`${ROOT}/verified-applications`, json(input)).then((response) =>

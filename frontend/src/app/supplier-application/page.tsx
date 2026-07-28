@@ -42,6 +42,7 @@ export default function SupplierApplicationAccessPage() {
   const [channel, setChannel] = useState<SupplierApplicantChannel>('Email');
   const [contact, setContact] = useState('');
   const [companyName, setCompanyName] = useState('');
+  const [retainedRegistrationId, setRetainedRegistrationId] = useState('');
   const [category, setCategory] =
     useState<SupplierRegistrationCategory>('Goods');
   const [otpCode, setOtpCode] = useState('');
@@ -56,6 +57,12 @@ export default function SupplierApplicationAccessPage() {
   const [loginCaptchaToken, setLoginCaptchaToken] = useState<string | null>(null);
   const applyCaptchaRef = useRef<PublicCaptchaChallengeHandle>(null);
   const loginCaptchaRef = useRef<PublicCaptchaChallengeHandle>(null);
+
+  useEffect(() => {
+    const retainedId = new URLSearchParams(window.location.search)
+      .get('retainedRegistrationId');
+    if (retainedId) setRetainedRegistrationId(retainedId);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -124,6 +131,7 @@ export default function SupplierApplicationAccessPage() {
         otpCode,
         companyName,
         registrationCategory: category,
+        retainedRegistrationId: retainedRegistrationId || undefined,
         recaptchaToken: applyCaptchaToken ?? undefined,
       });
       setIssued(result);
@@ -138,6 +146,8 @@ export default function SupplierApplicationAccessPage() {
       setBusy(false);
     }
   };
+
+  const retainedApplication = Boolean(retainedRegistrationId);
 
   const login = async () => {
     if (captchaLoading) return;
@@ -204,8 +214,9 @@ export default function SupplierApplicationAccessPage() {
                   Verify contact and issue token
                 </CardTitle>
                 <CardDescription className="text-slate-400">
-                  The effective DEC-007 configuration determines whether this token
-                  is free or paid.
+                  {retainedApplication
+                    ? 'Verify the email address or phone number already recorded on this draft. Its original application data and audit ownership will be retained.'
+                    : 'The effective DEC-007 configuration determines whether this token is free or paid.'}
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-5">
@@ -240,36 +251,40 @@ export default function SupplierApplicationAccessPage() {
                       }
                     />
                   </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="supplier-company-name" className="text-slate-200">
-                      Company name
-                    </Label>
-                    <Input
-                      id="supplier-company-name"
-                      className="border-slate-700 bg-slate-950"
-                      value={companyName}
-                      onChange={(event) => setCompanyName(event.target.value)}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="supplier-registration-category" className="text-slate-200">
-                      Registration category
-                    </Label>
-                    <select
-                      id="supplier-registration-category"
-                      className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3"
-                      value={category}
-                      onChange={(event) =>
-                        setCategory(
-                          event.target.value as SupplierRegistrationCategory
-                        )
-                      }
-                    >
-                      <option value="Goods">Goods</option>
-                      <option value="Works">Works</option>
-                      <option value="Services">Services</option>
-                    </select>
-                  </div>
+                  {!retainedApplication && (
+                    <>
+                      <div className="grid gap-2">
+                        <Label htmlFor="supplier-company-name" className="text-slate-200">
+                          Company name
+                        </Label>
+                        <Input
+                          id="supplier-company-name"
+                          className="border-slate-700 bg-slate-950"
+                          value={companyName}
+                          onChange={(event) => setCompanyName(event.target.value)}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="supplier-registration-category" className="text-slate-200">
+                          Registration category
+                        </Label>
+                        <select
+                          id="supplier-registration-category"
+                          className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3"
+                          value={category}
+                          onChange={(event) =>
+                            setCategory(
+                              event.target.value as SupplierRegistrationCategory
+                            )
+                          }
+                        >
+                          <option value="Goods">Goods</option>
+                          <option value="Works">Works</option>
+                          <option value="Services">Services</option>
+                        </select>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {captchaLoading ? (
@@ -295,7 +310,7 @@ export default function SupplierApplicationAccessPage() {
                       busy ||
                       captchaLoading ||
                       !contact ||
-                      !companyName ||
+                      (!retainedApplication && !companyName) ||
                       (captchaEnabled && !applyCaptchaToken)
                     }
                     onClick={requestCode}
@@ -324,7 +339,9 @@ export default function SupplierApplicationAccessPage() {
                       }
                       onClick={verifyAndIssue}
                     >
-                      Verify and issue token
+                      {retainedApplication
+                        ? 'Verify and secure existing application'
+                        : 'Verify and issue token'}
                     </Button>
                   </div>
                 )}

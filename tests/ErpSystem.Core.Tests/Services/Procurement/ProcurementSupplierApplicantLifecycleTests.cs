@@ -19,6 +19,96 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementSupplierApplicantLifecycleTests
 {
+    [Fact]
+    public async Task VerifiedContactMigratesRetainedDraftWithoutReplacingAuditOwner()
+    {
+        await using var fixture = new Fixture();
+        fixture.SeedSystemActor();
+        var originalOwnerId = Guid.NewGuid();
+        var registration = new BusinessPartnerRegistration
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            RegistrationNumber = "LEGACY-APP-001",
+            ApplicantName = "Retained Supplier",
+            ApplicantEmail = "retained@example.test",
+            PartnerType = "Supplier",
+            RegistrationCategory = ProcurementSupplierRegistrationCategory.Services,
+            Status = "MoreInfoRequired",
+            CreatedAt = DateTime.UtcNow.AddDays(-2),
+            CreatedBy = "Legacy External Applicant",
+            CreatedById = originalOwnerId
+        };
+        fixture.Context.BusinessPartnerRegistrations.Add(registration);
+        await fixture.Context.SaveChangesAsync();
+
+        var issued = await fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                Contact = " RETAINED@EXAMPLE.TEST ",
+                RetainedRegistrationId = registration.Id
+            },
+            "migrate-retained-draft");
+
+        issued.RegistrationId.Should().Be(registration.Id);
+        issued.RegistrationNumber.Should().Be("LEGACY-APP-001");
+        (await fixture.Context.BusinessPartnerRegistrations
+                .IgnoreQueryFilters().CountAsync())
+            .Should().Be(1);
+        var retained = await fixture.Context.BusinessPartnerRegistrations
+            .IgnoreQueryFilters()
+            .SingleAsync();
+        retained.Status.Should().Be("MoreInfoRequired");
+        retained.ApplicantName.Should().Be("Retained Supplier");
+        retained.CreatedById.Should().Be(originalOwnerId);
+        var access = await fixture.Context.ProcurementSupplierApplicantAccesses
+            .SingleAsync();
+        access.RegistrationId.Should().Be(registration.Id);
+        access.CreatedById.Should().Be(fixture.ActorId);
+    }
+
+    [Fact]
+    public async Task RetainedDraftMigrationRejectsContactThatIsNotRecordedOnApplication()
+    {
+        await using var fixture = new Fixture();
+        fixture.SeedSystemActor();
+        var registration = new BusinessPartnerRegistration
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            RegistrationNumber = "LEGACY-APP-002",
+            ApplicantName = "Retained Supplier",
+            ApplicantEmail = "owner@example.test",
+            PartnerType = "Supplier",
+            Status = "Draft",
+            CreatedAt = DateTime.UtcNow,
+            CreatedById = Guid.NewGuid()
+        };
+        fixture.Context.BusinessPartnerRegistrations.Add(registration);
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                Contact = "attacker@example.test",
+                RetainedRegistrationId = registration.Id
+            },
+            "reject-wrong-retained-contact");
+
+        (await action.Should()
+                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
+            .Which.Code.Should()
+            .Be("SUPPLIER_APPLICANT_RETAINED_APPLICATION_NOT_ELIGIBLE");
+        (await fixture.Context.ProcurementSupplierApplicantAccesses.CountAsync())
+            .Should().Be(0);
+        (await fixture.Context.ProcurementSupplierOnboardingTokens.CountAsync())
+            .Should().Be(0);
+    }
+
     [Theory]
     [InlineData(
         ProcurementSupplierApplicantVerificationChannel.Email,
