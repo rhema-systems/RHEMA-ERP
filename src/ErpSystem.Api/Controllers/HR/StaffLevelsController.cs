@@ -1,12 +1,16 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/hr/staff-levels")]
+// No global fallback policy exists, so require authentication explicitly (matches sibling HR
+// controllers) — otherwise these endpoints, including writes, are reachable anonymously.
+[Authorize]
 public class StaffLevelsController : ControllerBase
 {
     private readonly IStaffLevelService _staffLevelService;

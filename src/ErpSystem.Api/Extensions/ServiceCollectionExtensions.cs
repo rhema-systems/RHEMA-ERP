@@ -103,6 +103,11 @@ namespace ErpSystem.Api.Extensions
             var jwtSettings = configuration.GetSection("JwtSettings");
             var key = Encoding.ASCII.GetBytes(jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey not found"));
 
+            // Fail fast if the external-portal key/audience are not distinct from the internal ones —
+            // otherwise portal tokens would validate on the default bearer scheme registered below and
+            // could satisfy internal [Authorize] attributes.
+            ErpSystem.Api.Security.PortalAuth.ValidateDistinctFromInternal(configuration);
+
             services.AddAuthentication(x =>
             {
                 x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;

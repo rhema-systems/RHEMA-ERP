@@ -18,6 +18,9 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/performance/goals-at-risk")]
+// This endpoint returns org-wide employee/goal/risk data with no manager scope, so it must be
+// gated to HR/Admin (there is no global fallback policy — without this it is reachable anonymously).
+[Authorize(Roles = "HR,Admin,SuperAdmin")]
 public class AtRiskGoalsController : ControllerBase
 {
     private readonly IAtRiskGoalsQueryService        _atRiskService;

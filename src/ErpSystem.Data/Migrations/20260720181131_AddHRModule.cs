@@ -124,8 +124,14 @@ IF OBJECT_ID(N'WorkStations', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM WorkSt
 -- Column drops that would silently lose data (nullable columns: only halt when actually populated)
 IF EXISTS (SELECT 1 FROM ShiftAssignments WHERE StartDate IS NOT NULL)
     THROW 50000, 'HR-port upgrade halted: ShiftAssignments.StartDate holds data being dropped. Preserve it per docs/hr-port-data-migration.md, then re-run.', 1;
-IF EXISTS (SELECT 1 FROM LeaveRequests WHERE ApprovalDate IS NOT NULL OR ApprovalNotes IS NOT NULL)
-    THROW 50000, 'HR-port upgrade halted: LeaveRequests.ApprovalDate/ApprovalNotes hold approval history being dropped. Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+-- ApprovalDate is preserved below (backfilled into the new ApprovedDate before it is dropped), so it is NOT halted here.
+IF EXISTS (SELECT 1 FROM LeaveRequests WHERE ApprovalNotes IS NOT NULL)
+    THROW 50000, 'HR-port upgrade halted: LeaveRequests.ApprovalNotes holds data being dropped (no target column). Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+IF EXISTS (SELECT 1 FROM LeaveRequests WHERE RejectionDate IS NOT NULL)
+    THROW 50000, 'HR-port upgrade halted: LeaveRequests.RejectionDate holds rejection timestamps being dropped (the new model keeps only RejectionReason). Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+-- FK-retarget with a non-nullable new column and no valid legacy mapping: cannot be auto-migrated on populated data.
+IF OBJECT_ID(N'ShiftAssignments', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM ShiftAssignments)
+    THROW 50000, 'HR-port upgrade halted: ShiftAssignments holds data; its ShiftId is re-pointed to the new ShiftDefinitions table with no legacy mapping (would create dangling FKs). Migrate per docs/hr-port-data-migration.md, then re-run.', 1;
 IF EXISTS (SELECT 1 FROM LeavePlans WHERE DepartmentId IS NOT NULL)
     THROW 50000, 'HR-port upgrade halted: LeavePlans.DepartmentId holds data being dropped. Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
 IF EXISTS (SELECT 1 FROM LeaveBalances WHERE AdjustmentReason IS NOT NULL)
@@ -255,6 +261,16 @@ IF EXISTS (SELECT 1 FROM PublicHolidays)
                 name: "ApplicableToPositions",
                 table: "LeaveTypes");
 
+            // [HR-MODULE-PORT] Preserve the real approval timestamp: add the new ApprovedDate and backfill
+            // it from the legacy ApprovalDate BEFORE ApprovalDate is dropped. (The RejectionDate->ApprovedDate
+            // rename further below is removed so a rejection time is never mislabelled as an approval time.)
+            migrationBuilder.AddColumn<DateTime>(
+                name: "ApprovedDate",
+                table: "LeaveRequests",
+                type: "datetime2",
+                nullable: true);
+            migrationBuilder.Sql("UPDATE LeaveRequests SET ApprovedDate = ApprovalDate WHERE ApprovalDate IS NOT NULL;");
+
             migrationBuilder.DropColumn(
                 name: "ApprovalDate",
                 table: "LeaveRequests");
@@ -356,25 +372,45 @@ IF EXISTS (SELECT 1 FROM PublicHolidays)
                 table: "PublicHolidays",
                 newName: "IX_PublicHolidays_DateTo");
 
-            migrationBuilder.RenameColumn(
+            // [HR-MODULE-PORT] These are UNRELATED policies, not renames — a rename would reinterpret legacy
+            // values (documentation-required -> reliever-required, a consecutive-day cap -> a service-month
+            // gate, applies-to-all-categories -> mandatory-annual-leave). Add each new column with its own
+            // deliberate default and drop the unrelated legacy column.
+            migrationBuilder.AddColumn<bool>(
+                name: "RequiresReliever",
+                table: "LeaveTypes",
+                type: "bit",
+                nullable: false,
+                defaultValue: false);
+            migrationBuilder.DropColumn(
                 name: "RequiresDocumentation",
-                table: "LeaveTypes",
-                newName: "RequiresReliever");
+                table: "LeaveTypes");
 
-            migrationBuilder.RenameColumn(
+            migrationBuilder.AddColumn<int>(
+                name: "MinServiceMonthsToAccess",
+                table: "LeaveTypes",
+                type: "int",
+                nullable: true);
+            migrationBuilder.DropColumn(
                 name: "MaxConsecutiveDays",
-                table: "LeaveTypes",
-                newName: "MinServiceMonthsToAccess");
+                table: "LeaveTypes");
 
-            migrationBuilder.RenameColumn(
+            migrationBuilder.AddColumn<bool>(
+                name: "MandatoryAnnualLeave",
+                table: "LeaveTypes",
+                type: "bit",
+                nullable: false,
+                defaultValue: false);
+            migrationBuilder.DropColumn(
                 name: "AppliesToAllCategories",
-                table: "LeaveTypes",
-                newName: "MandatoryAnnualLeave");
+                table: "LeaveTypes");
 
-            migrationBuilder.RenameColumn(
+            // ApprovedDate is added + backfilled from the legacy ApprovalDate above. RejectionDate is dropped
+            // here (its data is guarded in the block above) rather than renamed into ApprovedDate, which would
+            // have recorded a rejection timestamp as an approval timestamp.
+            migrationBuilder.DropColumn(
                 name: "RejectionDate",
-                table: "LeaveRequests",
-                newName: "ApprovedDate");
+                table: "LeaveRequests");
 
             migrationBuilder.RenameColumn(
                 name: "ApprovedByEmployeeId",
@@ -390,6 +426,14 @@ IF EXISTS (SELECT 1 FROM PublicHolidays)
                 name: "IX_Employees_ShiftId",
                 table: "Employees",
                 newName: "IX_Employees_HireRecordId");
+
+            // [HR-MODULE-PORT] The two renames just above re-point columns at unrelated targets
+            // (ApprovedByEmployeeId -> WorkflowInstanceId; Employees.ShiftId -> HireRecordId). Both new
+            // columns are nullable with NO valid legacy mapping, so clear the mis-carried legacy ids to NULL
+            // rather than leave a value that points at the wrong entity. No-op on a fresh/empty database.
+            migrationBuilder.Sql(@"
+UPDATE LeaveRequests SET WorkflowInstanceId = NULL WHERE WorkflowInstanceId IS NOT NULL;
+UPDATE Employees      SET HireRecordId      = NULL WHERE HireRecordId      IS NOT NULL;");
 
             migrationBuilder.RenameIndex(
                 name: "IX_EmployeeBankBranch_Tenant_Bank_Code",

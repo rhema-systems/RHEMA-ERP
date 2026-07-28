@@ -14,10 +14,12 @@ namespace ErpSystem.Api.Security;
 /// registered on the careers portal could read applications and candidate PII, reject applicants and
 /// approve staff requisitions.</para>
 ///
-/// <para>Portal tokens now use a distinct signing key and audience and are validated only on the
-/// <see cref="Scheme"/> scheme. An internal endpoint (default scheme) cannot validate them at all.
-/// <c>AddErpSystemAuthorization</c> additionally hardens the default policy so a portal token is
-/// rejected even if it ever did authenticate.</para>
+/// <para>Portal tokens use a distinct signing key and audience and are validated only on the
+/// <see cref="Scheme"/> scheme, so an internal endpoint (default scheme) cannot validate them at all.
+/// <see cref="ValidateDistinctFromInternal"/> is enforced at startup to guarantee that separation —
+/// if the portal key or audience ever equalled its internal counterpart, portal tokens would validate
+/// on the default bearer scheme and could satisfy a bare internal <c>[Authorize]</c> (they do not
+/// carry the ExternalUser role the access middleware checks).</para>
 /// </summary>
 public static class PortalAuth
 {
@@ -46,6 +48,30 @@ public static class PortalAuth
     public static string Issuer(IConfiguration config) =>
         config["JwtSettings:Issuer"]
         ?? throw new InvalidOperationException("JwtSettings:Issuer is not configured.");
+
+    /// <summary>
+    /// Fail fast at startup if the external-portal signing key or audience is NOT distinct from the
+    /// internal ones. If they matched, portal tokens would validate on the internal default bearer
+    /// scheme and could satisfy internal <c>[Authorize]</c> attributes. Existence of the portal values
+    /// is enforced separately by <see cref="SigningKey"/> / <see cref="Audience"/>.
+    /// </summary>
+    public static void ValidateDistinctFromInternal(IConfiguration config)
+    {
+        var internalKey = config["JwtSettings:SecretKey"];
+        var portalKey   = config["JwtSettings:PortalSecretKey"];
+        if (!string.IsNullOrEmpty(portalKey) && string.Equals(portalKey, internalKey, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "JwtSettings:PortalSecretKey must be different from JwtSettings:SecretKey. When they are equal, " +
+                "external portal tokens validate on the internal bearer scheme and can satisfy [Authorize] on " +
+                "internal controllers.");
+
+        var internalAudience = config["JwtSettings:Audience"];
+        var portalAudience   = config["JwtSettings:PortalAudience"];
+        if (!string.IsNullOrEmpty(portalAudience) && string.Equals(portalAudience, internalAudience, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "JwtSettings:PortalAudience must be different from JwtSettings:Audience so external portal " +
+                "tokens are never accepted on internal endpoints.");
+    }
 
     /// <summary>
     /// The single definition of how a portal token is validated — used both by the
