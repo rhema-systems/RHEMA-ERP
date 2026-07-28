@@ -987,12 +987,10 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             throw new UnauthorizedAccessException(
                 "The controlled file-upload record belongs to a different actor.");
         }
-        if (fileRecord.VirusScanStatus is Enums.FileVirusScanStatus.Pending or
-            Enums.FileVirusScanStatus.Infected or
-            Enums.FileVirusScanStatus.Error)
+        if (fileRecord.VirusScanStatus != Enums.FileVirusScanStatus.Clean)
         {
             throw new InvalidOperationException(
-                "Registration evidence does not have an acceptable virus-scan result.");
+                "Registration evidence must have a clean virus-scan result.");
         }
         var requestedPath = (dto.DocumentPath ?? dto.FilePath ?? string.Empty)
             .Replace('\\', '/');

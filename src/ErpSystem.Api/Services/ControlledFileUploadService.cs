@@ -10,47 +10,6 @@ using Microsoft.Extensions.Options;
 
 namespace ErpSystem.Api.Services;
 
-public interface IControlledFileUploadService
-{
-    Task<ControlledFileUploadResult> UploadAsync(
-        ControlledFileUploadRequest request,
-        CancellationToken cancellationToken = default);
-
-    Task DeleteAsync(
-        Guid tenantId,
-        Guid fileUploadRecordId,
-        Guid actorUserId,
-        CancellationToken cancellationToken = default);
-}
-
-public sealed class ControlledFileUploadRequest
-{
-    public required Guid TenantId { get; init; }
-    public required Guid ActorUserId { get; init; }
-    public string? ActorName { get; init; }
-    public required string Category { get; init; }
-    public required string FileName { get; init; }
-    public required string ContentType { get; init; }
-    public required long FileSize { get; init; }
-    public required Func<Stream> OpenReadStream { get; init; }
-}
-
-public sealed class ControlledFileUploadResult
-{
-    public required FileUploadRecord Record { get; init; }
-    public required string ChecksumSha256 { get; init; }
-    public required string PublicUrl { get; init; }
-}
-
-public sealed class ControlledFileUploadException(
-    string code,
-    string message,
-    int statusCode = StatusCodes.Status422UnprocessableEntity) : InvalidOperationException(message)
-{
-    public string Code { get; } = code;
-    public int StatusCode { get; } = statusCode;
-}
-
 /// <summary>
 /// Applies the shared tenant file-upload policy before any storage provider is
 /// called, and persists the shared FileUploadRecord used by evidence controls.
@@ -89,6 +48,7 @@ public sealed class ControlledFileUploadService : IControlledFileUploadService
     private readonly IFileVirusScanService _virusScan;
     private readonly ApplicationDbContext _db;
     private readonly ILogger<ControlledFileUploadService> _logger;
+    private readonly HashSet<string> _cleanScanRequiredCategories;
 
     public ControlledFileUploadService(
         IOptions<FileUploadOptions> options,
@@ -102,6 +62,16 @@ public sealed class ControlledFileUploadService : IControlledFileUploadService
         _virusScan = virusScan;
         _db = db;
         _logger = logger;
+        _cleanScanRequiredCategories = new HashSet<string>(
+            ControlledFileUploadCategories.SystemCleanScanRequired,
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var category in ParseCsv(
+                     _options.RequiredCleanScanCategoriesCsv,
+                     ensureDot: false))
+        {
+            _cleanScanRequiredCategories.Add(
+                NormalizeCategory(category));
+        }
     }
 
     public async Task<ControlledFileUploadResult> UploadAsync(
@@ -403,7 +373,8 @@ public sealed class ControlledFileUploadService : IControlledFileUploadService
             MaxCategoryTotalBytes =
                 specific?.MaxCategoryTotalBytes ?? global?.MaxCategoryTotalBytes,
             RequireVirusScan =
-                specific?.RequireVirusScan ?? global?.RequireVirusScan ?? false,
+                _cleanScanRequiredCategories.Contains(category) ||
+                (specific?.RequireVirusScan ?? global?.RequireVirusScan ?? false),
             AllowedExtensions = allowedExtensions,
             AllowedMimeTypes = allowedMimeTypes
         };

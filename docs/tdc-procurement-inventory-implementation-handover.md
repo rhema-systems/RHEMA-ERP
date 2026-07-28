@@ -502,6 +502,7 @@ The full TypeScript check currently fails in unrelated baseline files. Each next
 | Copying broad/contradictory authorization | Use explicit authenticated administration actions; never combine `[AllowAnonymous]` and `[Authorize]`. |
 | Enforcing UI-only restrictions | Put every hard stop in service/API code and add direct-API negative tests. |
 | Building a new workflow/evidence implementation | Reuse the shared workflow, file storage, evidence policies, notifications, and audit history. |
+| Adding module-specific upload or malware-scan code | Inject the Core `IControlledFileUploadService`, use `ControlledFileUploadCategories`, and register one host-level `IFileVirusScanService`; never write user-controlled documents directly from a module controller. |
 | Adding a large all-in-one settings screen | Use dedicated list/detail routes and shared dialogs/controls. |
 | Publishing seeded questionnaire values | Seed them only as clearly unapproved Draft suggestions; never activate them without TDC approval evidence. |
 | Editing or deleting the dirty worktree | Preserve team changes and keep procurement commits scoped. |
@@ -522,7 +523,7 @@ The full TypeScript check currently fails in unrelated baseline files. Each next
 
 Use this prompt in the new chat after opening the repository:
 
-> Continue the TDC Procurement and Inventory implementation using `docs/tdc-procurement-inventory-implementation-handover.md` and `docs/tdc-procurement-inventory-gap-implementation-tracker.md` as the active delivery documents. Start with `TDC-0401` only. Reverify the preserved dirty worktree, local Finance-integrated baseline through `a0f18da9`, complete accepted uncommitted `TDC-0302` through `TDC-0309` implementations/evidence, and test database current through `20260727134547_HardenProcurementSupplierApplicantEvidence`; preserve all existing team changes. Implement the framework agreement and governed price-list register without beginning `TDC-0402`, weakening supplier eligibility/onboarding controls, recreating workflow/evidence controls, or broadly changing PR/PO/receiving/inventory runtime; do not mark the task `Done` until every applicable acceptance gate passes.
+> Continue the TDC Procurement and Inventory implementation using `docs/tdc-procurement-inventory-implementation-handover.md` and `docs/tdc-procurement-inventory-gap-implementation-tracker.md` as the active delivery documents. Start with `TDC-0401` only. Reverify the preserved dirty worktree, local Finance-integrated baseline through `a0f18da9`, complete accepted uncommitted `TDC-0302` through `TDC-0309` implementations/evidence, and test database current through `20260728173000_RequireCleanSupplierRegistrationEvidence`; preserve all existing team changes. Reuse the Core controlled-upload and malware-scanning boundary for every new document path. Implement the framework agreement and governed price-list register without beginning `TDC-0402`, weakening supplier eligibility/onboarding controls, recreating workflow/evidence controls, or broadly changing PR/PO/receiving/inventory runtime; do not mark the task `Done` until every applicable acceptance gate passes.
 
 ## Handover Completion Signal
 

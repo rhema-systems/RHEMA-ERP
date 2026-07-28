@@ -89,6 +89,25 @@ public sealed class BusinessPartnerRegistrationDocumentControlTests
             .Should().Be(0);
     }
 
+    [Fact]
+    public async Task SkippedControlledUploadCannotBeBoundToApplication()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.FileRecord.VirusScanStatus = FileVirusScanStatus.Skipped;
+        fixture.FileRecord.ScannedAtUtc = null;
+        await fixture.Db.SaveChangesAsync();
+
+        var act = () => fixture.Service.UploadDocumentAsync(
+            fixture.RegistrationId,
+            fixture.DocumentRequest(fixture.FileRecord),
+            fixture.ActorId);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*clean virus-scan result*");
+        (await fixture.Db.BusinessPartnerRegistrationDocuments.CountAsync())
+            .Should().Be(0);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public Guid TenantId { get; }

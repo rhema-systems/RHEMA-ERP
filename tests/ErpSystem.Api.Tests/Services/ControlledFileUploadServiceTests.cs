@@ -67,6 +67,65 @@ public sealed class ControlledFileUploadServiceTests
             Times.Once);
     }
 
+    [Theory]
+    [InlineData("*", ControlledFileUploadCategories.SupplierRegistrationEvidence)]
+    [InlineData(
+        ControlledFileUploadCategories.SupplierRegistrationEvidence,
+        ControlledFileUploadCategories.SupplierRegistrationEvidence)]
+    [InlineData("*", ControlledFileUploadCategories.DocumentManagement)]
+    public async Task SystemCategoryForcesCleanScanWhenPolicyDisablesScanning(
+        string policyCategory,
+        string uploadCategory)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = Database();
+        db.FileUploadPolicies.Add(new FileUploadPolicy
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Category = policyCategory,
+            IsEnabled = true,
+            RequireVirusScan = false
+        });
+        await db.SaveChangesAsync();
+        var storage = Storage(result: Stored(tenantId));
+        var scanner = CleanScanner();
+        var service = Service(db, storage.Object, scanner.Object);
+
+        var result = await service.UploadAsync(
+            Request(tenantId, Guid.NewGuid(), uploadCategory));
+
+        result.Record.VirusScanStatus.Should().Be(FileVirusScanStatus.Clean);
+        scanner.Verify(item => item.ScanAsync(
+            It.Is<FileVirusScanRequest>(request =>
+                request.Category == uploadCategory),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ConfiguredModuleCategoryUsesTheCentralCleanScanBoundary()
+    {
+        const string moduleCategory = "legal-case-documents";
+        var tenantId = Guid.NewGuid();
+        await using var db = Database();
+        var storage = Storage(result: Stored(tenantId));
+        var scanner = CleanScanner();
+        var service = Service(
+            db,
+            storage.Object,
+            scanner.Object,
+            requiredCleanScanCategoriesCsv: moduleCategory);
+
+        var result = await service.UploadAsync(
+            Request(tenantId, Guid.NewGuid(), moduleCategory));
+
+        result.Record.VirusScanStatus.Should().Be(FileVirusScanStatus.Clean);
+        scanner.Verify(item => item.ScanAsync(
+            It.Is<FileVirusScanRequest>(request =>
+                request.Category == moduleCategory),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task DefaultPolicyRejectsScriptableSvgBeforeStorageWrite()
     {
@@ -221,7 +280,7 @@ public sealed class ControlledFileUploadServiceTests
             setup.ReturnsAsync(FailedStorage(tenantId));
         }
         var service = Service(
-            db, storage.Object, Mock.Of<IFileVirusScanService>());
+            db, storage.Object, CleanScanner().Object);
 
         var act = () => service.UploadAsync(
             Request(tenantId, Guid.NewGuid()));
@@ -296,9 +355,15 @@ public sealed class ControlledFileUploadServiceTests
     private static ControlledFileUploadService Service(
         ApplicationDbContext db,
         IFileStorageService storage,
-        IFileVirusScanService scanner) =>
+        IFileVirusScanService scanner,
+        string? requiredCleanScanCategoriesCsv = null) =>
         new(
-            Options.Create(new FileUploadOptions { MaxFileSizeBytes = 1024 }),
+            Options.Create(new FileUploadOptions
+            {
+                MaxFileSizeBytes = 1024,
+                RequiredCleanScanCategoriesCsv =
+                    requiredCleanScanCategoriesCsv
+            }),
             storage,
             scanner,
             db,
@@ -306,7 +371,9 @@ public sealed class ControlledFileUploadServiceTests
 
     private static ControlledFileUploadRequest Request(
         Guid tenantId,
-        Guid actorId)
+        Guid actorId,
+        string category =
+            ControlledFileUploadCategories.SupplierRegistrationEvidence)
     {
         var content = new byte[] { 1, 2, 3, 4 };
         return new ControlledFileUploadRequest
@@ -314,7 +381,7 @@ public sealed class ControlledFileUploadServiceTests
             TenantId = tenantId,
             ActorUserId = actorId,
             ActorName = "test",
-            Category = "supplier-registration-evidence",
+            Category = category,
             FileName = "evidence.pdf",
             ContentType = "application/pdf",
             FileSize = content.Length,
@@ -332,6 +399,20 @@ public sealed class ControlledFileUploadServiceTests
         storage.Setup(item => item.DeleteFileAsync(It.IsAny<string>()))
             .ReturnsAsync(true);
         return storage;
+    }
+
+    private static Mock<IFileVirusScanService> CleanScanner()
+    {
+        var scanner = new Mock<IFileVirusScanService>();
+        scanner.Setup(item => item.ScanAsync(
+                It.IsAny<FileVirusScanRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileVirusScanResult
+            {
+                Status = FileVirusScanStatus.Clean,
+                Message = "clean"
+            });
+        return scanner;
     }
 
     private static FileStorageResult Stored(Guid tenantId) => new()

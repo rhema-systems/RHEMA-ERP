@@ -272,6 +272,12 @@ public class FileUploadOptions
     public bool EnableImageOptimization { get; set; } = false;
     public int MaxImageWidth { get; set; } = 2048;
     public int MaxImageHeight { get; set; } = 2048;
+    /// <summary>
+    /// Additional normalized upload categories that must obtain a clean scan.
+    /// System categories declared by <see cref="ControlledFileUploadCategories"/>
+    /// are always included and cannot be disabled here.
+    /// </summary>
+    public string? RequiredCleanScanCategoriesCsv { get; set; }
 }
 
 // Response DTOs

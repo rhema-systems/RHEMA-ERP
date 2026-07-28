@@ -24,6 +24,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -1435,9 +1436,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Add storage services
             services.AddStorageServices();
 
-            // Phase 2 baseline: virus scan hook (no-op by default; can be replaced with a real provider)
-            services.AddSingleton<IFileVirusScanService, ErpSystem.Api.Services.NoOpFileVirusScanService>();
-            services.AddScoped<ErpSystem.Api.Services.IControlledFileUploadService,
+            // Central malware-scanning boundary. TryAdd keeps a real provider
+            // registered by the host/module from being overwritten here.
+            services.TryAddSingleton<IFileVirusScanService,
+                ErpSystem.Api.Services.NoOpFileVirusScanService>();
+            services.AddScoped<IControlledFileUploadService,
                 ErpSystem.Api.Services.ControlledFileUploadService>();
 
             // Configure multipart body length limit for file uploads
