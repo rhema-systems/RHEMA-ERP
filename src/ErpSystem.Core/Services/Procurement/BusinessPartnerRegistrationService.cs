@@ -1361,11 +1361,13 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             // Primary Contact Information (from contact person)
             PrimaryContactName = additionalData.ContactPersonName,
             PrimaryContactTitle = additionalData.ContactPersonTitle,
-            // Link to user account (for external portal access and notifications)
-            UserId = registration.CreatedById, // Link to the user who created the registration
+            // Preserve legacy account-first registrations. In the token-gated path,
+            // credential provisioning replaces the system actor with the approved
+            // supplier account while leaving registration audit fields unchanged.
+            UserId = registration.CreatedById,
             // Operational status used across internal UIs and downstream docs.
-            RegistrationStatus = "Active",
-            ApprovalStatus = "Approved",
+            RegistrationStatus = BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus,
+            ApprovalStatus = BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus,
             IsPreferred = false,
             IsBlacklisted = false,
             IsActive = true,

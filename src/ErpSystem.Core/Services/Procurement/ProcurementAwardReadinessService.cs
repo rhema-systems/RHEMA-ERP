@@ -1117,13 +1117,12 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             var warnings = new List<string>();
             if (!partner.IsActive) errors.Add("Supplier is inactive.");
             if (partner.IsBlacklisted) errors.Add("Supplier is blacklisted.");
-            if (!string.Equals(partner.ApprovalStatus, "Approved",
-                    StringComparison.OrdinalIgnoreCase))
+            if (!BusinessPartnerLifecyclePolicy.IsApproved(partner.ApprovalStatus))
                 errors.Add("Supplier approval is not current.");
             if (!partner.ApprovedById.HasValue && !partner.CreatedById.HasValue)
                 errors.Add("Supplier controller lineage is missing.");
-            if (!string.Equals(partner.RegistrationStatus, "Approved",
-                    StringComparison.OrdinalIgnoreCase))
+            if (!BusinessPartnerLifecyclePolicy.IsOperationalRegistration(
+                    partner.RegistrationStatus))
                 errors.Add("Supplier registration is not approved.");
             if (!partner.PartnerType.Contains("Supplier", StringComparison.OrdinalIgnoreCase) &&
                 !partner.PartnerType.Contains("Contractor", StringComparison.OrdinalIgnoreCase) &&

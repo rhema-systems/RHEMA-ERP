@@ -73,6 +73,8 @@ public sealed class ProcurementSupplierApplicantAccessService :
         _unitOfWork.Repository<BusinessPartnerRegistration>();
     private IGenericRepository<ProcurementSupplierOnboardingToken> Tokens =>
         _unitOfWork.Repository<ProcurementSupplierOnboardingToken>();
+    private IGenericRepository<BusinessPartner> BusinessPartners =>
+        _unitOfWork.Repository<BusinessPartner>();
     private IGenericRepository<BusinessPartnerUser> BusinessPartnerUsers =>
         _unitOfWork.Repository<BusinessPartnerUser>();
     private IGenericRepository<UserTenant> UserTenants =>
@@ -562,15 +564,58 @@ public sealed class ProcurementSupplierApplicantAccessService :
             .Include(item => item.Token)
             .SingleOrDefaultAsync(cancellationToken);
         if (access is null) return;
-        if (access.ApprovedUserId.HasValue &&
-            access.Status is ProcurementSupplierApplicantAccessStatus.CredentialDelivered or
-                ProcurementSupplierApplicantAccessStatus.Activated)
-            return;
         if (!string.Equals(access.Registration.Status, "Approved",
                 StringComparison.OrdinalIgnoreCase) ||
             access.Registration.BusinessPartnerId != businessPartnerId)
             throw Error("SUPPLIER_APPLICANT_APPROVAL_NOT_CURRENT",
                 "The approved supplier-account subject is not current.", 409);
+        var businessPartner = await BusinessPartners.GetQueryable(item =>
+                item.Id == businessPartnerId &&
+                item.TenantId == access.TenantId &&
+                !item.IsDeleted)
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw Error(
+                "SUPPLIER_APPLICANT_BUSINESS_PARTNER_NOT_FOUND",
+                "The approved business partner was not found in the current tenant.",
+                409);
+        if (access.ApprovedUserId.HasValue &&
+            access.Status is ProcurementSupplierApplicantAccessStatus.CredentialDelivered or
+                ProcurementSupplierApplicantAccessStatus.Activated)
+        {
+            var approvedUserId = access.ApprovedUserId.Value;
+            var approvedUser = await _userManager.FindByIdAsync(approvedUserId.ToString())
+                ?? throw Error(
+                    "SUPPLIER_APPLICANT_ACCOUNT_NOT_FOUND",
+                    "The provisioned supplier account was not found.",
+                    409);
+            EnsureApprovedUserTenant(approvedUser, access);
+            var repaired = await EnsureApprovedSupplierIdentityLinksAsync(
+                businessPartner,
+                approvedUserId,
+                approvedById,
+                DateTime.UtcNow,
+                cancellationToken);
+            if (repaired)
+            {
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await RecordUserEventAsync(
+                    access,
+                    access.Token,
+                    "SupplierAccountLinkReconciled",
+                    ProcurementControlEventResult.Succeeded,
+                    new
+                    {
+                        UserId = approvedUserId,
+                        BusinessPartnerId = businessPartner.Id,
+                        PrimaryPortalUserLinked = true,
+                        BusinessPartnerMembershipLinked = true
+                    },
+                    "The approved supplier account links were reconciled idempotently.",
+                    NormalizeCorrelation(correlationId),
+                    cancellationToken);
+            }
+            return;
+        }
 
         await CloseForTerminalRegistrationAsync(
             registrationId,
@@ -606,6 +651,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
             user = await _userManager.FindByIdAsync(access.ApprovedUserId.Value.ToString())
                 ?? throw Error("SUPPLIER_APPLICANT_ACCOUNT_NOT_FOUND",
                     "The provisioned supplier account was not found.", 409);
+            EnsureApprovedUserTenant(user, access);
             var reset = await _userManager.GeneratePasswordResetTokenAsync(user);
             var resetResult = await _userManager.ResetPasswordAsync(
                 user, reset, temporaryPassword);
@@ -665,28 +711,12 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 CreatedById = approvedById
             });
         }
-        if (!await BusinessPartnerUsers.GetQueryable(item =>
-                item.TenantId == access.TenantId &&
-                item.BusinessPartnerId == businessPartnerId &&
-                item.UserId == user.Id && !item.IsDeleted)
-            .AnyAsync(cancellationToken))
-        {
-            await BusinessPartnerUsers.AddAsync(new BusinessPartnerUser
-            {
-                Id = Guid.NewGuid(),
-                TenantId = access.TenantId,
-                BusinessPartnerId = businessPartnerId,
-                UserId = user.Id,
-                Role = NormalizeBusinessPartnerRole(),
-                IsActive = true,
-                GrantedAt = now,
-                GrantedById = approvedById,
-                Notes = "Provisioned from approved token-gated supplier application.",
-                CreatedAt = now,
-                CreatedBy = approvedById.ToString(),
-                CreatedById = approvedById
-            });
-        }
+        await EnsureApprovedSupplierIdentityLinksAsync(
+            businessPartner,
+            user.Id,
+            approvedById,
+            now,
+            cancellationToken);
 
         access.ApprovedUserId = user.Id;
         access.BusinessPartnerId = businessPartnerId;
@@ -711,6 +741,8 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 UserId = user.Id,
                 Roles = roles,
                 BusinessPartnerRole = access.ApprovedBusinessPartnerRole,
+                BusinessPartnerId = businessPartner.Id,
+                PrimaryPortalUserLinked = businessPartner.UserId == user.Id,
                 access.TemporaryCredentialExpiresAtUtc,
                 MustChangePassword = true
             },
@@ -719,6 +751,85 @@ public sealed class ProcurementSupplierApplicantAccessService :
             cancellationToken);
         await DeliverCredentialAsync(
             access, temporaryPassword, resend: false, correlationId, cancellationToken);
+    }
+
+    private async Task<bool> EnsureApprovedSupplierIdentityLinksAsync(
+        BusinessPartner businessPartner,
+        Guid approvedUserId,
+        Guid approvedById,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        var changed = false;
+        if (businessPartner.UserId != approvedUserId)
+        {
+            businessPartner.UserId = approvedUserId;
+            businessPartner.UpdatedAt = now;
+            businessPartner.UpdatedBy = approvedById.ToString();
+            businessPartner.LastModifiedById = approvedById;
+            await BusinessPartners.UpdateAsync(businessPartner);
+            changed = true;
+        }
+
+        var role = NormalizeBusinessPartnerRole();
+        var membership = await BusinessPartnerUsers
+            .GetQueryableIncludingDeleted(item =>
+                item.TenantId == businessPartner.TenantId &&
+                item.BusinessPartnerId == businessPartner.Id &&
+                item.UserId == approvedUserId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (membership is null)
+        {
+            await BusinessPartnerUsers.AddAsync(new BusinessPartnerUser
+            {
+                Id = Guid.NewGuid(),
+                TenantId = businessPartner.TenantId,
+                BusinessPartnerId = businessPartner.Id,
+                UserId = approvedUserId,
+                Role = role,
+                IsActive = true,
+                GrantedAt = now,
+                GrantedById = approvedById,
+                Notes = "Provisioned from approved token-gated supplier application.",
+                CreatedAt = now,
+                CreatedBy = approvedById.ToString(),
+                CreatedById = approvedById
+            });
+            return true;
+        }
+
+        if (membership.IsDeleted ||
+            !membership.IsActive ||
+            !string.Equals(membership.Role, role, StringComparison.Ordinal))
+        {
+            membership.IsDeleted = false;
+            membership.DeletedAt = null;
+            membership.DeletedBy = null;
+            membership.IsActive = true;
+            membership.Role = role;
+            membership.GrantedAt = now;
+            membership.GrantedById = approvedById;
+            membership.UpdatedAt = now;
+            membership.UpdatedBy = approvedById.ToString();
+            membership.LastModifiedById = approvedById;
+            membership.Notes =
+                "Provisioned from approved token-gated supplier application.";
+            await BusinessPartnerUsers.UpdateAsync(membership);
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static void EnsureApprovedUserTenant(
+        ApplicationUser user,
+        ProcurementSupplierApplicantAccess access)
+    {
+        if (user.TenantId != access.TenantId)
+            throw Error(
+                "SUPPLIER_APPLICANT_ACCOUNT_TENANT_MISMATCH",
+                "The provisioned supplier account is not assigned to the application tenant.",
+                409);
     }
 
     public async Task RetryApprovedSupplierActivationAsync(

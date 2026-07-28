@@ -1731,7 +1731,12 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 item.BusinessPartner.TenantId == _currentUser.TenantId &&
                 !item.BusinessPartner.IsDeleted && item.BusinessPartner.IsActive &&
                 !item.BusinessPartner.IsBlacklisted &&
-                item.BusinessPartner.RegistrationStatus == "Approved" &&
+                item.BusinessPartner.ApprovalStatus ==
+                    BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
+                (item.BusinessPartner.RegistrationStatus ==
+                     BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
+                 item.BusinessPartner.RegistrationStatus ==
+                     BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
                 (item.BusinessPartner.PartnerType == "Supplier" ||
                  item.BusinessPartner.PartnerType == "Contractor" ||
                  item.BusinessPartner.PartnerType == "Both"))
@@ -1745,7 +1750,12 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 item.BusinessPartner.TenantId == _currentUser.TenantId &&
                 !item.BusinessPartner.IsDeleted && item.BusinessPartner.IsActive &&
                 !item.BusinessPartner.IsBlacklisted &&
-                item.BusinessPartner.RegistrationStatus == "Approved" &&
+                item.BusinessPartner.ApprovalStatus ==
+                    BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
+                (item.BusinessPartner.RegistrationStatus ==
+                     BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
+                 item.BusinessPartner.RegistrationStatus ==
+                     BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
                 (item.BusinessPartner.PartnerType == "Supplier" ||
                  item.BusinessPartner.PartnerType == "Contractor" ||
                  item.BusinessPartner.PartnerType == "Both"))

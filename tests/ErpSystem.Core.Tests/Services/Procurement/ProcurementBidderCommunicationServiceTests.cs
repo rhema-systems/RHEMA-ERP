@@ -703,8 +703,10 @@ public sealed class ProcurementBidderCommunicationServiceTests
             PrimaryPhone = $"+23320{Random.Shared.Next(1000000, 9999999)}",
             IsActive = true,
             IsBlacklisted = false,
-            ApprovalStatus = "Approved",
-            RegistrationStatus = "Approved"
+            ApprovalStatus =
+                BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus,
+            RegistrationStatus =
+                BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus
         };
 
         private void SeedRfq()

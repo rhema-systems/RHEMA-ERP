@@ -165,6 +165,27 @@ public sealed class SupplierValidationServiceTests
     }
 
     [Fact]
+    public async Task LegacyApprovedRegistrationRemainsEligible()
+    {
+        await using var fixture = new Fixture();
+        var supplier = fixture.AddSupplier(
+            registrationStatus:
+                BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus);
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateEligibilityAsync(
+            new SupplierEligibilityEvaluationRequest
+            {
+                BusinessPartnerId = supplier.Id,
+                Boundary = SupplierEligibilityBoundary.StatusReview,
+                SkipFormalAvlMembership = true
+            });
+
+        result.Findings.Should().NotContain(item =>
+            item.Code == "REGISTRATION_NOT_APPROVED");
+    }
+
+    [Fact]
     public async Task EffectiveDec011RequiresAnApprovedCurrentDueDiligenceReview()
     {
         await using var fixture = new Fixture();
@@ -299,7 +320,9 @@ public sealed class SupplierValidationServiceTests
         public BusinessPartner AddSupplier(
             bool blacklisted = false,
             Guid? categoryId = null,
-            Guid? tenantId = null)
+            Guid? tenantId = null,
+            string registrationStatus =
+                BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus)
         {
             var supplier = new BusinessPartner
             {
@@ -308,8 +331,9 @@ public sealed class SupplierValidationServiceTests
                 PartnerCode = $"SUP-{Guid.NewGuid():N}"[..12],
                 PartnerName = "Eligible supplier",
                 PartnerType = "Supplier",
-                RegistrationStatus = "Approved",
-                ApprovalStatus = "Approved",
+                RegistrationStatus = registrationStatus,
+                ApprovalStatus =
+                    BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus,
                 IsActive = true,
                 IsBlacklisted = blacklisted,
                 BlacklistReason = blacklisted ? "Compliance hold" : null

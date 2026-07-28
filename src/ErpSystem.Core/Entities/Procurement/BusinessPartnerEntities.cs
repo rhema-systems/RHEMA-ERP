@@ -352,8 +352,8 @@ public class BusinessPartner : TenantEntity
 
     // User Account Link (for external portal access)
     /// <summary>
-    /// Links this business partner to the user account that manages it in the external portal
-    /// This is the user ID from the registration process (CreatedById from BusinessPartnerRegistration)
+    /// Links this business partner to its primary external-portal user.
+    /// Registration and approval actors remain in their dedicated audit fields.
     /// </summary>
     public Guid? UserId { get; set; }
 

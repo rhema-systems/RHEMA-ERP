@@ -141,8 +141,10 @@ public sealed class ProcurementAwardReadinessServiceTests
                 PartnerType = "Supplier",
                 IsActive = true,
                 IsBlacklisted = false,
-                ApprovalStatus = "Approved",
-                RegistrationStatus = "Approved",
+                ApprovalStatus =
+                    BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus,
+                RegistrationStatus =
+                    BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus,
                 ApprovedById = SupplierControllerId
             };
             Tender = new Tender

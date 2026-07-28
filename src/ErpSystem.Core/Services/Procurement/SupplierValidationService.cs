@@ -209,9 +209,9 @@ public class SupplierValidationService : ISupplierValidationService
               partner.PartnerType.Contains("Both", StringComparison.OrdinalIgnoreCase)))
             result.Block("SUPPLIER_TYPE_INVALID", $"Business partner type '{partner.PartnerType}' is not eligible for procurement.");
 
-        if (!string.Equals(partner.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+        if (!BusinessPartnerLifecyclePolicy.IsApproved(partner.ApprovalStatus))
             result.Block("SUPPLIER_NOT_APPROVED", $"Supplier approval status is '{partner.ApprovalStatus ?? "Pending"}'.");
-        if (!string.Equals(partner.RegistrationStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+        if (!BusinessPartnerLifecyclePolicy.IsOperationalRegistration(partner.RegistrationStatus))
             result.Block("REGISTRATION_NOT_APPROVED", $"Supplier registration status is '{partner.RegistrationStatus}'.");
         if (!partner.IsActive)
             result.Block("SUPPLIER_INACTIVE", "Supplier account is inactive.");

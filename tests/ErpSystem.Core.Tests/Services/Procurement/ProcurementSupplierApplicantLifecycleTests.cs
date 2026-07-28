@@ -295,9 +295,33 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
         (await fixture.Context.BusinessPartnerUsers.CountAsync(item =>
             item.UserId == access.ApprovedUserId &&
             item.BusinessPartnerId == subject.BusinessPartnerId)).Should().Be(1);
+        var partner = await fixture.Context.BusinessPartners
+            .SingleAsync(item => item.Id == subject.BusinessPartnerId);
+        partner.UserId.Should().Be(access.ApprovedUserId);
+        partner.CreatedById.Should().Be(fixture.ActorId);
+        (await fixture.Context.BusinessPartnerRegistrations
+                .SingleAsync(item => item.Id == subject.RegistrationId))
+            .CreatedById.Should().Be(fixture.ActorId);
         fixture.DeliveredMessages.Should().ContainSingle()
             .Which.Should().Contain(access.LoginIdentifier)
             .And.Contain(fixture.LastTemporaryPassword);
+
+        partner.UserId = fixture.ActorId;
+        var membership = await fixture.Context.BusinessPartnerUsers.SingleAsync(
+            item => item.BusinessPartnerId == subject.BusinessPartnerId &&
+                    item.UserId == access.ApprovedUserId);
+        membership.IsActive = false;
+        await fixture.Context.SaveChangesAsync();
+        await fixture.Service.ProvisionApprovedSupplierAsync(
+            subject.RegistrationId,
+            subject.BusinessPartnerId,
+            fixture.ActorId,
+            "approval-link-repair");
+        partner.UserId.Should().Be(access.ApprovedUserId);
+        membership.IsActive.Should().BeTrue();
+        (await fixture.Context.BusinessPartnerUsers.CountAsync(item =>
+            item.UserId == access.ApprovedUserId &&
+            item.BusinessPartnerId == subject.BusinessPartnerId)).Should().Be(1);
 
         fixture.UseSupplierAccount(Guid.NewGuid());
         var wrongActor = () => fixture.Service.CompleteCredentialActivationAsync(
@@ -573,7 +597,14 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
                     TenantId = TenantId,
                     PartnerCode = "SUP-001",
                     PartnerName = "Approved Supplier",
-                    PartnerType = "Supplier"
+                    PartnerType = "Supplier",
+                    RegistrationStatus =
+                        BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus,
+                    ApprovalStatus =
+                        BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus,
+                    IsActive = true,
+                    UserId = ActorId,
+                    CreatedById = ActorId
                 });
             var access = new ProcurementSupplierApplicantAccess
             {

@@ -74,6 +74,24 @@ public sealed class ProcurementTenderDocumentControlServiceTests
     }
 
     [Fact]
+    public async Task ActiveApprovedSupplierCanReadItsIssuedRegister()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
+        var register = await fixture.BindAsync("bind-active-supplier");
+        await fixture.Service.IssueAsync(
+            fixture.Issue(register.RowVersion, amountPaid: 0m),
+            "issue-active-supplier");
+        await fixture.SwitchToExternalAsync();
+
+        var external = await fixture.Service.GetRegisterAsync(
+            ProcurementTenderDocumentSourceType.Tender,
+            fixture.Tender.Id);
+
+        external.Issuances.Should().ContainSingle(item =>
+            item.BusinessPartnerId == fixture.Supplier.Id);
+    }
+
+    [Fact]
     public async Task MandatoryApprovedChangeAcknowledgementBlocksSubmissionUntilAcknowledged()
     {
         await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
@@ -318,7 +336,8 @@ public sealed class ProcurementTenderDocumentControlServiceTests
     private sealed class Fixture : IAsyncDisposable
     {
         private Guid _tenantId;
-        private readonly Guid _userId = Guid.NewGuid();
+        private Guid _userId = Guid.NewGuid();
+        private bool _external;
         private readonly UnitOfWork _unitOfWork;
 
         public Fixture(ProcurementTenderDocumentFeeMode feeMode)
@@ -428,7 +447,11 @@ public sealed class ProcurementTenderDocumentControlServiceTests
                 PartnerName = "Supplier One",
                 PartnerType = "Supplier",
                 IsActive = true,
-                RegistrationStatus = "Approved"
+                IsBlacklisted = false,
+                ApprovalStatus =
+                    BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus,
+                RegistrationStatus =
+                    BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus
             };
             var workflowEntityType = new WorkflowEntityType
             {
@@ -488,14 +511,15 @@ public sealed class ProcurementTenderDocumentControlServiceTests
 
             var current = new Mock<ICurrentUserProvider>();
             current.SetupGet(item => item.TenantId).Returns(() => _tenantId);
-            current.SetupGet(item => item.UserId).Returns(_userId);
+            current.SetupGet(item => item.UserId).Returns(() => _userId);
             current.SetupGet(item => item.IsAuthenticated).Returns(true);
-            current.SetupGet(item => item.IsExternalUser).Returns(false);
+            current.SetupGet(item => item.IsExternalUser).Returns(() => _external);
             current.SetupGet(item => item.Username).Returns("officer@tdc.test");
             current.SetupGet(item => item.FullName).Returns("Procurement Officer");
-            current.SetupGet(item => item.Roles).Returns(["TenantAdmin"]);
+            current.SetupGet(item => item.Roles).Returns(() =>
+                _external ? ["Supplier"] : ["TenantAdmin"]);
             current.Setup(item => item.HasRole(It.IsAny<string>()))
-                .Returns((string role) => role == "TenantAdmin");
+                .Returns((string role) => !_external && role == "TenantAdmin");
             _unitOfWork = new UnitOfWork(Context);
             var access = new Mock<IProcurementAccessControlService>();
             var sod = new Mock<IProcurementSodGuardService>();
@@ -535,6 +559,22 @@ public sealed class ProcurementTenderDocumentControlServiceTests
         public ProcurementTenderDocumentControlService Service { get; }
 
         public void SwitchTenant(Guid tenantId) => _tenantId = tenantId;
+
+        public async Task SwitchToExternalAsync()
+        {
+            _external = true;
+            _userId = Guid.NewGuid();
+            Context.Add(new BusinessPartnerUser
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                BusinessPartnerId = Supplier.Id,
+                UserId = _userId,
+                Role = "User",
+                IsActive = true
+            });
+            await Context.SaveChangesAsync();
+        }
 
         public Task<ProcurementTenderDocumentRegisterDto> BindAsync(string correlation) =>
             Service.BindAsync(new BindProcurementTenderDocumentRegisterRequest
