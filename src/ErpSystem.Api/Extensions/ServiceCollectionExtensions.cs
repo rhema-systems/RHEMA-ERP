@@ -465,11 +465,30 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IPropertyManagementProcedureCatalogService, ErpSystem.Core.Services.Estate.PropertyManagementProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IEstateProcedureCatalogService, ErpSystem.Core.Services.Estate.EstateProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IEstateManagedAssetService, ErpSystem.Core.Services.Estate.EstateManagedAssetService>();
-            services.AddHttpClient<ErpSystem.Api.Services.Estate.IEstateGisIntegrationService, ErpSystem.Api.Services.Estate.EstateGisIntegrationService>(client =>
-            {
-                client.Timeout = TimeSpan.FromSeconds(20);
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("RHEMA-ERP-Estate-GIS/1.0");
-            });
+            services
+                .AddOptions<ErpSystem.Api.Services.Estate.EstateGisNetworkSecurityOptions>()
+                .Configure<IConfiguration>((options, configuration) =>
+                    configuration
+                        .GetSection(ErpSystem.Api.Services.Estate.EstateGisNetworkSecurityOptions.SectionName)
+                        .Bind(options));
+            services.AddSingleton<ErpSystem.Api.Services.Estate.EstateGisNetworkPolicy>();
+            services
+                .AddHttpClient<ErpSystem.Api.Services.Estate.IEstateGisIntegrationService, ErpSystem.Api.Services.Estate.EstateGisIntegrationService>(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(20);
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("RHEMA-ERP-Estate-GIS/1.0");
+                })
+                .ConfigurePrimaryHttpMessageHandler(serviceProvider =>
+                {
+                    var networkPolicy = serviceProvider.GetRequiredService<ErpSystem.Api.Services.Estate.EstateGisNetworkPolicy>();
+                    return new SocketsHttpHandler
+                    {
+                        AllowAutoRedirect = false,
+                        UseProxy = false,
+                        ConnectTimeout = TimeSpan.FromSeconds(10),
+                        ConnectCallback = networkPolicy.ConnectHttpAsync
+                    };
+                });
             services.AddScoped<ErpSystem.Core.Interfaces.Planning.IPlanningProcedureCatalogService, ErpSystem.Core.Services.Planning.PlanningProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procedures.IProcedureCaseService, ErpSystem.Api.Services.ProcedureCaseService>();
 

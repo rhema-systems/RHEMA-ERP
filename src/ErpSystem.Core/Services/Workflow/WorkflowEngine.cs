@@ -1849,7 +1849,7 @@ public class WorkflowEngine : IWorkflowEngine
                 {
                     Id = "document-1",
                     RequirementKey = string.IsNullOrWhiteSpace(taskConfig.DocumentRequirementKey)
-                        ? BuildRequirementKey(taskConfig.DocumentName, 0)
+                        ? string.Empty
                         : taskConfig.DocumentRequirementKey.Trim(),
                     DocumentName = string.IsNullOrWhiteSpace(taskConfig.DocumentName)
                         ? "Required document"

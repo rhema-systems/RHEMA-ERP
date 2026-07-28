@@ -23,6 +23,7 @@ public sealed class EstateGisIntegrationService : IEstateGisIntegrationService
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly HttpClient _httpClient;
+    private readonly EstateGisNetworkPolicy _networkPolicy;
     private readonly IDataProtector _protector;
     private readonly ILogger<EstateGisIntegrationService> _logger;
 
@@ -30,12 +31,14 @@ public sealed class EstateGisIntegrationService : IEstateGisIntegrationService
         ApplicationDbContext db,
         ICurrentUserService currentUser,
         HttpClient httpClient,
+        EstateGisNetworkPolicy networkPolicy,
         IDataProtectionProvider dataProtectionProvider,
         ILogger<EstateGisIntegrationService> logger)
     {
         _db = db;
         _currentUser = currentUser;
         _httpClient = httpClient;
+        _networkPolicy = networkPolicy;
         _protector = dataProtectionProvider.CreateProtector(ProtectorPurpose);
         _logger = logger;
     }
@@ -71,7 +74,7 @@ public sealed class EstateGisIntegrationService : IEstateGisIntegrationService
         CancellationToken cancellationToken)
     {
         var tenantId = RequireTenantId();
-        ValidateConfiguration(request);
+        await ValidateConfigurationAsync(request, cancellationToken);
         var sourceCrs = Required(request.SourceCrs, "Source CRS is required.").ToUpperInvariant();
         var displayCrs = Required(request.DisplayCrs, "Display CRS is required.").ToUpperInvariant();
 
@@ -291,14 +294,13 @@ public sealed class EstateGisIntegrationService : IEstateGisIntegrationService
     {
         try
         {
-            using var client = new TcpClient();
-            await client.ConnectAsync(
+            await using var connection = await _networkPolicy.ConnectAsync(
                 configuration.SqlServerHost!,
                 configuration.SqlServerPort ?? 1433,
                 cancellationToken);
             return ProviderResult("SQL Server", true, "SQL Server endpoint is reachable.");
         }
-        catch (Exception ex) when (ex is SocketException or TaskCanceledException or ArgumentException)
+        catch (Exception ex) when (ex is HttpRequestException or SocketException or TaskCanceledException or ArgumentException)
         {
             _logger.LogWarning(
                 ex,
@@ -530,14 +532,29 @@ public sealed class EstateGisIntegrationService : IEstateGisIntegrationService
             ? tenantId
             : throw new InvalidOperationException("A tenant context is required for Estate GIS.");
 
-    private static void ValidateConfiguration(UpdateEstateGisConfigurationDto request)
+    private async Task ValidateConfigurationAsync(
+        UpdateEstateGisConfigurationDto request,
+        CancellationToken cancellationToken)
     {
         if (request.SqlServerPort is <= 0 or > 65535)
             throw new InvalidOperationException("SQL Server port must be between 1 and 65535.");
 
-        ValidateOptionalHttpUrl(request.GeoServerBaseUrl, "GeoServer URL");
-        ValidateOptionalHttpUrl(request.ArcGisFeatureServiceUrl, "ArcGIS feature service URL");
-        ValidateOptionalHttpUrl(request.BaseMapTileUrl, "Base-map tile URL");
+        await _networkPolicy.ValidateHostAsync(
+            request.SqlServerHost,
+            "SQL Server host",
+            cancellationToken);
+        await _networkPolicy.ValidateHttpTargetAsync(
+            request.GeoServerBaseUrl,
+            "GeoServer URL",
+            cancellationToken);
+        await _networkPolicy.ValidateHttpTargetAsync(
+            request.ArcGisFeatureServiceUrl,
+            "ArcGIS feature service URL",
+            cancellationToken);
+        await _networkPolicy.ValidateHttpTargetAsync(
+            request.BaseMapTileUrl,
+            "Base-map tile URL",
+            cancellationToken);
 
         if (request.IsEnabled
             && string.IsNullOrWhiteSpace(request.GeoServerBaseUrl)
@@ -548,18 +565,6 @@ public sealed class EstateGisIntegrationService : IEstateGisIntegrationService
 
         ValidateCrs(Required(request.SourceCrs, "Source CRS is required."), "Source CRS");
         ValidateCrs(Required(request.DisplayCrs, "Display CRS is required."), "Display CRS");
-    }
-
-    private static void ValidateOptionalHttpUrl(string? value, string label)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return;
-        if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-            || !string.IsNullOrEmpty(uri.UserInfo))
-        {
-            throw new InvalidOperationException($"{label} must be an absolute HTTP or HTTPS URL without embedded credentials.");
-        }
     }
 
     private static void ValidateCrs(string value, string label)

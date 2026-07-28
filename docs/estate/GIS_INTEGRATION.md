@@ -57,6 +57,10 @@ available for checking beacon coordinates.
 ## Production Controls
 
 - Use HTTPS for GeoServer and ArcGIS endpoints.
+- Public GIS endpoints are permitted after DNS validation. Private, loopback,
+  and reserved network targets must be explicitly approved by deployment
+  administrators through `EstateGisNetworkSecurity:AllowedHosts`. DNS is
+  revalidated for each server connection and HTTP redirects are disabled.
 - Restrict GIS setup to tenant and system administrators.
 - Rotate GeoServer passwords and ArcGIS tokens on a defined schedule.
 - Keep GeoServer behind the API or an authenticated reverse proxy.
