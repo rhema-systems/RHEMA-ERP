@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.Extensions.Logging;
 
@@ -11,14 +12,28 @@ namespace ErpSystem.Core.Services.HR;
 public class EmployeePositionService : IEmployeePositionService
 {
     private readonly IEmployeePositionRepository _positionRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<EmployeePositionService> _logger;
 
     public EmployeePositionService(
         IEmployeePositionRepository positionRepository,
+        ICurrentUserProvider currentUserProvider,
         ILogger<EmployeePositionService> logger)
     {
         _positionRepository = positionRepository;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<EmployeePositionDto?> GetByIdAsync(Guid id)
@@ -29,14 +44,17 @@ public class EmployeePositionService : IEmployeePositionService
 
     public async Task<IEnumerable<EmployeePositionDto>> GetAllAsync()
     {
-        var positions = await _positionRepository.GetAllAsync(p => p.OrganizationUnit!, p => p.StaffLevel);
-        return positions.Select(MapToDto);
+        var tenantId = GetTenantId();
+        var positions = await _positionRepository.GetAllAsync(
+            p => p.OrganizationUnit!, p => p.OrganizationLevel!, p => p.StaffLevel);
+        return positions.Where(p => p.TenantId == tenantId).OrderBy(p => p.Title).Select(MapToDto);
     }
 
     public async Task<IEnumerable<EmployeePositionDto>> GetActivePositionsAsync()
     {
+        var tenantId = GetTenantId();
         var positions = await _positionRepository.GetActivePositionsAsync();
-        return positions.Select(MapToDto);
+        return positions.Where(p => p.TenantId == tenantId).OrderBy(p => p.Title).Select(MapToDto);
     }
 
     public async Task<IEnumerable<EmployeePositionDto>> GetByOrganizationUnitAsync(Guid organizationUnitId)
@@ -69,6 +87,7 @@ public class EmployeePositionService : IEmployeePositionService
             Title = createDto.Title,
             Code = createDto.Code ?? string.Empty,
             Description = createDto.Description,
+            TenantId = GetTenantId(),
             OrganizationLevelId = createDto.OrganizationLevelId,
             OrganizationUnitId = createDto.OrganizationUnitId,
             Level = createDto.Level,
@@ -95,6 +114,7 @@ public class EmployeePositionService : IEmployeePositionService
                 .Select(g => g.First())
                 .Select(x => new PositionSkillRequirement
                 {
+                    TenantId = GetTenantId(),
                     SkillId = x.SkillId,
                     RequiredLevel = x.RequiredLevel,
                     IsRequired = x.IsRequired,
@@ -110,6 +130,7 @@ public class EmployeePositionService : IEmployeePositionService
                 .Select(g => g.First())
                 .Select(x => new EmployeePositionBenefit
                 {
+                    TenantId = GetTenantId(),
                     PolicyId = x.PolicyId,
                     ExpiryDate = x.ExpiryDate,
                     PositionAmount = x.PositionAmount
@@ -286,6 +307,7 @@ public class EmployeePositionService : IEmployeePositionService
                 var newReq = new PositionSkillRequirement
                 {
                     PositionId = position.Id,
+                    TenantId = GetTenantId(),
                     SkillId = req.SkillId,
                     RequiredLevel = req.RequiredLevel,
                     IsRequired = req.IsRequired,
@@ -341,6 +363,7 @@ public class EmployeePositionService : IEmployeePositionService
                 var newBenefit = new EmployeePositionBenefit
                 {
                     PositionId = position.Id,
+                    TenantId = GetTenantId(),
                     PolicyId = ben.PolicyId,
                     ExpiryDate = ben.ExpiryDate,
                     PositionAmount = ben.PositionAmount

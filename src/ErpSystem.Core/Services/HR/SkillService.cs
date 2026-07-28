@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.Extensions.Logging;
 
@@ -11,12 +12,28 @@ namespace ErpSystem.Core.Services.HR;
 public sealed class SkillService : ISkillService
 {
     private readonly ISkillRepository _skillRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<SkillService> _logger;
 
-    public SkillService(ISkillRepository skillRepository, ILogger<SkillService> logger)
+    public SkillService(
+        ISkillRepository skillRepository,
+        ICurrentUserProvider currentUserProvider,
+        ILogger<SkillService> logger)
     {
         _skillRepository = skillRepository;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<SkillDto?> GetByIdAsync(Guid id)
@@ -27,20 +44,23 @@ public sealed class SkillService : ISkillService
 
     public async Task<IEnumerable<SkillDto>> GetAllAsync()
     {
+        var tenantId = GetTenantId();
         var items = await _skillRepository.GetAllAsync();
-        return items.OrderBy(x => x.Name).Select(MapToDto);
+        return items.Where(x => x.TenantId == tenantId).OrderBy(x => x.Name).Select(MapToDto);
     }
 
     public async Task<IEnumerable<SkillDto>> GetActiveSkillsAsync()
     {
+        var tenantId = GetTenantId();
         var items = await _skillRepository.GetActiveSkillsAsync();
-        return items.Select(MapToDto);
+        return items.Where(x => x.TenantId == tenantId).OrderBy(x => x.Name).Select(MapToDto);
     }
 
     public async Task<IEnumerable<SkillDto>> GetByCategoryAsync(string category)
     {
+        var tenantId = GetTenantId();
         var items = await _skillRepository.GetByCategoryAsync(category);
-        return items.Select(MapToDto);
+        return items.Where(x => x.TenantId == tenantId).OrderBy(x => x.Name).Select(MapToDto);
     }
 
     public async Task<SkillDto?> GetByNameAsync(string name)
@@ -58,6 +78,7 @@ public sealed class SkillService : ISkillService
 
         var entity = new Skill
         {
+            TenantId = GetTenantId(),
             Name = createDto.Name,
             Description = createDto.Description,
             Category = createDto.Category,
@@ -76,7 +97,7 @@ public sealed class SkillService : ISkillService
     public async Task<SkillDto> UpdateSkillAsync(Guid id, CreateSkillDto updateDto)
     {
         var entity = await _skillRepository.GetByIdAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
         {
             throw new InvalidOperationException($"Skill with ID {id} not found.");
         }
@@ -102,6 +123,10 @@ public sealed class SkillService : ISkillService
 
     public async Task<bool> DeleteSkillAsync(Guid id)
     {
+        var entity = await _skillRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            return false;
+
         await _skillRepository.DeleteAsync(id);
         await _skillRepository.SaveChangesAsync();
 
@@ -114,8 +139,10 @@ public sealed class SkillService : ISkillService
 
     public async Task<IEnumerable<string>> GetSkillCategoriesAsync()
     {
+        var tenantId = GetTenantId();
         var all = await _skillRepository.GetAllAsync();
         return all
+            .Where(s => s.TenantId == tenantId)
             .Select(s => s.Category)
             .Where(c => !string.IsNullOrWhiteSpace(c))
             .Distinct(StringComparer.Ordinal)

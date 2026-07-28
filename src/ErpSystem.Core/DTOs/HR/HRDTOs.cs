@@ -132,7 +132,7 @@ public class EmployeeFullProfileDto : EmployeeDetailDto
 /// </summary>
 public class CreateEmployeeDto
 {
-    [Required]
+    // Optional: the service auto-generates an employee number when this is blank.
     public string EmployeeNumber { get; set; } = string.Empty;
 
     [Required]
@@ -2261,6 +2261,47 @@ public class CountryDto
     public string Name { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string Alpha2Code { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+}
+
+/// <summary>
+/// DTO for creating a country.
+/// </summary>
+public class CreateCountryDto
+{
+    [Required]
+    [MaxLength(100)]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(3)]
+    public string Code { get; set; } = string.Empty; // ISO 3166-1 alpha-3
+
+    [MaxLength(2)]
+    public string Alpha2Code { get; set; } = string.Empty; // ISO 3166-1 alpha-2
+
+    public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
+/// DTO for updating a country.
+/// </summary>
+public class UpdateCountryDto
+{
+    [Required]
+    public Guid Id { get; set; }
+
+    [Required]
+    [MaxLength(100)]
+    public string Name { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(3)]
+    public string Code { get; set; } = string.Empty;
+
+    [MaxLength(2)]
+    public string Alpha2Code { get; set; } = string.Empty;
+
     public bool IsActive { get; set; }
 }
 

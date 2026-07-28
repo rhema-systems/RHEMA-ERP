@@ -20,6 +20,7 @@ public class EmployeeService : IEmployeeService
     private readonly IEmployeePositionRepository _positionRepository;
     private readonly ILocationRepository _locationRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<EmployeeService> _logger;
 
     public EmployeeService(
@@ -28,6 +29,7 @@ public class EmployeeService : IEmployeeService
         IEmployeePositionRepository positionRepository,
         ILocationRepository locationRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<EmployeeService> logger)
     {
         _employeeRepository = employeeRepository;
@@ -35,7 +37,19 @@ public class EmployeeService : IEmployeeService
         _positionRepository = positionRepository;
         _locationRepository = locationRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     #region 1) Core Employee Lifecycle
@@ -128,11 +142,17 @@ public class EmployeeService : IEmployeeService
 
         var employeeEntity = dto.ToEntity(employeeNumber, orgUnit.OrganizationLevelId, location.LocationLevelId);
         employeeEntity.EmailAddress = email;
+        employeeEntity.TenantId = GetTenantId();
 
-        await _employeeRepository.AddAsync(employeeEntity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        await EnsureInitialPositionHistoryExistsAsync(employeeEntity, cancellationToken);
+        // Persist the employee and its initial position-history row atomically:
+        // both commit together, or neither does. Prevents an orphaned employee
+        // (saved) with no position history (failed) if the child insert throws.
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            await _employeeRepository.AddAsync(employeeEntity);
+            await _unitOfWork.SaveChangesAsync(ct);
+            await EnsureInitialPositionHistoryExistsAsync(employeeEntity, ct);
+        }, cancellationToken);
 
         _logger.LogInformation("Employee created: {EmployeeNumber} ({EmployeeId})", employeeEntity.EmployeeNumber, employeeEntity.Id);
 
@@ -160,6 +180,7 @@ public class EmployeeService : IEmployeeService
         var initial = new EmployeePositionHistory
         {
             EmployeeId = employee.Id,
+            TenantId = employee.TenantId,
             LocationLevelId = employee.LocationLevelId ?? Guid.Empty,
             LocationId = employee.LocationId,
             OrganizationLevelId = employee.OrganizationLevelId ?? Guid.Empty,
@@ -500,7 +521,8 @@ public class EmployeeService : IEmployeeService
         if (pageSize <= 0) pageSize = 20;
         if (pageSize > 200) pageSize = 200;
 
-        IQueryable<Employee> q = _employeeRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        IQueryable<Employee> q = _employeeRepository.GetQueryable().Where(e => e.TenantId == tenantId);
 
         q = q
             .Include(e => e.Position)

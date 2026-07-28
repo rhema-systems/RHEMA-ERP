@@ -445,6 +445,9 @@ public interface ICountryService
     Task<IEnumerable<CountryDto>> GetActiveCountriesAsync();
     Task<CountryDto?> GetByCodeAsync(string code);
     Task<CountryDto?> GetByAlpha2CodeAsync(string alpha2Code);
+    Task<CountryDto> CreateAsync(CreateCountryDto dto);
+    Task<CountryDto> UpdateAsync(Guid id, UpdateCountryDto dto);
+    Task<bool> DeleteAsync(Guid id);
 }
 
 /// <summary>
