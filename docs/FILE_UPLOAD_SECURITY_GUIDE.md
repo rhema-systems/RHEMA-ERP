@@ -38,14 +38,34 @@ categories.
 ## Scanner provider
 
 `IFileVirusScanService` is the single provider contract for the application.
-`AddErpSystemFileUpload` uses `TryAddSingleton`, so a real host-level scanner
-registered before the ERP file-upload extension is not overwritten.
+`AddErpSystemFileUpload` registers the centralized
+`ClamAvFileVirusScanService` by default and uses `TryAddSingleton`, so an
+equivalent host-level scanner registered before the ERP extension is not
+overwritten. The service streams bytes through clamd's `INSTREAM` protocol;
+it does not share storage paths with the scanner.
 
-The built-in `NoOpFileVirusScanService` returns `Skipped`; it never reports a
-file as clean. Uploads in mandatory clean-scan categories therefore fail
-closed until a real provider is registered. Provider failures, timeouts,
-`Skipped`, `Pending`, `Error`, and `Infected` outcomes never reach storage for
-those categories.
+Configure the daemon under `FileVirusScan:ClamAv`:
+
+- `Host` defaults to `127.0.0.1`;
+- `Port` defaults to `3310`;
+- connection and scan timeouts are bounded; and
+- chunk and response sizes are validated at startup.
+
+The checked-in Docker Compose definitions run the official
+`clamav/clamav:stable` image, persist its signature database, and expose port
+3310 only inside the private ERP network. Never publish clamd's TCP port to an
+untrusted network because the protocol has no transport authentication.
+
+For a native Windows/VPS deployment, install and run `clamd` as a local
+service (or provide a private reachable clamd host), then override
+`FileVirusScan__ClamAv__Host` and `FileVirusScan__ClamAv__Port` as needed.
+`/health/ready` reports unhealthy while the configured daemon cannot answer
+`PING`, and mandatory clean-scan uploads remain fail closed.
+
+Provider failures, timeouts, `Skipped`, `Pending`, `Error`, and `Infected`
+outcomes never reach storage for mandatory clean-scan categories. The legacy
+`NoOpFileVirusScanService` is retained only as an explicit test/custom-host
+type and is no longer the application runtime default.
 
 ## Linking uploaded files
 

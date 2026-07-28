@@ -15,12 +15,15 @@ services:
       - ASPNETCORE_Kestrel__Certificates__Default__Path=/https/aspnetcore-https-api.pfx
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=ErpSystemDb;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=true;
       - ConnectionStrings__Redis=redis:6379
+      - FileVirusScan__ClamAv__Host=clamav
+      - FileVirusScan__ClamAv__Port=3310
     volumes:
       - ~/.aspnet/https:/https:ro
       - ./data:/app/data
     depends_on:
       - sqlserver
       - redis
+      - clamav
     networks:
       - erp-network
 
@@ -47,9 +50,20 @@ services:
       - erp-network
     command: redis-server --appendonly yes
 
+  clamav:
+    image: clamav/clamav:stable
+    environment:
+      - CLAMAV_NO_MILTERD=true
+    volumes:
+      - clamav-data:/var/lib/clamav
+    networks:
+      - erp-network
+    restart: unless-stopped
+
 volumes:
   sqlserver-data:
   redis-data:
+  clamav-data:
 
 networks:
   erp-network:

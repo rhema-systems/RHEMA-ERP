@@ -1436,10 +1436,38 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Add storage services
             services.AddStorageServices();
 
-            // Central malware-scanning boundary. TryAdd keeps a real provider
-            // registered by the host/module from being overwritten here.
+            services.AddOptions<ErpSystem.Api.Services.ClamAvVirusScanOptions>()
+                .Bind(configuration.GetSection(
+                    ErpSystem.Api.Services.ClamAvVirusScanOptions.SectionName))
+                .Validate(
+                    options => !string.IsNullOrWhiteSpace(options.Host),
+                    "FileVirusScan:ClamAv:Host is required.")
+                .Validate(
+                    options => options.Port is > 0 and <= 65535,
+                    "FileVirusScan:ClamAv:Port must be between 1 and 65535.")
+                .Validate(
+                    options => options.ConnectTimeoutSeconds is >= 1 and <= 60,
+                    "ClamAV connect timeout must be between 1 and 60 seconds.")
+                .Validate(
+                    options => options.ScanTimeoutSeconds is >= 1 and <= 600,
+                    "ClamAV scan timeout must be between 1 and 600 seconds.")
+                .Validate(
+                    options => options.ChunkSizeBytes is >= 1024 and <= 1024 * 1024,
+                    "ClamAV chunk size must be between 1 KiB and 1 MiB.")
+                .Validate(
+                    options => options.MaximumResponseBytes is >= 1024 and <= 1024 * 1024,
+                    "ClamAV maximum response size must be between 1 KiB and 1 MiB.")
+                .ValidateOnStart();
+
+            // Central malware-scanning boundary. TryAdd keeps a real custom
+            // provider registered by the host from being overwritten.
             services.TryAddSingleton<IFileVirusScanService,
-                ErpSystem.Api.Services.NoOpFileVirusScanService>();
+                ErpSystem.Api.Services.ClamAvFileVirusScanService>();
+            services.AddHealthChecks()
+                .AddCheck<ErpSystem.Api.Services.FileVirusScanHealthCheck>(
+                    "file-virus-scanner",
+                    failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+                    tags: ["ready", "security"]);
             services.AddScoped<IControlledFileUploadService,
                 ErpSystem.Api.Services.ControlledFileUploadService>();
             services.AddScoped<ErpSystem.Api.Services.FileStorageCleanupProcessor>();

@@ -14,6 +14,19 @@ export interface SupplierMasterOption {
   approvalStatus?: string;
 }
 
+export interface SupplierMasterDetail extends SupplierMasterOption {
+  riskLevel?: string;
+  isActive: boolean;
+  isBlacklisted: boolean;
+  blacklistReason?: string;
+  blacklistDate?: string;
+  blacklistExpiryDate?: string;
+  complianceStatus?: string;
+  complianceReviewDateUtc?: string;
+  complianceValidUntilUtc?: string;
+  complianceNotes?: string;
+}
+
 export interface SupplierCategoryOption {
   id: string;
   categoryCode: string;
@@ -52,6 +65,10 @@ export const procurementSupplierMasterChangeService = {
         item.partnerType.toLowerCase().includes('both')
     );
   },
+  supplier: (id: string) =>
+    apiService.get<SupplierMasterDetail>(
+      `/procurement/business-partners/${encodeURIComponent(id)}`
+    ),
   categories: () =>
     apiService.get<SupplierCategoryOption[]>(
       '/procurement/partner-categories/active'

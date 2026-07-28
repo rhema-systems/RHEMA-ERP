@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -49,9 +49,13 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { requestActions, statusTone } from '@/lib/procurement-master-data-change';
+import {
+  requestActions,
+  statusTone,
+} from '@/lib/procurement-master-data-change';
 import {
   buildSupplierMasterPatch,
+  hydrateSupplierComplianceDraft,
   supplierMasterResourceTypes,
   type BeneficialOwnerDraft,
   type SupplierMasterChangeDraft,
@@ -127,6 +131,9 @@ export default function SupplierMasterChangesPage() {
   const [draftOpen, setDraftOpen] = useState(false);
   const [partnerId, setPartnerId] = useState('');
   const [draft, setDraft] = useState<SupplierMasterChangeDraft>(emptyDraft);
+  const [changedFields, setChangedFields] = useState<
+    Set<keyof SupplierMasterChangeDraft>
+  >(new Set());
   const [reason, setReason] = useState('');
   const [effectiveAtUtc, setEffectiveAtUtc] = useState(today());
   const [evidenceReference, setEvidenceReference] = useState('');
@@ -153,6 +160,12 @@ export default function SupplierMasterChangesPage() {
     queryKey: ['supplier-master-change-suppliers'],
     queryFn: procurementSupplierMasterChangeService.suppliers,
   });
+  const supplierDetail = useQuery({
+    queryKey: ['supplier-master-change-supplier', partnerId],
+    queryFn: () => procurementSupplierMasterChangeService.supplier(partnerId),
+    enabled:
+      Boolean(partnerId) && draft.resourceType === 'SupplierComplianceStatus',
+  });
   const categories = useQuery({
     queryKey: ['supplier-master-change-categories'],
     queryFn: procurementSupplierMasterChangeService.categories,
@@ -177,12 +190,40 @@ export default function SupplierMasterChangesPage() {
     [policies.data]
   );
   const selectedProtected = effectiveResources.has(draft.resourceType);
+  const complianceDetailReady =
+    draft.resourceType !== 'SupplierComplianceStatus' ||
+    supplierDetail.data?.id === partnerId;
+
+  useEffect(() => {
+    const detail = supplierDetail.data;
+    if (
+      draft.resourceType !== 'SupplierComplianceStatus' ||
+      detail?.id !== partnerId ||
+      changedFields.size > 0
+    )
+      return;
+    setDraft((current) => hydrateSupplierComplianceDraft(current, detail));
+  }, [changedFields.size, draft.resourceType, partnerId, supplierDetail.data]);
+
+  const changeDraftField = (
+    field: keyof SupplierMasterChangeDraft,
+    value: SupplierMasterChangeDraft[keyof SupplierMasterChangeDraft]
+  ) => {
+    setDraft((current) => ({ ...current, [field]: value }));
+    setChangedFields((current) => new Set(current).add(field));
+  };
 
   const invalidate = () =>
     Promise.all([
-      client.invalidateQueries({ queryKey: ['supplier-master-change-summary'] }),
-      client.invalidateQueries({ queryKey: ['supplier-master-change-history'] }),
-      client.invalidateQueries({ queryKey: ['supplier-master-change-policies'] }),
+      client.invalidateQueries({
+        queryKey: ['supplier-master-change-summary'],
+      }),
+      client.invalidateQueries({
+        queryKey: ['supplier-master-change-history'],
+      }),
+      client.invalidateQueries({
+        queryKey: ['supplier-master-change-policies'],
+      }),
     ]);
 
   const create = useMutation({
@@ -193,7 +234,11 @@ export default function SupplierMasterChangesPage() {
         throw new Error(
           `${resourceLabels[draft.resourceType]} has no effective maker-checker policy.`
         );
-      const patch = buildSupplierMasterPatch(draft);
+      if (!complianceDetailReady)
+        throw new Error(
+          'Wait for the selected supplier compliance values to load.'
+        );
+      const patch = buildSupplierMasterPatch(draft, changedFields);
       if (!Object.keys(patch).length)
         throw new Error('Enter at least one proposed field value.');
       return procurementSupplierMasterChangeService.saveDraft({
@@ -321,6 +366,7 @@ export default function SupplierMasterChangesPage() {
           <Button
             onClick={() => {
               setDraft(emptyDraft());
+              setChangedFields(new Set());
               setPartnerId('');
               setReason('');
               setEffectiveAtUtc(today());
@@ -339,8 +385,8 @@ export default function SupplierMasterChangesPage() {
         <AlertTitle>Existing maker-checker control reused</AlertTitle>
         <AlertDescription>
           This workspace uses the shared TDC-0007 policy, workflow, evidence,
-          revalidation, immutable snapshot, notification, and audit controls.
-          It does not edit PR, PO, receipt, stock, or inventory transactions.
+          revalidation, immutable snapshot, notification, and audit controls. It
+          does not edit PR, PO, receipt, stock, or inventory transactions.
         </AlertDescription>
       </Alert>
 
@@ -520,13 +566,24 @@ export default function SupplierMasterChangesPage() {
           <DialogHeader>
             <DialogTitle>Stage supplier master change</DialogTitle>
             <DialogDescription>
-              Only the selected protected family is included in the immutable
-              proposed snapshot.
+              Current compliance values are loaded from the selected supplier.
+              Only fields you explicitly change are included in the immutable
+              proposed patch.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Supplier">
-              <Select value={partnerId} onValueChange={setPartnerId}>
+              <Select
+                value={partnerId}
+                onValueChange={(value) => {
+                  setPartnerId(value);
+                  setChangedFields(new Set());
+                  setDraft((current) => ({
+                    ...emptyDraft(),
+                    resourceType: current.resourceType,
+                  }));
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select supplier" />
                 </SelectTrigger>
@@ -542,12 +599,13 @@ export default function SupplierMasterChangesPage() {
             <Field label="Protected family">
               <Select
                 value={draft.resourceType}
-                onValueChange={(value) =>
-                  setDraft((current) => ({
-                    ...current,
+                onValueChange={(value) => {
+                  setChangedFields(new Set());
+                  setDraft({
+                    ...emptyDraft(),
                     resourceType: value as SupplierMasterResourceType,
-                  }))
-                }
+                  });
+                }}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -568,17 +626,47 @@ export default function SupplierMasterChangesPage() {
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle>Release configuration required</AlertTitle>
               <AlertDescription>
-                Activate an effective {resourceLabels[draft.resourceType]} policy
-                in Controlled master-data changes before staging this family.
+                Activate an effective {resourceLabels[draft.resourceType]}{' '}
+                policy in Controlled master-data changes before staging this
+                family.
               </AlertDescription>
             </Alert>
           )}
 
-          <ResourceFields
-            draft={draft}
-            setDraft={setDraft}
-            categories={categories.data ?? []}
-          />
+          {draft.resourceType === 'SupplierComplianceStatus' &&
+          (!partnerId || !complianceDetailReady) ? (
+            <Alert
+              className={
+                supplierDetail.isError
+                  ? 'border-destructive/40 bg-destructive/5'
+                  : undefined
+              }
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${
+                  supplierDetail.isFetching ? 'animate-spin' : ''
+                }`}
+              />
+              <AlertTitle>
+                {supplierDetail.isError
+                  ? 'Unable to load supplier values'
+                  : partnerId
+                    ? 'Loading current supplier values'
+                    : 'Select a supplier'}
+              </AlertTitle>
+              <AlertDescription>
+                {supplierDetail.isError
+                  ? 'Refresh or select the supplier again before staging a compliance change.'
+                  : 'Compliance controls remain unavailable until the authoritative current values are loaded.'}
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <ResourceFields
+              draft={draft}
+              onChange={changeDraftField}
+              categories={categories.data ?? []}
+            />
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Effective date">
@@ -609,7 +697,12 @@ export default function SupplierMasterChangesPage() {
             </Button>
             <Button
               onClick={() => create.mutate()}
-              disabled={create.isPending || !selectedProtected}
+              disabled={
+                create.isPending ||
+                !selectedProtected ||
+                !complianceDetailReady ||
+                changedFields.size === 0
+              }
             >
               Save Draft
             </Button>
@@ -658,48 +751,88 @@ export default function SupplierMasterChangesPage() {
 
 function ResourceFields({
   draft,
-  setDraft,
+  onChange,
   categories,
 }: {
   draft: SupplierMasterChangeDraft;
-  setDraft: React.Dispatch<React.SetStateAction<SupplierMasterChangeDraft>>;
+  onChange: (
+    field: keyof SupplierMasterChangeDraft,
+    value: SupplierMasterChangeDraft[keyof SupplierMasterChangeDraft]
+  ) => void;
   categories: Array<{ id: string; categoryCode: string; categoryName: string }>;
 }) {
   const text = (key: keyof SupplierMasterChangeDraft) => ({
     value: String(draft[key] ?? ''),
-    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-      setDraft((current) => ({ ...current, [key]: event.target.value })),
+    onChange: (
+      event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+    ) => onChange(key, event.target.value),
   });
 
   if (draft.resourceType === 'SupplierProfile')
     return (
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Partner name"><Input {...text('partnerName')} /></Field>
-        <Field label="Legal name"><Input {...text('legalName')} /></Field>
-        <Field label="Primary email"><Input type="email" {...text('primaryEmail')} /></Field>
-        <Field label="Primary phone"><Input {...text('primaryPhone')} /></Field>
-        <div className="sm:col-span-2"><Field label="Physical address"><Textarea {...text('physicalAddress')} /></Field></div>
+        <Field label="Partner name">
+          <Input {...text('partnerName')} />
+        </Field>
+        <Field label="Legal name">
+          <Input {...text('legalName')} />
+        </Field>
+        <Field label="Primary email">
+          <Input type="email" {...text('primaryEmail')} />
+        </Field>
+        <Field label="Primary phone">
+          <Input {...text('primaryPhone')} />
+        </Field>
+        <div className="sm:col-span-2">
+          <Field label="Physical address">
+            <Textarea {...text('physicalAddress')} />
+          </Field>
+        </div>
       </div>
     );
   if (draft.resourceType === 'SupplierBankDetails')
     return (
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Bank name"><Input {...text('bankName')} /></Field>
-        <Field label="Account name"><Input {...text('bankAccountName')} /></Field>
-        <Field label="Account number"><Input {...text('bankAccountNumber')} /></Field>
-        <Field label="Branch"><Input {...text('bankBranch')} /></Field>
-        <Field label="SWIFT code"><Input {...text('bankSwiftCode')} /></Field>
-        <Field label="IBAN"><Input {...text('bankIBAN')} /></Field>
+        <Field label="Bank name">
+          <Input {...text('bankName')} />
+        </Field>
+        <Field label="Account name">
+          <Input {...text('bankAccountName')} />
+        </Field>
+        <Field label="Account number">
+          <Input {...text('bankAccountNumber')} />
+        </Field>
+        <Field label="Branch">
+          <Input {...text('bankBranch')} />
+        </Field>
+        <Field label="SWIFT code">
+          <Input {...text('bankSwiftCode')} />
+        </Field>
+        <Field label="IBAN">
+          <Input {...text('bankIBAN')} />
+        </Field>
       </div>
     );
   if (draft.resourceType === 'SupplierTaxDetails')
     return (
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Tax identification number"><Input {...text('taxIdentificationNumber')} /></Field>
-        <Field label="VAT number"><Input {...text('vatNumber')} /></Field>
-        <Field label="Exemption certificate"><Input {...text('taxExemptionNumber')} /></Field>
-        <Field label="Exemption expiry"><Input type="date" {...text('taxExemptionExpiry')} /></Field>
-        <CheckField label="Tax exempt" checked={draft.isTaxExempt} onChange={(checked) => setDraft((current) => ({ ...current, isTaxExempt: checked }))} />
+        <Field label="Tax identification number">
+          <Input {...text('taxIdentificationNumber')} />
+        </Field>
+        <Field label="VAT number">
+          <Input {...text('vatNumber')} />
+        </Field>
+        <Field label="Exemption certificate">
+          <Input {...text('taxExemptionNumber')} />
+        </Field>
+        <Field label="Exemption expiry">
+          <Input type="date" {...text('taxExemptionExpiry')} />
+        </Field>
+        <CheckField
+          label="Tax exempt"
+          checked={draft.isTaxExempt}
+          onChange={(checked) => onChange('isTaxExempt', checked)}
+        />
       </div>
     );
   if (draft.resourceType === 'SupplierOwnershipDetails')
@@ -708,18 +841,125 @@ function ResourceFields({
         {draft.owners.map((item, index) => (
           <Card key={index}>
             <CardContent className="grid gap-4 pt-5 sm:grid-cols-2">
-              <Field label="Owner name"><Input value={item.name} onChange={(event) => updateOwner(setDraft, index, 'name', event.target.value)} /></Field>
-              <Field label="Ownership %"><Input type="number" min="0.01" max="100" value={item.ownershipPercent} onChange={(event) => updateOwner(setDraft, index, 'ownershipPercent', event.target.value)} /></Field>
-              <Field label="Nationality"><Input value={item.nationality} onChange={(event) => updateOwner(setDraft, index, 'nationality', event.target.value)} /></Field>
-              <Field label="Registration / ID"><Input value={item.registrationNumber} onChange={(event) => updateOwner(setDraft, index, 'registrationNumber', event.target.value)} /></Field>
-              <CheckField label="Politically exposed" checked={item.politicallyExposed} onChange={(checked) => updateOwner(setDraft, index, 'politicallyExposed', checked)} />
-              {draft.owners.length > 1 && <Button type="button" variant="outline" onClick={() => setDraft((current) => ({ ...current, owners: current.owners.filter((_, ownerIndex) => ownerIndex !== index) }))}><Trash2 className="mr-2 h-4 w-4" />Remove owner</Button>}
+              <Field label="Owner name">
+                <Input
+                  value={item.name}
+                  onChange={(event) =>
+                    onChange(
+                      'owners',
+                      updateOwner(
+                        draft.owners,
+                        index,
+                        'name',
+                        event.target.value
+                      )
+                    )
+                  }
+                />
+              </Field>
+              <Field label="Ownership %">
+                <Input
+                  type="number"
+                  min="0.01"
+                  max="100"
+                  value={item.ownershipPercent}
+                  onChange={(event) =>
+                    onChange(
+                      'owners',
+                      updateOwner(
+                        draft.owners,
+                        index,
+                        'ownershipPercent',
+                        event.target.value
+                      )
+                    )
+                  }
+                />
+              </Field>
+              <Field label="Nationality">
+                <Input
+                  value={item.nationality}
+                  onChange={(event) =>
+                    onChange(
+                      'owners',
+                      updateOwner(
+                        draft.owners,
+                        index,
+                        'nationality',
+                        event.target.value
+                      )
+                    )
+                  }
+                />
+              </Field>
+              <Field label="Registration / ID">
+                <Input
+                  value={item.registrationNumber}
+                  onChange={(event) =>
+                    onChange(
+                      'owners',
+                      updateOwner(
+                        draft.owners,
+                        index,
+                        'registrationNumber',
+                        event.target.value
+                      )
+                    )
+                  }
+                />
+              </Field>
+              <CheckField
+                label="Politically exposed"
+                checked={item.politicallyExposed}
+                onChange={(checked) =>
+                  onChange(
+                    'owners',
+                    updateOwner(
+                      draft.owners,
+                      index,
+                      'politicallyExposed',
+                      checked
+                    )
+                  )
+                }
+              />
+              {draft.owners.length > 1 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    onChange(
+                      'owners',
+                      draft.owners.filter(
+                        (_, ownerIndex) => ownerIndex !== index
+                      )
+                    )
+                  }
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Remove owner
+                </Button>
+              )}
             </CardContent>
           </Card>
         ))}
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <Field label="Ownership verified date"><Input type="date" {...text('ownershipVerifiedAtUtc')} /></Field>
-          <Button type="button" variant="outline" onClick={() => setDraft((current) => ({ ...current, owners: [...current.owners, { ...owner(), ownershipPercent: '' }] }))}><Plus className="mr-2 h-4 w-4" />Add owner</Button>
+          <Field label="Ownership verified date">
+            <Input type="date" {...text('ownershipVerifiedAtUtc')} />
+          </Field>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              onChange('owners', [
+                ...draft.owners,
+                { ...owner(), ownershipPercent: '' },
+              ])
+            }
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add owner
+          </Button>
         </div>
       </div>
     );
@@ -727,41 +967,102 @@ function ResourceFields({
     return (
       <div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-2">
         {categories.map((item) => (
-          <CheckField key={item.id} label={`${item.categoryCode} — ${item.categoryName}`} checked={draft.categoryIds.includes(item.id)} onChange={(checked) => setDraft((current) => ({ ...current, categoryIds: checked ? [...current.categoryIds, item.id] : current.categoryIds.filter((id) => id !== item.id) }))} />
+          <CheckField
+            key={item.id}
+            label={`${item.categoryCode} — ${item.categoryName}`}
+            checked={draft.categoryIds.includes(item.id)}
+            onChange={(checked) =>
+              onChange(
+                'categoryIds',
+                checked
+                  ? [...draft.categoryIds, item.id]
+                  : draft.categoryIds.filter((id) => id !== item.id)
+              )
+            }
+          />
         ))}
-        {!categories.length && <p className="text-sm text-muted-foreground">No active current-tenant supplier categories are available.</p>}
+        {!categories.length && (
+          <p className="text-sm text-muted-foreground">
+            No active current-tenant supplier categories are available.
+          </p>
+        )}
       </div>
     );
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <SelectField label="Registration status" value={draft.registrationStatus} values={['Approved', 'Suspended', 'Blacklisted', 'Inactive']} onChange={(value) => setDraft((current) => ({ ...current, registrationStatus: value }))} />
-      <SelectField label="Approval status" value={draft.approvalStatus} values={['Approved', 'Pending', 'Rejected']} onChange={(value) => setDraft((current) => ({ ...current, approvalStatus: value }))} />
-      <SelectField label="Compliance status" value={draft.complianceStatus} values={['Compliant', 'Conditional', 'NonCompliant', 'Suspended', 'PendingReview']} onChange={(value) => setDraft((current) => ({ ...current, complianceStatus: value }))} />
-      <SelectField label="Risk level" value={draft.riskLevel} values={['Low', 'Medium', 'High', 'Critical']} onChange={(value) => setDraft((current) => ({ ...current, riskLevel: value }))} />
-      <CheckField label="Supplier active" checked={draft.isActive} onChange={(checked) => setDraft((current) => ({ ...current, isActive: checked }))} />
-      <CheckField label="Blacklisted" checked={draft.isBlacklisted} onChange={(checked) => setDraft((current) => ({ ...current, isBlacklisted: checked }))} />
-      <Field label="Blacklist reason"><Input {...text('blacklistReason')} /></Field>
-      <Field label="Blacklist date"><Input type="date" {...text('blacklistDate')} /></Field>
-      <Field label="Blacklist expiry"><Input type="date" {...text('blacklistExpiryDate')} /></Field>
-      <Field label="Compliance review date"><Input type="date" {...text('complianceReviewDateUtc')} /></Field>
-      <Field label="Compliance valid until"><Input type="date" {...text('complianceValidUntilUtc')} /></Field>
-      <div className="sm:col-span-2"><Field label="Compliance notes"><Textarea {...text('complianceNotes')} /></Field></div>
+      <SelectField
+        label="Registration status"
+        value={draft.registrationStatus}
+        values={['Approved', 'Suspended', 'Blacklisted', 'Inactive']}
+        onChange={(value) => onChange('registrationStatus', value)}
+      />
+      <SelectField
+        label="Approval status"
+        value={draft.approvalStatus}
+        values={['Approved', 'Pending', 'Rejected']}
+        onChange={(value) => onChange('approvalStatus', value)}
+      />
+      <SelectField
+        label="Compliance status"
+        value={draft.complianceStatus}
+        values={[
+          'Compliant',
+          'Conditional',
+          'NonCompliant',
+          'Suspended',
+          'PendingReview',
+        ]}
+        onChange={(value) => onChange('complianceStatus', value)}
+      />
+      <SelectField
+        label="Risk level"
+        value={draft.riskLevel}
+        values={['Low', 'Medium', 'High', 'Critical']}
+        onChange={(value) => onChange('riskLevel', value)}
+      />
+      <CheckField
+        label="Supplier active"
+        checked={draft.isActive}
+        onChange={(checked) => onChange('isActive', checked)}
+      />
+      <CheckField
+        label="Blacklisted"
+        checked={draft.isBlacklisted}
+        onChange={(checked) => onChange('isBlacklisted', checked)}
+      />
+      <Field label="Blacklist reason">
+        <Input {...text('blacklistReason')} />
+      </Field>
+      <Field label="Blacklist date">
+        <Input type="date" {...text('blacklistDate')} />
+      </Field>
+      <Field label="Blacklist expiry">
+        <Input type="date" {...text('blacklistExpiryDate')} />
+      </Field>
+      <Field label="Compliance review date">
+        <Input type="date" {...text('complianceReviewDateUtc')} />
+      </Field>
+      <Field label="Compliance valid until">
+        <Input type="date" {...text('complianceValidUntilUtc')} />
+      </Field>
+      <div className="sm:col-span-2">
+        <Field label="Compliance notes">
+          <Textarea {...text('complianceNotes')} />
+        </Field>
+      </div>
     </div>
   );
 }
 
 function updateOwner(
-  setDraft: React.Dispatch<React.SetStateAction<SupplierMasterChangeDraft>>,
+  owners: BeneficialOwnerDraft[],
   index: number,
   key: keyof BeneficialOwnerDraft,
   value: string | boolean
-) {
-  setDraft((current) => ({
-    ...current,
-    owners: current.owners.map((item, ownerIndex) =>
-      ownerIndex === index ? { ...item, [key]: value } : item
-    ),
-  }));
+): BeneficialOwnerDraft[] {
+  return owners.map((item, ownerIndex) =>
+    ownerIndex === index ? { ...item, [key]: value } : item
+  );
 }
 
 function Field({
@@ -771,7 +1072,12 @@ function Field({
   label: string;
   children: React.ReactNode;
 }) {
-  return <div className="space-y-1.5"><Label>{label}</Label>{children}</div>;
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  );
 }
 
 function CheckField({
@@ -785,7 +1091,10 @@ function CheckField({
 }) {
   return (
     <label className="flex items-center gap-2 rounded-md border p-3 text-sm">
-      <Checkbox checked={checked} onCheckedChange={(value) => onChange(value === true)} />
+      <Checkbox
+        checked={checked}
+        onCheckedChange={(value) => onChange(value === true)}
+      />
       {label}
     </label>
   );
@@ -805,8 +1114,16 @@ function SelectField({
   return (
     <Field label={label}>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger><SelectValue /></SelectTrigger>
-        <SelectContent>{values.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {values.map((item) => (
+            <SelectItem key={item} value={item}>
+              {item}
+            </SelectItem>
+          ))}
+        </SelectContent>
       </Select>
     </Field>
   );
@@ -839,5 +1156,9 @@ function ActionButton({
   label: string;
   onClick: () => void;
 }) {
-  return <Button size="sm" variant="outline" onClick={onClick}>{label}</Button>;
+  return (
+    <Button size="sm" variant="outline" onClick={onClick}>
+      {label}
+    </Button>
+  );
 }

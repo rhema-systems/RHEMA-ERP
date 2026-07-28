@@ -34,6 +34,7 @@ public class BusinessPartnerDto
     public decimal? PerformanceRating { get; set; }
     public string? RiskLevel { get; set; }
     public bool IsPreferred { get; set; }
+    public bool IsActive { get; set; }
     public bool IsBlacklisted { get; set; }
     public string? Currency { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -115,6 +116,10 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public string? BlacklistReason { get; set; }
     public DateTime? BlacklistDate { get; set; }
     public DateTime? BlacklistExpiryDate { get; set; }
+    public string? ComplianceStatus { get; set; }
+    public DateTime? ComplianceReviewDateUtc { get; set; }
+    public DateTime? ComplianceValidUntilUtc { get; set; }
+    public string? ComplianceNotes { get; set; }
 
     // Contractor-Specific Fields
     public string? ContractorLicenseNumber { get; set; }
