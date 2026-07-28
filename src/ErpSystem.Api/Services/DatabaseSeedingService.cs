@@ -6225,7 +6225,7 @@ namespace ErpSystem.Web.Services
                 new { Department = "Legal", Code = "LA-LEG", Username = "legal.manager2", First = "Mansa", Last = "Legal", Role = "Legal Manager", Number = "LA-LEG-004" },
 
                 new { Department = "Finance and Assets", Code = "LA-FIN", Username = "finance.officer", First = "Daniel", Last = "Finance", Role = "Finance Officer", Number = "LA-FIN-001" },
-                new { Department = "Finance and Assets", Code = "LA-FIN", Username = "finance.manager", First = "Grace", Last = "Finance", Role = "Finance Manager", Number = "LA-FIN-002" },
+                new { Department = "Finance and Assets", Code = "LA-FIN", Username = "acquisition.finance.manager", First = "Grace", Last = "Finance", Role = "Finance Manager", Number = "LA-FIN-002" },
                 new { Department = "Finance and Assets", Code = "LA-FIN", Username = "accounts.payable", First = "Samuel", Last = "Accounts", Role = "Accounts Payable", Number = "LA-FIN-003" },
                 new { Department = "Finance and Assets", Code = "LA-FIN", Username = "fixed.asset", First = "Linda", Last = "Assets", Role = "Fixed Asset Officer", Number = "LA-FIN-004" },
 

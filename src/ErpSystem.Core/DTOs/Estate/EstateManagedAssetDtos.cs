@@ -31,6 +31,8 @@ public class EstateManagedAssetDto
     public string? SurveyorName { get; set; }
     public DateTime? SurveyDate { get; set; }
     public int? BeaconCount { get; set; }
+    public int DemarcationCount { get; set; }
+    public int VerifiedDemarcationCount { get; set; }
     public IReadOnlyList<ExistingLandOwnerDto> OwnershipHistory { get; set; } = Array.Empty<ExistingLandOwnerDto>();
     public bool IsReadyForProjectManagement { get; set; }
     public string? BlockName { get; set; }
@@ -149,23 +151,26 @@ public class CreateManualExistingLandDto
     public List<ExistingLandOwnerDto> OwnershipHistory { get; set; } = [];
 }
 
-public class UpdateEstateManagedLandDemarcationDto
+public class EstateLandDemarcationDto
 {
-    public string CadastreDescription { get; set; } = string.Empty;
-    public string Region { get; set; } = string.Empty;
-    public string District { get; set; } = string.Empty;
-    public string Town { get; set; } = string.Empty;
-    public decimal AreaValue { get; set; }
-    public string AreaUnit { get; set; } = string.Empty;
-    public decimal? AreaSquareMeters { get; set; }
-    public string SurveyorName { get; set; } = string.Empty;
-    public DateTime? SurveyDate { get; set; }
-    public string SurveyPlanNumber { get; set; } = string.Empty;
-    public string MapSheetNumber { get; set; } = string.Empty;
+    public Guid Id { get; set; }
+    public Guid EstateManagedAssetId { get; set; }
+    public int DemarcationNumber { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public int BeaconCount { get; set; }
+    public string BoundaryCoordinates { get; set; } = string.Empty;
+    public decimal AreaSquareFeet { get; set; }
+    public bool BoundaryVerified { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public string? CreatedBy { get; set; }
+}
+
+public class SaveEstateLandDemarcationDto
+{
+    public string Description { get; set; } = string.Empty;
     public int BeaconCount { get; set; }
     public string BoundaryCoordinates { get; set; } = string.Empty;
     public bool BoundaryVerified { get; set; }
-    public bool IsReadyForProjectManagement { get; set; }
 }
 
 public class EstateManagedAssetQuery

@@ -107,7 +107,6 @@ export default function ExistingLandDialog({
   const [owners, setOwners] = React.useState<ExistingLandOwner[]>([initialOwner()]);
   const [documents, setDocuments] = React.useState<PendingDocument[]>([]);
   const [boundaryVerified, setBoundaryVerified] = React.useState(false);
-  const [ready, setReady] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const boundaryPreviewCoordinates = React.useMemo(
     () => boundaryCoordinatesFromBeacons(beacons),
@@ -121,7 +120,7 @@ export default function ExistingLandDialog({
   const setValue = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const reset = () => {
     setForm(initialForm); setBeacons(initialBeacons()); setOwners([initialOwner()]); setDocuments([]);
-    setBoundaryVerified(false); setReady(false);
+    setBoundaryVerified(false);
   };
 
   const missing = React.useMemo(() => {
@@ -138,7 +137,6 @@ export default function ExistingLandDialog({
 
   const save = async () => {
     if (missing) return toast.error('Complete all required land, cadastral, beacon, and owner inputs.');
-    if (ready && !boundaryVerified) return toast.error('Verify the boundary before project handoff.');
     const boundaryCoordinates = JSON.stringify(beacons.map((item) => ({
       beacon: item.beacon.trim(), northing: Number(item.northing), easting: Number(item.easting),
       bearing: item.bearing.trim() || undefined,
@@ -148,7 +146,7 @@ export default function ExistingLandDialog({
       ...(form as unknown as Omit<CreateManualExistingLand, 'areaValue' | 'areaSquareMeters' | 'valuationAmount' | 'beaconCount' | 'boundaryCoordinates' | 'boundaryVerified' | 'isReadyForProjectManagement' | 'ownershipHistory'>),
       areaValue: Number(form.areaValue), areaSquareMeters,
       valuationAmount: Number(form.valuationAmount), beaconCount: beacons.length, boundaryCoordinates,
-      boundaryVerified, isReadyForProjectManagement: ready, ownershipHistory: owners,
+      boundaryVerified, isReadyForProjectManagement: false, ownershipHistory: owners,
     };
     try {
       setSaving(true);
@@ -229,7 +227,6 @@ export default function ExistingLandDialog({
             <LandBankMap boundaryCoordinates={boundaryPreviewCoordinates} />
             <div className="flex flex-wrap gap-5">
               <label className="flex items-center gap-2 text-sm"><Checkbox checked={boundaryVerified} onCheckedChange={(checked) => setBoundaryVerified(checked === true)} /> Boundary verified</label>
-              <label className="flex items-center gap-2 text-sm"><Checkbox checked={ready} onCheckedChange={(checked) => setReady(checked === true)} /> Ready for Project Management</label>
             </div>
           </TabsContent>
 

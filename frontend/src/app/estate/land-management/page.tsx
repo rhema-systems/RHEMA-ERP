@@ -7,6 +7,8 @@ import {
   ArrowRight,
   BadgeCheck,
   Building2,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   Globe2,
   Landmark,
@@ -32,6 +34,7 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   estateLandManagementService,
   EstateManagedAssetSourceType,
+  type EstateLandDemarcation,
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
 import {
@@ -44,6 +47,7 @@ import GisAssetLinkDialog from './GisAssetLinkDialog';
 import LandDocumentsPanel from './LandDocumentsPanel';
 
 const LandBankMap = dynamic(() => import('./LandBankMap'), { ssr: false });
+const LAND_CARD_PAGE_SIZE = 9;
 const GIS_LINK_ROLES = [
   'admin',
   'Admin',
@@ -80,10 +84,6 @@ function sourceLabel(sourceType: EstateManagedAssetSourceType) {
   return 'Manual';
 }
 
-function hasBoundary(asset?: EstateManagedAsset) {
-  return Boolean(asset?.boundaryCoordinates?.trim());
-}
-
 function acquisitionMatches(item: LandAcquisitionItem, query?: string) {
   const normalized = query?.trim().toLowerCase();
   if (!normalized) return true;
@@ -107,6 +107,14 @@ function acquisitionDemarcationHref(item: LandAcquisitionItem) {
 
 function acquisitionHasDemarcation(item: LandAcquisitionItem) {
   return item.stageOrder >= 2;
+}
+
+function acquisitionBoundaryVerified(item: LandAcquisitionItem) {
+  return item.stageOrder > 3;
+}
+
+function acquisitionReadyForLandBank(item: LandAcquisitionItem) {
+  return item.stageOrder >= 15 && item.stageInputsComplete;
 }
 
 function StatCard({
@@ -161,7 +169,11 @@ export default function EstateLandManagementPage() {
   );
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
+  const [recordPage, setRecordPage] = React.useState(1);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [selectedDemarcations, setSelectedDemarcations] = React.useState<
+    EstateLandDemarcation[]
+  >([]);
   const [existingLandOpen, setExistingLandOpen] = React.useState(false);
   const [demarcationAsset, setDemarcationAsset] =
     React.useState<EstateManagedAsset | null>(null);
@@ -197,6 +209,53 @@ export default function EstateLandManagementPage() {
     () => records.find((record) => record.key === selectedKey) || records[0],
     [records, selectedKey]
   );
+  const recordPageCount = Math.max(
+    1,
+    Math.ceil(records.length / LAND_CARD_PAGE_SIZE)
+  );
+  const pagedRecords = React.useMemo(
+    () =>
+      records.slice(
+        (recordPage - 1) * LAND_CARD_PAGE_SIZE,
+        recordPage * LAND_CARD_PAGE_SIZE
+      ),
+    [recordPage, records]
+  );
+
+  React.useEffect(() => {
+    if (
+      pagedRecords.length &&
+      !pagedRecords.some((record) => record.key === selectedKey)
+    ) {
+      setSelectedKey(pagedRecords[0].key);
+    }
+  }, [pagedRecords, selectedKey]);
+
+  React.useEffect(() => {
+    setRecordPage((current) => Math.min(current, recordPageCount));
+  }, [recordPageCount]);
+
+  React.useEffect(() => {
+    let active = true;
+    if (selected?.type !== 'asset') {
+      setSelectedDemarcations([]);
+      return;
+    }
+
+    setSelectedDemarcations([]);
+    void estateLandManagementService
+      .getLandDemarcations(selected.asset.id)
+      .then((items) => {
+        if (active) setSelectedDemarcations(items);
+      })
+      .catch(() => {
+        if (active) setSelectedDemarcations([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selected]);
 
   const loadLandRecords = React.useCallback(async (query?: string) => {
     setIsLoading(true);
@@ -241,8 +300,8 @@ export default function EstateLandManagementPage() {
   const verifiedCount = records.filter(
     (record) =>
       record.type === 'asset'
-        ? record.asset.boundaryVerified || hasBoundary(record.asset)
-        : acquisitionHasDemarcation(record.acquisition)
+        ? record.asset.boundaryVerified
+        : acquisitionBoundaryVerified(record.acquisition)
   ).length;
 
   const markAssetProjectReady = async (asset: EstateManagedAsset) => {
@@ -363,6 +422,7 @@ export default function EstateLandManagementPage() {
               className="flex gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
+                setRecordPage(1);
                 void loadLandRecords(search);
               }}
             >
@@ -385,7 +445,7 @@ export default function EstateLandManagementPage() {
               </Button>
             </form>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {isLoading ? (
                 <div className="col-span-full flex items-center justify-center gap-2 rounded-md border py-12 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -401,7 +461,7 @@ export default function EstateLandManagementPage() {
 
               {/* Keep several records visible while selection drives the workspace below. */}
               {!isLoading &&
-                records.map((record) => {
+                pagedRecords.map((record) => {
                   const active = selected?.key === record.key;
                   const title =
                     record.type === 'asset'
@@ -417,9 +477,8 @@ export default function EstateLandManagementPage() {
                       : record.acquisition.location;
                   const verified =
                     record.type === 'asset'
-                      ? record.asset.boundaryVerified ||
-                        hasBoundary(record.asset)
-                      : acquisitionHasDemarcation(record.acquisition);
+                      ? record.asset.boundaryVerified
+                      : acquisitionBoundaryVerified(record.acquisition);
                   const area =
                     record.type === 'asset'
                       ? formatArea(record.asset.areaSquareMeters)
@@ -463,15 +522,53 @@ export default function EstateLandManagementPage() {
                       <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
                         <span className="truncate">{area}</span>
                         <span className="shrink-0">
-                          {record.type === 'asset'
-                            ? sourceLabel(record.asset.sourceType)
-                            : 'Acquisition'}
+                          {record.type === 'asset' &&
+                          record.asset.demarcationCount > 0
+                            ? `${record.asset.demarcationCount} demarcation${record.asset.demarcationCount === 1 ? '' : 's'}`
+                            : record.type === 'asset'
+                              ? sourceLabel(record.asset.sourceType)
+                              : 'Acquisition'}
                         </span>
                       </div>
                     </button>
                   );
                 })}
             </div>
+            {recordPageCount > 1 ? (
+              <div className="flex items-center justify-between border-t pt-4">
+                <p className="text-sm text-muted-foreground">
+                  Page {recordPage} of {recordPageCount}
+                </p>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    aria-label="Previous land records"
+                    disabled={recordPage === 1}
+                    onClick={() =>
+                      setRecordPage((current) => Math.max(1, current - 1))
+                    }
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    aria-label="Next land records"
+                    disabled={recordPage === recordPageCount}
+                    onClick={() =>
+                      setRecordPage((current) =>
+                        Math.min(recordPageCount, current + 1)
+                      )
+                    }
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -508,16 +605,16 @@ export default function EstateLandManagementPage() {
                   <Button
                     variant="outline"
                     disabled={
-                      !acquisitionHasDemarcation(selected.acquisition) ||
+                      !acquisitionReadyForLandBank(selected.acquisition) ||
                       markingReadyKey === `acquisition:${selected.acquisition.id}`
                     }
                     onClick={() =>
                       void publishAcquisitionToLandBank(selected.acquisition)
                     }
                     title={
-                      acquisitionHasDemarcation(selected.acquisition)
+                      acquisitionReadyForLandBank(selected.acquisition)
                         ? undefined
-                        : 'Complete cadastral demarcation before publishing this land to Estate Land Bank.'
+                        : 'Complete the acquisition workflow through Asset Creation before publishing this land to Estate Land Bank.'
                     }
                   >
                     {markingReadyKey ===
@@ -545,7 +642,9 @@ export default function EstateLandManagementPage() {
                     onClick={() => setDemarcationAsset(selected.asset)}
                   >
                     <MapPin className="mr-2 h-4 w-4" />
-                    {hasBoundary(selected.asset) ? 'Re-demarcate' : 'Demarcate'}
+                    {selected.asset.demarcationCount
+                      ? 'Manage Demarcations'
+                      : 'Add Demarcation'}
                   </Button>
                   {selected.asset.isReadyForProjectManagement ? (
                     <Button asChild variant="outline">
@@ -558,14 +657,22 @@ export default function EstateLandManagementPage() {
                     <Button
                       variant="outline"
                       disabled={
-                        !(selected.asset.boundaryVerified || hasBoundary(selected.asset)) ||
+                        !selected.asset.boundaryVerified ||
+                        selected.asset.demarcationCount === 0 ||
+                        selected.asset.verifiedDemarcationCount !==
+                          selected.asset.demarcationCount ||
                         markingReadyKey === `asset:${selected.asset.id}`
                       }
                       onClick={() => void markAssetProjectReady(selected.asset)}
                       title={
-                        selected.asset.boundaryVerified || hasBoundary(selected.asset)
-                          ? undefined
-                          : 'Record and verify the whole land boundary before Project Management can access it.'
+                        !selected.asset.boundaryVerified
+                          ? 'Verify the main cadastral boundary first.'
+                          : selected.asset.demarcationCount === 0
+                            ? 'Add at least one demarcation first.'
+                            : selected.asset.verifiedDemarcationCount !==
+                                selected.asset.demarcationCount
+                              ? 'Verify every demarcation first.'
+                              : undefined
                       }
                     >
                       {markingReadyKey === `asset:${selected.asset.id}` ? (
@@ -588,6 +695,11 @@ export default function EstateLandManagementPage() {
                 <LandBankMap
                   assetId={selected.asset.id}
                   boundaryCoordinates={selected.asset.boundaryCoordinates}
+                  demarcations={selectedDemarcations.map((item) => ({
+                    id: item.id,
+                    description: `Parcel ${item.demarcationNumber}: ${item.description}`,
+                    boundaryCoordinates: item.boundaryCoordinates,
+                  }))}
                   gisFeatureId={selected.asset.gisFeatureId}
                   gisLayerReference={selected.asset.gisLayerReference}
                   gisProvider={selected.asset.gisProvider}
@@ -663,6 +775,10 @@ export default function EstateLandManagementPage() {
                     label="Beacon count"
                     value={selected.asset.beaconCount?.toString()}
                   />
+                  <DetailRow
+                    label="Demarcations"
+                    value={selected.asset.demarcationCount.toString()}
+                  />
                 </div>
 
                 {selected.asset.ownershipHistory?.length ? (
@@ -729,7 +845,7 @@ export default function EstateLandManagementPage() {
                       </Button>
                       <Button
                         disabled={
-                          !acquisitionHasDemarcation(selected.acquisition) ||
+                          !acquisitionReadyForLandBank(selected.acquisition) ||
                           markingReadyKey ===
                             `acquisition:${selected.acquisition.id}`
                         }
@@ -739,9 +855,9 @@ export default function EstateLandManagementPage() {
                           )
                         }
                         title={
-                          acquisitionHasDemarcation(selected.acquisition)
+                          acquisitionReadyForLandBank(selected.acquisition)
                             ? undefined
-                            : 'Complete cadastral demarcation before publishing this land to Estate Land Bank.'
+                            : 'Complete the acquisition workflow through Asset Creation before publishing this land to Estate Land Bank.'
                         }
                       >
                         {markingReadyKey ===
@@ -818,9 +934,15 @@ export default function EstateLandManagementPage() {
         onOpenChange={(open) => {
           if (!open) setDemarcationAsset(null);
         }}
-        onSaved={async (asset) => {
+        onSaved={async () => {
+          const assetId = demarcationAsset?.id;
           await loadLandRecords(search);
-          setSelectedKey(`asset:${asset.id}`);
+          if (assetId) {
+            setSelectedKey(`asset:${assetId}`);
+            setSelectedDemarcations(
+              await estateLandManagementService.getLandDemarcations(assetId)
+            );
+          }
         }}
       />
       <GisAssetLinkDialog

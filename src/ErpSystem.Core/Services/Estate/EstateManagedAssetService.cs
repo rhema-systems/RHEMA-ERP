@@ -4,6 +4,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 using System.Text.Json;
 
 namespace ErpSystem.Core.Services.Estate;
@@ -57,7 +58,36 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             .Take(take)
             .ToListAsync();
 
-        return assets.Select(MapToDto).ToList();
+        var mappedAssets = assets.Select(MapToDto).ToList();
+        if (assets.Count == 0)
+        {
+            return mappedAssets;
+        }
+
+        var assetIds = assets.Select(item => item.Id).ToList();
+        var demarcationCounts = await _unitOfWork.Repository<EstateLandDemarcation>()
+            .GetQueryable(item => item.TenantId == _currentUserProvider.TenantId
+                && assetIds.Contains(item.EstateManagedAssetId)
+                && !item.IsDeleted)
+            .GroupBy(item => item.EstateManagedAssetId)
+            .Select(group => new
+            {
+                AssetId = group.Key,
+                Count = group.Count(),
+                VerifiedCount = group.Count(item => item.BoundaryVerified)
+            })
+            .ToDictionaryAsync(item => item.AssetId);
+
+        foreach (var mappedAsset in mappedAssets)
+        {
+            if (demarcationCounts.TryGetValue(mappedAsset.Id, out var count))
+            {
+                mappedAsset.DemarcationCount = count.Count;
+                mappedAsset.VerifiedDemarcationCount = count.VerifiedCount;
+            }
+        }
+
+        return mappedAssets;
     }
 
     public async Task<EstateManagedAssetDto> PublishLandAcquisitionAsync(LandAcquisitionEstateHandoffDto handoff)
@@ -127,7 +157,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.IsAvailableForSale = false;
         asset.IsPublishedFromProject = false;
         // Acquisition publishes into Estate Land Bank; Land Management marks project readiness after demarcation.
-        asset.IsReadyForProjectManagement = handoff.IsReadyForProjectManagement;
+        asset.IsReadyForProjectManagement = false;
         asset.Notes = TrimOrNull(handoff.Notes);
         asset.UpdatedAt = now;
         asset.UpdatedBy = _currentUserProvider.Username;
@@ -268,11 +298,6 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             throw new InvalidOperationException("Complete every owner field and identify exactly one current owner before saving.");
         }
 
-        if (request.IsReadyForProjectManagement && !request.BoundaryVerified)
-        {
-            throw new InvalidOperationException("Verify the cadastral boundary before making the land ready for project management.");
-        }
-
         var repository = _unitOfWork.Repository<EstateManagedAsset>();
         var assetId = Guid.NewGuid();
         var areaSquareMeters = ConvertAreaToSquareMeters(request.AreaValue, request.AreaUnit);
@@ -313,7 +338,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             AssetType = EstateManagedAssetType.Land,
             Status = EstateManagedAssetStatus.LandBank,
             SourceType = EstateManagedAssetSourceType.Manual,
-            IsReadyForProjectManagement = request.IsReadyForProjectManagement,
+            IsReadyForProjectManagement = false,
             IsAvailableForLease = false,
             IsAvailableForSale = false
         };
@@ -322,47 +347,140 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         return MapToDto(asset);
     }
 
-    public async Task<EstateManagedAssetDto> UpdateLandDemarcationAsync(Guid assetId, UpdateEstateManagedLandDemarcationDto request)
+    public async Task<IReadOnlyList<EstateLandDemarcationDto>> GetLandDemarcationsAsync(Guid assetId)
     {
-        var required = new[] { request.CadastreDescription, request.Region, request.District, request.Town,
-            request.AreaUnit, request.SurveyorName, request.SurveyPlanNumber, request.MapSheetNumber, request.BoundaryCoordinates };
-        if (required.Any(string.IsNullOrWhiteSpace) || request.AreaValue <= 0 || request.BeaconCount < 3)
+        await RequireLandAssetAsync(assetId);
+        var demarcations = await _unitOfWork.Repository<EstateLandDemarcation>()
+            .GetQueryable(item => item.EstateManagedAssetId == assetId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted)
+            .OrderBy(item => item.DemarcationNumber)
+            .ToListAsync();
+        return demarcations.Select(MapDemarcationToDto).ToList();
+    }
+
+    public async Task<EstateLandDemarcationDto> CreateLandDemarcationAsync(
+        Guid assetId,
+        SaveEstateLandDemarcationDto request)
+    {
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
-            throw new InvalidOperationException("Complete the cadastral, beacon, and survey fields before saving demarcation.");
+            var asset = await RequireLandAssetAsync(assetId);
+            var measurement = ValidateDemarcationRequest(asset, request);
+            var repository = _unitOfWork.Repository<EstateLandDemarcation>();
+            var transactionStarted = false;
+            try
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+                transactionStarted = true;
+                var existingBoundaries = await repository
+                    .GetQueryable(item => item.EstateManagedAssetId == assetId
+                        && item.TenantId == _currentUserProvider.TenantId
+                        && !item.IsDeleted)
+                    .Select(item => item.BoundaryCoordinates)
+                    .ToListAsync();
+                EnsureDoesNotOverlap(request.BoundaryCoordinates, existingBoundaries);
+                var lastDemarcationNumber = await repository
+                    .GetQueryable(item => item.EstateManagedAssetId == assetId
+                        && item.TenantId == _currentUserProvider.TenantId)
+                    .Select(item => (int?)item.DemarcationNumber)
+                    .MaxAsync() ?? 0;
+
+                var demarcation = new EstateLandDemarcation
+                {
+                    TenantId = _currentUserProvider.TenantId,
+                    EstateManagedAssetId = assetId,
+                    DemarcationNumber = lastDemarcationNumber + 1,
+                    Description = request.Description.Trim(),
+                    BeaconCount = measurement.BeaconCount,
+                    BoundaryCoordinates = request.BoundaryCoordinates.Trim(),
+                    AreaSquareFeet = measurement.AreaSquareFeet,
+                    BoundaryVerified = request.BoundaryVerified,
+                    CreatedBy = _currentUserProvider.Username,
+                    CreatedById = _currentUserProvider.UserId
+                };
+
+                await repository.AddAsync(demarcation);
+                await ResetProjectReadinessAsync(asset);
+                await _unitOfWork.SaveChangesAsync();
+                transactionStarted = false;
+                await _unitOfWork.CommitAsync();
+                return MapDemarcationToDto(demarcation);
+            }
+            catch
+            {
+                if (transactionStarted)
+                {
+                    await _unitOfWork.RollbackAsync();
+                }
+                throw;
+            }
+        });
+    }
+
+    public async Task<EstateLandDemarcationDto> UpdateLandDemarcationAsync(
+        Guid assetId,
+        Guid demarcationId,
+        SaveEstateLandDemarcationDto request)
+    {
+        var asset = await RequireLandAssetAsync(assetId);
+        var measurement = ValidateDemarcationRequest(asset, request);
+        var repository = _unitOfWork.Repository<EstateLandDemarcation>();
+        var demarcation = await repository.FirstOrDefaultAsync(item =>
+            item.Id == demarcationId
+            && item.EstateManagedAssetId == assetId
+            && item.TenantId == _currentUserProvider.TenantId
+            && !item.IsDeleted);
+        if (demarcation == null)
+        {
+            throw new InvalidOperationException("Land demarcation was not found.");
         }
 
-        if (request.IsReadyForProjectManagement && !request.BoundaryVerified)
-        {
-            throw new InvalidOperationException("Verify the cadastral boundary before making the land ready for project management.");
-        }
+        var otherBoundaries = await repository
+            .GetQueryable(item => item.EstateManagedAssetId == assetId
+                && item.Id != demarcationId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted)
+            .Select(item => item.BoundaryCoordinates)
+            .ToListAsync();
+        EnsureDoesNotOverlap(request.BoundaryCoordinates, otherBoundaries);
 
-        var repository = _unitOfWork.Repository<EstateManagedAsset>();
-        var asset = await repository.FirstOrDefaultAsync(item => item.Id == assetId &&
-            item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted && item.AssetType == EstateManagedAssetType.Land);
-        if (asset == null) throw new InvalidOperationException("Land asset was not found.");
+        demarcation.Description = request.Description.Trim();
+        demarcation.BeaconCount = measurement.BeaconCount;
+        demarcation.BoundaryCoordinates = request.BoundaryCoordinates.Trim();
+        demarcation.AreaSquareFeet = measurement.AreaSquareFeet;
+        demarcation.BoundaryVerified = request.BoundaryVerified;
+        demarcation.UpdatedAt = DateTime.UtcNow;
+        demarcation.UpdatedBy = _currentUserProvider.Username;
+        demarcation.LastModifiedById = _currentUserProvider.UserId;
 
-        asset.CadastreDescription = request.CadastreDescription.Trim();
-        asset.Region = request.Region.Trim();
-        asset.District = request.District.Trim();
-        asset.Town = request.Town.Trim();
-        asset.AreaValue = request.AreaValue;
-        asset.AreaUnit = request.AreaUnit.Trim();
-        asset.AreaSquareMeters = request.AreaSquareMeters > 0 ? request.AreaSquareMeters : asset.AreaSquareMeters;
-        asset.SurveyorName = request.SurveyorName.Trim();
-        asset.SurveyDate = request.SurveyDate ?? asset.SurveyDate;
-        asset.SurveyPlanNumber = request.SurveyPlanNumber.Trim();
-        asset.MapSheetNumber = request.MapSheetNumber.Trim();
-        asset.BeaconCount = request.BeaconCount;
-        asset.BoundaryCoordinates = request.BoundaryCoordinates.Trim();
-        asset.BoundaryVerified = request.BoundaryVerified;
-        asset.IsReadyForProjectManagement = request.IsReadyForProjectManagement;
-        asset.UpdatedAt = DateTime.UtcNow;
-        asset.UpdatedBy = _currentUserProvider.Username;
-        asset.LastModifiedById = _currentUserProvider.UserId;
-
-        await repository.UpdateAsync(asset);
+        await repository.UpdateAsync(demarcation);
+        await ResetProjectReadinessAsync(asset);
         await _unitOfWork.SaveChangesAsync();
-        return MapToDto(asset);
+        return MapDemarcationToDto(demarcation);
+    }
+
+    public async Task DeleteLandDemarcationAsync(Guid assetId, Guid demarcationId)
+    {
+        var asset = await RequireLandAssetAsync(assetId);
+        var repository = _unitOfWork.Repository<EstateLandDemarcation>();
+        var demarcation = await repository.FirstOrDefaultAsync(item =>
+            item.Id == demarcationId
+            && item.EstateManagedAssetId == assetId
+            && item.TenantId == _currentUserProvider.TenantId
+            && !item.IsDeleted);
+        if (demarcation == null)
+        {
+            throw new InvalidOperationException("Land demarcation was not found.");
+        }
+
+        demarcation.IsDeleted = true;
+        demarcation.UpdatedAt = DateTime.UtcNow;
+        demarcation.UpdatedBy = _currentUserProvider.Username;
+        demarcation.LastModifiedById = _currentUserProvider.UserId;
+        await repository.UpdateAsync(demarcation);
+        await ResetProjectReadinessAsync(asset);
+        await _unitOfWork.SaveChangesAsync();
     }
 
     public async Task<EstateManagedAssetDto> MarkReadyForProjectManagementAsync(Guid assetId)
@@ -373,6 +491,35 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         if (asset == null) throw new InvalidOperationException("Land asset was not found.");
         if (!asset.BoundaryVerified || string.IsNullOrWhiteSpace(asset.BoundaryCoordinates))
             throw new InvalidOperationException("Verify and record the cadastral boundary before project handoff.");
+        var demarcations = await _unitOfWork.Repository<EstateLandDemarcation>()
+            .GetQueryable(item => item.EstateManagedAssetId == assetId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted)
+            .Select(item => new { item.BoundaryVerified, item.BoundaryCoordinates })
+            .ToListAsync();
+        if (demarcations.Count == 0)
+            throw new InvalidOperationException("Add at least one demarcation within the main cadastral boundary.");
+        if (demarcations.Any(item => !item.BoundaryVerified))
+            throw new InvalidOperationException("Verify every demarcation before project handoff.");
+        foreach (var demarcation in demarcations)
+        {
+            EstateBoundaryGeometry.ValidateContained(
+                asset.BoundaryCoordinates,
+                demarcation.BoundaryCoordinates);
+        }
+        for (var first = 0; first < demarcations.Count; first++)
+        {
+            for (var second = first + 1; second < demarcations.Count; second++)
+            {
+                if (EstateBoundaryGeometry.Overlaps(
+                    demarcations[first].BoundaryCoordinates,
+                    demarcations[second].BoundaryCoordinates))
+                {
+                    throw new InvalidOperationException(
+                        "Resolve overlapping demarcations before project handoff.");
+                }
+            }
+        }
         asset.IsReadyForProjectManagement = true;
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = _currentUserProvider.Username;
@@ -587,6 +734,82 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
         return string.Join(". ", parts);
     }
+
+    private async Task<EstateManagedAsset> RequireLandAssetAsync(Guid assetId)
+    {
+        var asset = await _unitOfWork.Repository<EstateManagedAsset>()
+            .FirstOrDefaultAsync(item => item.Id == assetId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted
+                && item.AssetType == EstateManagedAssetType.Land);
+        return asset ?? throw new InvalidOperationException("Land asset was not found.");
+    }
+
+    private static EstateBoundaryMeasurement ValidateDemarcationRequest(
+        EstateManagedAsset asset,
+        SaveEstateLandDemarcationDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Description))
+        {
+            throw new InvalidOperationException("Enter a description for this demarcation.");
+        }
+
+        if (request.Description.Trim().Length > 1000)
+        {
+            throw new InvalidOperationException("The demarcation description cannot exceed 1000 characters.");
+        }
+
+        if (!asset.BoundaryVerified || string.IsNullOrWhiteSpace(asset.BoundaryCoordinates))
+        {
+            throw new InvalidOperationException(
+                "The main cadastral boundary must be recorded and verified before demarcation.");
+        }
+
+        var measurement = EstateBoundaryGeometry.ValidateContained(
+            asset.BoundaryCoordinates,
+            request.BoundaryCoordinates);
+        if (request.BeaconCount != measurement.BeaconCount)
+        {
+            throw new InvalidOperationException("The beacon count does not match the demarcation coordinates.");
+        }
+
+        return measurement;
+    }
+
+    private static void EnsureDoesNotOverlap(
+        string boundaryCoordinates,
+        IEnumerable<string> existingBoundaries)
+    {
+        if (existingBoundaries.Any(existing => EstateBoundaryGeometry.Overlaps(existing, boundaryCoordinates)))
+        {
+            throw new InvalidOperationException(
+                "The demarcation overlaps another parcel already defined under this cadastral boundary.");
+        }
+    }
+
+    private async Task ResetProjectReadinessAsync(EstateManagedAsset asset)
+    {
+        // Any subdivision change requires Estate to confirm the complete set again before Project Management can pull it.
+        asset.IsReadyForProjectManagement = false;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = _currentUserProvider.Username;
+        asset.LastModifiedById = _currentUserProvider.UserId;
+        await _unitOfWork.Repository<EstateManagedAsset>().UpdateAsync(asset);
+    }
+
+    private static EstateLandDemarcationDto MapDemarcationToDto(EstateLandDemarcation demarcation) => new()
+    {
+        Id = demarcation.Id,
+        EstateManagedAssetId = demarcation.EstateManagedAssetId,
+        DemarcationNumber = demarcation.DemarcationNumber,
+        Description = demarcation.Description,
+        BeaconCount = demarcation.BeaconCount,
+        BoundaryCoordinates = demarcation.BoundaryCoordinates,
+        AreaSquareFeet = demarcation.AreaSquareFeet,
+        BoundaryVerified = demarcation.BoundaryVerified,
+        CreatedAt = demarcation.CreatedAt,
+        CreatedBy = demarcation.CreatedBy
+    };
 
     private static EstateManagedAssetDto MapToDto(EstateManagedAsset asset) => new()
     {

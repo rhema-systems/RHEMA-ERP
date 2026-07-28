@@ -9,7 +9,10 @@ public interface IEstateManagedAssetService
     Task<EstateManagedAssetDto> PublishProjectUnitAsync(ProjectUnitEstateHandoffDto handoff);
     Task WithdrawProjectUnitAsync(Guid projectUnitId);
     Task<EstateManagedAssetDto> CreateManualExistingLandAsync(CreateManualExistingLandDto request);
-    Task<EstateManagedAssetDto> UpdateLandDemarcationAsync(Guid assetId, UpdateEstateManagedLandDemarcationDto request);
+    Task<IReadOnlyList<EstateLandDemarcationDto>> GetLandDemarcationsAsync(Guid assetId);
+    Task<EstateLandDemarcationDto> CreateLandDemarcationAsync(Guid assetId, SaveEstateLandDemarcationDto request);
+    Task<EstateLandDemarcationDto> UpdateLandDemarcationAsync(Guid assetId, Guid demarcationId, SaveEstateLandDemarcationDto request);
+    Task DeleteLandDemarcationAsync(Guid assetId, Guid demarcationId);
     Task<EstateManagedAssetDto> MarkReadyForProjectManagementAsync(Guid assetId);
     Task<EstateManagedAssetDto> UpdateExternalListingAsync(Guid assetId, UpdateEstateManagedAssetListingDto request);
     Task<EstateManagedAssetDocumentDto> RegisterDocumentAsync(Guid assetId, RegisterEstateManagedAssetDocumentDto document);

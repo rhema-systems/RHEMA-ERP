@@ -100,19 +100,64 @@ public sealed class EstateManagedAssetsController : ControllerBase
         }
     }
 
-    [HttpPatch("{id:guid}/demarcation")]
-    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer,Survey Officer")]
-    public async Task<IActionResult> UpdateLandDemarcation(Guid id, [FromBody] UpdateEstateManagedLandDemarcationDto request)
+    [HttpGet("{id:guid}/demarcations")]
+    public async Task<IActionResult> GetLandDemarcations(Guid id)
     {
-        if (request.IsReadyForProjectManagement && !CanMarkReadyForProjectManagement())
-        {
-            return Forbid();
-        }
-
         try
         {
-            var asset = await _managedAssetService.UpdateLandDemarcationAsync(id, request);
-            return Ok(new { success = true, data = asset, message = "Land demarcation updated." });
+            return Ok(new
+            {
+                success = true,
+                data = await _managedAssetService.GetLandDemarcationsAsync(id)
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("{id:guid}/demarcations")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer,Survey Officer")]
+    public async Task<IActionResult> CreateLandDemarcation(Guid id, [FromBody] SaveEstateLandDemarcationDto request)
+    {
+        try
+        {
+            var demarcation = await _managedAssetService.CreateLandDemarcationAsync(id, request);
+            return Ok(new { success = true, data = demarcation, message = "Land demarcation added." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPatch("{id:guid}/demarcations/{demarcationId:guid}")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer,Survey Officer")]
+    public async Task<IActionResult> UpdateLandDemarcation(
+        Guid id,
+        Guid demarcationId,
+        [FromBody] SaveEstateLandDemarcationDto request)
+    {
+        try
+        {
+            var demarcation = await _managedAssetService.UpdateLandDemarcationAsync(id, demarcationId, request);
+            return Ok(new { success = true, data = demarcation, message = "Land demarcation updated." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpDelete("{id:guid}/demarcations/{demarcationId:guid}")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer,Survey Officer")]
+    public async Task<IActionResult> DeleteLandDemarcation(Guid id, Guid demarcationId)
+    {
+        try
+        {
+            await _managedAssetService.DeleteLandDemarcationAsync(id, demarcationId);
+            return Ok(new { success = true, message = "Land demarcation deleted." });
         }
         catch (InvalidOperationException ex)
         {

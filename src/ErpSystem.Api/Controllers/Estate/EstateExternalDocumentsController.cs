@@ -222,7 +222,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return BadRequest(new { success = false, message = "Unsupported Estate service request type." });
         }
 
-        var reference = $"PORTAL-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        var reference = BuildExternalReference("PORTAL");
         var applicantName = string.IsNullOrWhiteSpace(request.ApplicantName)
             ? _currentUserService.UserName
             : request.ApplicantName.Trim();
@@ -389,7 +389,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var contact = string.IsNullOrWhiteSpace(request.Contact)
             ? _currentUserService.Email ?? _currentUserService.UserName
             : request.Contact.Trim();
-        var reference = $"LISTING-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        var reference = BuildExternalReference("LISTING");
         var description = string.IsNullOrWhiteSpace(request.Message)
             ? $"External portal {requestType.ToLowerInvariant()} request for {asset.AssetCode} - {asset.Name}."
             : request.Message.Trim();
@@ -760,6 +760,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
+    private static string BuildExternalReference(string prefix)
+        => $"{prefix}-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}".ToUpperInvariant();
 
     private static IDictionary<string, string?> BuildFieldValues(
         ExternalEstateRequestDefinition definition,

@@ -177,22 +177,44 @@ function formatPoint(point: BeaconPoint) {
 interface LandBankMapProps {
   assetId?: string;
   boundaryCoordinates?: string;
+  demarcations?: Array<{
+    id: string;
+    description: string;
+    boundaryCoordinates: string;
+    isDraft?: boolean;
+  }>;
   gisFeatureId?: string;
   gisLayerReference?: string;
   gisProvider?: string;
+  forceSurvey?: boolean;
+  showBeaconSchedule?: boolean;
 }
 
 export default function LandBankMap({
   assetId,
   boundaryCoordinates,
+  demarcations = [],
   gisFeatureId,
   gisLayerReference,
   gisProvider,
+  forceSurvey = false,
+  showBeaconSchedule = true,
 }: LandBankMapProps) {
   const points = React.useMemo(() => parseBoundary(boundaryCoordinates), [boundaryCoordinates]);
-  const center = React.useMemo(() => centerOf(points), [points]);
-  const surveyGridLines = React.useMemo(() => gridLines(points), [points]);
-  const isLinked = Boolean(assetId && gisFeatureId && gisLayerReference);
+  const demarcationPolygons = React.useMemo(
+    () =>
+      demarcations
+        .map((item) => ({ ...item, points: parseBoundary(item.boundaryCoordinates) }))
+        .filter((item) => item.points.length >= 3),
+    [demarcations]
+  );
+  const allSurveyPoints = React.useMemo(
+    () => [...points, ...demarcationPolygons.flatMap((item) => item.points)],
+    [demarcationPolygons, points]
+  );
+  const center = React.useMemo(() => centerOf(allSurveyPoints), [allSurveyPoints]);
+  const surveyGridLines = React.useMemo(() => gridLines(allSurveyPoints), [allSurveyPoints]);
+  const isLinked = Boolean(!forceSurvey && assetId && gisFeatureId && gisLayerReference);
   const [mode, setMode] = React.useState<'gis' | 'survey'>(
     isLinked ? 'gis' : 'survey'
   );
@@ -322,7 +344,7 @@ export default function LandBankMap({
             />
             <GisMapSync geometry={gisGeometry} />
           </MapContainer>
-        ) : points.length >= 3 ? (
+        ) : allSurveyPoints.length >= 3 ? (
           <MapContainer
             center={center}
             zoom={0}
@@ -338,7 +360,7 @@ export default function LandBankMap({
               backgroundSize: '32px 32px',
             }}
           >
-            <MapSync points={points} />
+            <MapSync points={allSurveyPoints} />
             {surveyGridLines.map((line, index) => (
               <Polyline
                 key={`grid-${index}`}
@@ -350,13 +372,14 @@ export default function LandBankMap({
             <Polygon
               positions={points.map(toPlanPoint)}
               pathOptions={{
-                color: '#0f766e',
-                fillColor: '#14b8a6',
-                fillOpacity: 0.2,
+                color: '#1d4ed8',
+                fillColor: '#60a5fa',
+                fillOpacity: 0.08,
                 weight: 3,
               }}
             >
               <Tooltip sticky>
+                <div className="mb-1 font-medium">Main cadastral boundary</div>
                 <div className="space-y-1">
                   {points.map((point) => (
                     <div key={`${point.beacon}-${point.northing}-${point.easting}`}>{formatPoint(point)}</div>
@@ -370,7 +393,7 @@ export default function LandBankMap({
                 center={toPlanPoint(point)}
                 radius={5}
                 pathOptions={{
-                  color: '#0f766e',
+                  color: '#1d4ed8',
                   fillColor: '#ffffff',
                   fillOpacity: 1,
                   weight: 2,
@@ -381,6 +404,30 @@ export default function LandBankMap({
                 </Tooltip>
               </CircleMarker>
             ))}
+            {demarcationPolygons.map((demarcation, index) => {
+              const color = demarcation.isDraft
+                ? '#dc2626'
+                : ['#0f766e', '#7c3aed', '#c2410c', '#047857'][index % 4];
+              return (
+                <Polygon
+                  key={demarcation.id}
+                  positions={demarcation.points.map(toPlanPoint)}
+                  pathOptions={{
+                    color,
+                    fillColor: color,
+                    fillOpacity: demarcation.isDraft ? 0.12 : 0.22,
+                    dashArray: demarcation.isDraft ? '8 6' : undefined,
+                    weight: 3,
+                  }}
+                >
+                  <Tooltip sticky>
+                    <div className="font-medium">
+                      {demarcation.isDraft ? 'Unsaved demarcation' : demarcation.description}
+                    </div>
+                  </Tooltip>
+                </Polygon>
+              );
+            })}
           </MapContainer>
         ) : (
           <div className="flex h-[360px] flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
@@ -397,7 +444,7 @@ export default function LandBankMap({
         ) : null}
       </div>
 
-      {points.length ? (
+      {showBeaconSchedule && points.length ? (
         <div className="overflow-hidden rounded-md border bg-background">
           <div className="border-b px-4 py-3">
             <p className="text-sm font-semibold text-foreground">Beacon Schedule</p>

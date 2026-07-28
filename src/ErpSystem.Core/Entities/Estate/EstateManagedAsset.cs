@@ -126,6 +126,19 @@ public class EstateManagedAsset : TenantEntity
     public string? Notes { get; set; }
 
     public ICollection<EstateManagedAssetDocument> Documents { get; set; } = new List<EstateManagedAssetDocument>();
+    public ICollection<EstateLandDemarcation> Demarcations { get; set; } = new List<EstateLandDemarcation>();
+}
+
+public class EstateLandDemarcation : TenantEntity
+{
+    public Guid EstateManagedAssetId { get; set; }
+    public EstateManagedAsset EstateManagedAsset { get; set; } = null!;
+    public int DemarcationNumber { get; set; }
+    [Required, MaxLength(1000)] public string Description { get; set; } = string.Empty;
+    public int BeaconCount { get; set; }
+    [Required] public string BoundaryCoordinates { get; set; } = string.Empty;
+    public decimal AreaSquareFeet { get; set; }
+    public bool BoundaryVerified { get; set; }
 }
 
 public class EstateManagedAssetDocument : TenantEntity

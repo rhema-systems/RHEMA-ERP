@@ -233,6 +233,7 @@ public partial class ProjectService
         var releaseBatch = await ValidateProjectUnitReleaseBatchAsync(entity.ProjectId, dto.ProjectUnitReleaseBatchId, building?.Id, floor?.Id);
         var isReleasedForMarket = dto.IsReleasedForMarket;
         var wasReleasedForMarket = entity.IsReleasedForMarket;
+        var wasReadyForEstate = IsProjectUnitReadyForEstate(wasReleasedForMarket, entity.Status);
         var normalizedStatus = NormalizeProjectUnitStatus(dto.Status);
         ValidateProjectUnitCommercialControls(isReleasedForMarket, normalizedStatus, dto.HandoverDate, salesAgreement, salesOrder);
         var effectiveStatus = AlignProjectUnitStatusForRelease(normalizedStatus, isReleasedForMarket);
@@ -278,8 +279,9 @@ public partial class ProjectService
         await _unitOfWork.Repository<ProjectUnit>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         await ReplaceProjectUnitAmenitiesAsync(entity.Id, resolvedAmenities);
-        if (wasReleasedForMarket && !isReleasedForMarket)
+        if (wasReadyForEstate && !IsProjectUnitReadyForEstate(isReleasedForMarket, entity.Status))
         {
+            // Estate/Project integration: retire the managed copy when a unit leaves every permitted handoff state.
             await _estateManagedAssetService.WithdrawProjectUnitAsync(entity.Id);
         }
 
@@ -341,9 +343,7 @@ public partial class ProjectService
             : siteAddress;
 
         // Estate/Project integration: only released, handed-over, or occupied Project units can enter Estate management.
-        var isReadyForEstate = unit.IsReleasedForMarket
-            || ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.HandedOver)
-            || ProjectUnitStatusEquals(unit.Status, ProjectUnitStatuses.Occupied);
+        var isReadyForEstate = IsProjectUnitReadyForEstate(unit.IsReleasedForMarket, unit.Status);
 
         if (!isReadyForEstate)
         {
@@ -398,6 +398,8 @@ public partial class ProjectService
         await ReplaceProjectUnitAmenitiesAsync(entity.Id, []);
         await _unitOfWork.Repository<ProjectUnit>().DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+        // Estate/Project integration: deleting the source unit must also withdraw its managed Estate copy.
+        await _estateManagedAssetService.WithdrawProjectUnitAsync(entity.Id);
     }
 
     public async Task<IEnumerable<ProjectCustomerVariationDto>> GetCustomerVariationsAsync(Guid projectId)
@@ -949,6 +951,11 @@ public partial class ProjectService
             throw new InvalidOperationException("Only unallocated available units can be withdrawn from market release.");
         }
     }
+
+    private static bool IsProjectUnitReadyForEstate(bool isReleasedForMarket, string? status)
+        => isReleasedForMarket
+            || ProjectUnitStatusEquals(status, ProjectUnitStatuses.HandedOver)
+            || ProjectUnitStatusEquals(status, ProjectUnitStatuses.Occupied);
 
     private static string AlignProjectUnitStatusForRelease(string? status, bool isReleasedForMarket)
     {

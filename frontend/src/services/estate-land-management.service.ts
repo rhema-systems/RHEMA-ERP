@@ -52,6 +52,8 @@ export interface EstateManagedAsset {
   surveyorName?: string;
   surveyDate?: string;
   beaconCount?: number;
+  demarcationCount: number;
+  verifiedDemarcationCount: number;
   ownershipHistory: ExistingLandOwner[];
   isReadyForProjectManagement: boolean;
   assetType: EstateManagedAssetType;
@@ -121,22 +123,24 @@ export interface CreateManualExistingLand {
   ownershipHistory: ExistingLandOwner[];
 }
 
-export interface UpdateEstateManagedLandDemarcation {
-  cadastreDescription: string;
-  region: string;
-  district: string;
-  town: string;
-  areaValue: number;
-  areaUnit: string;
-  areaSquareMeters?: number;
-  surveyorName: string;
-  surveyDate?: string;
-  surveyPlanNumber: string;
-  mapSheetNumber: string;
+export interface EstateLandDemarcation {
+  id: string;
+  estateManagedAssetId: string;
+  demarcationNumber: number;
+  description: string;
+  beaconCount: number;
+  boundaryCoordinates: string;
+  areaSquareFeet: number;
+  boundaryVerified: boolean;
+  createdAt: string;
+  createdBy?: string;
+}
+
+export interface SaveEstateLandDemarcation {
+  description: string;
   beaconCount: number;
   boundaryCoordinates: string;
   boundaryVerified: boolean;
-  isReadyForProjectManagement: boolean;
 }
 
 export interface EstateManagedAssetDocument {
@@ -368,18 +372,54 @@ export class EstateLandManagementService {
     return normalizeManagedAsset(response.data);
   }
 
+  async getLandDemarcations(
+    assetId: string
+  ): Promise<EstateLandDemarcation[]> {
+    const response = await apiService.get<
+      ApiListResponse<EstateLandDemarcation>
+    >(`/estate/managed-assets/${assetId}/demarcations`);
+    return response.data || [];
+  }
+
+  async createLandDemarcation(
+    assetId: string,
+    payload: SaveEstateLandDemarcation
+  ): Promise<EstateLandDemarcation> {
+    const response = await apiService.post<{
+      success?: boolean;
+      data?: EstateLandDemarcation;
+      message?: string;
+    }>(`/estate/managed-assets/${assetId}/demarcations`, payload);
+    if (!response.data)
+      throw new Error(response.message || 'Unable to add land demarcation.');
+    return response.data;
+  }
+
   async updateLandDemarcation(
     assetId: string,
-    payload: UpdateEstateManagedLandDemarcation
-  ): Promise<EstateManagedAsset> {
+    demarcationId: string,
+    payload: SaveEstateLandDemarcation
+  ): Promise<EstateLandDemarcation> {
     const response = await apiService.patch<{
       success?: boolean;
-      data?: EstateManagedAsset;
+      data?: EstateLandDemarcation;
       message?: string;
-    }>(`/estate/managed-assets/${assetId}/demarcation`, payload);
+    }>(
+      `/estate/managed-assets/${assetId}/demarcations/${demarcationId}`,
+      payload
+    );
     if (!response.data)
       throw new Error(response.message || 'Unable to update land demarcation.');
-    return normalizeManagedAsset(response.data);
+    return response.data;
+  }
+
+  async deleteLandDemarcation(
+    assetId: string,
+    demarcationId: string
+  ): Promise<void> {
+    await apiService.delete(
+      `/estate/managed-assets/${assetId}/demarcations/${demarcationId}`
+    );
   }
 
   async getDocuments(assetId: string): Promise<EstateManagedAssetDocument[]> {

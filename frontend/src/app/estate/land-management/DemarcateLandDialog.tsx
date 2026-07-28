@@ -2,7 +2,7 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
-import { Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { Edit3, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -15,23 +15,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import {
   estateLandManagementService,
+  type EstateLandDemarcation,
   type EstateManagedAsset,
-  type UpdateEstateManagedLandDemarcation,
+  type SaveEstateLandDemarcation,
 } from '@/services/estate-land-management.service';
 
 const LandBankMap = dynamic(() => import('./LandBankMap'), { ssr: false });
 
-type FormState = Record<string, string>;
 type Beacon = {
   beacon: string;
   northing: string;
@@ -39,6 +32,7 @@ type Beacon = {
   bearing: string;
   distance: string;
 };
+
 type ParsedBeacon = {
   beacon: string;
   northing: number;
@@ -47,80 +41,65 @@ type ParsedBeacon = {
   distance?: number;
 };
 
-const areaUnits = ['sq ft', 'acres', 'hectares', 'sqm'];
-
-function RequiredLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <Label>
-      {children} <span className="text-destructive">*</span>
-    </Label>
-  );
-}
-
-function formatDateInput(value?: string) {
-  if (!value) return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
-}
-
-function initialBeacons(asset?: EstateManagedAsset): Beacon[] {
-  const parsed = parseBoundary(asset?.boundaryCoordinates);
-  if (parsed.length) {
-    return parsed.map((point) => ({
-      beacon: point.beacon,
-      northing: `${point.northing}`,
-      easting: `${point.easting}`,
-      bearing: point.bearing,
-      distance: point.distance == null ? '' : `${point.distance}`,
-    }));
-  }
-
-  return Array.from({ length: 4 }, (_, index) => ({
+const emptyBeacons = (): Beacon[] =>
+  Array.from({ length: 4 }, (_, index) => ({
     beacon: `Beacon ${index + 1}`,
     northing: '',
     easting: '',
     bearing: '',
     distance: '',
   }));
-}
 
-function parseBoundary(value?: string): ParsedBeacon[] {
-  if (!value?.trim()) return [];
+function parseBoundary(value?: string): Beacon[] {
+  if (!value?.trim()) return emptyBeacons();
 
   try {
     const parsed = JSON.parse(value);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) return emptyBeacons();
 
-    return parsed
-      .map((item, index): ParsedBeacon | null => {
+    const points = parsed
+      .map((item, index): Beacon | null => {
         const northing = Number(
           Array.isArray(item)
             ? item[0]
-            : item?.northing ?? item?.Northing ?? item?.northingFeet ?? item?.NorthingFeet
+            : item?.northing ??
+                item?.Northing ??
+                item?.northingFeet ??
+                item?.NorthingFeet
         );
         const easting = Number(
           Array.isArray(item)
             ? item[1]
-            : item?.easting ?? item?.Easting ?? item?.eastingFeet ?? item?.EastingFeet
+            : item?.easting ??
+                item?.Easting ??
+                item?.eastingFeet ??
+                item?.EastingFeet
         );
         if (!Number.isFinite(northing) || !Number.isFinite(easting)) return null;
 
-        const distance = Number(item?.distance ?? item?.Distance ?? item?.distanceFeet ?? item?.DistanceFeet);
+        const distance = Number(
+          item?.distance ??
+            item?.Distance ??
+            item?.distanceFeet ??
+            item?.DistanceFeet
+        );
         return {
           beacon: `${item?.beacon ?? item?.Beacon ?? item?.beaconIndex ?? item?.BeaconIndex ?? `Beacon ${index + 1}`}`,
-          northing,
-          easting,
+          northing: `${northing}`,
+          easting: `${easting}`,
           bearing: `${item?.bearing ?? item?.Bearing ?? ''}`.trim(),
-          distance: Number.isFinite(distance) ? distance : undefined,
+          distance: Number.isFinite(distance) ? `${distance}` : '',
         };
       })
-      .filter((item): item is ParsedBeacon => Boolean(item));
+      .filter((item): item is Beacon => Boolean(item));
+
+    return points.length >= 3 ? points : emptyBeacons();
   } catch {
-    return [];
+    return emptyBeacons();
   }
 }
 
-function boundaryCoordinatesFromBeacons(beacons: Beacon[]) {
+function serializeBoundary(beacons: Beacon[]) {
   const points = beacons
     .map((item): ParsedBeacon | null => {
       const northing = Number(item.northing);
@@ -141,20 +120,9 @@ function boundaryCoordinatesFromBeacons(beacons: Beacon[]) {
   return points.length >= 3 ? JSON.stringify(points) : '';
 }
 
-function buildForm(asset: EstateManagedAsset): FormState {
-  return {
-    cadastreDescription: asset.cadastreDescription || '',
-    region: asset.region || '',
-    district: asset.district || '',
-    town: asset.town || '',
-    areaValue: asset.areaValue == null ? '' : `${asset.areaValue}`,
-    areaUnit: asset.areaUnit || 'sq ft',
-    areaSquareMeters: asset.areaSquareMeters == null ? '' : `${asset.areaSquareMeters}`,
-    surveyorName: asset.surveyorName || '',
-    surveyDate: formatDateInput(asset.surveyDate),
-    surveyPlanNumber: asset.surveyPlanNumber || '',
-    mapSheetNumber: asset.mapSheetNumber || '',
-  };
+function formatArea(areaSquareFeet: number) {
+  const acres = areaSquareFeet / 43560;
+  return `${areaSquareFeet.toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft (${acres.toLocaleString(undefined, { maximumFractionDigits: 4 })} acres)`;
 }
 
 export default function DemarcateLandDialog({
@@ -166,161 +134,302 @@ export default function DemarcateLandDialog({
   asset: EstateManagedAsset | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved: (asset: EstateManagedAsset) => Promise<void> | void;
+  onSaved: () => Promise<void> | void;
 }) {
-  const [form, setForm] = React.useState<FormState>(() =>
-    asset ? buildForm(asset) : {}
-  );
-  const [beacons, setBeacons] = React.useState<Beacon[]>(() =>
-    initialBeacons(asset || undefined)
-  );
+  const [demarcations, setDemarcations] = React.useState<
+    EstateLandDemarcation[]
+  >([]);
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [description, setDescription] = React.useState('');
+  const [beacons, setBeacons] = React.useState<Beacon[]>(emptyBeacons);
   const [boundaryVerified, setBoundaryVerified] = React.useState(false);
-  const [ready, setReady] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [deletingId, setDeletingId] = React.useState<string | null>(null);
+
+  const resetEditor = React.useCallback(() => {
+    setEditingId(null);
+    setDescription('');
+    setBeacons(emptyBeacons());
+    setBoundaryVerified(false);
+  }, []);
+
+  const loadDemarcations = React.useCallback(async () => {
+    if (!asset) return;
+    setLoading(true);
+    try {
+      setDemarcations(
+        await estateLandManagementService.getLandDemarcations(asset.id)
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Unable to load land demarcations.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [asset]);
 
   React.useEffect(() => {
-    if (!asset || !open) return;
-    setForm(buildForm(asset));
-    setBeacons(initialBeacons(asset));
-    setBoundaryVerified(asset.boundaryVerified);
-    setReady(asset.isReadyForProjectManagement);
-  }, [asset, open]);
+    if (!open || !asset) return;
+    resetEditor();
+    void loadDemarcations();
+  }, [asset, loadDemarcations, open, resetEditor]);
 
   const boundaryCoordinates = React.useMemo(
-    () => boundaryCoordinatesFromBeacons(beacons),
+    () => serializeBoundary(beacons),
     [beacons]
   );
+  const isIncomplete =
+    !description.trim() ||
+    beacons.length < 3 ||
+    beacons.some(
+      (item) =>
+        !item.beacon.trim() ||
+        !item.northing.trim() ||
+        !item.easting.trim()
+    ) ||
+    !boundaryCoordinates;
 
-  const missing = React.useMemo(() => {
-    const requiredKeys = [
-      'cadastreDescription',
-      'region',
-      'district',
-      'town',
-      'areaValue',
-      'areaUnit',
-      'surveyorName',
-      'surveyPlanNumber',
-      'mapSheetNumber',
-    ];
-    return (
-      requiredKeys.some((key) => !form[key]?.trim()) ||
-      beacons.length < 3 ||
-      beacons.some((item) => !item.beacon.trim() || !item.northing.trim() || !item.easting.trim()) ||
-      !boundaryCoordinates
-    );
-  }, [beacons, boundaryCoordinates, form]);
+  const mapDemarcations = React.useMemo(
+    () => [
+      ...demarcations
+        .filter((item) => item.id !== editingId)
+        .map((item) => ({
+          id: item.id,
+          description: `Parcel ${item.demarcationNumber}: ${item.description}`,
+          boundaryCoordinates: item.boundaryCoordinates,
+        })),
+      ...(boundaryCoordinates
+        ? [
+            {
+              id: 'draft',
+              description: description.trim() || 'Unsaved demarcation',
+              boundaryCoordinates,
+              isDraft: true,
+            },
+          ]
+        : []),
+    ],
+    [boundaryCoordinates, demarcations, description, editingId]
+  );
 
-  const setValue = (key: string, value: string) =>
-    setForm((current) => ({ ...current, [key]: value }));
+  const editDemarcation = (demarcation: EstateLandDemarcation) => {
+    setEditingId(demarcation.id);
+    setDescription(demarcation.description);
+    setBeacons(parseBoundary(demarcation.boundaryCoordinates));
+    setBoundaryVerified(demarcation.boundaryVerified);
+  };
 
   const save = async () => {
-    if (!asset) return;
-    if (missing) {
-      toast.error('Complete the cadastral and beacon fields before saving.');
-      return;
-    }
-    if (ready && !boundaryVerified) {
-      toast.error('Verify the boundary before project handoff.');
+    if (!asset || isIncomplete) {
+      toast.error('Enter a description and at least three complete beacons.');
       return;
     }
 
-    const payload: UpdateEstateManagedLandDemarcation = {
-      cadastreDescription: form.cadastreDescription,
-      region: form.region,
-      district: form.district,
-      town: form.town,
-      areaValue: Number(form.areaValue),
-      areaUnit: form.areaUnit,
-      areaSquareMeters: form.areaSquareMeters ? Number(form.areaSquareMeters) : undefined,
-      surveyorName: form.surveyorName,
-      surveyDate: form.surveyDate || undefined,
-      surveyPlanNumber: form.surveyPlanNumber,
-      mapSheetNumber: form.mapSheetNumber,
+    const payload: SaveEstateLandDemarcation = {
+      description: description.trim(),
       beaconCount: beacons.length,
       boundaryCoordinates,
       boundaryVerified,
-      isReadyForProjectManagement: ready,
     };
 
     try {
       setSaving(true);
-      const updated = await estateLandManagementService.updateLandDemarcation(
-        asset.id,
-        payload
+      if (editingId) {
+        await estateLandManagementService.updateLandDemarcation(
+          asset.id,
+          editingId,
+          payload
+        );
+        toast.success('Demarcation updated.');
+      } else {
+        await estateLandManagementService.createLandDemarcation(
+          asset.id,
+          payload
+        );
+        toast.success('Demarcation added within the main cadastral boundary.');
+      }
+      resetEditor();
+      await loadDemarcations();
+      await onSaved();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to save demarcation.'
       );
-      toast.success('Land demarcation updated.');
-      await onSaved(updated);
-      onOpenChange(false);
-    } catch (error: any) {
-      toast.error(error?.message || 'Unable to update land demarcation.');
     } finally {
       setSaving(false);
     }
   };
 
+  const remove = async (demarcation: EstateLandDemarcation) => {
+    if (
+      !asset ||
+      !window.confirm(
+        `Delete Parcel ${demarcation.demarcationNumber}: ${demarcation.description}?`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setDeletingId(demarcation.id);
+      await estateLandManagementService.deleteLandDemarcation(
+        asset.id,
+        demarcation.id
+      );
+      if (editingId === demarcation.id) resetEditor();
+      await loadDemarcations();
+      await onSaved();
+      toast.success('Demarcation deleted.');
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to delete demarcation.'
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
-    <Dialog open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => !saving && !deletingId && onOpenChange(next)}
+    >
       <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>
-            {asset?.boundaryCoordinates ? 'Re-demarcate Land' : 'Demarcate Land'}
-          </DialogTitle>
+          <DialogTitle>Demarcations - {asset?.assetCode}</DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          {[
-            ['cadastreDescription', 'Cadastre Description'],
-            ['region', 'Region'],
-            ['district', 'District'],
-            ['town', 'Town'],
-            ['areaValue', 'Survey Area'],
-            ['areaSquareMeters', 'Area (sqm)'],
-            ['surveyorName', 'Surveyor Name'],
-            ['surveyDate', 'Survey Date'],
-            ['surveyPlanNumber', 'Survey Plan Number'],
-            ['mapSheetNumber', 'Map Sheet Number'],
-          ].map(([key, label]) => (
-            <div key={key} className="space-y-2">
-              <RequiredLabel>{label}</RequiredLabel>
-              <Input
-                type={
-                  key === 'surveyDate'
-                    ? 'date'
-                    : ['areaValue', 'areaSquareMeters'].includes(key)
-                      ? 'number'
-                      : 'text'
-                }
-                value={form[key] || ''}
-                onChange={(event) => setValue(key, event.target.value)}
-              />
-            </div>
-          ))}
-          <div className="space-y-2">
-            <RequiredLabel>Survey Area Unit</RequiredLabel>
-            <Select
-              value={form.areaUnit || 'sq ft'}
-              onValueChange={(value) => setValue('areaUnit', value)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {areaUnits.map((unit) => (
-                  <SelectItem key={unit} value={unit}>
-                    {unit}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-md border p-3">
+            <p className="text-xs text-muted-foreground">Main cadastral</p>
+            <p className="mt-1 text-sm font-medium">
+              {asset?.cadastreDescription || asset?.name}
+            </p>
           </div>
+          <div className="rounded-md border p-3">
+            <p className="text-xs text-muted-foreground">Survey plan</p>
+            <p className="mt-1 text-sm font-medium">
+              {asset?.surveyPlanNumber || 'Not recorded'}
+            </p>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-xs text-muted-foreground">Demarcations</p>
+            <p className="mt-1 text-sm font-medium">{demarcations.length}</p>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-md border">
+          <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+            <p className="text-sm font-semibold">Defined parcels</p>
+            <Button type="button" size="sm" variant="outline" onClick={resetEditor}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Demarcation
+            </Button>
+          </div>
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading demarcations
+            </div>
+          ) : demarcations.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead className="bg-muted/60 text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Parcel</th>
+                    <th className="px-4 py-3 font-medium">Description</th>
+                    <th className="px-4 py-3 font-medium">Area</th>
+                    <th className="px-4 py-3 font-medium">Beacons</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                    <th className="px-4 py-3 font-medium" aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {demarcations.map((demarcation) => (
+                    <tr key={demarcation.id}>
+                      <td className="px-4 py-3 font-medium">
+                        {demarcation.demarcationNumber}
+                      </td>
+                      <td className="max-w-xs px-4 py-3">
+                        {demarcation.description}
+                      </td>
+                      <td className="px-4 py-3 tabular-nums">
+                        {formatArea(demarcation.areaSquareFeet)}
+                      </td>
+                      <td className="px-4 py-3 tabular-nums">
+                        {demarcation.beaconCount}
+                      </td>
+                      <td className="px-4 py-3">
+                        {demarcation.boundaryVerified ? 'Verified' : 'Draft'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            title="Edit demarcation"
+                            onClick={() => editDemarcation(demarcation)}
+                          >
+                            <Edit3 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            title="Delete demarcation"
+                            disabled={deletingId === demarcation.id}
+                            onClick={() => void remove(demarcation)}
+                          >
+                            {deletingId === demarcation.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              No demarcations have been added.
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="demarcation-description" className="text-sm font-medium">
+            Demarcation Description <span className="text-destructive">*</span>
+          </label>
+          <Textarea
+            id="demarcation-description"
+            value={description}
+            maxLength={1000}
+            rows={3}
+            onChange={(event) => setDescription(event.target.value)}
+          />
         </div>
 
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full min-w-[850px] text-sm">
             <thead className="bg-muted">
               <tr>
-                {['Beacon index', 'Northing (Y), ft', 'Easting (X), ft', 'Bearing', 'Distance, ft', ''].map((label) => (
+                {[
+                  'Beacon index',
+                  'Northing (Y), ft',
+                  'Easting (X), ft',
+                  'Bearing',
+                  'Distance, ft',
+                  '',
+                ].map((label) => (
                   <th key={label} className="px-3 py-2 text-left font-medium">
                     {label}
                   </th>
@@ -330,15 +439,29 @@ export default function DemarcateLandDialog({
             <tbody className="divide-y">
               {beacons.map((beacon, index) => (
                 <tr key={index}>
-                  {(['beacon', 'northing', 'easting', 'bearing', 'distance'] as const).map((key) => (
+                  {(
+                    [
+                      'beacon',
+                      'northing',
+                      'easting',
+                      'bearing',
+                      'distance',
+                    ] as const
+                  ).map((key) => (
                     <td key={key} className="p-2">
                       <Input
-                        type={['northing', 'easting', 'distance'].includes(key) ? 'number' : 'text'}
+                        type={
+                          ['northing', 'easting', 'distance'].includes(key)
+                            ? 'number'
+                            : 'text'
+                        }
                         value={beacon[key]}
                         onChange={(event) =>
                           setBeacons((current) =>
                             current.map((item, row) =>
-                              row === index ? { ...item, [key]: event.target.value } : item
+                              row === index
+                                ? { ...item, [key]: event.target.value }
+                                : item
                             )
                           )
                         }
@@ -350,8 +473,13 @@ export default function DemarcateLandDialog({
                       type="button"
                       size="icon"
                       variant="ghost"
+                      title="Remove beacon"
                       disabled={beacons.length <= 3}
-                      onClick={() => setBeacons((current) => current.filter((_, row) => row !== index))}
+                      onClick={() =>
+                        setBeacons((current) =>
+                          current.filter((_, row) => row !== index)
+                        )
+                      }
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -362,53 +490,65 @@ export default function DemarcateLandDialog({
           </table>
         </div>
 
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() =>
-            setBeacons((current) => [
-              ...current,
-              {
-                beacon: `Beacon ${current.length + 1}`,
-                northing: '',
-                easting: '',
-                bearing: '',
-                distance: '',
-              },
-            ])
-          }
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Add Beacon
-        </Button>
-
-        <LandBankMap boundaryCoordinates={boundaryCoordinates || undefined} />
-
-        <div className="flex flex-wrap gap-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              setBeacons((current) => [
+                ...current,
+                {
+                  beacon: `Beacon ${current.length + 1}`,
+                  northing: '',
+                  easting: '',
+                  bearing: '',
+                  distance: '',
+                },
+              ])
+            }
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add Beacon
+          </Button>
           <label className="flex items-center gap-2 text-sm">
             <Checkbox
               checked={boundaryVerified}
-              onCheckedChange={(checked) => setBoundaryVerified(checked === true)}
+              onCheckedChange={(checked) =>
+                setBoundaryVerified(checked === true)
+              }
             />
-            Boundary verified
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={ready} onCheckedChange={(checked) => setReady(checked === true)} />
-            Mark whole land demarcated and ready for Project Management
+            Demarcation boundary verified
           </label>
         </div>
 
+        <LandBankMap
+          boundaryCoordinates={asset?.boundaryCoordinates}
+          demarcations={mapDemarcations}
+          forceSurvey
+          showBeaconSchedule={false}
+        />
+
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancel
+          {editingId ? (
+            <Button variant="outline" onClick={resetEditor} disabled={saving}>
+              <X className="mr-2 h-4 w-4" />
+              Cancel Edit
+            </Button>
+          ) : null}
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={saving}
+          >
+            Close
           </Button>
-          <Button onClick={save} disabled={saving || missing}>
+          <Button onClick={() => void save()} disabled={saving || isIncomplete}>
             {saving ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Save className="mr-2 h-4 w-4" />
             )}
-            Save Demarcation
+            {editingId ? 'Update Demarcation' : 'Save Demarcation'}
           </Button>
         </DialogFooter>
       </DialogContent>

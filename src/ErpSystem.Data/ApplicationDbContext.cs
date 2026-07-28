@@ -832,6 +832,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<LandRegistration> LandRegistrations { get; set; }
     public DbSet<LandAsset> LandAssets { get; set; }
     public DbSet<EstateManagedAsset> EstateManagedAssets { get; set; }
+    public DbSet<EstateLandDemarcation> EstateLandDemarcations { get; set; }
     public DbSet<EstateManagedAssetDocument> EstateManagedAssetDocuments { get; set; }
     public DbSet<EstateGisConfiguration> EstateGisConfigurations { get; set; }
     public DbSet<LandAcquisitionNote> LandAcquisitionNotes { get; set; }
@@ -8469,6 +8470,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithOne(item => item.EstateManagedAsset)
                 .HasForeignKey(item => item.EstateManagedAssetId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.Demarcations)
+                .WithOne(item => item.EstateManagedAsset)
+                .HasForeignKey(item => item.EstateManagedAssetId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EstateLandDemarcation>(entity =>
+        {
+            entity.ToTable("EstateLandDemarcations");
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.DemarcationNumber })
+                .IsUnique();
+            entity.Property(item => item.AreaSquareFeet).HasPrecision(18, 4);
         });
 
         builder.Entity<EstateGisConfiguration>(entity =>
