@@ -701,7 +701,16 @@ public sealed class ProcurementSupplierApplicantAccessService :
             (item.NormalizedUserName == loginIdentifier.ToUpper() ||
              (!string.IsNullOrWhiteSpace(item.Email) &&
               item.Email == access.VerifiedContact)), cancellationToken);
-        if (existing is not null && access.ApprovedUserId != existing.Id)
+        var resumedPartialIdentity = existing is not null &&
+            access.ApprovedUserId != existing.Id &&
+            await IsRecoverablePartialSupplierIdentityAsync(
+                existing,
+                access,
+                roles,
+                cancellationToken);
+        if (existing is not null &&
+            access.ApprovedUserId != existing.Id &&
+            !resumedPartialIdentity)
             throw Error("SUPPLIER_APPLICANT_LOGIN_ALREADY_EXISTS",
                 "The verified contact is already assigned to another account.", 409);
 
@@ -710,12 +719,25 @@ public sealed class ProcurementSupplierApplicantAccessService :
         var expiry = now.AddDays(Math.Clamp(
             _options.TemporaryPasswordExpiryDays, 1, 30));
         ApplicationUser user;
-        if (access.ApprovedUserId.HasValue)
+        if (access.ApprovedUserId.HasValue || resumedPartialIdentity)
         {
-            user = await _userManager.FindByIdAsync(access.ApprovedUserId.Value.ToString())
-                ?? throw Error("SUPPLIER_APPLICANT_ACCOUNT_NOT_FOUND",
-                    "The provisioned supplier account was not found.", 409);
+            user = resumedPartialIdentity
+                ? existing!
+                : await _userManager.FindByIdAsync(
+                    access.ApprovedUserId!.Value.ToString())
+                  ?? throw Error("SUPPLIER_APPLICANT_ACCOUNT_NOT_FOUND",
+                      "The provisioned supplier account was not found.", 409);
             EnsureApprovedUserTenant(user, access);
+            var assignedRoles = await _userManager.GetRolesAsync(user);
+            var missingRoles = roles.Except(
+                    assignedRoles,
+                    StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (missingRoles.Length > 0)
+            {
+                EnsureIdentitySucceeded(
+                    await _userManager.AddToRolesAsync(user, missingRoles));
+            }
             var reset = await _userManager.GeneratePasswordResetTokenAsync(user);
             var resetResult = await _userManager.ResetPasswordAsync(
                 user, reset, temporaryPassword);
@@ -795,6 +817,24 @@ public sealed class ProcurementSupplierApplicantAccessService :
         Capture(access);
         await Accesses.UpdateAsync(access);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        if (resumedPartialIdentity)
+        {
+            await RecordUserEventAsync(
+                access,
+                access.Token,
+                "SupplierAccountProvisioningResumed",
+                ProcurementControlEventResult.Succeeded,
+                new
+                {
+                    UserId = user.Id,
+                    BusinessPartnerId = businessPartner.Id,
+                    Roles = roles,
+                    RecoveredFromPartialIdentity = true
+                },
+                "A strictly matched, unbound partial supplier identity was reconciled during activation retry.",
+                NormalizeCorrelation(correlationId),
+                cancellationToken);
+        }
         await RecordUserEventAsync(
             access,
             access.Token,
@@ -883,6 +923,78 @@ public sealed class ProcurementSupplierApplicantAccessService :
         }
 
         return changed;
+    }
+
+    private async Task<bool> IsRecoverablePartialSupplierIdentityAsync(
+        ApplicationUser user,
+        ProcurementSupplierApplicantAccess access,
+        IReadOnlyCollection<string> approvedRoles,
+        CancellationToken cancellationToken)
+    {
+        var registration = access.Registration;
+        if (!registration.ApprovedDate.HasValue ||
+            !registration.ApprovedById.HasValue ||
+            !Guid.TryParse(user.CreatedBy, out var createdById) ||
+            createdById != registration.ApprovedById.Value ||
+            user.CreatedAt < registration.ApprovedDate.Value.AddMinutes(-1) ||
+            user.TenantId != access.TenantId ||
+            !user.IsActive ||
+            user.AuthenticationProvider != AuthenticationProvider.Local ||
+            !user.MustChangePassword ||
+            !user.TemporaryPasswordExpiresAtUtc.HasValue ||
+            user.PasswordChangedAtUtc.HasValue ||
+            user.EmployeeId.HasValue ||
+            !string.Equals(
+                user.FirstName,
+                registration.ApplicantName,
+                StringComparison.Ordinal) ||
+            !string.Equals(user.LastName, "Supplier", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var contactMatches = access.VerifiedChannel ==
+            ProcurementSupplierApplicantVerificationChannel.Email
+            ? string.Equals(
+                user.Email,
+                access.VerifiedContact,
+                StringComparison.OrdinalIgnoreCase)
+            : string.Equals(
+                NormalizeContact(
+                    ProcurementSupplierApplicantVerificationChannel.Sms,
+                    user.PhoneNumber ?? string.Empty),
+                access.VerifiedContact,
+                StringComparison.Ordinal);
+        if (!contactMatches)
+            return false;
+
+        var assignedRoles = await _userManager.GetRolesAsync(user);
+        if (assignedRoles.Any(role => !approvedRoles.Contains(
+                role,
+                StringComparer.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        var hasApplicantAccess = await Accesses
+            .GetQueryableIncludingDeleted(item =>
+                item.Id != access.Id &&
+                item.ApprovedUserId == user.Id)
+            .AnyAsync(cancellationToken);
+        var hasTenantAccess = await UserTenants
+            .GetQueryableIncludingDeleted(item => item.UserId == user.Id)
+            .AnyAsync(cancellationToken);
+        var ownsBusinessPartner = await BusinessPartners
+            .GetQueryableIncludingDeleted(item => item.UserId == user.Id)
+            .AnyAsync(cancellationToken);
+        var hasBusinessPartnerMembership = await BusinessPartnerUsers
+            .GetQueryableIncludingDeleted(item => item.UserId == user.Id)
+            .AnyAsync(cancellationToken);
+
+        return !hasApplicantAccess &&
+               !hasTenantAccess &&
+               !ownsBusinessPartner &&
+               !hasBusinessPartnerMembership;
     }
 
     private static void EnsureApprovedUserTenant(

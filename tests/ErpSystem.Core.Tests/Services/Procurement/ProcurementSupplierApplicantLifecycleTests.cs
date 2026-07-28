@@ -352,6 +352,110 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
     }
 
     [Fact]
+    public async Task ActivationRetryResumesStrictlyMatchedPartialIdentity()
+    {
+        await using var fixture = new Fixture
+        {
+            PersistIdentityImmediately = true,
+            FailRoleAssignmentOnce = true
+        };
+        var subject = fixture.SeedApprovedApplication();
+
+        var firstAttempt = () => fixture.Service.ProvisionApprovedSupplierAsync(
+            subject.RegistrationId,
+            subject.BusinessPartnerId,
+            fixture.ActorId,
+            "approval-partial-identity");
+        (await firstAttempt.Should()
+                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
+            .Which.Code.Should().Be("SUPPLIER_APPLICANT_IDENTITY_PROVISION_FAILED");
+
+        var partialUser = await fixture.Context.Users
+            .SingleAsync(item => item.Email == "approved@example.test");
+        (await fixture.Context.ProcurementSupplierApplicantAccesses.SingleAsync())
+            .ApprovedUserId.Should().BeNull();
+        (await fixture.Context.UserTenants.AnyAsync(item =>
+            item.UserId == partialUser.Id)).Should().BeFalse();
+        (await fixture.Context.BusinessPartnerUsers.AnyAsync(item =>
+            item.UserId == partialUser.Id)).Should().BeFalse();
+
+        await fixture.Service.RetryApprovedSupplierActivationAsync(
+            subject.RegistrationId,
+            fixture.ActorId,
+            "approval-partial-identity-retry");
+
+        var access = await fixture.Context.ProcurementSupplierApplicantAccesses
+            .SingleAsync();
+        access.ApprovedUserId.Should().Be(partialUser.Id);
+        access.Status.Should()
+            .Be(ProcurementSupplierApplicantAccessStatus.CredentialDelivered);
+        (await fixture.Context.Users.CountAsync(item =>
+            item.Email == "approved@example.test")).Should().Be(1);
+        (await fixture.Context.UserTenants.CountAsync(item =>
+            item.UserId == partialUser.Id &&
+            item.TenantId == fixture.TenantId)).Should().Be(1);
+        (await fixture.Context.BusinessPartnerUsers.CountAsync(item =>
+            item.UserId == partialUser.Id &&
+            item.BusinessPartnerId == subject.BusinessPartnerId)).Should().Be(1);
+        (await fixture.Context.BusinessPartners.SingleAsync(item =>
+            item.Id == subject.BusinessPartnerId)).UserId.Should().Be(partialUser.Id);
+        fixture.DeliveredMessages.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task ActivationRetryDoesNotClaimLinkedMatchingIdentity()
+    {
+        await using var fixture = new Fixture();
+        var subject = fixture.SeedApprovedApplication();
+        var registration = await fixture.Context.BusinessPartnerRegistrations
+            .SingleAsync(item => item.Id == subject.RegistrationId);
+        var existingUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "approved@example.test",
+            NormalizedUserName = "APPROVED@EXAMPLE.TEST",
+            Email = "approved@example.test",
+            NormalizedEmail = "APPROVED@EXAMPLE.TEST",
+            EmailConfirmed = true,
+            FirstName = registration.ApplicantName,
+            LastName = "Supplier",
+            TenantId = fixture.TenantId,
+            IsActive = true,
+            AuthenticationProvider = AuthenticationProvider.Local,
+            MustChangePassword = true,
+            TemporaryPasswordExpiresAtUtc = DateTime.UtcNow.AddDays(7),
+            CreatedAt = registration.ApprovedDate!.Value.AddSeconds(1),
+            CreatedBy = fixture.ActorId.ToString()
+        };
+        fixture.Context.Users.Add(existingUser);
+        fixture.Context.UserTenants.Add(new UserTenant
+        {
+            Id = Guid.NewGuid(),
+            UserId = existingUser.Id,
+            TenantId = fixture.TenantId,
+            AccessLevel = UserTenantAccessLevel.Standard,
+            Status = UserTenantStatus.Active,
+            IsDefault = true,
+            GrantedAt = DateTime.UtcNow
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var retry = () => fixture.Service.ProvisionApprovedSupplierAsync(
+            subject.RegistrationId,
+            subject.BusinessPartnerId,
+            fixture.ActorId,
+            "approval-existing-identity");
+
+        (await retry.Should()
+                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
+            .Which.Code.Should().Be("SUPPLIER_APPLICANT_LOGIN_ALREADY_EXISTS");
+        (await fixture.Context.ProcurementSupplierApplicantAccesses.SingleAsync())
+            .ApprovedUserId.Should().BeNull();
+        (await fixture.Context.BusinessPartnerUsers.AnyAsync(item =>
+            item.UserId == existingUser.Id)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task TenantAdministratorCannotResendOrRetryAnotherTenantsApplication()
     {
         await using var fixture = new Fixture();
@@ -401,10 +505,13 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
         private readonly Mock<IBusinessPartnerRegistrationService> _registrations = new();
         private readonly Mock<IProcurementSupplierOnboardingTokenService> _tokenService = new();
         private readonly Mock<INotificationService> _notifications = new();
+        private readonly Dictionary<Guid, HashSet<string>> _userRoles = new();
 
         public Guid TenantId { get; } = Guid.NewGuid();
         public Guid ActorId { get; } = Guid.NewGuid();
         public bool FailCredentialDelivery { get; set; }
+        public bool PersistIdentityImmediately { get; set; }
+        public bool FailRoleAssignmentOnce { get; set; }
         public string LastTemporaryPassword { get; private set; } = string.Empty;
         public List<string> DeliveredMessages { get; } = [];
         public ApplicationDbContext Context { get; }
@@ -460,11 +567,42 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
                 {
                     LastTemporaryPassword = password;
                     Context.Users.Add(user);
+                    if (PersistIdentityImmediately)
+                        Context.SaveChanges();
                 })
                 .ReturnsAsync(IdentityResult.Success);
             _userManager.Setup(item => item.AddToRolesAsync(
                     It.IsAny<ApplicationUser>(), It.IsAny<IEnumerable<string>>()))
-                .ReturnsAsync(IdentityResult.Success);
+                .Returns<ApplicationUser, IEnumerable<string>>((user, roles) =>
+                {
+                    if (FailRoleAssignmentOnce)
+                    {
+                        FailRoleAssignmentOnce = false;
+                        return Task.FromResult(IdentityResult.Failed(
+                            new IdentityError
+                            {
+                                Code = "RoleAssignmentUnavailable",
+                                Description = "Role assignment is temporarily unavailable."
+                            }));
+                    }
+
+                    if (!_userRoles.TryGetValue(user.Id, out var assigned))
+                    {
+                        assigned = new HashSet<string>(
+                            StringComparer.OrdinalIgnoreCase);
+                        _userRoles[user.Id] = assigned;
+                    }
+                    assigned.UnionWith(roles);
+                    return Task.FromResult(IdentityResult.Success);
+                });
+            _userManager.Setup(item => item.GetRolesAsync(
+                    It.IsAny<ApplicationUser>()))
+                .ReturnsAsync((ApplicationUser user) =>
+                    (IList<string>)(_userRoles.TryGetValue(
+                        user.Id,
+                        out var roles)
+                        ? roles.ToList()
+                        : []));
             _userManager.Setup(item => item.UpdateAsync(It.IsAny<ApplicationUser>()))
                 .ReturnsAsync(IdentityResult.Success);
             _userManager.Setup(item => item.GeneratePasswordResetTokenAsync(
@@ -588,6 +726,8 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
                 ApplicantEmail = "approved@example.test",
                 PartnerType = "Supplier",
                 Status = "Approved",
+                ApprovedDate = DateTime.UtcNow.AddMinutes(-1),
+                ApprovedById = ActorId,
                 BusinessPartnerId = businessPartnerId,
                 CreatedById = ActorId
             };

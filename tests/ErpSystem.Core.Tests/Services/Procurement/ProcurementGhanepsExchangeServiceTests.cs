@@ -2013,6 +2013,7 @@ public sealed class ProcurementGhanepsExchangeServiceTests
             inner.AccountSegmentValues;
         public ISegmentLookupValueRepository SegmentLookupValues =>
             inner.SegmentLookupValues;
+        public bool HasActiveTransaction => inner.HasActiveTransaction;
 
         public async Task<int> SaveChangesAsync(
             CancellationToken cancellationToken = default)
