@@ -32,6 +32,7 @@ public record LandAcquisitionItemDto(
     string LastActivity,
     string? ValueEstimate,
     string? RiskLevel,
+    bool HasLandAsset,
     bool StageInputsComplete,
     IReadOnlyList<string> MissingInputs);
 

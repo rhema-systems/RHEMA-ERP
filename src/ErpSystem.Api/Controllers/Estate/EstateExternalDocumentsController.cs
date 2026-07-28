@@ -18,14 +18,7 @@ namespace ErpSystem.Api.Controllers.Estate;
 [Authorize(Roles = Constants.Roles.ExternalUser)]
 public sealed class EstateExternalDocumentsController : ControllerBase
 {
-    private static readonly string[] PortalRecipientFieldKeys =
-    [
-        "dispatchedto",
-        "applicantname",
-        "applicantemail",
-        "email",
-        "recipient"
-    ];
+    private const string PortalRecipientFieldKey = "dispatchedto";
 
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
@@ -62,7 +55,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .Where(value => value.TenantId == tenantId
                 && !value.IsDeleted
                 && value.FieldValue != null
-                && PortalRecipientFieldKeys.Contains(value.FieldKey))
+                && value.FieldKey == PortalRecipientFieldKey)
             .Where(value => identities.Contains(value.FieldValue!.Trim().ToLower()))
             .Select(value => value.DocumentRecordId)
             .Distinct()
@@ -498,7 +491,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && !value.IsDeleted
                 && value.DocumentRecordId == id
                 && value.FieldValue != null
-                && PortalRecipientFieldKeys.Contains(value.FieldKey)
+                && value.FieldKey == PortalRecipientFieldKey
                 && identities.Contains(value.FieldValue!.Trim().ToLower()), cancellationToken);
 
         if (!isRecipient)

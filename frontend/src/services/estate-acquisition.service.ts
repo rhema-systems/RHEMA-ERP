@@ -63,6 +63,7 @@ export interface LandAcquisitionItem {
   lastActivity: string;
   valueEstimate?: string;
   riskLevel?: 'Low' | 'Medium' | 'High';
+  hasLandAsset?: boolean;
   stageInputsComplete: boolean;
   missingInputs: string[];
 }
@@ -816,17 +817,22 @@ export class EstateAcquisitionService {
     return rawApiService.downloadBlob(`/estate/land-acquisitions/${acquisitionId}/documents/${documentId}/viewer-pdf`);
   }
 
-  async markReadyForProjectManagement(acquisitionId: string): Promise<{ success: boolean; message?: string; asset?: EstateManagedAsset }> {
+  async publishToLandBank(acquisitionId: string): Promise<{ success: boolean; message?: string; asset?: EstateManagedAsset }> {
     const response = await apiService.post<MaybeApiResponse<EstateManagedAsset>>(
-      `/estate/land-acquisitions/${acquisitionId}/ready-for-project-management`,
+      `/estate/land-acquisitions/${acquisitionId}/publish-to-land-bank`,
       {}
     );
 
     return {
       success: response.success !== false,
-      message: response.message || 'Demarcated land is ready for project management.',
+      message: response.message || 'Land asset has been published to Estate Land Bank.',
       asset: response.data,
     };
+  }
+
+  async markReadyForProjectManagement(acquisitionId: string): Promise<{ success: boolean; message?: string; asset?: EstateManagedAsset }> {
+    // Backward-compatible client method; acquisition now publishes to Estate Land Bank before Land Management marks PM readiness.
+    return this.publishToLandBank(acquisitionId);
   }
 
   async createWorkflowTemplate(): Promise<void> {

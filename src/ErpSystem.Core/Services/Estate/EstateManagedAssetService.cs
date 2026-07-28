@@ -107,12 +107,15 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.ProjectCode = handoff.ProjectReference.Trim();
         asset.ProjectTitle = FirstNonBlank(handoff.ParcelIdentifier, handoff.Name, handoff.ProjectReference);
         asset.AreaSquareMeters = handoff.AreaSquareMeters;
+        asset.AreaValue = handoff.AreaValue;
+        asset.AreaUnit = TrimOrNull(handoff.AreaUnit);
         asset.ValuationAmount = handoff.ValuationAmount;
         asset.Currency = string.IsNullOrWhiteSpace(handoff.Currency) ? "GHS" : handoff.Currency.Trim().ToUpperInvariant();
         asset.IsAvailableForLease = false;
         asset.IsAvailableForSale = false;
         asset.IsPublishedFromProject = false;
-        asset.IsReadyForProjectManagement = true;
+        // Acquisition publishes into Estate Land Bank; Land Management marks project readiness after demarcation.
+        asset.IsReadyForProjectManagement = handoff.IsReadyForProjectManagement;
         asset.Notes = TrimOrNull(handoff.Notes);
         asset.UpdatedAt = now;
         asset.UpdatedBy = _currentUserProvider.Username;

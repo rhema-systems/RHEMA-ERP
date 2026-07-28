@@ -348,10 +348,27 @@ public sealed class DocumentManagementController : ControllerBase
         }
 
         var normalizedAction = NormalizeMetadataField(action);
+        if (!IsSupportedGeneratedDocumentWorkflowAction(normalizedAction))
+        {
+            return BadRequest(new { success = false, message = "Unsupported generated document workflow action." });
+        }
+
+        var template = await ResolveGeneratedTemplateForRecordAsync(tenantId, record, cancellationToken);
+        if (template is null)
+        {
+            return BadRequest(new { success = false, message = "The generated document template could not be resolved." });
+        }
+
         // PR review: generated document workflow transitions must honor DMS permissions and configured approval/signature roles.
-        if (!await CanRunGeneratedDocumentWorkflowActionAsync(tenantId, record, normalizedAction, cancellationToken))
+        if (!await CanRunGeneratedDocumentWorkflowActionAsync(tenantId, record, normalizedAction, template, cancellationToken))
         {
             return Forbid();
+        }
+
+        var transitionError = GeneratedDocumentWorkflowTransitionError(record.LifecycleStatus, normalizedAction, template);
+        if (transitionError is not null)
+        {
+            return Conflict(new { success = false, message = transitionError });
         }
 
         var version = await _db.CentralDocumentVersions
@@ -3853,6 +3870,7 @@ public sealed class DocumentManagementController : ControllerBase
         Guid tenantId,
         CentralDocumentRecord record,
         string normalizedAction,
+        GeneratedDocumentTemplateDefinition template,
         CancellationToken cancellationToken)
     {
         if (IsDmsAccessAdministrator())
@@ -3873,13 +3891,57 @@ public sealed class DocumentManagementController : ControllerBase
             return false;
         }
 
-        var template = await ResolveGeneratedTemplateForRecordAsync(tenantId, record, cancellationToken);
         return normalizedAction switch
         {
-            "approve" or "return" or "returnforaction" => HasConfiguredOrSourceRole(template?.ApprovalRole, record, "Authorised Signatory", "Records Officer"),
-            "sign" => HasConfiguredOrSourceRole(template?.SignatureRole, record, "Authorised Signatory", "Records Officer"),
+            "approve" or "return" or "returnforaction" => HasConfiguredOrSourceRole(template.ApprovalRole, record, "Authorised Signatory", "Records Officer"),
+            "sign" => HasConfiguredOrSourceRole(template.SignatureRole, record, "Authorised Signatory", "Records Officer"),
             "dispatch" => HasAnyRole("Records Officer", "Estate Officer"),
             _ => true
+        };
+    }
+
+    private static bool IsSupportedGeneratedDocumentWorkflowAction(string normalizedAction) =>
+        normalizedAction is "submitapproval"
+            or "submitforapproval"
+            or "approve"
+            or "sign"
+            or "dispatch"
+            or "return"
+            or "returnforaction";
+
+    private static string? GeneratedDocumentWorkflowTransitionError(
+        string? lifecycleStatus,
+        string normalizedAction,
+        GeneratedDocumentTemplateDefinition template)
+    {
+        var normalizedStatus = NormalizeMetadataField(lifecycleStatus ?? string.Empty);
+        var requiresSignature = !string.IsNullOrWhiteSpace(template.SignatureRole);
+
+        return normalizedAction switch
+        {
+            "submitapproval" or "submitforapproval" when !template.RequiresApproval =>
+                "This document template does not require approval.",
+            "submitapproval" or "submitforapproval" when normalizedStatus is not ("draft" or "returnedforaction") =>
+                "Only a draft or returned document can be submitted for approval.",
+            "approve" when !template.RequiresApproval =>
+                "This document template does not require approval.",
+            "approve" when normalizedStatus != "pendingapproval" =>
+                "Only a document pending approval can be approved.",
+            "sign" when !requiresSignature =>
+                "This document template does not require a signature.",
+            "sign" when template.RequiresApproval && normalizedStatus != "approved" =>
+                "This document must be approved before it can be signed.",
+            "sign" when !template.RequiresApproval && normalizedStatus is not ("draft" or "returnedforaction") =>
+                "Only a draft or returned document can be signed.",
+            "dispatch" when requiresSignature && normalizedStatus != "signed" =>
+                "This document must be signed before it can be dispatched.",
+            "dispatch" when !requiresSignature && template.RequiresApproval && normalizedStatus != "approved" =>
+                "This document must be approved before it can be dispatched.",
+            "dispatch" when !requiresSignature && !template.RequiresApproval && normalizedStatus != "draft" =>
+                "Only a draft document can be dispatched.",
+            "return" or "returnforaction" when normalizedStatus is not ("pendingapproval" or "approved" or "signed") =>
+                "Only a document under review, approved, or signed can be returned for action.",
+            _ => null
         };
     }
 

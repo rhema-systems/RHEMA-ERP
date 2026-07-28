@@ -1963,6 +1963,19 @@ public class WorkflowEngine : IWorkflowEngine
             {
                 return assignedId;
             }
+
+            // Role-owned workflow tasks are intentionally unassigned to a specific user.
+            // This keeps the stage available to every user in the configured role instead
+            // of carrying forward the actor who completed the previous step.
+            if (stepDefinition.AssignmentType.Equals("Role", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(stepDefinition.RequiredRole))
+        {
+            return null;
         }
 
         return defaultUserId;

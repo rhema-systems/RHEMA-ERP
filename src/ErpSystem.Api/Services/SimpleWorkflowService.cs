@@ -804,6 +804,14 @@ public class SimpleWorkflowService : IWorkflowService
             return null;
         }
 
+        // Role-owned manual steps should remain unassigned to a specific person.
+        // The workflow engine then authorizes any user with the configured role.
+        var repairedAssignedToId = stepDefinition.StepType == WorkflowStepType.Approval ||
+            !string.IsNullOrWhiteSpace(stepDefinition.RequiredRole) ||
+            string.Equals(stepDefinition.AssignmentType, "Role", StringComparison.OrdinalIgnoreCase)
+                ? (Guid?)null
+                : instance.StartedById ?? instance.InitiatedById;
+
         var repairedStepInstance = new WorkflowStepInstance
         {
             Id = Guid.NewGuid(),
@@ -811,9 +819,7 @@ public class SimpleWorkflowService : IWorkflowService
             WorkflowStepId = stepDefinition.Id,
             Status = WorkflowStepInstanceStatus.Pending,
             StartedDate = DateTime.UtcNow,
-            AssignedToId = stepDefinition.StepType == WorkflowStepType.Approval
-                ? null
-                : instance.StartedById ?? instance.InitiatedById,
+            AssignedToId = repairedAssignedToId,
             DueDate = stepDefinition.EstimatedHours.HasValue
                 ? DateTime.UtcNow.AddHours(stepDefinition.EstimatedHours.Value)
                 : null,

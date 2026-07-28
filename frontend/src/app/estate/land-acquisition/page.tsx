@@ -593,8 +593,8 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('registrationNotes', 'Registration Notes', 'textarea', undefined, 2),
   ],
   'asset-creation': [
-    field('assetCode', 'Asset Code'),
-    field('assetNumber', 'Asset Number'),
+    field('assetCode', 'Asset Code', 'text', undefined, 1, true),
+    field('assetNumber', 'Asset Number', 'text', undefined, 1, true),
     field('parcelIdentifier', 'Parcel Identifier'),
     field('registrationNumber', 'Registration Number'),
     field('ownerName', 'Owner Name'),
@@ -2053,6 +2053,7 @@ export default function LandAcquisitionPage() {
           values={workspaceValues}
           onChange={setWorkspaceValues}
           onSave={saveWorkspace}
+          onReload={reload}
           saving={savingWorkspace}
           canEdit={canEditSelectedStage}
         />
@@ -2219,17 +2220,32 @@ function AcquisitionDetail({
     LandAcquisitionDocument[]
   >([]);
   const [stageSubmitting, setStageSubmitting] = React.useState(false);
+  const [handoffSubmitting, setHandoffSubmitting] = React.useState(false);
   const missingLabels = inputLabels(
     stage.workspaceKind,
     item.missingInputs || []
   );
+  const isAssetCreationStage = stage.workspaceKind === 'asset-creation';
+  const hasCreatedLandAsset = isAssetCreationStage && item.hasLandAsset === true;
+  const hasPublishedLandAsset =
+    isAssetCreationStage && item.status === 'Approved';
+  const captureStageActionLabel = hasCreatedLandAsset
+    ? 'Complete Asset Creation'
+    : stage.primaryAction;
+  const assetWorkspaceNotSavedReason =
+    isAssetCreationStage && !hasCreatedLandAsset
+      ? 'Open the Asset Creation workspace, review the auto-filled asset details, then Save Workspace. Saving creates the Estate asset before Land Bank handoff.'
+      : undefined;
   const forwardActionReason = item.stageInputsComplete
     ? undefined
-    : `Complete all stage inputs first: ${missingLabels.slice(0, 4).join(', ')}${missingLabels.length > 4 ? ` and ${missingLabels.length - 4} more` : ''}.`;
+    : assetWorkspaceNotSavedReason ||
+      `Complete all stage inputs first: ${missingLabels.slice(0, 4).join(', ')}${missingLabels.length > 4 ? ` and ${missingLabels.length - 4} more` : ''}.`;
   const workflowActionDescription =
     item.stageOrder > stage.order
       ? completedWorkflowActionLabel(stage.primaryAction)
-      : stage.primaryAction;
+      : hasCreatedLandAsset
+        ? 'Asset created'
+        : stage.primaryAction;
   const showCaptureStageSubmit =
     item.stageOrder === stage.order &&
     stage.order > 0 &&
@@ -2343,7 +2359,7 @@ function AcquisitionDetail({
     try {
       setStageSubmitting(true);
       await onPrimary();
-      toast.success(completedWorkflowActionLabel(stage.primaryAction), {
+      toast.success(completedWorkflowActionLabel(captureStageActionLabel), {
         description: item.projectReference,
       });
       await onReload();
@@ -2353,6 +2369,39 @@ function AcquisitionDetail({
       });
     } finally {
       setStageSubmitting(false);
+    }
+  };
+
+  const publishToLandBank = async () => {
+    if (!hasCreatedLandAsset) {
+      toast.error('Create and save the Estate asset before Land Bank handoff.');
+      return;
+    }
+
+    if (!item.stageInputsComplete) {
+      toast.error(
+        forwardActionReason ||
+          'Complete all required asset fields before Land Bank handoff.'
+      );
+      return;
+    }
+
+    try {
+      setHandoffSubmitting(true);
+      const result = await estateAcquisitionService.publishToLandBank(item.id);
+      if (!result.success) {
+        throw new Error(result.message || 'Land Bank handoff failed.');
+      }
+      toast.success('Published to Land Bank', {
+        description: result.asset?.assetCode || item.projectReference,
+      });
+      await onReload();
+    } catch (error: any) {
+      toast.error('Unable to publish asset to Land Bank.', {
+        description: error?.message || undefined,
+      });
+    } finally {
+      setHandoffSubmitting(false);
     }
   };
 
@@ -2438,8 +2487,11 @@ function AcquisitionDetail({
             </h3>
             <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
               {ACQUISITION_STAGES.map((candidate) => {
-                const done = candidate.order < stage.order;
-                const active = candidate.order === stage.order;
+                const done =
+                  candidate.order < stage.order ||
+                  (hasPublishedLandAsset && candidate.order <= stage.order);
+                const active =
+                  !hasPublishedLandAsset && candidate.order === stage.order;
                 return (
                   <div
                     key={candidate.id}
@@ -2495,7 +2547,25 @@ function AcquisitionDetail({
                   ) : (
                     <Send className="mr-2 h-4 w-4" />
                   )}
-                  {stage.primaryAction}
+                  {captureStageActionLabel}
+                </Button>
+              )}
+              {hasCreatedLandAsset && !hasPublishedLandAsset && (
+                <Button
+                  className="w-full justify-start"
+                  disabled={!item.stageInputsComplete || handoffSubmitting}
+                  onClick={() => void publishToLandBank()}
+                  title={
+                    !item.stageInputsComplete ? forwardActionReason : undefined
+                  }
+                  variant="outline"
+                >
+                  {handoffSubmitting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Building2 className="mr-2 h-4 w-4" />
+                  )}
+                  Publish to Land Bank
                 </Button>
               )}
               <WorkflowApprovalActions
@@ -2991,6 +3061,7 @@ function WorkspaceDialog({
   values,
   onChange,
   onSave,
+  onReload,
   saving,
   canEdit,
 }: {
@@ -3002,6 +3073,7 @@ function WorkspaceDialog({
   values: WorkspaceValues;
   onChange: React.Dispatch<React.SetStateAction<WorkspaceValues>>;
   onSave: (pendingDocuments?: PendingAcquisitionDocument[]) => Promise<void>;
+  onReload: () => Promise<void>;
   saving: boolean;
   canEdit: boolean;
 }) {
@@ -3039,6 +3111,12 @@ function WorkspaceDialog({
   const accountsPayablePaid =
     Boolean(accountsPayableInvoiceId) &&
     (values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true');
+  const isPublishedAssetWorkspace =
+    stage.workspaceKind === 'asset-creation' && item.status === 'Approved';
+  const workspaceCanEdit = canEdit && !isPublishedAssetWorkspace;
+  const workspaceLockedMessage = isPublishedAssetWorkspace
+    ? 'This asset has already been published to Estate Land Bank, so the workspace is read-only.'
+    : assignmentMessage;
 
   const refreshAccountsPayableStatus = async () => {
     if (!item.id) return;
@@ -3046,6 +3124,7 @@ function WorkspaceDialog({
       setSyncingPayable(true);
       const workspace = await estateAcquisitionService.getWorkspace(item.id, stage.id);
       onChange(workspace.values);
+      await onReload();
       toast.success(
         workspace.values.isPaid === true
           ? 'Accounts Payable payment synchronized.'
@@ -3059,12 +3138,13 @@ function WorkspaceDialog({
   };
 
   const createAccountsPayableRequest = async () => {
-    if (!item.id || !canEdit) return;
+    if (!item.id || !workspaceCanEdit) return;
     try {
       setSyncingPayable(true);
       const workspace =
         await estateAcquisitionService.ensureAccountsPayableRequest(item.id);
       onChange(workspace.values);
+      await onReload();
       toast.success('Accounts Payable request created.');
     } catch (error: any) {
       toast.error(error?.message || 'Unable to create the Accounts Payable request.');
@@ -3257,8 +3337,8 @@ function WorkspaceDialog({
   };
 
   const attachDocument = async (pendingDocument: PendingAcquisitionDocument) => {
-    if (!canEdit) {
-      toast.error(assignmentMessage);
+    if (!workspaceCanEdit) {
+      toast.error(workspaceLockedMessage);
       return;
     }
 
@@ -3327,10 +3407,10 @@ function WorkspaceDialog({
         </DialogHeader>
         <ScrollArea className="max-h-[68vh] px-6 py-5">
           <div className="space-y-5">
-            {!canEdit && (
+            {!workspaceCanEdit && (
               <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                 <p className="font-medium">Workspace locked</p>
-                <p className="mt-1 text-xs">{assignmentMessage}</p>
+                <p className="mt-1 text-xs">{workspaceLockedMessage}</p>
               </div>
             )}
             {missingInputs.length > 0 && (
@@ -3381,7 +3461,7 @@ function WorkspaceDialog({
             {stage.workspaceKind === 'ownership-classification' && (
               <PastOwnersPanel
                 owners={parsePastOwners(values.pastOwnersJson)}
-                disabled={!canEdit}
+                disabled={!workspaceCanEdit}
                 onChange={(owners) =>
                   setValue('pastOwnersJson', serializePastOwners(owners))
                 }
@@ -3427,8 +3507,8 @@ function WorkspaceDialog({
                         type="button"
                         size="sm"
                         onClick={() => void createAccountsPayableRequest()}
-                        disabled={syncingPayable || !canEdit}
-                        title={!canEdit ? assignmentMessage : undefined}
+                        disabled={syncingPayable || !workspaceCanEdit}
+                        title={!workspaceCanEdit ? workspaceLockedMessage : undefined}
                       >
                         {syncingPayable ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -3467,7 +3547,7 @@ function WorkspaceDialog({
                   </p>
                 </div>
                 {!hasRequirements &&
-                  (canEdit ? (
+                  (workspaceCanEdit ? (
                   <Button variant="outline" size="sm" asChild>
                     <label>
                       <Upload className="mr-2 h-4 w-4" />
@@ -3494,7 +3574,7 @@ function WorkspaceDialog({
                     </label>
                   </Button>
                 ) : (
-                  <Button variant="outline" size="sm" disabled title={assignmentMessage}>
+                  <Button variant="outline" size="sm" disabled title={workspaceLockedMessage}>
                     <Upload className="mr-2 h-4 w-4" />
                     Add Files
                   </Button>
@@ -3552,11 +3632,11 @@ function WorkspaceDialog({
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={uploadingDocuments || !canEdit}
-                              title={!canEdit ? assignmentMessage : undefined}
-                              asChild={canEdit}
+                              disabled={uploadingDocuments || !workspaceCanEdit}
+                              title={!workspaceCanEdit ? workspaceLockedMessage : undefined}
+                              asChild={workspaceCanEdit}
                             >
-                              {canEdit ? (
+                              {workspaceCanEdit ? (
                                 <label>
                                   <Upload className="mr-2 h-4 w-4" />
                                   Upload
@@ -3646,6 +3726,8 @@ function WorkspaceDialog({
                                 <Button
                                   type="button"
                                   variant="ghost"
+                                  disabled={!workspaceCanEdit}
+                                  title={!workspaceCanEdit ? workspaceLockedMessage : undefined}
                                   onClick={() =>
                                     setPendingDocuments((current) =>
                                       current.filter(
@@ -3738,6 +3820,8 @@ function WorkspaceDialog({
                     <Button
                       type="button"
                       variant="ghost"
+                      disabled={!workspaceCanEdit}
+                      title={!workspaceCanEdit ? workspaceLockedMessage : undefined}
                       onClick={() =>
                         setPendingDocuments((current) =>
                           current.filter((_, row) => row !== index)
@@ -3775,7 +3859,7 @@ function WorkspaceDialog({
                         </Label>
                         <Select
                           value={`${values.vendorId || ''}`}
-                          disabled={vendorsLoading || !canEdit}
+                          disabled={vendorsLoading || !workspaceCanEdit}
                           onValueChange={(vendorId) => {
                             const vendor = vendors.find(
                               (candidate) => candidate.id === vendorId
@@ -3831,7 +3915,7 @@ function WorkspaceDialog({
                           <>
                             <Select
                               value={`${values.vendorId || ''}`}
-                              disabled={vendorsLoading || !canEdit}
+                              disabled={vendorsLoading || !workspaceCanEdit}
                               onValueChange={(vendorId) => {
                                 const vendor = vendors.find(
                                   (candidate) => candidate.id === vendorId
@@ -3896,7 +3980,7 @@ function WorkspaceDialog({
                           <Input
                             value={`${values.ownerName || ''}`}
                             placeholder="Enter the past owner's full name"
-                            disabled={!canEdit}
+                            disabled={!workspaceCanEdit}
                             onChange={(event) =>
                               setValue('ownerName', event.target.value)
                             }
@@ -3936,7 +4020,7 @@ function WorkspaceDialog({
                         </Label>
                         <Textarea
                           value={`${values.dateGapReason || ''}`}
-                          disabled={!canEdit}
+                          disabled={!workspaceCanEdit}
                           onChange={(event) =>
                             setValue('dateGapReason', event.target.value)
                           }
@@ -3952,9 +4036,9 @@ function WorkspaceDialog({
                         key={config.key}
                         config={config}
                         value={values[config.key]}
-                        disabled={!canEdit || config.readOnly}
+                        disabled={!workspaceCanEdit || config.readOnly}
                         onChange={(value) => {
-                          if (!canEdit || config.readOnly) return;
+                          if (!workspaceCanEdit || config.readOnly) return;
                           if (config.key === 'isCurrentOwner') {
                             const currentOwner = value === true;
                             onChange((current) => ({
@@ -4038,8 +4122,8 @@ function WorkspaceDialog({
           ) : (
             <Button
               onClick={() => onSave(pendingDocuments)}
-              disabled={saving || !canEdit}
-              title={!canEdit ? assignmentMessage : undefined}
+              disabled={saving || !workspaceCanEdit}
+              title={!workspaceCanEdit ? workspaceLockedMessage : undefined}
             >
               {saving ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

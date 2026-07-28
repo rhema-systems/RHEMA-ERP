@@ -264,8 +264,13 @@ public class LandAcquisitionsController : ControllerBase
             await PopulateAgreementSellerDefaultsAsync(acquisition, snapshots, responseValues, cancellationToken);
         }
 
+        if (procedureId == (int)AcquisitionProcedure.LandAssetCreation)
+        {
+            PopulateAssetCreationDefaults(acquisition, snapshots, responseValues);
+        }
+
         var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
-        var missingInputs = GetMissingStageInputs(acquisition, procedureId, documentRequirementsByStage);
+        var missingInputs = GetMissingStageInputs(acquisition, procedureId, documentRequirementsByStage, responseValues);
         return Ok(new LandAcquisitionWorkspaceDataResponse
         {
             AcquisitionId = id,
@@ -847,8 +852,10 @@ public class LandAcquisitionsController : ControllerBase
         }
     }
 
+    [HttpPost("{id:guid}/publish-to-land-bank")]
+    // Backward-compatible route for older clients; acquisition handoff now publishes only to Estate Land Bank.
     [HttpPost("{id:guid}/ready-for-project-management")]
-    public async Task<ActionResult<EstateManagedAssetDto>> MarkReadyForProjectManagement(
+    public async Task<ActionResult<EstateManagedAssetDto>> PublishToLandBank(
         Guid id,
         CancellationToken cancellationToken)
     {
@@ -866,33 +873,47 @@ public class LandAcquisitionsController : ControllerBase
         var assetCreationStage = StageDefinitions[^1];
         if (acquisition.StageOrder < assetCreationStage.Order)
         {
-            return BadRequest("Complete the acquisition workflow through asset creation before handing it to project management.");
+            return BadRequest("Complete the acquisition workflow through asset creation before publishing it to the Estate Land Bank.");
         }
 
-        // PR review: project-management handoff must stay behind the same workflow authority as the active acquisition stage.
+        // Land Bank publishing stays behind the same workflow authority as the active acquisition stage.
         if (!await CanAccessStageAsync(acquisition, acquisition.StageOrder, userId, isAdministrator))
         {
             return Forbid();
         }
 
         var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
-        var missingInputs = GetMissingStageInputs(acquisition, assetCreationStage.Order, documentRequirementsByStage);
+        var snapshots = ReadWorkspaceSnapshots(acquisition);
+        snapshots.TryGetValue(assetCreationStage.Order, out var assetCreationSnapshot);
+        var assetCreationValues = assetCreationSnapshot?.ToDictionary(
+            pair => pair.Key,
+            pair => (object?)pair.Value,
+            StringComparer.OrdinalIgnoreCase)
+            ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        PopulateAssetCreationDefaults(acquisition, snapshots, assetCreationValues);
+        var missingInputs = GetMissingStageInputs(
+            acquisition,
+            assetCreationStage.Order,
+            documentRequirementsByStage,
+            assetCreationValues);
         if (missingInputs.Count > 0)
         {
             return BadRequest(new
             {
-                message = "Complete every required asset creation input before handing this acquisition to project management.",
+                message = "Complete every required asset creation input before publishing this acquisition to the Estate Land Bank.",
                 missingInputs
             });
         }
 
-        var survey = acquisition.CadastralSurveys.FirstOrDefault();
-        if (survey == null || string.IsNullOrWhiteSpace(survey.BoundaryCoordinates))
-        {
-            return BadRequest("Demarcate the land boundary before marking it ready for project management.");
-        }
+        var survey = acquisition.CadastralSurveys
+            .Where(item => !item.IsDeleted)
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefault();
 
-        var asset = acquisition.LandAssets.FirstOrDefault();
+        var asset = acquisition.LandAssets
+            .Where(item => !item.IsDeleted)
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefault();
         var managedAsset = await _managedAssetService.PublishLandAcquisitionAsync(new LandAcquisitionEstateHandoffDto
         {
             LandAcquisitionId = acquisition.Id,
@@ -904,19 +925,26 @@ public class LandAcquisitionsController : ControllerBase
             Description = asset?.Notes,
             Location = asset?.Location ?? acquisition.Location,
             Purpose = asset?.Purpose ?? acquisition.IntendedUse,
-            AreaSquareMeters = ToSquareMeters(survey.AreaSize, survey.AreaUnit, acquisition.EstimatedSize),
+            AreaSquareMeters = survey == null
+                ? null
+                : ToSquareMeters(survey.AreaSize, survey.AreaUnit, acquisition.EstimatedSize),
+            AreaValue = asset?.Size > 0 ? asset.Size : acquisition.EstimatedSize,
+            AreaUnit = asset?.SizeUnit,
             ValuationAmount = asset is { CapitalizationValue: > 0 } ? asset.CapitalizationValue : null,
-            BoundaryCoordinates = survey.BoundaryCoordinates,
-            SurveyPlanNumber = survey.PlanNumber,
-            MapSheetNumber = survey.MapSheetNumber,
+            BoundaryCoordinates = survey?.BoundaryCoordinates,
+            SurveyPlanNumber = survey?.PlanNumber,
+            MapSheetNumber = survey?.MapSheetNumber,
             ZoningClassification = asset?.ZoningClassification ?? acquisition.PhysicalAssessment?.ZoningClassification,
             PlanningComplianceStatus = acquisition.SuitableForDueDiligence ? "Compliant" : "Pending",
-            GisLayerReference = survey.MapSheetNumber ?? survey.PlanNumber,
-            BoundaryVerified = true,
-            Notes = "Demarcated land published from land acquisition for project management pull."
+            GisLayerReference = survey?.MapSheetNumber ?? survey?.PlanNumber,
+            BoundaryVerified = false,
+            IsReadyForProjectManagement = false,
+            Notes = "Land asset published from land acquisition into Estate Land Bank for demarcation and project-readiness review."
         });
 
         acquisition.InternalApproved = true;
+        // Land Bank publication is the final Estate/Facility acquisition outcome; keep the active board from treating it as pending work.
+        acquisition.Status = LandAcquisitionStatus.AssetCreated;
         acquisition.UpdatedAt = DateTime.UtcNow;
         acquisition.LastModifiedById = userId;
         await _context.SaveChangesAsync(cancellationToken);
@@ -925,12 +953,14 @@ public class LandAcquisitionsController : ControllerBase
         {
             success = true,
             data = managedAsset,
-            message = "Demarcated land is ready for project management."
+            message = "Land asset has been published to Estate Land Bank."
         });
     }
 
     private IQueryable<LandAcquisition> BaseQuery(Guid tenantId)
         => _context.LandAcquisitions
+            // The acquisition board needs many child collections; split queries prevent SQL Server timeouts from a single huge join.
+            .AsSplitQuery()
             .Include(item => item.Documents)
             .Include(item => item.Notes)
             .Include(item => item.ChecklistResponses)
@@ -1400,6 +1430,127 @@ public class LandAcquisitionsController : ControllerBase
             partner?.PrimaryPhone ??
             partner?.SecondaryPhone);
     }
+
+    private void PopulateAssetCreationDefaults(
+        LandAcquisition acquisition,
+        IReadOnlyDictionary<int, Dictionary<string, JsonElement>> snapshots,
+        IDictionary<string, object?> responseValues)
+    {
+        snapshots.TryGetValue((int)AcquisitionProcedure.LandsCommissionRegistration, out var registrationSnapshot);
+        snapshots.TryGetValue((int)AcquisitionProcedure.OwnershipVerification, out var ownershipVerification);
+        snapshots.TryGetValue((int)AcquisitionProcedure.OwnershipClassification, out var ownershipClassification);
+
+        var asset = acquisition.LandAssets
+            .Where(item => !item.IsDeleted)
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefault();
+        var owner = acquisition.OwnershipHistories
+            .Where(item => !item.IsDeleted)
+            .OrderByDescending(item => item.IsCurrentOwner)
+            .ThenByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefault();
+        var registration = acquisition.Registrations
+            .Where(item => !item.IsDeleted)
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefault();
+        var negotiatedValue = acquisition.NegotiationOffers
+            .Where(item => !item.IsDeleted && item.NegotiatedValue.HasValue)
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .Select(item => item.NegotiatedValue)
+            .FirstOrDefault();
+        var capitalizationValue =
+            asset?.CapitalizationValue ??
+            negotiatedValue ??
+            acquisition.StampDutyAssessment?.AssessedValue ??
+            acquisition.StampDutyPayment?.AmountPaid;
+
+        SetMissingResponseValue(responseValues, "assetCode", asset?.AssetCode ?? GenerateLandAssetCode(acquisition.ProjectReference));
+        SetMissingResponseValue(responseValues, "assetNumber", asset?.AssetNumber ?? GenerateLandAssetNumber(acquisition.ProjectReference));
+        SetMissingResponseValue(responseValues, "parcelIdentifier", asset?.ParcelIdentifier ?? acquisition.ProjectReference);
+        SetMissingResponseValue(
+            responseValues,
+            "registrationNumber",
+            asset?.RegistrationNumber ??
+            registration?.RegistrationNumber ??
+            SnapshotText(registrationSnapshot, "registrationNumber"));
+        SetMissingResponseValue(
+            responseValues,
+            "ownerName",
+            asset?.OwnerName ??
+            owner?.OwnerName ??
+            SnapshotText(ownershipClassification, "ownerName") ??
+            SnapshotText(ownershipClassification, "vendorName"));
+        SetMissingResponseValue(responseValues, "assetLocation", asset?.Location ?? acquisition.Location);
+        SetMissingResponseValue(responseValues, "assetCategory", asset?.AssetCategory ?? "Land");
+        SetMissingResponseValue(
+            responseValues,
+            "size",
+            asset?.Size.HasValue == true
+                ? asset.Size.Value.ToString(CultureInfo.InvariantCulture)
+                : acquisition.EstimatedSize.ToString(CultureInfo.InvariantCulture));
+        SetMissingResponseValue(responseValues, "sizeUnit", asset?.SizeUnit ?? "Acres");
+        SetMissingResponseValue(responseValues, "assetStatus", asset?.Status ?? "Active");
+        SetMissingResponseValue(
+            responseValues,
+            "purpose",
+            asset?.Purpose ??
+            (string.IsNullOrWhiteSpace(acquisition.IntendedUse) ? null : $"{acquisition.IntendedUse} land bank asset pending project handoff"));
+        SetMissingResponseValue(
+            responseValues,
+            "zoningClassification",
+            asset?.ZoningClassification ??
+            acquisition.PhysicalAssessment?.ZoningClassification ??
+            SnapshotText(ownershipVerification, "zoningClassification"));
+        SetMissingResponseValue(
+            responseValues,
+            "ownershipVerification",
+            asset?.OwnershipVerification ??
+            SnapshotText(ownershipVerification, "dueDiligenceStatus") ??
+            "Ownership verified through legal due diligence and Lands Commission registration");
+        SetMissingResponseValue(
+            responseValues,
+            "capitalizationValue",
+            capitalizationValue.HasValue
+                ? capitalizationValue.Value.ToString(CultureInfo.InvariantCulture)
+                : null);
+        SetMissingResponseValue(responseValues, "glAccount", asset?.GlAccount ?? "Land Under Acquisition");
+        SetMissingResponseValue(responseValues, "custodian", asset?.Custodian ?? _currentUserService.UserName ?? "Fixed Asset Officer");
+        SetMissingResponseValue(
+            responseValues,
+            "assetNotes",
+            asset?.Notes ??
+            "Created from completed estate land acquisition workflow. Registered instrument and supporting documents retained in Estate DMS.");
+    }
+
+    private static string GenerateLandAssetCode(string projectReference)
+        => TrimAssetIdentifier($"LAND-{NormalizeAssetReference(projectReference)}", 50);
+
+    private static string GenerateLandAssetNumber(string projectReference)
+        => TrimAssetIdentifier($"FA-LAND-{NormalizeAssetReference(projectReference)}", 50);
+
+    private static string NormalizeAssetReference(string projectReference)
+    {
+        var normalized = new string((projectReference ?? string.Empty)
+            .Trim()
+            .ToUpperInvariant()
+            .Select(character => char.IsLetterOrDigit(character) ? character : '-')
+            .ToArray());
+        while (normalized.Contains("--", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        normalized = normalized.Trim('-');
+        if (normalized.StartsWith("LAND-ACQ-", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized["LAND-ACQ-".Length..];
+        }
+
+        return string.IsNullOrWhiteSpace(normalized) ? DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture) : normalized;
+    }
+
+    private static string TrimAssetIdentifier(string value, int maxLength)
+        => value.Length <= maxLength ? value : value[..maxLength].TrimEnd('-');
 
     private async Task<IReadOnlyDictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>>> GetWorkflowDocumentRequirementsByStageAsync(
         LandAcquisition acquisition,
@@ -1887,7 +2038,8 @@ public class LandAcquisitionsController : ControllerBase
     private static IReadOnlyList<string> GetMissingStageInputs(
         LandAcquisition acquisition,
         int procedureId,
-        IReadOnlyDictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>>? documentRequirementsByStage = null)
+        IReadOnlyDictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>>? documentRequirementsByStage = null,
+        IReadOnlyDictionary<string, object?>? responseValues = null)
     {
         if (!RequiredStageInputs.TryGetValue(procedureId, out var requiredInputs))
         {
@@ -1919,6 +2071,26 @@ public class LandAcquisitionsController : ControllerBase
             }
 
             return paymentMissing.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+
+        if (procedureId == (int)AcquisitionProcedure.LandAssetCreation && responseValues != null)
+        {
+            var assetMissing = requiredInputs
+                .Where(key => !responseValues.TryGetValue(key, out var value) || !HasInputValue(value))
+                .ToList();
+
+            if (documentRequirementsByStage != null &&
+                documentRequirementsByStage.TryGetValue(procedureId, out var assetDocumentRequirements) &&
+                assetDocumentRequirements.Where(requirement => requirement.IsRequired).Any(requirement =>
+                    !acquisition.Documents.Any(document =>
+                        !document.IsDeleted &&
+                        (int)document.Procedure == procedureId &&
+                        MatchesWorkflowDocumentRequirement(document, requirement))))
+            {
+                assetMissing.Add("stageDocuments");
+            }
+
+            return assetMissing.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         }
 
         var snapshots = ReadWorkspaceSnapshots(acquisition);
@@ -2042,6 +2214,21 @@ public class LandAcquisitionsController : ControllerBase
     private static bool HasResponseValue(IDictionary<string, object?> values, string key)
     {
         if (!values.TryGetValue(key, out var value) || value == null)
+        {
+            return false;
+        }
+
+        if (value is JsonElement json)
+        {
+            return HasInputValue(json);
+        }
+
+        return !string.IsNullOrWhiteSpace(value.ToString());
+    }
+
+    private static bool HasInputValue(object? value)
+    {
+        if (value == null)
         {
             return false;
         }
@@ -3293,6 +3480,7 @@ public class LandAcquisitionsController : ControllerBase
                                         acquisitionTypeValue.ValueKind == JsonValueKind.String
             ? acquisitionTypeValue.GetString()
             : null;
+        var hasLandAsset = item.LandAssets.Any(asset => !asset.IsDeleted);
         var missingInputs = GetMissingStageInputs(item, item.StageOrder, documentRequirementsByStage);
         return new LandAcquisitionItemDto(
             item.Id,
@@ -3310,6 +3498,7 @@ public class LandAcquisitionsController : ControllerBase
             (item.UpdatedAt ?? item.CreatedAt).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             item.NegotiationOffers.FirstOrDefault()?.NegotiatedValue?.ToString("C", CultureInfo.GetCultureInfo("en-GH")),
             owner?.RiskLevel,
+            hasLandAsset,
             missingInputs.Count == 0,
             missingInputs);
     }

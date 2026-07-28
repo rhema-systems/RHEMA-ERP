@@ -208,6 +208,8 @@ public class LandAcquisitionEstateHandoffDto
     public string? Location { get; set; }
     public string? Purpose { get; set; }
     public decimal? AreaSquareMeters { get; set; }
+    public decimal? AreaValue { get; set; }
+    public string? AreaUnit { get; set; }
     public decimal? ValuationAmount { get; set; }
     public string Currency { get; set; } = "GHS";
     public string? BoundaryCoordinates { get; set; }
@@ -217,5 +219,6 @@ public class LandAcquisitionEstateHandoffDto
     public string? PlanningComplianceStatus { get; set; }
     public string? GisLayerReference { get; set; }
     public bool BoundaryVerified { get; set; }
+    public bool IsReadyForProjectManagement { get; set; }
     public string? Notes { get; set; }
 }

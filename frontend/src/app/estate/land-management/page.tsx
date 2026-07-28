@@ -241,17 +241,16 @@ export default function EstateLandManagementPage() {
     }
   };
 
-  const markAcquisitionProjectReady = async (item: LandAcquisitionItem) => {
+  const publishAcquisitionToLandBank = async (item: LandAcquisitionItem) => {
     const key = `acquisition:${item.id}`;
     try {
       setMarkingReadyKey(key);
-      const result =
-        await estateAcquisitionService.markReadyForProjectManagement(item.id);
+      const result = await estateAcquisitionService.publishToLandBank(item.id);
       if (!result.success) {
         throw new Error(result.message || 'Unable to publish land.');
       }
       toast.success(
-        result.message || 'Whole land is demarcated and ready for project management.'
+        result.message || 'Land asset has been published to Estate Land Bank.'
       );
       await loadLandRecords(search);
       if (result.asset?.id) {
@@ -260,7 +259,7 @@ export default function EstateLandManagementPage() {
     } catch (error: any) {
       toast.error(
         error?.message ||
-          'Demarcate the whole land boundary before making it ready for project management.'
+          'Unable to publish this acquisition into Estate Land Bank.'
       );
     } finally {
       setMarkingReadyKey(null);
@@ -471,12 +470,12 @@ export default function EstateLandManagementPage() {
                       markingReadyKey === `acquisition:${selected.acquisition.id}`
                     }
                     onClick={() =>
-                      void markAcquisitionProjectReady(selected.acquisition)
+                      void publishAcquisitionToLandBank(selected.acquisition)
                     }
                     title={
                       acquisitionHasDemarcation(selected.acquisition)
                         ? undefined
-                        : 'Complete cadastral demarcation before marking this land ready for Project Management.'
+                        : 'Complete cadastral demarcation before publishing this land to Estate Land Bank.'
                     }
                   >
                     {markingReadyKey ===
@@ -485,7 +484,7 @@ export default function EstateLandManagementPage() {
                     ) : (
                       <Building2 className="mr-2 h-4 w-4" />
                     )}
-                    Mark Demarcated & Ready
+                    Publish to Land Bank
                   </Button>
                 </div>
               ) : selected?.type === 'asset' ? (
@@ -668,9 +667,14 @@ export default function EstateLandManagementPage() {
                             `acquisition:${selected.acquisition.id}`
                         }
                         onClick={() =>
-                          void markAcquisitionProjectReady(
+                          void publishAcquisitionToLandBank(
                             selected.acquisition
                           )
+                        }
+                        title={
+                          acquisitionHasDemarcation(selected.acquisition)
+                            ? undefined
+                            : 'Complete cadastral demarcation before publishing this land to Estate Land Bank.'
                         }
                       >
                         {markingReadyKey ===
@@ -679,7 +683,7 @@ export default function EstateLandManagementPage() {
                         ) : (
                           <Building2 className="mr-2 h-4 w-4" />
                         )}
-                        Mark Demarcated & Ready
+                        Publish to Land Bank
                       </Button>
                     </div>
                   </div>
