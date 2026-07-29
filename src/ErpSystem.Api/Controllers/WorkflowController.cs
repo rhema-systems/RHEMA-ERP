@@ -11,6 +11,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Core.Services.Workflow;
@@ -44,12 +45,14 @@ public class WorkflowController : ControllerBase
     private readonly IWorkflowStepInstanceRepository _workflowStepInstanceRepository;
     private readonly IWorkflowApprovalRepository _workflowApprovalRepository;
     private readonly IWorkflowEntityTypeRepository _workflowEntityTypeRepository;
+    private readonly IWorkflowEntityTypeCatalogService _workflowEntityTypeCatalog;
     private readonly ErpSystem.Data.ApplicationDbContext _db;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IAppEventBus _appEventBus;
     private readonly IFileStorageService _fileStorageService;
     private readonly ICurrentUserService _currentUserService;
     private readonly IProcurementRequisitionBudgetControlService _requisitionBudgetControlService;
+    private readonly IProcedureCaseService _procedureCaseService;
     private readonly ILogger<WorkflowController> _logger;
 
     public WorkflowController(
@@ -66,12 +69,14 @@ public class WorkflowController : ControllerBase
         IWorkflowStepInstanceRepository workflowStepInstanceRepository,
         IWorkflowApprovalRepository workflowApprovalRepository,
         IWorkflowEntityTypeRepository workflowEntityTypeRepository,
+        IWorkflowEntityTypeCatalogService workflowEntityTypeCatalog,
         ErpSystem.Data.ApplicationDbContext db,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IAppEventBus appEventBus,
         IFileStorageService fileStorageService,
         ICurrentUserService currentUserService,
         IProcurementRequisitionBudgetControlService requisitionBudgetControlService,
+        IProcedureCaseService procedureCaseService,
         ILogger<WorkflowController> logger)
     {
         _workflowEngine = workflowEngine;
@@ -87,12 +92,14 @@ public class WorkflowController : ControllerBase
         _workflowStepInstanceRepository = workflowStepInstanceRepository;
         _workflowApprovalRepository = workflowApprovalRepository;
         _workflowEntityTypeRepository = workflowEntityTypeRepository;
+        _workflowEntityTypeCatalog = workflowEntityTypeCatalog;
         _db = db;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _appEventBus = appEventBus;
         _fileStorageService = fileStorageService;
         _currentUserService = currentUserService;
         _requisitionBudgetControlService = requisitionBudgetControlService;
+        _procedureCaseService = procedureCaseService;
         _logger = logger;
     }
 
@@ -1511,7 +1518,7 @@ public class WorkflowController : ControllerBase
                 .GetQueryable(t => t.TenantId == tenantId)
                 .ToListAsync();
 
-            var defaults = GetDefaultEntityTypes();
+            var defaults = _workflowEntityTypeCatalog.GetDefaultEntityTypes();
 
             var created = new List<WorkflowEntityType>();
             var updated = new List<WorkflowEntityType>();
@@ -1651,94 +1658,6 @@ public class WorkflowController : ControllerBase
             _logger.LogError(ex, "Error seeding workflow entity types");
             return StatusCode(500, "An error occurred while seeding workflow entity types");
         }
-    }
-
-    private static List<WorkflowEntityTypeSeed> GetDefaultEntityTypes()
-    {
-        var defaults = new List<WorkflowEntityTypeSeed>
-        {
-            new("WorkOrder", "Maintenance work orders", "Settings", "#3B82F6", 10),
-            new("JobCard", "Maintenance job cards", "FileText", "#8B5CF6", 20),
-            new("FleetTrip", "Fleet trip requests and dispatch", "MapPin", "#0EA5E9", 25),
-            new("FleetTripInspection", "Fleet pre-start, post-trip, inspection, and service sheet approvals", "ClipboardCheck", "#14B8A6", 26),
-            new("PurchaseOrder", "Procurement purchase orders", "FileText", "#F59E0B", 30),
-            new("ProcurementPlan", "Annual, quarterly, and amended procurement plans", "ClipboardList", "#2563EB", 35),
-            new("PurchaseRequisition", "Procurement requisitions", "FileText", "#F97316", 40),
-            new("Tender", "Procurement tenders (RFQ/RFP/ITB/EOI)", "FileText", "#06B6D4", 45),
-            new("RFQ", "Requests for Quotation (RFQs)", "FileText", "#06B6D4", 46),
-            new("SupplierQuote", "Supplier quotes submitted in response to RFQs", "FileText", "#22C55E", 47),
-            new("Bid", "Supplier bids submitted in response to tenders", "FileText", "#22C55E", 48),
-            new("Evaluation", "Tender evaluations and scoring", "CheckCircle", "#F59E0B", 49),
-            new("Asset", "Assets and equipment", "Database", "#10B981", 50),
-            new("Inventory", "Inventory records", "Database", "#14B8A6", 60),
-            new("InventoryTransfer", "Inventory transfers", "Truck", "#A855F7", 65),
-            new("InventoryRequisition", "Inventory requisitions", "ClipboardList", "#0EA5E9", 68),
-            new("Employee", "Human resources employees", "Users", "#6366F1", 70),
-            new("PayrollRun", "HR payroll runs, payslip generation, and posting", "WalletCards", "#0EA5E9", 72),
-            new("PayrollPayslipEmail", "HR payroll payslip email notifications", "Mail", "#2563EB", 73),
-            new("PayrollSalaryAdvance", "HR payroll salary advance requests", "ReceiptText", "#14B8A6", 74),
-            new("PayrollBonusSetup", "HR payroll bonus setup and exception approval", "BadgePercent", "#F97316", 76),
-            new("PayrollBackpaySetup", "HR payroll salary back pay and salary increase setup", "TrendingUp", "#22C55E", 78),
-            new("Project", "Project management items", "CheckCircle", "#22C55E", 80),
-            new("ProjectDeliverable", "Project deliverable approvals and external sign-off", "PackageCheck", "#16A34A", 82),
-            new("ProjectClosure", "Project closure approval and close-out governance", "Flag", "#15803D", 84),
-            new("Customer", "Sales customers", "User", "#0EA5E9", 90),
-            new("SalesOrder", "Sales orders and customer sales transactions", "ShoppingCart", "#2563EB", 91),
-            new("SalesAgreement", "Sales, lease, tenancy, and plot allocation agreements", "FileText", "#7C3AED", 92),
-            new("SalesAllocation", "Sales reservations, plot allocations, and saleable source holds", "MapPinned", "#0891B2", 93),
-            new("Refund", "Customer refund requests and approvals", "RotateCcw", "#F97316", 94),
-            new("CreditNote", "Customer credit notes and adjustments", "ReceiptText", "#14B8A6", 95),
-            new("BusinessPartner", "Business partner onboarding/approvals (suppliers/contractors/customers)", "Building", "#64748B", 96),
-            new("Vendor", "Business partners and vendors", "Building", "#64748B", 100),
-            new("Quality", "Quality inspections", "CheckCircle", "#EF4444", 110),
-            new("ServiceRequest", "Service catalog requests", "ClipboardList", "#10B981", 115)
-        };
-
-        return defaults
-            .Select((item, index) => item with { DisplayOrder = item.DisplayOrder == 0 ? (index + 1) * 10 : item.DisplayOrder })
-            .ToList();
-    }
-
-    private record WorkflowEntityTypeSeed(
-        string Name,
-        string? Description,
-        string? Icon,
-        string? ColorCode,
-        int DisplayOrder)
-    {
-        public string Code => GenerateEntityTypeCode(Name);
-    }
-
-    private static string GenerateEntityTypeCode(string entityType)
-    {
-        if (string.IsNullOrWhiteSpace(entityType))
-        {
-            return "ENTITY";
-        }
-
-        var codeChars = new List<char>();
-        for (var i = 0; i < entityType.Length; i++)
-        {
-            var ch = entityType[i];
-            if (char.IsWhiteSpace(ch) || ch == '-' || ch == '_')
-            {
-                if (codeChars.LastOrDefault() != '_')
-                {
-                    codeChars.Add('_');
-                }
-                continue;
-            }
-
-            if (char.IsUpper(ch) && i > 0 && char.IsLower(entityType[i - 1]))
-            {
-                codeChars.Add('_');
-            }
-
-            codeChars.Add(char.ToUpperInvariant(ch));
-        }
-
-        var code = new string(codeChars.ToArray()).Trim('_');
-        return string.IsNullOrWhiteSpace(code) ? "ENTITY" : code;
     }
 
     [HttpGet("conformance")]
@@ -2234,6 +2153,7 @@ public class WorkflowController : ControllerBase
 
             if (!string.IsNullOrWhiteSpace(safeRequirementKey) && checklist.Count > 0)
             {
+                // Resolve named upload requirements so attachments stay tied to the workflow step that requested them.
                 checklistItem = checklist.FirstOrDefault(item =>
                     string.Equals(
                         WorkflowChecklistEvidenceValidator.NormalizeKey(item.Id, item.Name),
@@ -2628,6 +2548,25 @@ public class WorkflowController : ControllerBase
             var entityType = instance?.EntityType;
             if (instance == null || entityType == null)
             {
+                return;
+            }
+
+            // PR review: generic workflow approvals must resync module-owned procedure cases after approver actions.
+            var procedureCaseId = await _db.ProcedureCases
+                .AsNoTracking()
+                .Where(item => item.TenantId == instance.TenantId
+                    && item.Id == instance.EntityId
+                    && item.WorkflowInstanceId == instance.Id
+                    && !item.IsDeleted)
+                .Select(item => (Guid?)item.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (procedureCaseId.HasValue)
+            {
+                await _procedureCaseService.SyncFromWorkflowRuntimeAsync(
+                    procedureCaseId.Value,
+                    instance.Id,
+                    actorUserId,
+                    request.Comments);
                 return;
             }
 
@@ -3112,10 +3051,71 @@ public class WorkflowController : ControllerBase
         {
             TaskActionType = taskActionType,
             DocumentName = string.IsNullOrWhiteSpace(taskConfig.DocumentName) ? null : taskConfig.DocumentName.Trim(),
-            RequiresDocument = taskConfig.RequiresDocument || taskActionType.Equals("document", StringComparison.OrdinalIgnoreCase),
+            RequiresDocument = taskConfig.RequiresDocument ||
+                taskConfig.DocumentRequirements.Any(requirement => requirement.IsRequired) ||
+                taskActionType.Equals("document", StringComparison.OrdinalIgnoreCase),
             DocumentRequirementKey = string.IsNullOrWhiteSpace(taskConfig.DocumentRequirementKey) ? null : taskConfig.DocumentRequirementKey.Trim(),
+            DocumentRequirements = NormalizeDocumentRequirements(taskConfig),
             Instructions = string.IsNullOrWhiteSpace(taskConfig.Instructions) ? null : taskConfig.Instructions.Trim()
         };
+    }
+
+    private static List<WorkflowDocumentRequirementDto> NormalizeDocumentRequirements(WorkflowTaskConfigDto taskConfig)
+    {
+        // Surface a normalized requirement list to the UI while still honoring older single-document configs.
+        var configured = taskConfig.DocumentRequirements
+            .Where(requirement =>
+                !string.IsNullOrWhiteSpace(requirement.DocumentName) ||
+                !string.IsNullOrWhiteSpace(requirement.RequirementKey))
+            .Select((requirement, index) => new WorkflowDocumentRequirementDto
+            {
+                Id = string.IsNullOrWhiteSpace(requirement.Id) ? $"document-{index + 1}" : requirement.Id,
+                RequirementKey = string.IsNullOrWhiteSpace(requirement.RequirementKey)
+                    ? BuildRequirementKey(requirement.DocumentName, index)
+                    : requirement.RequirementKey.Trim(),
+                DocumentName = string.IsNullOrWhiteSpace(requirement.DocumentName)
+                    ? $"Document {index + 1}"
+                    : requirement.DocumentName.Trim(),
+                DocumentType = string.IsNullOrWhiteSpace(requirement.DocumentType) ? null : requirement.DocumentType.Trim(),
+                IsRequired = requirement.IsRequired,
+            })
+            .ToList();
+
+        if (configured.Count > 0)
+        {
+            return configured;
+        }
+
+        if (taskConfig.RequiresDocument ||
+            taskConfig.TaskActionType.Equals("document", StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrWhiteSpace(taskConfig.DocumentName))
+        {
+            configured.Add(new WorkflowDocumentRequirementDto
+            {
+                Id = "document-1",
+                RequirementKey = string.IsNullOrWhiteSpace(taskConfig.DocumentRequirementKey)
+                    ? BuildRequirementKey(taskConfig.DocumentName, 0)
+                    : taskConfig.DocumentRequirementKey.Trim(),
+                DocumentName = string.IsNullOrWhiteSpace(taskConfig.DocumentName)
+                    ? "Required document"
+                    : taskConfig.DocumentName.Trim(),
+                IsRequired = true,
+            });
+        }
+
+        return configured;
+    }
+
+    private static string BuildRequirementKey(string? value, int index)
+    {
+        var source = string.IsNullOrWhiteSpace(value) ? $"document-{index + 1}" : value.Trim().ToLowerInvariant();
+        var key = new string(source.Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray()).Trim('-');
+        while (key.Contains("--", StringComparison.Ordinal))
+        {
+            key = key.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        return string.IsNullOrWhiteSpace(key) ? $"document-{index + 1}" : key;
     }
 
     private static List<WorkflowQualityCheckDto> GetChecklistFromStepConfiguration(string? configurationJson)

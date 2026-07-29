@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Projects;
 
 namespace ErpSystem.Core.Interfaces.Projects;
@@ -90,6 +91,7 @@ public interface IProjectService
     Task<ProjectUnitDto> UpdateProjectUnitAsync(Guid unitId, UpdateProjectUnitDto dto);
     Task<ProjectUnitDto> ReleaseProjectUnitAsync(Guid unitId);
     Task<ProjectUnitDto> WithdrawProjectUnitReleaseAsync(Guid unitId);
+    Task<EstateManagedAssetDto> PublishProjectUnitToEstateAsync(Guid unitId);
     Task<ProjectUnitDto> CreateSalesAgreementFromProjectUnitAsync(Guid unitId);
     Task<ProjectUnitDto> CreateLeaseAgreementFromProjectUnitAsync(Guid unitId);
     Task<ProjectUnitDto> CreateSalesOrderFromProjectUnitAsync(Guid unitId);

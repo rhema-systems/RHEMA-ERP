@@ -1,11 +1,13 @@
 'use client';
 
 import * as React from 'react';
-import { CheckCircle, Clock, Download, FileText, Loader2, Upload, User, XCircle } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { CheckCircle, Clock, Download, Eye, FileText, Loader2, Upload, User, XCircle } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { useToast } from '@/hooks/use-toast';
@@ -19,6 +21,8 @@ import type {
   WorkflowStepInstanceStatus,
   WorkflowTaskAttachmentDto,
 } from '@/types/workflow';
+
+const ProcedurePdfViewer = dynamic(() => import('@/components/procedures/ProcedurePdfViewer'), { ssr: false });
 
 export interface WorkflowApprovalHistoryPanelProps {
   entityType: string;
@@ -168,11 +172,13 @@ function AttachmentRow({
   attachment,
   downloadingAttachmentId,
   onDownloadAttachment,
+  onViewAttachment,
 }: {
   stepInstanceId?: string;
   attachment: WorkflowTaskAttachmentDto;
   downloadingAttachmentId?: string | null;
   onDownloadAttachment?: (stepInstanceId: string, attachment: WorkflowTaskAttachmentDto) => void;
+  onViewAttachment?: (stepInstanceId: string, attachment: WorkflowTaskAttachmentDto) => void;
 }) {
   const canDownload = Boolean(stepInstanceId && attachment.id && onDownloadAttachment);
   const key = attachmentDownloadKey(stepInstanceId, attachment.id);
@@ -189,23 +195,19 @@ function AttachmentRow({
         <span>{formatDateTime(attachment.uploadedAt)}</span>
         {attachment.fileSizeBytes ? <span>{formatFileSize(attachment.fileSizeBytes)}</span> : null}
       </div>
-      {onDownloadAttachment ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2 text-xs"
-          disabled={!canDownload || downloading}
-          onClick={() => stepInstanceId && onDownloadAttachment(stepInstanceId, attachment)}
-        >
-          {downloading ? (
-            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Download className="mr-1 h-3.5 w-3.5" />
-          )}
-          Download
-        </Button>
-      ) : null}
+      <div className="flex items-center gap-1">
+        {onViewAttachment && attachment.fileName?.toLowerCase().endsWith('.pdf') ? (
+          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={!canDownload || downloading} onClick={() => stepInstanceId && onViewAttachment(stepInstanceId, attachment)}>
+            <Eye className="mr-1 h-3.5 w-3.5" /> View
+          </Button>
+        ) : null}
+        {onDownloadAttachment ? (
+          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={!canDownload || downloading} onClick={() => stepInstanceId && onDownloadAttachment(stepInstanceId, attachment)}>
+            {downloading ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1 h-3.5 w-3.5" />}
+            Download
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -214,10 +216,12 @@ function StepRequirementSummary({
   step,
   downloadingAttachmentId,
   onDownloadAttachment,
+  onViewAttachment,
 }: {
   step: WorkflowStepAuditDto;
   downloadingAttachmentId?: string | null;
   onDownloadAttachment?: (stepInstanceId: string, attachment: WorkflowTaskAttachmentDto) => void;
+  onViewAttachment?: (stepInstanceId: string, attachment: WorkflowTaskAttachmentDto) => void;
 }) {
   const taskLabel = getTaskActionLabel(step);
   const checklist = step.checklist || [];
@@ -288,6 +292,7 @@ function StepRequirementSummary({
                           attachment={attachment}
                           downloadingAttachmentId={downloadingAttachmentId}
                           onDownloadAttachment={onDownloadAttachment}
+                          onViewAttachment={onViewAttachment}
                         />
                       ))}
                     </div>
@@ -310,6 +315,7 @@ function StepRequirementSummary({
                 attachment={attachment}
                 downloadingAttachmentId={downloadingAttachmentId}
                 onDownloadAttachment={onDownloadAttachment}
+                onViewAttachment={onViewAttachment}
               />
             ))}
           </div>
@@ -342,6 +348,7 @@ export function WorkflowApprovalHistoryPanel({
   const [audit, setAudit] = React.useState<WorkflowEntityAuditDto | null>(null);
   const [summary, setSummary] = React.useState<WorkflowEntitySummaryDto | null>(workflowSummary ?? null);
   const [downloadingAttachmentId, setDownloadingAttachmentId] = React.useState<string | null>(null);
+  const [preview, setPreview] = React.useState<{ url: string; fileName: string } | null>(null);
 
   const effectiveSummary = workflowSummary ?? summary;
   const effectiveStatus = status || enumLabel(effectiveSummary?.status ?? audit?.status, instanceStatusLabels);
@@ -412,6 +419,26 @@ export function WorkflowApprovalHistoryPanel({
     },
     [toast]
   );
+
+  const handleViewAttachment = React.useCallback(async (stepInstanceId: string, attachment: WorkflowTaskAttachmentDto) => {
+    const key = attachmentDownloadKey(stepInstanceId, attachment.id);
+    try {
+      setDownloadingAttachmentId(key);
+      const blob = await workflowApiService.downloadStepAttachment(stepInstanceId, attachment.id);
+      setPreview((current) => {
+        if (current?.url) window.URL.revokeObjectURL(current.url);
+        return { url: window.URL.createObjectURL(blob), fileName: attachment.fileName || 'Workflow document.pdf' };
+      });
+    } catch (e: any) {
+      toast({ title: 'Failed to open document', description: e?.message || 'The workflow document could not be opened.', variant: 'destructive' });
+    } finally {
+      setDownloadingAttachmentId(null);
+    }
+  }, [toast]);
+
+  React.useEffect(() => () => {
+    if (preview?.url) window.URL.revokeObjectURL(preview.url);
+  }, [preview?.url]);
 
   if (loading) {
     return (
@@ -541,6 +568,7 @@ export function WorkflowApprovalHistoryPanel({
                     attachment={attachment}
                     downloadingAttachmentId={downloadingAttachmentId}
                     onDownloadAttachment={handleDownloadAttachment}
+                    onViewAttachment={handleViewAttachment}
                   />
                 ))}
               </div>
@@ -604,6 +632,7 @@ export function WorkflowApprovalHistoryPanel({
                     step={step}
                     downloadingAttachmentId={downloadingAttachmentId}
                     onDownloadAttachment={handleDownloadAttachment}
+                    onViewAttachment={handleViewAttachment}
                   />
 
                   {step.approvals?.length > 0 && (
@@ -645,6 +674,12 @@ export function WorkflowApprovalHistoryPanel({
           </CardContent>
         </Card>
       )}
+      <Dialog open={Boolean(preview)} onOpenChange={(open) => !open && setPreview(null)}>
+        <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
+          <DialogHeader><DialogTitle>{preview?.fileName || 'Document preview'}</DialogTitle></DialogHeader>
+          {preview ? <ProcedurePdfViewer fileUrl={preview.url} fileName={preview.fileName} /> : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

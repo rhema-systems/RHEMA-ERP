@@ -103,6 +103,31 @@ export default function ExternalPortalDashboard() {
       color: 'bg-purple-500',
       available: false,
     },
+    // Estate/customer portal integration: public Estate cards route customers into request flows owned by Estate APIs.
+    {
+      title: 'Property Listings',
+      description: 'Search available lands, buildings, and apartments for sale or rent',
+      icon: MapPin,
+      href: '/external-portal/property-listings',
+      color: 'bg-emerald-500',
+      available: true,
+    },
+    {
+      title: 'Estate Documents',
+      description: 'View dispatched Estate letters and document references',
+      icon: FileText,
+      href: '/external-portal/estate-documents',
+      color: 'bg-sky-500',
+      available: true,
+    },
+    {
+      title: 'Estate Services',
+      description: 'Request maintenance, change of use, searches, CTCs, and related Estate services',
+      icon: ClipboardList,
+      href: '/external-portal/estate-services',
+      color: 'bg-cyan-500',
+      available: true,
+    },
   ];
 
   // Get recent applications from real data

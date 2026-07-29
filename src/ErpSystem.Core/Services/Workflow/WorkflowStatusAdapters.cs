@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
@@ -45,6 +46,328 @@ public class WorkflowStatusAdapterRegistry : IWorkflowStatusAdapterRegistry
         => TryGetAdapter(entityType, out var adapter)
             ? adapter
             : throw new InvalidOperationException($"No workflow status adapter registered for entity type '{entityType}'.");
+}
+
+public sealed class LandAcquisitionWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    // Estate/DMS integration: Land Acquisition uses Workflow for approvals while keeping Estate-specific status transitions here.
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "LandAcquisition",
+        "Land Acquisition",
+        "LAND_ACQUISITION"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+    {
+        var acquisition = RequireLandAcquisition(entity);
+        acquisition.SubmittedAt = DateTime.UtcNow;
+        acquisition.SubmittedById = userId;
+        Apply(acquisition, outcome, userId, null);
+    }
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => Apply(RequireLandAcquisition(entity), outcome, userId, rejectionReason);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+    {
+        var acquisition = RequireLandAcquisition(entity);
+        acquisition.Status = LandAcquisitionStatus.PendingIdentification;
+        acquisition.RejectionReason = reason;
+        acquisition.ApprovedAt = null;
+        acquisition.ApprovedById = null;
+    }
+
+    private static void Apply(LandAcquisition acquisition, WorkflowOutcome outcome, Guid? userId, string? rejectionReason)
+    {
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                acquisition.Status = acquisition.StageOrder >= 15
+                    ? LandAcquisitionStatus.AssetCreated
+                    : LandAcquisitionStatus.Completed;
+                acquisition.ApprovedAt = DateTime.UtcNow;
+                acquisition.ApprovedById = userId;
+                acquisition.RejectionReason = null;
+                break;
+            case WorkflowOutcome.Rejected:
+                acquisition.Status = LandAcquisitionStatus.Rejected;
+                acquisition.ApprovedAt = null;
+                acquisition.ApprovedById = null;
+                acquisition.RejectionReason = rejectionReason;
+                break;
+            default:
+                acquisition.Status = LandAcquisitionStatus.PendingApproval;
+                acquisition.ApprovedAt = null;
+                acquisition.ApprovedById = null;
+                acquisition.RejectionReason = null;
+                break;
+        }
+    }
+
+    private static LandAcquisition RequireLandAcquisition(object entity)
+        => entity as LandAcquisition
+            ?? throw new InvalidOperationException("Workflow adapter expected a LandAcquisition entity.");
+}
+
+public sealed class LegalProcedureWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "LegalProcedure",
+        "LegalMortgage",
+        "LegalMortgageInPrinciple",
+        "LegalCourtProcess",
+        "LegalOtherCourtProcess",
+        "LegalTerminationRecognition",
+        "LegalAssignmentSubleaseVesting",
+        "LegalLeaseVariationRenewalSublease",
+        "LegalTransfer"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+        => ApplyGenericOutcome(entity, outcome);
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => ApplyGenericOutcome(entity, outcome);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+        => WorkflowStatusAdapterDefaults.ApplyDraftOutcome(entity);
+
+    private static void ApplyGenericOutcome(object entity, WorkflowOutcome outcome)
+    {
+        var status = outcome switch
+        {
+            WorkflowOutcome.Approved => "Approved",
+            WorkflowOutcome.Rejected => "Rejected",
+            _ => "Pending"
+        };
+
+        TrySetStringOrEnum(entity, "Status", status);
+        TrySetStringOrEnum(entity, "ApprovalStatus", status);
+    }
+
+    private static void TrySetStringOrEnum(object entity, string propertyName, string value)
+    {
+        var property = entity.GetType().GetProperty(propertyName);
+        if (property == null || !property.CanWrite)
+        {
+            return;
+        }
+
+        if (property.PropertyType == typeof(string))
+        {
+            property.SetValue(entity, value);
+            return;
+        }
+
+        if (property.PropertyType.IsEnum && Enum.TryParse(property.PropertyType, value, ignoreCase: true, out var enumValue))
+        {
+            property.SetValue(entity, enumValue);
+        }
+    }
+}
+
+public sealed class EstateFacilitiesWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    // Estate/DMS integration: generic Estate/Facilities procedure cases reuse Workflow without adding another approval engine.
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "EstatePropertyManagementPropertyUnit",
+        "EstatePropertyManagementLease",
+        "EstatePropertyManagementTenantOccupant",
+        "EstatePropertyManagementBillingServiceCharge",
+        "EstatePropertyManagementOccupancyAvailability",
+        "EstatePropertyManagementMoveInMoveOutHandover",
+        "EstatePropertyManagementDocumentRecordIndex",
+        "EstateFacilityMaintenance",
+        "EstateFacilityComplaint",
+        "EstateFacilityServiceProvider",
+        "EstateFacilityStaffCleaner",
+        "EstateFacilityAssetRegister",
+        "EstateFacilityDocument",
+        "EstateRegistrySecretariat",
+        "EstateRecordsManagement",
+        "EstateInspection",
+        "EstateSearchApplication",
+        "EstateRecordAmendment",
+        "EstateCertifiedTrueCopy",
+        "EstateJointOwnership",
+        "EstateTransfer",
+        "EstateAssignment",
+        "EstateMortgageConsent",
+        "EstateLeasePreparation",
+        "EstateAdditionalLand",
+        "EstateLayoutRevision",
+        "EstateChangeOfUse",
+        "EstateReminderRateRevision",
+        "EstateLeaseRenewal",
+        "EstateServicedPlotAllocation",
+        "EstateLandsPartiallyServiced",
+        "EstateHousingHomeOwnership",
+        "EstateTraditionalLands",
+        "EstateTenancyRegularisation",
+        "EstateReportingControls"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+        => ApplyGenericOutcome(entity, outcome);
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => ApplyGenericOutcome(entity, outcome);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+        => WorkflowStatusAdapterDefaults.ApplyDraftOutcome(entity);
+
+    private static void ApplyGenericOutcome(object entity, WorkflowOutcome outcome)
+    {
+        var status = outcome switch
+        {
+            WorkflowOutcome.Approved => "Approved",
+            WorkflowOutcome.Rejected => "Rejected",
+            _ => "Pending"
+        };
+
+        TrySetStringOrEnum(entity, "Status", status);
+        TrySetStringOrEnum(entity, "ApprovalStatus", status);
+    }
+
+    private static void TrySetStringOrEnum(object entity, string propertyName, string value)
+    {
+        var property = entity.GetType().GetProperty(propertyName);
+        if (property == null || !property.CanWrite)
+        {
+            return;
+        }
+
+        if (property.PropertyType == typeof(string))
+        {
+            property.SetValue(entity, value);
+            return;
+        }
+
+        if (property.PropertyType.IsEnum && Enum.TryParse(property.PropertyType, value, ignoreCase: true, out var enumValue))
+        {
+            property.SetValue(entity, enumValue);
+        }
+    }
+}
+
+public sealed class CentralDocumentManagementWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    // Estate/DMS integration: DMS governance stages participate in Workflow for approvals and audit trails.
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "CentralDocumentRegister",
+        "CentralDocumentMetadataTemplate",
+        "CentralDocumentVersion",
+        "CentralDocumentAnnotation",
+        "CentralDocumentGovernance",
+        "CentralDocumentIntegrationQueue"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+        => ApplyGenericOutcome(entity, outcome);
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => ApplyGenericOutcome(entity, outcome);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+        => WorkflowStatusAdapterDefaults.ApplyDraftOutcome(entity);
+
+    private static void ApplyGenericOutcome(object entity, WorkflowOutcome outcome)
+    {
+        var status = outcome switch
+        {
+            WorkflowOutcome.Approved => "Approved",
+            WorkflowOutcome.Rejected => "Rejected",
+            _ => "Pending"
+        };
+
+        TrySetStringOrEnum(entity, "Status", status);
+        TrySetStringOrEnum(entity, "ApprovalStatus", status);
+    }
+
+    private static void TrySetStringOrEnum(object entity, string propertyName, string value)
+    {
+        var property = entity.GetType().GetProperty(propertyName);
+        if (property == null || !property.CanWrite)
+        {
+            return;
+        }
+
+        if (property.PropertyType == typeof(string))
+        {
+            property.SetValue(entity, value);
+            return;
+        }
+
+        if (property.PropertyType.IsEnum && Enum.TryParse(property.PropertyType, value, ignoreCase: true, out var enumValue))
+        {
+            property.SetValue(entity, enumValue);
+        }
+    }
+}
+
+public sealed class PlanningProcedureWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "PlanningLandAllocationVetting",
+        "PlanningChangeOfUseReview",
+        "PlanningSchemeLayoutPreparation",
+        "PlanningSiteReport",
+        "PlanningSitePlanPreparation",
+        "PlanningOfficialSearchData",
+        "PlanningDevelopmentPermitConformity",
+        "PlanningRegularization",
+        "PlanningLayoutReviewCorrection",
+        "PlanningComplianceInspection",
+        "PlanningDisputeComplaint",
+        "PlanningAssemblySpatialCommittee"
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+        => ApplyGenericOutcome(entity, outcome);
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => ApplyGenericOutcome(entity, outcome);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+        => WorkflowStatusAdapterDefaults.ApplyDraftOutcome(entity);
+
+    private static void ApplyGenericOutcome(object entity, WorkflowOutcome outcome)
+    {
+        var status = outcome switch
+        {
+            WorkflowOutcome.Approved => "Approved",
+            WorkflowOutcome.Rejected => "Rejected",
+            _ => "Pending"
+        };
+
+        TrySetStringOrEnum(entity, "Status", status);
+        TrySetStringOrEnum(entity, "ApprovalStatus", status);
+    }
+
+    private static void TrySetStringOrEnum(object entity, string propertyName, string value)
+    {
+        var property = entity.GetType().GetProperty(propertyName);
+        if (property == null || !property.CanWrite)
+        {
+            return;
+        }
+
+        if (property.PropertyType == typeof(string))
+        {
+            property.SetValue(entity, value);
+            return;
+        }
+
+        if (property.PropertyType.IsEnum && Enum.TryParse(property.PropertyType, value, ignoreCase: true, out var enumValue))
+        {
+            property.SetValue(entity, enumValue);
+        }
+    }
 }
 
 public sealed class JobCardWorkflowStatusAdapter : IWorkflowStatusAdapter

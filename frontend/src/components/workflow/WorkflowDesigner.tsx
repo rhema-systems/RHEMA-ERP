@@ -49,6 +49,7 @@ import type {
   WorkflowAssignmentRuleDto,
   WorkflowApprovalConflictRuleDto,
   WorkflowQualityCheckDto,
+  WorkflowDocumentRequirementDto,
   WorkflowVariableInfo,
   WorkflowEntityTypeInfo
 } from '@/types/workflow';
@@ -295,6 +296,7 @@ const moduleIntegrations = [
   { id: 'procurement', name: 'Procurement', icon: FileText },
   { id: 'helpdesk', name: 'Helpdesk (EHC)', icon: MessageSquare },
   { id: 'projects', name: 'Project Management', icon: CheckCircle },
+  { id: 'planning', name: 'Development Planning', icon: FileText },
   { id: 'sales', name: 'Sales & CRM', icon: UserIcon },
   { id: 'quality', name: 'Quality Management', icon: CheckCircle },
 ];
@@ -1022,6 +1024,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
           taskAssigneeRole: '',
           taskDynamicExpression: '',
           documentName: '',
+          documentRequirements: [],
           dueDate: '',
           estimatedHours: '',
           priority: 'medium',
@@ -1406,12 +1409,23 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       ...item,
       id: item.id || `check-${index + 1}`,
     })) ?? [];
+    const documentRequirements = step.configuration?.taskConfig?.documentRequirements?.length
+      ? step.configuration.taskConfig.documentRequirements
+      : step.configuration?.taskConfig?.documentName
+        ? [{
+            id: step.configuration.taskConfig.documentRequirementKey || 'document-1',
+            requirementKey: step.configuration.taskConfig.documentRequirementKey || buildRequirementKey(step.configuration.taskConfig.documentName),
+            documentName: step.configuration.taskConfig.documentName,
+            isRequired: true,
+          }]
+        : [];
     const baseData: Record<string, any> = {
       label: step.name,
       instructions: step.description || '',
       estimatedHours: step.estimatedHours?.toString() || '',
       dueDate: step.estimatedHours ? `${step.estimatedHours}h` : '',
       stepChecklist,
+      documentRequirements,
     };
     if (normalizeStepType(step.stepType) === WorkflowStepType.Approval) {
       const approvalConfig = step.configuration?.approvalConfig;
@@ -1548,6 +1562,33 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     return normalized || 'task-document';
   };
 
+  const readDocumentRequirements = (data?: any): WorkflowDocumentRequirementDto[] => {
+    const configured = ((data?.documentRequirements || []) as WorkflowDocumentRequirementDto[])
+      .map((item, index) => ({
+        id: item.id || `document-${index + 1}`,
+        requirementKey: item.requirementKey || '',
+        documentName: item.documentName || '',
+        documentType: item.documentType?.trim() || undefined,
+        isRequired: item.isRequired !== false,
+      }));
+
+    if (configured.length > 0) {
+      return configured;
+    }
+
+    const fallbackDocumentName = data?.documentName?.trim();
+    if (!fallbackDocumentName) {
+      return [];
+    }
+
+    return [{
+      id: 'document-1',
+      requirementKey: buildRequirementKey(fallbackDocumentName),
+      documentName: fallbackDocumentName,
+      isRequired: true,
+    }];
+  };
+
   const readStepChecklist = (data?: any): WorkflowQualityCheckDto[] =>
     ((data?.stepChecklist || data?.approvalChecklist || []) as WorkflowQualityCheckDto[]);
 
@@ -1559,9 +1600,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         name: item.name.trim(),
         description: item.description?.trim() || '',
         isRequired: item.isRequired !== false,
-        requiresDocument: item.requiresDocument === true,
-        documentType: item.documentType?.trim() || undefined,
-        documentName: item.documentName?.trim() || undefined,
+        requiresDocument: false,
         applicabilityCondition: item.applicabilityCondition,
         expectedValue: item.expectedValue,
         validationExpression: item.validationExpression,
@@ -1638,14 +1677,26 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     if (node.type === 'task') {
       const taskAssigneeType = node.data?.taskAssigneeType || 'currentActor';
       const taskActionType = node.data?.taskActionType || 'general';
-      const documentName = node.data?.documentName?.trim() || '';
+      // Task-stage uploads are kept as a stage-level list for clear completion rules.
+      const documentRequirements = readDocumentRequirements(node.data)
+        .filter(item => item.documentName?.trim())
+        .map((item, index) => ({
+          ...item,
+          requirementKey: item.requirementKey?.trim() || buildRequirementKey(item.documentName || `document-${index + 1}`),
+          documentName: item.documentName.trim(),
+          documentType: item.documentType?.trim() || undefined,
+          isRequired: item.isRequired !== false,
+        }));
+      const documentName = documentRequirements[0]?.documentName || node.data?.documentName?.trim() || '';
       const taskConfig = {
         taskActionType,
         documentName: documentName || undefined,
-        requiresDocument: taskActionType === 'document',
-        documentRequirementKey: taskActionType === 'document'
-          ? buildRequirementKey(documentName || node.data?.label || node.id)
-          : undefined,
+        requiresDocument: taskActionType === 'document' || documentRequirements.some(item => item.isRequired !== false),
+        documentRequirementKey: documentRequirements[0]?.requirementKey ||
+          (taskActionType === 'document'
+            ? buildRequirementKey(documentName || node.data?.label || node.id)
+            : undefined),
+        documentRequirements,
         instructions: node.data?.instructions?.trim() || undefined,
       };
       const configuration: WorkflowStepConfigurationDto = {
@@ -1861,9 +1912,15 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         errors.push(`Task step "${node.data?.label || 'Task'}" must have a dynamic user field`);
       }
 
-      if (node.data?.taskActionType === 'document' && !node.data?.documentName?.trim()) {
-        errors.push(`Task step "${node.data?.label || 'Task'}" must name the required document`);
+      const documentRequirements = readDocumentRequirements(node.data);
+      if (node.data?.taskActionType === 'document' && documentRequirements.length === 0) {
+        errors.push(`Task step "${node.data?.label || 'Task'}" must define at least one required document`);
       }
+      documentRequirements.forEach((requirement, index) => {
+        if (!requirement.documentName?.trim()) {
+          errors.push(`Task step "${node.data?.label || 'Task'}" has a blank required document at row ${index + 1}`);
+        }
+      });
     });
 
     nodes
@@ -1873,12 +1930,6 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         checklist.forEach((item, index) => {
           if (!item.name?.trim()) {
             errors.push(`Step "${node.data?.label || 'Workflow step'}" has a blank checklist item at row ${index + 1}`);
-          }
-          if (item.requiresDocument && !item.documentType?.trim()) {
-            errors.push(`Checklist item "${item.name || index + 1}" in step "${node.data?.label || 'Workflow step'}" must define a document type`);
-          }
-          if (item.requiresDocument && !item.documentName?.trim()) {
-            errors.push(`Checklist item "${item.name || index + 1}" in step "${node.data?.label || 'Workflow step'}" must define a document name`);
           }
         });
       });
@@ -2047,6 +2098,36 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
       stepChecklist: nextChecklist,
       ...(selectedNode?.type === 'approval' ? { approvalChecklist: nextChecklist } : {}),
     });
+  };
+
+  const updateDocumentRequirements = (nextRequirements: WorkflowDocumentRequirementDto[]) => {
+    updateSelectedNode({ documentRequirements: nextRequirements });
+  };
+
+  const addDocumentRequirement = () => {
+    const currentRequirements = readDocumentRequirements(selectedNode?.data);
+    updateDocumentRequirements([
+      ...currentRequirements,
+      {
+        id: `document-${Date.now()}`,
+        requirementKey: '',
+        documentName: '',
+        documentType: '',
+        isRequired: true,
+      },
+    ]);
+  };
+
+  const updateDocumentRequirement = (itemId: string, updates: Partial<WorkflowDocumentRequirementDto>) => {
+    const currentRequirements = readDocumentRequirements(selectedNode?.data);
+    updateDocumentRequirements(
+      currentRequirements.map((item) => item.id === itemId ? { ...item, ...updates } : item)
+    );
+  };
+
+  const removeDocumentRequirement = (itemId: string) => {
+    const currentRequirements = readDocumentRequirements(selectedNode?.data);
+    updateDocumentRequirements(currentRequirements.filter((item) => item.id !== itemId));
   };
 
   const addApprovalChecklistItem = () => {
@@ -2584,7 +2665,19 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                             <Label>Task Action</Label>
                             <Select
                               value={selectedNode.data?.taskActionType || 'general'}
-                              onValueChange={(value) => updateSelectedNode({ taskActionType: value })}
+                              onValueChange={(value) => {
+                                const updates: Record<string, any> = { taskActionType: value };
+                                if (value === 'document' && readDocumentRequirements(selectedNode.data).length === 0) {
+                                  updates.documentRequirements = [{
+                                    id: `document-${Date.now()}`,
+                                    requirementKey: '',
+                                    documentName: '',
+                                    documentType: '',
+                                    isRequired: true,
+                                  }];
+                                }
+                                updateSelectedNode(updates);
+                              }}
                               disabled={selectedWorkflowHasLiveInstances}
                             >
                               <SelectTrigger>
@@ -2600,14 +2693,98 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                           </div>
 
                           {selectedNode.data?.taskActionType === 'document' && (
-                            <div>
-                              <Label>Document Requirement</Label>
-                              <Input
-                                value={selectedNode.data?.documentName || ''}
-                                placeholder="e.g. Signed customer approval"
-                                disabled={selectedWorkflowHasLiveInstances}
-                                onChange={(e) => updateSelectedNode({ documentName: e.target.value })}
-                              />
+                            <div className="space-y-3 rounded-md border p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <Label>Required Documents</Label>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={selectedWorkflowHasLiveInstances}
+                                  onClick={addDocumentRequirement}
+                                >
+                                  <Plus className="h-3.5 w-3.5 mr-1" />
+                                  Add Document
+                                </Button>
+                              </div>
+                              <div className="space-y-3">
+                                {readDocumentRequirements(selectedNode.data).length === 0 ? (
+                                  <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                                    Add each document that must be uploaded for this task stage.
+                                  </div>
+                                ) : (
+                                  readDocumentRequirements(selectedNode.data).map((requirement, index) => {
+                                    const itemId = requirement.id || `document-${index + 1}`;
+                                    return (
+                                      <div key={itemId} className="rounded-md border bg-muted/20 p-3 space-y-3">
+                                        <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                                          <div className="space-y-1.5">
+                                            <Label htmlFor={`task-document-name-${itemId}`}>Document name</Label>
+                                            <Input
+                                              id={`task-document-name-${itemId}`}
+                                              value={requirement.documentName || ''}
+                                              placeholder="e.g. Signed customer approval"
+                                              disabled={selectedWorkflowHasLiveInstances}
+                                              onChange={(event) =>
+                                                updateDocumentRequirement(itemId, { documentName: event.target.value })
+                                              }
+                                            />
+                                          </div>
+                                          <div className="flex items-end">
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              className="text-red-600 hover:text-red-700"
+                                              disabled={selectedWorkflowHasLiveInstances}
+                                              onClick={() => removeDocumentRequirement(itemId)}
+                                              aria-label="Remove document requirement"
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                          </div>
+                                        </div>
+                                        <div className="grid gap-3 md:grid-cols-2">
+                                          <div className="space-y-1.5">
+                                            <Label htmlFor={`task-document-type-${itemId}`}>Document type</Label>
+                                            <Input
+                                              id={`task-document-type-${itemId}`}
+                                              value={requirement.documentType || ''}
+                                              placeholder="e.g. Legal instrument"
+                                              disabled={selectedWorkflowHasLiveInstances}
+                                              onChange={(event) =>
+                                                updateDocumentRequirement(itemId, { documentType: event.target.value })
+                                              }
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label htmlFor={`task-document-key-${itemId}`}>Requirement key</Label>
+                                            <Input
+                                              id={`task-document-key-${itemId}`}
+                                              value={requirement.requirementKey || ''}
+                                              placeholder="Auto-generated if blank"
+                                              disabled={selectedWorkflowHasLiveInstances}
+                                              onChange={(event) =>
+                                                updateDocumentRequirement(itemId, { requirementKey: event.target.value })
+                                              }
+                                            />
+                                          </div>
+                                        </div>
+                                        <label className="flex items-center gap-2 text-sm">
+                                          <Checkbox
+                                            checked={requirement.isRequired !== false}
+                                            disabled={selectedWorkflowHasLiveInstances}
+                                            onCheckedChange={(checked) =>
+                                              updateDocumentRequirement(itemId, { isRequired: checked === true })
+                                            }
+                                          />
+                                          Required
+                                        </label>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
                             </div>
                           )}
 
@@ -3652,52 +3829,7 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                           />
                           Required
                         </label>
-                        <label className="flex items-center gap-2 text-sm">
-                          <Checkbox
-                            checked={item.requiresDocument === true}
-                            disabled={selectedWorkflowHasLiveInstances}
-                            onCheckedChange={(checked) =>
-                              updateApprovalChecklistItem(itemId, {
-                                requiresDocument: checked === true,
-                                ...(
-                                  checked === true
-                                    ? {}
-                                    : { documentType: undefined, documentName: undefined }
-                                ),
-                              })
-                            }
-                          />
-                          Requires document evidence
-                        </label>
                       </div>
-                      {item.requiresDocument === true && (
-                        <div className="grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-2">
-                          <div className="space-y-1.5">
-                            <Label htmlFor={`check-document-type-${itemId}`}>Document type</Label>
-                            <Input
-                              id={`check-document-type-${itemId}`}
-                              value={item.documentType || ''}
-                              placeholder="e.g. Tax clearance certificate"
-                              disabled={selectedWorkflowHasLiveInstances}
-                              onChange={(event) =>
-                                updateApprovalChecklistItem(itemId, { documentType: event.target.value })
-                              }
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label htmlFor={`check-document-name-${itemId}`}>Document name</Label>
-                            <Input
-                              id={`check-document-name-${itemId}`}
-                              value={item.documentName || ''}
-                              placeholder="e.g. Current GRA clearance"
-                              disabled={selectedWorkflowHasLiveInstances}
-                              onChange={(event) =>
-                                updateApprovalChecklistItem(itemId, { documentName: event.target.value })
-                              }
-                            />
-                          </div>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
