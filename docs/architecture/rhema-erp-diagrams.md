@@ -18,8 +18,17 @@ This view explains how internal teams, external partners, field users, and leade
 
 This view is designed for management discussions: eight enterprise capability groups surround the shared controls and technology foundation that connect them.
 
+## Technical solution and deployment architecture
+
+![RHEMA ERP technical solution and deployment architecture](assets/rhema-erp-technical-deployment-architecture.svg)
+
+[Open or download the technical solution and deployment architecture SVG](assets/rhema-erp-technical-deployment-architecture.svg)
+
+This detailed view is intended for technical governance, solution assurance, infrastructure planning, security review, and deployment discussions. It maps the repository implementation into access, gateway, application-service, background-processing, data, cross-cutting, and production-container layers.
+
 ## Presentation guidance
 
+- Use the **technical solution and deployment architecture** for design assurance, security review, integration planning, and production readiness.
 - Use the **executive solution architecture** when discussing technology strategy, security, resilience, or investment.
 - Use the **business capability landscape** when discussing ownership, transformation scope, operating model, or roadmap priorities.
 - Download the SVG directly from GitHub for PowerPoint, Google Slides, or a design tool. Most browsers can also print or export an opened SVG as PDF or PNG.
