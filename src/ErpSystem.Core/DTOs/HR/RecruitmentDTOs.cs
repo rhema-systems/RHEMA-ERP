@@ -4918,6 +4918,12 @@ public class ExternalApplicationDto
     [MaxLength(100)]
     public string? City { get; set; }
 
+    /// <summary>
+    /// Required: JobCandidate.CountryId is a non-nullable FK, so an omitted value would be written as
+    /// Guid.Empty and fail the foreign key with an opaque 500. The public portal exposes
+    /// GET /api/public/countries specifically to populate this field.
+    /// </summary>
+    [Required(ErrorMessage = "Country is required.")]
     public Guid? CountryId { get; set; }
 
     // ── Online presence (optional) ────────────────────────────────────────────

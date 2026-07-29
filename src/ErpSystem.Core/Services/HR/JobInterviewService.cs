@@ -617,8 +617,19 @@ public class JobInterviewService : IJobInterviewService
                 ie.ConfirmationDate           = null;
                 await _intervieweeRepository.UpdateAsync(ie);
 
-                await SendInterviewEmailAsync(email ?? string.Empty, name, fullReschedule, isReschedule: true, confirmToken,
-                    slotStart: ie.SlotStartTime, slotEnd: ie.SlotEndTime);
+                // Best-effort: an unguarded throw here would abandon the token rotations of every
+                // remaining interviewee, whose UpdateAsync calls are only saved after this loop.
+                try
+                {
+                    await SendInterviewEmailAsync(email ?? string.Empty, name, fullReschedule, isReschedule: true, confirmToken,
+                        slotStart: ie.SlotStartTime, slotEnd: ie.SlotEndTime);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Failed to send interview reschedule email to {Email} — the reschedule itself succeeded.",
+                        email);
+                }
             }
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }

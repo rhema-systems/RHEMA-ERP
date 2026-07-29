@@ -602,8 +602,19 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
             ["StageName"]         = stageName,
         };
 
-        await _templatedEmail.SendAsync(
-            RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.AssessmentPending, toEmail, tokens);
+        // Best-effort: this fires after the stage move has already been committed, so a mail failure
+        // must not fail the caller's request and roll a successful move back into an error response.
+        try
+        {
+            await _templatedEmail.SendAsync(
+                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.AssessmentPending, toEmail, tokens);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to send assessment pending email to {Email} — the stage move itself succeeded.",
+                toEmail);
+        }
     }
 
     private static PipelineStageWithApplicationsDto BuildEmptyColumn(RecruitmentPipelineStage stage) =>

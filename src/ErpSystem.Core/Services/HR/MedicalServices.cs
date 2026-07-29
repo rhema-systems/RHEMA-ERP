@@ -23,6 +23,7 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     private readonly IPhysicianRepository _physicianRepository;
     private readonly IFacilityServiceRepository _facilityServiceRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<HealthcareFacilityService> _logger;
 
     public HealthcareFacilityService(
@@ -30,21 +31,42 @@ public class HealthcareFacilityService : IHealthcareFacilityService
         IPhysicianRepository physicianRepository,
         IFacilityServiceRepository facilityServiceRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<HealthcareFacilityService> logger)
     {
         _facilityRepository = facilityRepository;
         _physicianRepository = physicianRepository;
         _facilityServiceRepository = facilityServiceRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // Create paths take the tenant from the controller (MedicalControllerBase.TryGetWriteContext).
+    // Assert it is the caller's own, so a forged value can never write into another tenant.
+    private void EnsureTenant(Guid tenantId)
+    {
+        if (tenantId != GetTenantId())
+            throw new UnauthorizedAccessException("The supplied tenant does not match the current user's tenant.");
     }
 
     public async Task<HealthcareFacilityDto> GetFacilityByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _facilityRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Healthcare facility with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Healthcare facility with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -53,8 +75,8 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         var entity = await _facilityRepository.GetWithFullDetailsAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Healthcare facility with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Healthcare facility with ID '{id}' not found.");
 
         return entity.ToDetailDto();
     }
@@ -62,42 +84,48 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     public async Task<HealthcareFacilityDto?> GetFacilityByCodeAsync(string facilityCode, CancellationToken cancellationToken = default)
     {
         var entity = await _facilityRepository.GetByFacilityCodeAsync(facilityCode);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<HealthcareFacilitySummaryDto>> GetAllFacilitiesAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _facilityRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<HealthcareFacilitySummaryDto>> GetActiveFacilitiesAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _facilityRepository.GetActiveFacilitiesAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<HealthcareFacilitySummaryDto>> GetFacilitiesByTypeAsync(HealthFacilityType facilityType, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _facilityRepository.GetByFacilityTypeAsync(facilityType);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<HealthcareFacilitySummaryDto>> GetFacilitiesAcceptingNHISAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _facilityRepository.GetFacilitiesAcceptingNHISAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<HealthcareFacilitySummaryDto>> SearchFacilitiesAsync(string searchTerm, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _facilityRepository.SearchFacilitiesAsync(searchTerm);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<HealthcareFacilitySummaryDto>> GetFacilitiesPagedAsync(int pageNumber, int pageSize, string? search = null, CancellationToken cancellationToken = default)
     {
-        var query = _facilityRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _facilityRepository.GetQueryable().Where(f => f.TenantId == tenantId);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -127,6 +155,7 @@ public class HealthcareFacilityService : IHealthcareFacilityService
 
     public async Task<HealthcareFacilityDto> CreateFacilityAsync(CreateHealthcareFacilityDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _facilityRepository.AddAsync(entity);
@@ -141,8 +170,8 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         var entity = await _facilityRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Healthcare facility with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Healthcare facility with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -158,8 +187,8 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         var entity = await _facilityRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Healthcare facility with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Healthcare facility with ID '{id}' not found.");
 
         await _facilityRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -173,32 +202,36 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         var entity = await _physicianRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Physician with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Physician with ID '{id}' not found.");
 
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<PhysicianSummaryDto>> GetAllPhysiciansAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _physicianRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<PhysicianSummaryDto>> GetPhysiciansByFacilityAsync(Guid facilityId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _physicianRepository.GetByFacilityIdAsync(facilityId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<PhysicianSummaryDto>> SearchPhysiciansAsync(string searchTerm, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _physicianRepository.SearchPhysiciansAsync(searchTerm);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PhysicianDto> CreatePhysicianAsync(CreatePhysicianDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _physicianRepository.AddAsync(entity);
@@ -213,8 +246,8 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         var entity = await _physicianRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Physician with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Physician with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -228,8 +261,8 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         var entity = await _physicianRepository.GetByIdAsync(verifyDto.PhysicianId);
 
-        if (entity == null)
-            throw new ArgumentException($"Physician with ID '{verifyDto.PhysicianId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Physician with ID '{verifyDto.PhysicianId}' not found.");
 
         verifyDto.ApplyTo(entity);
 
@@ -245,8 +278,8 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         var entity = await _physicianRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Physician with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Physician with ID '{id}' not found.");
 
         await _physicianRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -258,20 +291,22 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         var entity = await _facilityServiceRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Facility service with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Facility service with ID '{id}' not found.");
 
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<FacilityServiceDto>> GetFacilityServicesAsync(Guid facilityId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _facilityServiceRepository.GetByFacilityIdAsync(facilityId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<FacilityServiceDto> CreateFacilityServiceAsync(CreateFacilityServiceDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _facilityServiceRepository.AddAsync(entity);
@@ -284,8 +319,8 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         var entity = await _facilityServiceRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Facility service with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Facility service with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -299,8 +334,8 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     {
         var entity = await _facilityServiceRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Facility service with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Facility service with ID '{id}' not found.");
 
         await _facilityServiceRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -328,6 +363,7 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     private readonly IMedicalInsuranceProviderDocumentRepository _providerDocumentRepository;
     private readonly IMedicalInsurancePremiumRecordRepository _premiumRecordRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<MedicalInsuranceService> _logger;
 
     public MedicalInsuranceService(
@@ -340,6 +376,7 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         IMedicalInsuranceProviderDocumentRepository providerDocumentRepository,
         IMedicalInsurancePremiumRecordRepository premiumRecordRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<MedicalInsuranceService> logger)
     {
         _providerRepository = providerRepository;
@@ -351,15 +388,35 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         _providerDocumentRepository = providerDocumentRepository;
         _premiumRecordRepository = premiumRecordRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // Create paths take the tenant from the controller (MedicalControllerBase.TryGetWriteContext).
+    // Assert it is the caller's own, so a forged value can never write into another tenant.
+    private void EnsureTenant(Guid tenantId)
+    {
+        if (tenantId != GetTenantId())
+            throw new UnauthorizedAccessException("The supplied tenant does not match the current user's tenant.");
     }
 
     public async Task<MedicalInsuranceProviderDto> GetProviderByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _providerRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance provider with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance provider with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -368,8 +425,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _providerRepository.GetWithFullDetailsAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance provider with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance provider with ID '{id}' not found.");
 
         return entity.ToDetailDto();
     }
@@ -377,35 +434,40 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     public async Task<MedicalInsuranceProviderDto?> GetProviderByCodeAsync(string code, CancellationToken cancellationToken = default)
     {
         var entity = await _providerRepository.GetByCodeAsync(code);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<MedicalInsuranceProviderSummaryDto>> GetAllProvidersAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _providerRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MedicalInsuranceProviderSummaryDto>> GetProvidersByTypeAsync(MedicalInsuranceProviderType providerType, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _providerRepository.GetByProviderTypeAsync(providerType);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MedicalInsuranceProviderSummaryDto>> GetActiveProvidersAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _providerRepository.GetActiveProvidersAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MedicalInsuranceProviderSummaryDto>> SearchProvidersAsync(string searchTerm, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _providerRepository.SearchProvidersAsync(searchTerm);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<MedicalInsuranceProviderDto> CreateProviderAsync(CreateMedicalInsuranceProviderDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _providerRepository.AddAsync(entity);
@@ -420,8 +482,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _providerRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance provider with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance provider with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -435,8 +497,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _providerRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance provider with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance provider with ID '{id}' not found.");
 
         await _providerRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -448,20 +510,22 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _planRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance plan with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance plan with ID '{id}' not found.");
 
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<MedicalInsurancePlanDto>> GetPlansByProviderAsync(Guid providerId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _planRepository.GetByProviderIdAsync(providerId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<MedicalInsurancePlanDto> CreatePlanAsync(CreateMedicalInsurancePlanDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _planRepository.AddAsync(entity);
@@ -474,8 +538,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _planRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance plan with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance plan with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -489,8 +553,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _planRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance plan with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance plan with ID '{id}' not found.");
 
         await _planRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -502,8 +566,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _policyRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee medical insurance policy with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical insurance policy with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -512,15 +576,17 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _policyRepository.GetWithFullDetailsAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee medical insurance policy with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical insurance policy with ID '{id}' not found.");
 
         return entity.ToDetailDto();
     }
 
     public async Task<IEnumerable<EmployeeMedicalInsurancePolicySummaryDto>> GetAllPoliciesAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _policyRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
             .Include(p => p.Employee)
             .Include(p => p.MedicalInsuranceProvider)
             .Include(p => p.MedicalInsurancePlan)
@@ -531,24 +597,27 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
     public async Task<IEnumerable<EmployeeMedicalInsurancePolicySummaryDto>> GetPoliciesByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _policyRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<EmployeeMedicalInsurancePolicyDto?> GetActivePolicyForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var entity = await _policyRepository.GetActivePolicyAsync(employeeId);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<EmployeeMedicalInsurancePolicySummaryDto>> GetExpiringPoliciesAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _policyRepository.GetExpiringPoliciesAsync(daysAhead);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<EmployeeMedicalInsurancePolicyDto> CreatePolicyAsync(CreateEmployeeMedicalInsurancePolicyDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _policyRepository.AddAsync(entity);
@@ -563,8 +632,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _policyRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee medical insurance policy with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical insurance policy with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -578,8 +647,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _policyRepository.GetByIdAsync(cancelDto.PolicyId);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee medical insurance policy with ID '{cancelDto.PolicyId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical insurance policy with ID '{cancelDto.PolicyId}' not found.");
 
         cancelDto.ApplyTo(entity);
 
@@ -595,8 +664,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _policyRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee medical insurance policy with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical insurance policy with ID '{id}' not found.");
 
         await _policyRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -606,6 +675,7 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
     public async Task<MedicalInsurancePolicyDependentDto> AddPolicyDependentAsync(AddMedicalInsurancePolicyDependentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _policyDependentRepository.AddAsync(entity);
@@ -616,16 +686,17 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
     public async Task<IEnumerable<MedicalInsurancePolicyDependentDto>> GetPolicyDependentsAsync(Guid policyId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _policyDependentRepository.GetByPolicyIdAsync(policyId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<MedicalInsurancePolicyDependentDto> UpdatePolicyDependentAsync(UpdateMedicalInsurancePolicyDependentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _policyDependentRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance policy dependent with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance policy dependent with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -639,8 +710,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _policyDependentRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance policy dependent with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance policy dependent with ID '{id}' not found.");
 
         await _policyDependentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -652,26 +723,29 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _insuranceClaimRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance claim with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance claim with ID '{id}' not found.");
 
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<MedicalInsuranceClaimSummaryDto>> GetInsuranceClaimsByPolicyAsync(Guid policyId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _insuranceClaimRepository.GetByPolicyIdAsync(policyId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MedicalInsuranceClaimSummaryDto>> GetInsuranceClaimsByExpenseClaimAsync(Guid medicalExpenseClaimId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _insuranceClaimRepository.GetByMedicalExpenseClaimIdAsync(medicalExpenseClaimId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<MedicalInsuranceClaimDto> CreateInsuranceClaimAsync(CreateMedicalInsuranceClaimDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         if (string.IsNullOrWhiteSpace(entity.InsuranceClaimNumber))
@@ -689,8 +763,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _insuranceClaimRepository.GetByIdAsync(statusDto.ClaimId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance claim with ID '{statusDto.ClaimId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance claim with ID '{statusDto.ClaimId}' not found.");
 
         statusDto.ApplyTo(entity);
 
@@ -706,8 +780,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _insuranceClaimRepository.GetByIdAsync(paymentDto.ClaimId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical insurance claim with ID '{paymentDto.ClaimId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance claim with ID '{paymentDto.ClaimId}' not found.");
 
         paymentDto.ApplyTo(entity);
 
@@ -721,6 +795,7 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
     public async Task<MedicalInsuranceProviderFacilityDto> AddNetworkFacilityAsync(AddMedicalInsuranceProviderFacilityDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _networkFacilityRepository.AddAsync(entity);
@@ -731,16 +806,17 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
     public async Task<IEnumerable<MedicalInsuranceProviderFacilityDto>> GetNetworkFacilitiesByProviderAsync(Guid providerId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _networkFacilityRepository.GetByProviderIdAsync(providerId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<MedicalInsuranceProviderFacilityDto> UpdateNetworkFacilityAsync(UpdateMedicalInsuranceProviderFacilityDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _networkFacilityRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Network facility with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Network facility with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -754,8 +830,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _networkFacilityRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Network facility with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Network facility with ID '{id}' not found.");
 
         await _networkFacilityRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -770,6 +846,7 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
     public async Task<MedicalInsuranceProviderDocumentDto> AddProviderDocumentAsync(CreateMedicalInsuranceProviderDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _providerDocumentRepository.AddAsync(entity);
@@ -780,16 +857,17 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
     public async Task<IEnumerable<MedicalInsuranceProviderDocumentDto>> GetProviderDocumentsAsync(Guid providerId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _providerDocumentRepository.GetByProviderIdAsync(providerId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<bool> DeleteProviderDocumentAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _providerDocumentRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Provider document with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Provider document with ID '{id}' not found.");
 
         await _providerDocumentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -801,20 +879,22 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _premiumRecordRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Premium record with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Premium record with ID '{id}' not found.");
 
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<MedicalInsurancePremiumRecordSummaryDto>> GetPremiumRecordsByProviderAsync(Guid providerId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _premiumRecordRepository.GetByProviderIdAsync(providerId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<MedicalInsurancePremiumRecordDto> CreatePremiumRecordAsync(CreateMedicalInsurancePremiumRecordDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _premiumRecordRepository.AddAsync(entity);
@@ -827,8 +907,8 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     {
         var entity = await _premiumRecordRepository.GetByIdAsync(paymentDto.PremiumRecordId);
 
-        if (entity == null)
-            throw new ArgumentException($"Premium record with ID '{paymentDto.PremiumRecordId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Premium record with ID '{paymentDto.PremiumRecordId}' not found.");
 
         paymentDto.ApplyTo(entity);
 
@@ -842,8 +922,9 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
     public async Task<IEnumerable<MedicalInsurancePremiumRecordSummaryDto>> GetOverduePremiumsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _premiumRecordRepository.GetOverduePremiumsAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 }
 
@@ -860,26 +941,48 @@ public class MedicalBenefitSchemeService : IMedicalBenefitSchemeService
     private readonly IMedicalBenefitSchemeRepository _schemeRepository;
     private readonly IMedicalBenefitTierRepository _tierRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<MedicalBenefitSchemeService> _logger;
 
     public MedicalBenefitSchemeService(
         IMedicalBenefitSchemeRepository schemeRepository,
         IMedicalBenefitTierRepository tierRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<MedicalBenefitSchemeService> logger)
     {
         _schemeRepository = schemeRepository;
         _tierRepository = tierRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // Create paths take the tenant from the controller (MedicalControllerBase.TryGetWriteContext).
+    // Assert it is the caller's own, so a forged value can never write into another tenant.
+    private void EnsureTenant(Guid tenantId)
+    {
+        if (tenantId != GetTenantId())
+            throw new UnauthorizedAccessException("The supplied tenant does not match the current user's tenant.");
     }
 
     public async Task<MedicalBenefitSchemeDto> GetSchemeByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _schemeRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical benefit scheme with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical benefit scheme with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -888,8 +991,8 @@ public class MedicalBenefitSchemeService : IMedicalBenefitSchemeService
     {
         var entity = await _schemeRepository.GetWithTiersAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical benefit scheme with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical benefit scheme with ID '{id}' not found.");
 
         return entity.ToDetailDto();
     }
@@ -897,23 +1000,26 @@ public class MedicalBenefitSchemeService : IMedicalBenefitSchemeService
     public async Task<MedicalBenefitSchemeDto?> GetSchemeByCodeAsync(string code, CancellationToken cancellationToken = default)
     {
         var entity = await _schemeRepository.GetByCodeAsync(code);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<MedicalBenefitSchemeSummaryDto>> GetAllSchemesAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _schemeRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MedicalBenefitSchemeSummaryDto>> GetActiveSchemesAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _schemeRepository.GetActiveSchemesAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<MedicalBenefitSchemeDto> CreateSchemeAsync(CreateMedicalBenefitSchemeDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _schemeRepository.AddAsync(entity);
@@ -928,8 +1034,8 @@ public class MedicalBenefitSchemeService : IMedicalBenefitSchemeService
     {
         var entity = await _schemeRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical benefit scheme with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical benefit scheme with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -943,8 +1049,8 @@ public class MedicalBenefitSchemeService : IMedicalBenefitSchemeService
     {
         var entity = await _schemeRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical benefit scheme with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical benefit scheme with ID '{id}' not found.");
 
         await _schemeRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -956,20 +1062,22 @@ public class MedicalBenefitSchemeService : IMedicalBenefitSchemeService
     {
         var entity = await _tierRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical benefit tier with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical benefit tier with ID '{id}' not found.");
 
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<MedicalBenefitTierDto>> GetTiersBySchemeAsync(Guid schemeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _tierRepository.GetBySchemeIdAsync(schemeId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<MedicalBenefitTierDto> CreateTierAsync(CreateMedicalBenefitTierDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _tierRepository.AddAsync(entity);
@@ -982,8 +1090,8 @@ public class MedicalBenefitSchemeService : IMedicalBenefitSchemeService
     {
         var entity = await _tierRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical benefit tier with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical benefit tier with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -997,8 +1105,8 @@ public class MedicalBenefitSchemeService : IMedicalBenefitSchemeService
     {
         var entity = await _tierRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical benefit tier with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical benefit tier with ID '{id}' not found.");
 
         await _tierRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1023,6 +1131,7 @@ public class EmployeeHealthService : IEmployeeHealthService
     private readonly IEmployeeMedicalExamRepository _examRepository;
     private readonly IEmployeeMedicalExamDocumentRepository _examDocumentRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<EmployeeHealthService> _logger;
 
     public EmployeeHealthService(
@@ -1032,6 +1141,7 @@ public class EmployeeHealthService : IEmployeeHealthService
         IEmployeeMedicalExamRepository examRepository,
         IEmployeeMedicalExamDocumentRepository examDocumentRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<EmployeeHealthService> logger)
     {
         _profileRepository = profileRepository;
@@ -1040,12 +1150,34 @@ public class EmployeeHealthService : IEmployeeHealthService
         _examRepository = examRepository;
         _examDocumentRepository = examDocumentRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // Create paths take the tenant from the controller (MedicalControllerBase.TryGetWriteContext).
+    // Assert it is the caller's own, so a forged value can never write into another tenant.
+    private void EnsureTenant(Guid tenantId)
+    {
+        if (tenantId != GetTenantId())
+            throw new UnauthorizedAccessException("The supplied tenant does not match the current user's tenant.");
     }
 
     public async Task<IEnumerable<EmployeeHealthProfileDto>> GetAllProfilesAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _profileRepository.GetQueryable()
+            .Where(x => x.TenantId == tenantId)
             .Include(x => x.Employee)
             .Include(x => x.PreferredFacility)
             .Include(x => x.PreferredPhysician)
@@ -1058,8 +1190,8 @@ public class EmployeeHealthService : IEmployeeHealthService
     {
         var entity = await _profileRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee health profile with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee health profile with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -1068,8 +1200,8 @@ public class EmployeeHealthService : IEmployeeHealthService
     {
         var entity = await _profileRepository.GetWithFullDetailsAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee health profile with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee health profile with ID '{id}' not found.");
 
         return entity.ToDetailDto();
     }
@@ -1077,11 +1209,12 @@ public class EmployeeHealthService : IEmployeeHealthService
     public async Task<EmployeeHealthProfileDto?> GetProfileByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var entity = await _profileRepository.GetByEmployeeIdAsync(employeeId);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 
     public async Task<EmployeeHealthProfileDto> CreateProfileAsync(CreateEmployeeHealthProfileDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _profileRepository.AddAsync(entity);
@@ -1096,8 +1229,8 @@ public class EmployeeHealthService : IEmployeeHealthService
     {
         var entity = await _profileRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee health profile with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee health profile with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1111,8 +1244,8 @@ public class EmployeeHealthService : IEmployeeHealthService
     {
         var entity = await _profileRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee health profile with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee health profile with ID '{id}' not found.");
 
         await _profileRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1122,6 +1255,7 @@ public class EmployeeHealthService : IEmployeeHealthService
 
     public async Task<EmployeeHealthConditionDto> AddConditionAsync(CreateEmployeeHealthConditionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _conditionRepository.AddAsync(entity);
@@ -1132,22 +1266,24 @@ public class EmployeeHealthService : IEmployeeHealthService
 
     public async Task<IEnumerable<EmployeeHealthConditionDto>> GetConditionsAsync(Guid healthProfileId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _conditionRepository.GetByHealthProfileIdAsync(healthProfileId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<IEnumerable<EmployeeHealthConditionDto>> GetActiveConditionsAsync(Guid healthProfileId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _conditionRepository.GetActiveConditionsAsync(healthProfileId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<EmployeeHealthConditionDto> UpdateConditionAsync(UpdateEmployeeHealthConditionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _conditionRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee health condition with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee health condition with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1161,8 +1297,8 @@ public class EmployeeHealthService : IEmployeeHealthService
     {
         var entity = await _conditionRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee health condition with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee health condition with ID '{id}' not found.");
 
         await _conditionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1172,6 +1308,7 @@ public class EmployeeHealthService : IEmployeeHealthService
 
     public async Task<EmployeeAllergyDto> AddAllergyAsync(CreateEmployeeAllergyDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _allergyRepository.AddAsync(entity);
@@ -1182,16 +1319,17 @@ public class EmployeeHealthService : IEmployeeHealthService
 
     public async Task<IEnumerable<EmployeeAllergyDto>> GetAllergiesAsync(Guid healthProfileId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _allergyRepository.GetByHealthProfileIdAsync(healthProfileId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<EmployeeAllergyDto> UpdateAllergyAsync(UpdateEmployeeAllergyDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _allergyRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee allergy with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee allergy with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1205,8 +1343,8 @@ public class EmployeeHealthService : IEmployeeHealthService
     {
         var entity = await _allergyRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee allergy with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee allergy with ID '{id}' not found.");
 
         await _allergyRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1218,8 +1356,8 @@ public class EmployeeHealthService : IEmployeeHealthService
     {
         var entity = await _examRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee medical exam with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical exam with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -1228,26 +1366,29 @@ public class EmployeeHealthService : IEmployeeHealthService
     {
         var entity = await _examRepository.GetWithDocumentsAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee medical exam with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical exam with ID '{id}' not found.");
 
         return entity.ToDetailDto();
     }
 
     public async Task<IEnumerable<EmployeeMedicalExamSummaryDto>> GetExamsByProfileAsync(Guid healthProfileId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _examRepository.GetByHealthProfileIdAsync(healthProfileId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<EmployeeMedicalExamSummaryDto>> GetExamsDueAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _examRepository.GetDueForExamAsync(daysAhead);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<EmployeeMedicalExamDto> CreateExamAsync(CreateEmployeeMedicalExamDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _examRepository.AddAsync(entity);
@@ -1260,8 +1401,8 @@ public class EmployeeHealthService : IEmployeeHealthService
     {
         var entity = await _examRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee medical exam with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical exam with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1275,8 +1416,8 @@ public class EmployeeHealthService : IEmployeeHealthService
     {
         var entity = await _examRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee medical exam with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical exam with ID '{id}' not found.");
 
         await _examRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1286,6 +1427,7 @@ public class EmployeeHealthService : IEmployeeHealthService
 
     public async Task<EmployeeMedicalExamDocumentDto> AddExamDocumentAsync(CreateEmployeeMedicalExamDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _examDocumentRepository.AddAsync(entity);
@@ -1296,16 +1438,17 @@ public class EmployeeHealthService : IEmployeeHealthService
 
     public async Task<IEnumerable<EmployeeMedicalExamDocumentDto>> GetExamDocumentsAsync(Guid examId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _examDocumentRepository.GetByExamIdAsync(examId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<bool> DeleteExamDocumentAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _examDocumentRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Employee medical exam document with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical exam document with ID '{id}' not found.");
 
         await _examDocumentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1330,6 +1473,7 @@ public class MedicalClinicalService : IMedicalClinicalService
     private readonly IEmployeeMedicalInsurancePolicyRepository _policyRepository;
     private readonly IMedicalInsuranceProviderFacilityRepository _networkFacilityRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<MedicalClinicalService> _logger;
 
     public MedicalClinicalService(
@@ -1339,6 +1483,7 @@ public class MedicalClinicalService : IMedicalClinicalService
         IEmployeeMedicalInsurancePolicyRepository policyRepository,
         IMedicalInsuranceProviderFacilityRepository networkFacilityRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<MedicalClinicalService> logger)
     {
         _preAuthorizationRepository = preAuthorizationRepository;
@@ -1347,7 +1492,27 @@ public class MedicalClinicalService : IMedicalClinicalService
         _policyRepository = policyRepository;
         _networkFacilityRepository = networkFacilityRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // Create paths take the tenant from the controller (MedicalControllerBase.TryGetWriteContext).
+    // Assert it is the caller's own, so a forged value can never write into another tenant.
+    private void EnsureTenant(Guid tenantId)
+    {
+        if (tenantId != GetTenantId())
+            throw new UnauthorizedAccessException("The supplied tenant does not match the current user's tenant.");
     }
 
     /// <summary>
@@ -1361,7 +1526,7 @@ public class MedicalClinicalService : IMedicalClinicalService
             return;
 
         var policy = await _policyRepository.GetByIdAsync(policyId);
-        if (policy == null)
+        if (policy == null || policy.TenantId != GetTenantId())
             return; // policy existence is validated by the FK on save
 
         var network = await _networkFacilityRepository.GetActiveNetworkFacilitiesAsync(policy.ProviderId);
@@ -1379,8 +1544,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _preAuthorizationRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical claim pre-authorization with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical claim pre-authorization with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -1388,12 +1553,14 @@ public class MedicalClinicalService : IMedicalClinicalService
     public async Task<MedicalClaimPreAuthorizationDto?> GetPreAuthorizationByNumberAsync(string authorizationNumber, CancellationToken cancellationToken = default)
     {
         var entity = await _preAuthorizationRepository.GetByAuthorizationNumberAsync(authorizationNumber);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<MedicalClaimPreAuthorizationSummaryDto>> GetAllPreAuthorizationsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _preAuthorizationRepository.GetQueryable()
+            .Where(x => x.TenantId == tenantId)
             .Include(x => x.Employee)
             .OrderByDescending(x => x.RequestDate)
             .ToListAsync(cancellationToken);
@@ -1402,18 +1569,21 @@ public class MedicalClinicalService : IMedicalClinicalService
 
     public async Task<IEnumerable<MedicalClaimPreAuthorizationSummaryDto>> GetPreAuthorizationsByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _preAuthorizationRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MedicalClaimPreAuthorizationSummaryDto>> GetPendingPreAuthorizationsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _preAuthorizationRepository.GetPendingApprovalsAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<MedicalClaimPreAuthorizationDto> CreatePreAuthorizationAsync(CreateMedicalClaimPreAuthorizationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.AuthorizationNumber = $"PA-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
 
@@ -1431,8 +1601,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _preAuthorizationRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical claim pre-authorization with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical claim pre-authorization with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1446,8 +1616,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _preAuthorizationRepository.GetByIdAsync(approveDto.PreAuthorizationId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical claim pre-authorization with ID '{approveDto.PreAuthorizationId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical claim pre-authorization with ID '{approveDto.PreAuthorizationId}' not found.");
 
         approveDto.ApplyTo(entity);
 
@@ -1463,8 +1633,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _preAuthorizationRepository.GetByIdAsync(rejectDto.PreAuthorizationId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical claim pre-authorization with ID '{rejectDto.PreAuthorizationId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical claim pre-authorization with ID '{rejectDto.PreAuthorizationId}' not found.");
 
         rejectDto.ApplyTo(entity);
 
@@ -1480,8 +1650,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _preAuthorizationRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical claim pre-authorization with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical claim pre-authorization with ID '{id}' not found.");
 
         await _preAuthorizationRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1493,8 +1663,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _referralRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical referral with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical referral with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -1502,12 +1672,14 @@ public class MedicalClinicalService : IMedicalClinicalService
     public async Task<MedicalReferralDto?> GetReferralByNumberAsync(string referralNumber, CancellationToken cancellationToken = default)
     {
         var entity = await _referralRepository.GetByReferralNumberAsync(referralNumber);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<MedicalReferralSummaryDto>> GetAllReferralsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _referralRepository.GetQueryable()
+            .Where(x => x.TenantId == tenantId)
             .Include(x => x.Employee)
             .OrderByDescending(x => x.ReferralDate)
             .ToListAsync(cancellationToken);
@@ -1516,18 +1688,21 @@ public class MedicalClinicalService : IMedicalClinicalService
 
     public async Task<IEnumerable<MedicalReferralSummaryDto>> GetReferralsByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _referralRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MedicalReferralSummaryDto>> GetPendingReferralsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _referralRepository.GetPendingReferralsAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<MedicalReferralDto> CreateReferralAsync(CreateMedicalReferralDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.ReferralNumber = $"RF-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
 
@@ -1543,8 +1718,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _referralRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical referral with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical referral with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1558,8 +1733,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _referralRepository.GetByIdAsync(statusDto.ReferralId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical referral with ID '{statusDto.ReferralId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical referral with ID '{statusDto.ReferralId}' not found.");
 
         statusDto.ApplyTo(entity);
 
@@ -1573,8 +1748,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _referralRepository.GetByIdAsync(completeDto.ReferralId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical referral with ID '{completeDto.ReferralId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical referral with ID '{completeDto.ReferralId}' not found.");
 
         completeDto.ApplyTo(entity);
 
@@ -1590,8 +1765,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _referralRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical referral with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical referral with ID '{id}' not found.");
 
         await _referralRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1603,8 +1778,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _appointmentRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical appointment with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -1612,12 +1787,14 @@ public class MedicalClinicalService : IMedicalClinicalService
     public async Task<MedicalAppointmentDto?> GetAppointmentByNumberAsync(string appointmentNumber, CancellationToken cancellationToken = default)
     {
         var entity = await _appointmentRepository.GetByAppointmentNumberAsync(appointmentNumber);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<MedicalAppointmentSummaryDto>> GetAllAppointmentsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _appointmentRepository.GetQueryable()
+            .Where(x => x.TenantId == tenantId)
             .Include(x => x.Employee)
             .Include(x => x.Facility)
             .OrderByDescending(x => x.AppointmentDateTime)
@@ -1627,18 +1804,21 @@ public class MedicalClinicalService : IMedicalClinicalService
 
     public async Task<IEnumerable<MedicalAppointmentSummaryDto>> GetAppointmentsByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _appointmentRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MedicalAppointmentSummaryDto>> GetUpcomingAppointmentsAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _appointmentRepository.GetUpcomingAppointmentsAsync(daysAhead);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<MedicalAppointmentDto> CreateAppointmentAsync(CreateMedicalAppointmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.AppointmentNumber = $"AP-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
 
@@ -1654,8 +1834,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _appointmentRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical appointment with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1669,8 +1849,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _appointmentRepository.GetByIdAsync(statusDto.AppointmentId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical appointment with ID '{statusDto.AppointmentId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{statusDto.AppointmentId}' not found.");
 
         statusDto.ApplyTo(entity);
 
@@ -1684,8 +1864,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _appointmentRepository.GetByIdAsync(cancelDto.AppointmentId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical appointment with ID '{cancelDto.AppointmentId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{cancelDto.AppointmentId}' not found.");
 
         cancelDto.ApplyTo(entity);
 
@@ -1701,8 +1881,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _appointmentRepository.GetByIdAsync(checkInDto.AppointmentId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical appointment with ID '{checkInDto.AppointmentId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{checkInDto.AppointmentId}' not found.");
 
         checkInDto.ApplyTo(entity);
 
@@ -1716,8 +1896,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _appointmentRepository.GetByIdAsync(checkOutDto.AppointmentId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical appointment with ID '{checkOutDto.AppointmentId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{checkOutDto.AppointmentId}' not found.");
 
         checkOutDto.ApplyTo(entity);
 
@@ -1731,8 +1911,8 @@ public class MedicalClinicalService : IMedicalClinicalService
     {
         var entity = await _appointmentRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical appointment with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical appointment with ID '{id}' not found.");
 
         await _appointmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1754,26 +1934,48 @@ public class NHISService : INHISService
     private readonly INHISClaimRepository _claimRepository;
     private readonly INHISClaimDocumentRepository _claimDocumentRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<NHISService> _logger;
 
     public NHISService(
         INHISClaimRepository claimRepository,
         INHISClaimDocumentRepository claimDocumentRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<NHISService> logger)
     {
         _claimRepository = claimRepository;
         _claimDocumentRepository = claimDocumentRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // Create paths take the tenant from the controller (MedicalControllerBase.TryGetWriteContext).
+    // Assert it is the caller's own, so a forged value can never write into another tenant.
+    private void EnsureTenant(Guid tenantId)
+    {
+        if (tenantId != GetTenantId())
+            throw new UnauthorizedAccessException("The supplied tenant does not match the current user's tenant.");
     }
 
     public async Task<NHISClaimDto> GetClaimByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"NHIS claim with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -1782,8 +1984,8 @@ public class NHISService : INHISService
     {
         var entity = await _claimRepository.GetWithDocumentsAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"NHIS claim with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{id}' not found.");
 
         return entity.ToDetailDto();
     }
@@ -1791,12 +1993,14 @@ public class NHISService : INHISService
     public async Task<NHISClaimDto?> GetClaimByNumberAsync(string claimNumber, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByClaimNumberAsync(claimNumber);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<NHISClaimSummaryDto>> GetAllClaimsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _claimRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
             .Include(c => c.Employee)
             .OrderByDescending(c => c.ServiceDate)
             .ToListAsync(cancellationToken);
@@ -1805,18 +2009,21 @@ public class NHISService : INHISService
 
     public async Task<IEnumerable<NHISClaimSummaryDto>> GetClaimsByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _claimRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<NHISClaimSummaryDto>> GetPendingClaimsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _claimRepository.GetPendingClaimsAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<NHISClaimDto> CreateClaimAsync(CreateNHISClaimDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.ClaimNumber = $"NH-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
 
@@ -1832,8 +2039,8 @@ public class NHISService : INHISService
     {
         var entity = await _claimRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"NHIS claim with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1847,8 +2054,8 @@ public class NHISService : INHISService
     {
         var entity = await _claimRepository.GetByIdAsync(statusDto.ClaimId);
 
-        if (entity == null)
-            throw new ArgumentException($"NHIS claim with ID '{statusDto.ClaimId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{statusDto.ClaimId}' not found.");
 
         statusDto.ApplyTo(entity);
 
@@ -1864,8 +2071,8 @@ public class NHISService : INHISService
     {
         var entity = await _claimRepository.GetByIdAsync(submitDto.ClaimId);
 
-        if (entity == null)
-            throw new ArgumentException($"NHIS claim with ID '{submitDto.ClaimId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{submitDto.ClaimId}' not found.");
 
         submitDto.ApplyTo(entity);
 
@@ -1881,8 +2088,8 @@ public class NHISService : INHISService
     {
         var entity = await _claimRepository.GetByIdAsync(paymentDto.ClaimId);
 
-        if (entity == null)
-            throw new ArgumentException($"NHIS claim with ID '{paymentDto.ClaimId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{paymentDto.ClaimId}' not found.");
 
         paymentDto.ApplyTo(entity);
 
@@ -1898,8 +2105,8 @@ public class NHISService : INHISService
     {
         var entity = await _claimRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"NHIS claim with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{id}' not found.");
 
         await _claimRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1909,6 +2116,7 @@ public class NHISService : INHISService
 
     public async Task<NHISClaimDocumentDto> AddClaimDocumentAsync(CreateNHISClaimDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _claimDocumentRepository.AddAsync(entity);
@@ -1919,16 +2127,17 @@ public class NHISService : INHISService
 
     public async Task<IEnumerable<NHISClaimDocumentDto>> GetClaimDocumentsAsync(Guid nhisClaimId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _claimDocumentRepository.GetByNHISClaimIdAsync(nhisClaimId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<bool> DeleteClaimDocumentAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _claimDocumentRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"NHIS claim document with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim document with ID '{id}' not found.");
 
         await _claimDocumentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1955,6 +2164,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     private readonly IEmployeeMedicalInsurancePolicyRepository _policyRepository;
     private readonly IMedicalInsurancePolicyDependentRepository _policyDependentRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<MedicalExpenseClaimService> _logger;
 
     public MedicalExpenseClaimService(
@@ -1966,6 +2176,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         IEmployeeMedicalInsurancePolicyRepository policyRepository,
         IMedicalInsurancePolicyDependentRepository policyDependentRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<MedicalExpenseClaimService> logger)
     {
         _claimRepository = claimRepository;
@@ -1976,15 +2187,35 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         _policyRepository = policyRepository;
         _policyDependentRepository = policyDependentRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // Create paths take the tenant from the controller (MedicalControllerBase.TryGetWriteContext).
+    // Assert it is the caller's own, so a forged value can never write into another tenant.
+    private void EnsureTenant(Guid tenantId)
+    {
+        if (tenantId != GetTenantId())
+            throw new UnauthorizedAccessException("The supplied tenant does not match the current user's tenant.");
     }
 
     public async Task<MedicalExpenseClaimDto> GetClaimByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical expense claim with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -1993,8 +2224,8 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetWithFullDetailsAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical expense claim with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{id}' not found.");
 
         return entity.ToDetailDto();
     }
@@ -2002,18 +2233,20 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     public async Task<MedicalExpenseClaimDto?> GetClaimByNumberAsync(string claimNumber, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByClaimNumberAsync(claimNumber);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<MedicalExpenseClaimSummaryDto>> GetClaimsByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _claimRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<MedicalExpenseClaimSummaryDto>> GetClaimsPagedAsync(int pageNumber, int pageSize, ClaimStatus? status = null, CancellationToken cancellationToken = default)
     {
-        var query = _claimRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _claimRepository.GetQueryable().Where(c => c.TenantId == tenantId);
 
         if (status.HasValue)
             query = query.Where(c => c.Status == status.Value);
@@ -2037,18 +2270,21 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
     public async Task<IEnumerable<MedicalExpenseClaimSummaryDto>> GetPendingClaimsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _claimRepository.GetPendingClaimsAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MedicalExpenseClaimSummaryDto>> GetFlaggedClaimsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _claimRepository.GetFlaggedForReviewAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<MedicalExpenseClaimDto> CreateClaimAsync(CreateMedicalExpenseClaimDto createDto, Guid employeeId, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.EmployeeId = employeeId;
         entity.ClaimNumber = $"MC-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
@@ -2065,8 +2301,8 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical expense claim with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -2081,7 +2317,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         var claim = await _claimRepository.GetByIdAsync(processDto.ClaimId);
 
         if (claim == null)
-            throw new ArgumentException($"Medical expense claim with ID '{processDto.ClaimId}' not found.");
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{processDto.ClaimId}' not found.");
 
         // A claim is adjudicated exactly once; this keeps insurance utilization consistent.
         if (claim.Status is ClaimStatus.Approved or ClaimStatus.Rejected or ClaimStatus.Paid or ClaimStatus.Cancelled)
@@ -2089,6 +2325,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
                 MedicalWorkflowFailureReason.InvalidState,
                 $"Claim '{claim.ClaimNumber}' has already been processed ({claim.Status}) and cannot be re-adjudicated.");
 
+        EnsureTenant(tenantId);
         var approval = processDto.ToEntity(tenantId, processedByUserId, approverEmployeeId);
 
         if (processDto.Status == MedicalExpenseApprovalStatus.Approved)
@@ -2123,8 +2360,8 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetByIdAsync(paymentDto.ClaimId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical expense claim with ID '{paymentDto.ClaimId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{paymentDto.ClaimId}' not found.");
 
         paymentDto.ApplyTo(entity);
 
@@ -2140,8 +2377,8 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetByIdAsync(flagDto.ClaimId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical expense claim with ID '{flagDto.ClaimId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{flagDto.ClaimId}' not found.");
 
         flagDto.ApplyTo(entity);
 
@@ -2155,8 +2392,8 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetByIdAsync(unflagDto.ClaimId);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical expense claim with ID '{unflagDto.ClaimId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{unflagDto.ClaimId}' not found.");
 
         unflagDto.ApplyTo(entity);
 
@@ -2170,8 +2407,8 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical expense claim with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{id}' not found.");
 
         // Restore any insurance limit this claim had consumed at approval.
         if (entity.Status is ClaimStatus.Approved or ClaimStatus.Paid)
@@ -2193,8 +2430,9 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         if (claim.InsurancePolicyId == null || amount <= 0)
             return;
 
+        // Tenant-guarded: a cross-tenant policy id must never be consumable.
         var policy = await _policyRepository.GetByIdAsync(claim.InsurancePolicyId.Value);
-        if (policy == null)
+        if (policy == null || policy.TenantId != GetTenantId())
             throw new MedicalWorkflowException(
                 MedicalWorkflowFailureReason.NotFound,
                 "The insurance policy linked to this claim no longer exists.");
@@ -2209,7 +2447,8 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         if (claim.IsForDependent && claim.DependentId.HasValue)
         {
             var dependents = await _policyDependentRepository.GetByPolicyIdAsync(policy.Id);
-            dependent = dependents.FirstOrDefault(d => d.DependentId == claim.DependentId.Value);
+            dependent = dependents.FirstOrDefault(
+                d => d.DependentId == claim.DependentId.Value && d.TenantId == policy.TenantId);
 
             if (dependent == null || !dependent.IsActive)
                 throw new MedicalWorkflowException(
@@ -2247,8 +2486,9 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         if (claim.InsurancePolicyId == null || amount <= 0)
             return;
 
+        // Tenant-guarded: releasing utilization must never write to another tenant's policy.
         var policy = await _policyRepository.GetByIdAsync(claim.InsurancePolicyId.Value);
-        if (policy != null)
+        if (policy != null && policy.TenantId == GetTenantId())
         {
             policy.UtilizedAmount = Math.Max(0m, policy.UtilizedAmount - amount);
             await _policyRepository.UpdateAsync(policy);
@@ -2256,8 +2496,11 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
         if (claim.IsForDependent && claim.DependentId.HasValue)
         {
+            // Tenant-guarded independently of the policy block above, which may not have run.
+            var dependentTenantId = GetTenantId();
             var dependents = await _policyDependentRepository.GetByPolicyIdAsync(claim.InsurancePolicyId.Value);
-            var dependent = dependents.FirstOrDefault(d => d.DependentId == claim.DependentId.Value);
+            var dependent = dependents.FirstOrDefault(
+                d => d.DependentId == claim.DependentId.Value && d.TenantId == dependentTenantId);
             if (dependent != null)
             {
                 dependent.UtilizedAmount = Math.Max(0m, dependent.UtilizedAmount - amount);
@@ -2268,6 +2511,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
     public async Task<MedicalExpenseItemDto> AddItemAsync(CreateMedicalExpenseItemDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _itemRepository.AddAsync(entity);
@@ -2278,16 +2522,17 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
     public async Task<IEnumerable<MedicalExpenseItemDto>> GetItemsAsync(Guid claimId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _itemRepository.GetByClaimIdAsync(claimId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<MedicalExpenseItemDto> UpdateItemAsync(UpdateMedicalExpenseItemDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _itemRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical expense item with ID '{updateDto.Id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense item with ID '{updateDto.Id}' not found.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -2301,8 +2546,8 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _itemRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical expense item with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense item with ID '{id}' not found.");
 
         await _itemRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2312,6 +2557,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
     public async Task<MedicalExpenseDocumentDto> AddDocumentAsync(CreateMedicalExpenseDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _documentRepository.AddAsync(entity);
@@ -2322,16 +2568,17 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
     public async Task<IEnumerable<MedicalExpenseDocumentDto>> GetDocumentsAsync(Guid claimId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _documentRepository.GetByClaimIdAsync(claimId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<bool> DeleteDocumentAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _documentRepository.GetByIdAsync(id);
 
-        if (entity == null)
-            throw new ArgumentException($"Medical expense document with ID '{id}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense document with ID '{id}' not found.");
 
         await _documentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2341,6 +2588,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
     public async Task<MedicalExpenseClaimNoteDto> AddNoteAsync(AddMedicalExpenseClaimNoteDto createDto, Guid tenantId, Guid authorEmployeeId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId, authorEmployeeId);
 
         await _noteRepository.AddAsync(entity);
@@ -2351,14 +2599,16 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
     public async Task<IEnumerable<MedicalExpenseClaimNoteDto>> GetNotesAsync(Guid claimId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _noteRepository.GetByClaimIdAsync(claimId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<IEnumerable<MedicalExpenseClaimNoteDto>> GetInternalNotesAsync(Guid claimId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _noteRepository.GetInternalNotesAsync(claimId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 }
 
@@ -2379,6 +2629,7 @@ public class MedicalDashboardService : IMedicalDashboardService
     private readonly IMedicalClaimPreAuthorizationRepository _preAuthorizationRepository;
     private readonly IMedicalReferralRepository _referralRepository;
     private readonly IMedicalAppointmentRepository _appointmentRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
 
     public MedicalDashboardService(
         IMedicalExpenseClaimRepository claimRepository,
@@ -2387,7 +2638,8 @@ public class MedicalDashboardService : IMedicalDashboardService
         IEmployeeMedicalExamRepository examRepository,
         IMedicalClaimPreAuthorizationRepository preAuthorizationRepository,
         IMedicalReferralRepository referralRepository,
-        IMedicalAppointmentRepository appointmentRepository)
+        IMedicalAppointmentRepository appointmentRepository,
+        ICurrentUserProvider currentUserProvider)
     {
         _claimRepository = claimRepository;
         _policyRepository = policyRepository;
@@ -2396,12 +2648,27 @@ public class MedicalDashboardService : IMedicalDashboardService
         _preAuthorizationRepository = preAuthorizationRepository;
         _referralRepository = referralRepository;
         _appointmentRepository = appointmentRepository;
+        _currentUserProvider = currentUserProvider;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<MedicalDashboardDto> GetDashboardAsync(int upcomingDays = 30, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+
         // Lightweight scalar projection of every claim for in-memory aggregation.
         var claims = await _claimRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
             .Select(c => new ClaimRow
             {
                 Status = c.Status,
@@ -2449,20 +2716,27 @@ public class MedicalDashboardService : IMedicalDashboardService
 
         // Insurance metrics.
         dto.ActivePolicies = await _policyRepository.GetQueryable()
-            .CountAsync(p => p.Status == MedicalInsurancePolicyStatus.Active && p.IsActive, cancellationToken);
-        dto.ExpiringPolicies = (await _policyRepository.GetExpiringPoliciesAsync(upcomingDays)).Count();
+            .CountAsync(p => p.TenantId == tenantId
+                          && p.Status == MedicalInsurancePolicyStatus.Active && p.IsActive, cancellationToken);
+        dto.ExpiringPolicies = (await _policyRepository.GetExpiringPoliciesAsync(upcomingDays))
+            .Count(p => p.TenantId == tenantId);
 
-        var overduePremiums = (await _premiumRepository.GetOverduePremiumsAsync()).ToList();
+        var overduePremiums = (await _premiumRepository.GetOverduePremiumsAsync())
+            .Where(p => p.TenantId == tenantId).ToList();
         dto.OverduePremiums = overduePremiums.Count;
         dto.OverduePremiumAmount = overduePremiums.Sum(p => p.TotalPremiumAmount);
 
         // Clinical metrics.
-        dto.PendingPreAuthorizations = (await _preAuthorizationRepository.GetPendingApprovalsAsync()).Count();
-        dto.PendingReferrals = (await _referralRepository.GetPendingReferralsAsync()).Count();
-        dto.ExamsDue = (await _examRepository.GetDueForExamAsync(upcomingDays)).Count();
+        dto.PendingPreAuthorizations = (await _preAuthorizationRepository.GetPendingApprovalsAsync())
+            .Count(x => x.TenantId == tenantId);
+        dto.PendingReferrals = (await _referralRepository.GetPendingReferralsAsync())
+            .Count(x => x.TenantId == tenantId);
+        dto.ExamsDue = (await _examRepository.GetDueForExamAsync(upcomingDays))
+            .Count(x => x.TenantId == tenantId);
 
         // Spotlights — recent and pending claims (with employee name).
         dto.RecentClaims = await _claimRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
             .Include(c => c.Employee)
             .OrderByDescending(c => c.ClaimDate)
             .Take(5)
@@ -2479,6 +2753,7 @@ public class MedicalDashboardService : IMedicalDashboardService
             .ToListAsync(cancellationToken);
 
         dto.PendingApprovalClaims = await _claimRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
             .Include(c => c.Employee)
             .Where(c => c.Status == ClaimStatus.Pending)
             .OrderBy(c => c.ClaimDate)
@@ -2499,6 +2774,7 @@ public class MedicalDashboardService : IMedicalDashboardService
         var now = DateTime.UtcNow;
         var horizon = now.AddDays(upcomingDays);
         var upcoming = await _appointmentRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId)
             .Include(a => a.Employee)
             .Include(a => a.Facility)
             .Where(a => a.AppointmentDateTime >= now

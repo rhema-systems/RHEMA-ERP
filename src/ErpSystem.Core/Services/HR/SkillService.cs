@@ -49,9 +49,16 @@ public sealed class SkillService : ISkillService
         return items.Where(x => x.TenantId == tenantId).OrderBy(x => x.Name).Select(MapToDto);
     }
 
-    public async Task<IEnumerable<SkillDto>> GetActiveSkillsAsync()
+    public Task<IEnumerable<SkillDto>> GetActiveSkillsAsync()
+        => GetActiveSkillsAsync(GetTenantId());
+
+    // Anonymous callers (public career portal) have no tenant claim, so the tenant is passed in
+    // from the X-Tenant-Id header instead. Both overloads share one filter so they cannot drift.
+    public async Task<IEnumerable<SkillDto>> GetActiveSkillsAsync(Guid tenantId)
     {
-        var tenantId = GetTenantId();
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant id is required.", nameof(tenantId));
+
         var items = await _skillRepository.GetActiveSkillsAsync();
         return items.Where(x => x.TenantId == tenantId).OrderBy(x => x.Name).Select(MapToDto);
     }

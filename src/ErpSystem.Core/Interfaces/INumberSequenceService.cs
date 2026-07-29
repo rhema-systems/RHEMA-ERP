@@ -28,4 +28,11 @@ public interface INumberSequenceService
     /// the previous year's numbers.
     /// </param>
     Task<long> NextAsync(string key, int? year = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tenant-explicit overload for anonymous callers (public career portal), where there is no
+    /// authenticated tenant claim to resolve. Without this, the sequence row would be stamped with
+    /// <see cref="Guid.Empty"/> and violate the NumberSequences → Tenants foreign key.
+    /// </summary>
+    Task<long> NextAsync(string key, Guid tenantId, int? year = null, CancellationToken cancellationToken = default);
 }

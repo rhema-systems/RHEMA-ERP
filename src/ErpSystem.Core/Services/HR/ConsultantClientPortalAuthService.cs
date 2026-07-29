@@ -446,13 +446,22 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
 </div>
 </body></html>";
 
-        await _email.SendEmailAsync(new()
+        // Best-effort: the account row is already committed by the time this runs, so a mail failure
+        // must not fail the request and leave a client unable to verify or re-register.
+        try
         {
-            To = account.Email,
-            Subject = subject,
-            Body = body,
-            IsHtml = true,
-        });
+            await _email.SendEmailAsync(new()
+            {
+                To = account.Email,
+                Subject = subject,
+                Body = body,
+                IsHtml = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send verification email to {Email}", account.Email);
+        }
     }
 
     private async Task SendPasswordResetEmailAsync(ConsultantClientPortalAccount account, CancellationToken ct)
@@ -477,13 +486,22 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
 </div>
 </body></html>";
 
-        await _email.SendEmailAsync(new()
+        // Best-effort: the reset token is already committed, so a mail failure must not surface as an
+        // error that tells an anonymous caller whether the address exists.
+        try
         {
-            To = account.Email,
-            Subject = subject,
-            Body = body,
-            IsHtml = true,
-        });
+            await _email.SendEmailAsync(new()
+            {
+                To = account.Email,
+                Subject = subject,
+                Body = body,
+                IsHtml = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send password reset email to {Email}", account.Email);
+        }
     }
 
     private async Task SendAccountActivatedEmailAsync(
@@ -556,13 +574,22 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
 </div>
 </body></html>";
 
-        await _email.SendEmailAsync(new()
+        // Best-effort: the invite/setup token is already committed. A mail failure must not fail the
+        // request — the invite can be resent, but the caller should not see a 500 for a saved account.
+        try
         {
-            To = account.Email,
-            Subject = subject,
-            Body = body,
-            IsHtml = true,
-        });
+            await _email.SendEmailAsync(new()
+            {
+                To = account.Email,
+                Subject = subject,
+                Body = body,
+                IsHtml = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send portal invite email to {Email}", account.Email);
+        }
     }
 
     private static ConsultantClientPortalAccountSummaryDto ToAccountSummary(ConsultantClientPortalAccount account)

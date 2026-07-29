@@ -53,6 +53,12 @@ public interface IJobApplicationRepository : IGenericRepository<JobApplication>
     Task<string> GetNextApplicationNumberAsync();
 
     /// <summary>
+    /// Tenant-explicit overload for anonymous callers (public career portal), which have no
+    /// authenticated tenant claim for the underlying number sequence to resolve.
+    /// </summary>
+    Task<string> GetNextApplicationNumberAsync(Guid tenantId);
+
+    /// <summary>
     /// Returns the application whose <see cref="ErpSystem.Core.Entities.HR.Recruitment.JobApplication.ExternalTrackingToken"/>
     /// matches the given token. Returns null when no match is found.
     /// </summary>

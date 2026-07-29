@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
@@ -84,6 +85,21 @@ public class GlobalExceptionHandlingMiddleware
                 response.Status = (int)HttpStatusCode.NotFound;
                 response.Detail = notFoundEx.Message ?? "The requested resource was not found.";
                 context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                break;
+
+            // The medical module raises this for domain rejections and missing records. Its own
+            // contract (see MedicalWorkflowException) specifies NotFound -> 404 and everything else
+            // -> 422; without this case all of them fell through to a generic 500.
+            case MedicalWorkflowException medicalEx:
+                var medicalStatus = medicalEx.Reason == MedicalWorkflowFailureReason.NotFound
+                    ? HttpStatusCode.NotFound
+                    : HttpStatusCode.UnprocessableEntity;
+                response.Title = medicalEx.Reason == MedicalWorkflowFailureReason.NotFound
+                    ? "Not Found"
+                    : "Unprocessable Entity";
+                response.Status = (int)medicalStatus;
+                response.Detail = medicalEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)medicalStatus;
                 break;
 
             case ConflictException conflictEx:
@@ -177,7 +193,7 @@ public class GlobalExceptionHandlingMiddleware
 
             var level = exception switch
             {
-                ValidationException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException => "Warning",
+                ValidationException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException or MedicalWorkflowException => "Warning",
                 InvalidOperationException => "Error",
                 _ => "Critical"
             };
@@ -346,6 +362,7 @@ public class GlobalExceptionHandlingMiddleware
             case NotFoundException:
             case ConflictException:
             case ArgumentException:
+            case MedicalWorkflowException:
                 // These are expected exceptions - log as warnings
                 _logger.LogWarning(exception,
                     "Client error occurred for {RequestMethod} {RequestPath}. Context: {@LogContext}",

@@ -307,6 +307,12 @@ public interface ISkillService
     Task<SkillDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<SkillDto>> GetAllAsync();
     Task<IEnumerable<SkillDto>> GetActiveSkillsAsync();
+
+    /// <summary>
+    /// Tenant-explicit overload for anonymous callers (public career portal), where there is no
+    /// authenticated tenant claim to resolve. The tenant comes from the required X-Tenant-Id header.
+    /// </summary>
+    Task<IEnumerable<SkillDto>> GetActiveSkillsAsync(Guid tenantId);
     Task<IEnumerable<SkillDto>> GetByCategoryAsync(string category);
     Task<SkillDto?> GetByNameAsync(string name);
     Task<SkillDto> CreateSkillAsync(CreateSkillDto createDto);
@@ -325,6 +331,12 @@ public interface IQualificationCatalogueService
     Task<QualificationCatalogueDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<QualificationCatalogueDto>> GetAllAsync();
     Task<IEnumerable<QualificationCatalogueDto>> GetActiveAsync();
+
+    /// <summary>
+    /// Tenant-explicit overload for anonymous callers (public career portal), where there is no
+    /// authenticated tenant claim to resolve. The tenant comes from the required X-Tenant-Id header.
+    /// </summary>
+    Task<IEnumerable<QualificationCatalogueDto>> GetActiveAsync(Guid tenantId);
     Task<IEnumerable<QualificationCatalogueDto>> GetByTypeAsync(QualificationType type);
     Task<QualificationCatalogueDto?> GetByNameAsync(string name);
     Task<QualificationCatalogueDto> CreateAsync(CreateQualificationCatalogueDto dto);
@@ -443,6 +455,12 @@ public interface ICountryService
     Task<CountryDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<CountryDto>> GetAllAsync();
     Task<IEnumerable<CountryDto>> GetActiveCountriesAsync();
+
+    /// <summary>
+    /// Tenant-explicit overload for anonymous callers (public career portal), where there is no
+    /// authenticated tenant claim to resolve. The tenant comes from the required X-Tenant-Id header.
+    /// </summary>
+    Task<IEnumerable<CountryDto>> GetActiveCountriesAsync(Guid tenantId);
     Task<CountryDto?> GetByCodeAsync(string code);
     Task<CountryDto?> GetByAlpha2CodeAsync(string alpha2Code);
     Task<CountryDto> CreateAsync(CreateCountryDto dto);

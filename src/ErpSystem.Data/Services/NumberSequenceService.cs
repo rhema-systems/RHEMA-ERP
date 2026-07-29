@@ -36,12 +36,22 @@ public class NumberSequenceService : INumberSequenceService
         return $"{key}-{year}-{value:D3}";
     }
 
-    public async Task<long> NextAsync(string key, int? year = null, CancellationToken cancellationToken = default)
+    public Task<long> NextAsync(string key, int? year = null, CancellationToken cancellationToken = default)
+        => NextAsync(key, _currentUser.TenantId, year, cancellationToken);
+
+    // Anonymous callers (public career portal) have no tenant claim, so the tenant is passed in from
+    // the X-Tenant-Id header instead. Both overloads share one implementation so they cannot drift.
+    public async Task<long> NextAsync(string key, Guid tenantId, int? year = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("Sequence key is required.", nameof(key));
 
-        var tenantId = _currentUser.TenantId;
+        // A sequence row stamped with Guid.Empty violates the NumberSequences -> Tenants FK, which
+        // surfaces as an opaque 500 rather than anything actionable. Fail with the real reason.
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException(
+                $"Cannot generate a '{key}' number without a tenant. The caller must supply one explicitly " +
+                "when there is no authenticated tenant claim (e.g. the public career portal).");
 
         // Year 0 is the "not year-scoped" bucket, for numbers that do not print a year and must keep
         // counting up across year boundaries (e.g. APP-0000001).

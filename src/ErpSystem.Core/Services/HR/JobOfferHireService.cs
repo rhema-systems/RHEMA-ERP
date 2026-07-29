@@ -875,8 +875,19 @@ public class JobOfferService : IJobOfferService
                 : $"{_portalBaseUrl}/careers/portal/login?returnUrl=/careers/portal/offer/{offer.JobApplicationId}",
         };
 
-        await _templatedEmail.SendAsync(
-            RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferIssued, toEmail, tokens);
+        // Best-effort: the offer is already committed when this runs, so a mail failure must not turn a
+        // successful issue into an error response.
+        try
+        {
+            await _templatedEmail.SendAsync(
+                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferIssued, toEmail, tokens);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to send offer issued email to {Email} — offer {OfferNumber} was issued successfully.",
+                toEmail, offer.OfferNumber);
+        }
     }
 
     private async Task SendOfferAcceptedEmailAsync(string toEmail, string candidateName, JobOffer offer)
@@ -891,8 +902,27 @@ public class JobOfferService : IJobOfferService
             ["StartDate"]     = offer.ProposedStartDate?.ToString("dddd, d MMMM yyyy"),
         };
 
-        await _templatedEmail.SendAsync(
-            RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferAccepted, toEmail, tokens);
+        // Best-effort with a timeout race: this is reachable from the header-free, anonymous
+        // offer-response token flow, where the candidate's acceptance is already committed and an
+        // unresponsive SMTP server would otherwise hold their response open.
+        try
+        {
+            var emailTask = _templatedEmail.SendAsync(
+                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferAccepted, toEmail, tokens);
+
+            if (await Task.WhenAny(emailTask, Task.Delay(TimeSpan.FromSeconds(10))) == emailTask)
+                await emailTask;
+            else
+                _logger.LogWarning(
+                    "Offer accepted email timed out after 10 s for {Email} — offer {OfferNumber} was accepted successfully.",
+                    toEmail, offer.OfferNumber);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to send offer accepted email to {Email} — offer {OfferNumber} was accepted successfully.",
+                toEmail, offer.OfferNumber);
+        }
     }
 }
 

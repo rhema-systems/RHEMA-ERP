@@ -2061,6 +2061,13 @@ public class JobApplicationService : IJobApplicationService
         var candidate = await _candidateRepository.GetByEmailAsync(employee.EmailAddress);
         if (candidate == null)
         {
+            // JobCandidate.CountryId is a non-nullable FK while Employee.CountryId is optional, so an
+            // employee with no country would be written as Guid.Empty and fail the FK with a 500.
+            if (employee.CountryId is null || employee.CountryId == Guid.Empty)
+                throw new ArgumentException(
+                    "This employee has no country set on their profile, which is required to apply. " +
+                    "Please complete the employee record first.");
+
             candidate = new JobCandidate
             {
                 TenantId            = tenantId,
@@ -2074,7 +2081,7 @@ public class JobApplicationService : IJobApplicationService
                                         ? employee.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue)
                                         : DateTime.MinValue,
                 City                = employee.City ?? string.Empty,
-                CountryId           = employee.CountryId ?? Guid.Empty,
+                CountryId           = employee.CountryId!.Value,   // validated above
                 CandidateNumber     = await _candidateRepository.GetNextCandidateNumberAsync(),
                 IsInternalEmployee  = true,
                 InternalEmployeeId  = employeeId,
@@ -2180,6 +2187,12 @@ public class JobApplicationService : IJobApplicationService
         var candidate = await _candidateRepository.GetByEmailAsync(employee.EmailAddress);
         if (candidate == null)
         {
+            // See the note in the internal-apply flow above: non-nullable FK vs optional source field.
+            if (employee.CountryId is null || employee.CountryId == Guid.Empty)
+                throw new ArgumentException(
+                    "This employee has no country set on their profile, which is required to apply. " +
+                    "Please complete the employee record first.");
+
             candidate = new JobCandidate
             {
                 TenantId           = tenantId,
@@ -2193,7 +2206,7 @@ public class JobApplicationService : IJobApplicationService
                                        ? employee.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue)
                                        : DateTime.MinValue,
                 City               = employee.City ?? string.Empty,
-                CountryId          = employee.CountryId ?? Guid.Empty,
+                CountryId          = employee.CountryId!.Value,   // validated above
                 CandidateNumber    = await _candidateRepository.GetNextCandidateNumberAsync(),
                 IsInternalEmployee = true,
                 InternalEmployeeId = employeeId,
@@ -2309,6 +2322,87 @@ public class JobApplicationService : IJobApplicationService
         // POST /api/public/cv-upload — not an arbitrary string pointing anywhere on disk.
         var cvFilePath = ValidateUploadedCvPath(dto.CvFilePath);
 
+        // JobCandidate.CountryId is a non-nullable FK. A missing or cross-tenant country id would
+        // otherwise reach the database as an invalid key and surface as an opaque 500, so reject it
+        // here with a message the applicant can act on.
+        // Single-argument ArgumentException on purpose: the controller surfaces Message verbatim to an
+        // anonymous caller, and the two-argument overload would append "(Parameter 'CountryId')".
+        if (dto.CountryId is null || dto.CountryId == Guid.Empty)
+            throw new ArgumentException("A country must be selected.");
+
+        var countryExists = await _unitOfWork.Repository<Country>()
+            .ExistsAsync(c => c.Id == dto.CountryId.Value && c.TenantId == tenantId && !c.IsDeleted);
+        if (!countryExists)
+            throw new ArgumentException("The selected country is not recognised.");
+
+        // Everything that writes runs inside ONE transaction. This method used to commit four separate
+        // times, so a failure part-way through (e.g. while inserting the child profile rows) left a
+        // committed application with no work history, qualifications or skills — and the duplicate
+        // guard then blocked the candidate from ever re-applying. Rolling the whole unit back instead
+        // means a failed submission leaves nothing behind and can simply be retried.
+        var trackingToken = $"TKN-{Guid.NewGuid():N}".ToUpper();
+        JobApplication application = null!;
+
+        await _unitOfWork.ExecuteInTransactionAsync(
+            async ct =>
+            {
+                application = await PersistExternalApplicationAsync(
+                    dto, vacancy, tenantId, cvFilePath, trackingToken, ct);
+            },
+            cancellationToken);
+
+        _logger.LogInformation(
+            "External application {AppNumber} created for candidate {Email} on vacancy {VacancyId} " +
+            "(WorkHistory: {WH}, Quals: {Q}, Referees: {R}, Skills: {S}, Languages: {L})",
+            application.ApplicationNumber, dto.Email, dto.VacancyId,
+            dto.WorkHistories.Count, dto.Qualifications.Count,
+            dto.Referees.Count, dto.Skills.Count, dto.Languages.Count);
+
+        // The vacancy counter is a denormalised statistic, not part of the application's integrity.
+        // It stays OUT of the transaction: UpdateVacancyCounterAsync retries concurrency conflicts by
+        // reloading the vacancy row, which cannot work against rows the same transaction holds locked.
+        try
+        {
+            await UpdateVacancyCounterAsync(vacancy.Id, v => v.ApplicationCount++, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to increment the application counter for vacancy {VacancyId} — " +
+                "application {AppNumber} was submitted successfully.",
+                vacancy.Id, application.ApplicationNumber);
+        }
+
+        var confirmation = new ExternalApplicationConfirmationDto
+        {
+            ApplicationNumber = application.ApplicationNumber,
+            TrackingToken     = trackingToken,
+            CandidateName     = $"{dto.FirstName} {dto.LastName}".Trim(),
+            JobTitle          = vacancy.JobTitle,
+            VacancyNumber     = vacancy.VacancyNumber,
+            SubmittedAt       = application.ApplicationDate,
+        };
+
+        // Best-effort: the application is already committed, so a failed or slow confirmation email
+        // must never cost the candidate their tracking token. See SendApplicationReceivedEmailAsync.
+        await SendApplicationReceivedEmailAsync(dto.Email, confirmation);
+
+        return confirmation;
+    }
+
+    /// <summary>
+    /// Persists an external application and all of its child profile rows. Runs inside the caller's
+    /// transaction — it performs a single <c>SaveChangesAsync</c> (needed so the pipeline placement
+    /// below can read the application back by id) and lets the caller commit.
+    /// </summary>
+    private async Task<JobApplication> PersistExternalApplicationAsync(
+        ExternalApplicationDto dto,
+        JobVacancy vacancy,
+        Guid tenantId,
+        string? cvFilePath,
+        string trackingToken,
+        CancellationToken cancellationToken = default)
+    {
         // 2. Resolve or create candidate record (keyed by email, per-tenant)
         var candidate = await _candidateRepository.GetByEmailAsync(dto.Email, tenantId);
         if (candidate == null)
@@ -2324,14 +2418,16 @@ public class JobApplicationService : IJobApplicationService
                 Gender          = dto.Gender,
                 DateOfBirth     = dto.DateOfBirth,
                 City            = dto.City?.Trim() ?? string.Empty,
-                CountryId       = dto.CountryId ?? Guid.Empty,
+                CountryId       = dto.CountryId!.Value,   // validated above
                 LinkedInProfile = dto.LinkedInProfile,
                 PortfolioUrl    = dto.PortfolioUrl,
                 CvFilePath      = cvFilePath,
                 AvailableFrom   = dto.AvailableFrom,
                 IsInTalentPool  = dto.AddToTalentPool,
                 TalentPoolAddedDate = dto.AddToTalentPool ? DateTime.UtcNow : null,
-                CandidateNumber = await _candidateRepository.GetNextCandidateNumberAsync(),
+                // Tenant-explicit: this flow is anonymous, so the number sequence has no tenant claim
+                // to read and would otherwise stamp Guid.Empty and break its FK to Tenants.
+                CandidateNumber = await _candidateRepository.GetNextCandidateNumberAsync(tenantId),
                 CreatedBy       = "external-portal",
             };
             await _candidateRepository.AddAsync(candidate);
@@ -2372,10 +2468,7 @@ public class JobApplicationService : IJobApplicationService
                 $"You have already submitted an application for this vacancy (Application #{duplicate.ApplicationNumber}). " +
                 $"Use your tracking token to check its status.");
 
-        // 4. Generate a unique tracking token
-        var trackingToken = $"TKN-{Guid.NewGuid():N}".ToUpper();
-
-        // 5. Create the application
+        // 4. Create the application (the tracking token is generated by the caller)
         var application = new JobApplication
         {
             TenantId               = tenantId,
@@ -2391,14 +2484,12 @@ public class JobApplicationService : IJobApplicationService
             ExternalTrackingToken  = trackingToken,
             CreatedBy              = "external-portal",
         };
-        application.ApplicationNumber = await _applicationRepository.GetNextApplicationNumberAsync();
+        // Tenant-explicit for the same reason as CandidateNumber above — anonymous flow, no claim.
+        application.ApplicationNumber = await _applicationRepository.GetNextApplicationNumberAsync(tenantId);
 
         await _applicationRepository.AddAsync(application);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        await UpdateVacancyCounterAsync(vacancy.Id, v => v.ApplicationCount++, cancellationToken);
-
-        // 6. Persist structured profile data into child tables
+        // 5. Persist structured profile data into child tables
         //    For returning candidates, we ADD new entries (deduplicated by caller intent).
         //    All records are scoped to this tenant.
 
@@ -2484,8 +2575,6 @@ public class JobApplicationService : IJobApplicationService
             });
         }
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
         // Build snapshot from the submitted DTO data — avoids an extra DB round-trip
         // and guarantees we freeze exactly what the candidate provided on the form.
         try
@@ -2541,9 +2630,11 @@ public class JobApplicationService : IJobApplicationService
                 WorkHistories        = snapshotWork.AsReadOnly(),
             };
 
+            // No UpdateAsync here: the application is still tracked as Added (the single
+            // SaveChangesAsync below has not run yet), so the snapshot rides along on the INSERT.
+            // Calling Update() would flip the entity to Modified and emit an UPDATE for a row that
+            // does not exist yet, which fails with "expected to affect 1 row(s), but actually 0".
             application.ProfileSnapshotJson = System.Text.Json.JsonSerializer.Serialize(snapshot);
-            await _applicationRepository.UpdateAsync(application);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -2553,30 +2644,17 @@ public class JobApplicationService : IJobApplicationService
                 application.ApplicationNumber);
         }
 
-        _logger.LogInformation(
-            "External application {AppNumber} created for candidate {Email} on vacancy {VacancyId} " +
-            "(WorkHistory: {WH}, Quals: {Q}, Referees: {R}, Skills: {S}, Languages: {L})",
-            application.ApplicationNumber, dto.Email, dto.VacancyId,
-            dto.WorkHistories.Count, dto.Qualifications.Count,
-            dto.Referees.Count, dto.Skills.Count, dto.Languages.Count);
+        // Flush the application, its child rows and the snapshot so the pipeline placement below can
+        // read the application back by id. This is a save, not a commit — the caller's transaction
+        // still owns the commit, so everything here rolls back together on failure.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Place the application into the first pipeline stage, if the vacancy has one.
+        // Enlists in the caller's transaction (same scoped IUnitOfWork) and is itself best-effort.
         await _pipelineService.PlaceInFirstPipelineStageAsync(
             application.Id, vacancy.Id, tenantId, cancellationToken);
 
-        var confirmation = new ExternalApplicationConfirmationDto
-        {
-            ApplicationNumber = application.ApplicationNumber,
-            TrackingToken     = trackingToken,
-            CandidateName     = $"{dto.FirstName} {dto.LastName}".Trim(),
-            JobTitle          = vacancy.JobTitle,
-            VacancyNumber     = vacancy.VacancyNumber,
-            SubmittedAt       = application.ApplicationDate,
-        };
-
-        await SendApplicationReceivedEmailAsync(dto.Email, confirmation);
-
-        return confirmation;
+        return application;
     }
 
     public async Task<PublicApplicationStatusDto> GetApplicationStatusByTokenAsync(
@@ -2679,6 +2757,41 @@ public class JobApplicationService : IJobApplicationService
 
     // ── Email helpers ─────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Sends a templated email without ever failing the caller. Used by the notifications that fire
+    /// AFTER their record has already been committed — a candidate whose application is saved must
+    /// still receive their confirmation and tracking token even if mail delivery is broken or slow.
+    /// Mirrors <c>CandidatePortalService</c>'s portal-side treatment of the same emails.
+    /// </summary>
+    private async Task SendBestEffortAsync(
+        string eventName,
+        string toEmail,
+        Dictionary<string, string?> tokens,
+        string description)
+    {
+        try
+        {
+            var emailTask = _templatedEmail.SendAsync(
+                RecruitmentEmailCatalog.Module, eventName, toEmail, tokens);
+
+            // Race the send against a 10-second timeout so an unresponsive SMTP server never holds
+            // the HTTP response open. TemplatedEmailService already swallows delivery failures and
+            // returns false, so latency — not an exception — is the failure mode that matters here.
+            if (await Task.WhenAny(emailTask, Task.Delay(TimeSpan.FromSeconds(10))) == emailTask)
+                await emailTask;
+            else
+                _logger.LogWarning(
+                    "{Description} email timed out after 10 s for {Email} — the operation itself succeeded.",
+                    description, toEmail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to send {Description} email to {Email} — the operation itself succeeded.",
+                description, toEmail);
+        }
+    }
+
     private async Task SendApplicationReceivedEmailAsync(
         string toEmail,
         ExternalApplicationConfirmationDto confirmation)
@@ -2694,8 +2807,8 @@ public class JobApplicationService : IJobApplicationService
             ["SubmittedAt"]       = confirmation.SubmittedAt.ToString("dd MMM yyyy HH:mm") + " UTC",
         };
 
-        await _templatedEmail.SendAsync(
-            RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.ApplicationReceived, toEmail, tokens);
+        await SendBestEffortAsync(
+            RecruitmentEmailCatalog.Events.ApplicationReceived, toEmail, tokens, "application received");
     }
 
     private async Task SendWithdrawalConfirmationEmailAsync(
@@ -2713,8 +2826,8 @@ public class JobApplicationService : IJobApplicationService
             ["ApplicationNumber"] = applicationNumber,
         };
 
-        await _templatedEmail.SendAsync(
-            RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.ApplicationWithdrawn, toEmail, tokens);
+        await SendBestEffortAsync(
+            RecruitmentEmailCatalog.Events.ApplicationWithdrawn, toEmail, tokens, "withdrawal confirmation");
     }
 
     private async Task SendUnderReviewEmailAsync(
@@ -2729,8 +2842,8 @@ public class JobApplicationService : IJobApplicationService
             ["ApplicationNumber"] = applicationNumber,
         };
 
-        await _templatedEmail.SendAsync(
-            RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.ApplicationUnderReview, toEmail, tokens);
+        await SendBestEffortAsync(
+            RecruitmentEmailCatalog.Events.ApplicationUnderReview, toEmail, tokens, "application under review");
     }
 
     private async Task SendShortlistedEmailAsync(

@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.Extensions.Logging;
 
@@ -13,44 +14,68 @@ namespace ErpSystem.Core.Services.HR;
 public sealed class QualificationCatalogueService : IQualificationCatalogueService
 {
     private readonly IQualificationCatalogueRepository _repository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<QualificationCatalogueService> _logger;
 
     public QualificationCatalogueService(
         IQualificationCatalogueRepository repository,
+        ICurrentUserProvider currentUserProvider,
         ILogger<QualificationCatalogueService> logger)
     {
         _repository = repository;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<QualificationCatalogueDto?> GetByIdAsync(Guid id)
     {
         var entity = await _repository.GetByIdAsync(id);
-        return entity == null ? null : MapToDto(entity);
+        return entity == null || entity.TenantId != GetTenantId() ? null : MapToDto(entity);
     }
 
     public async Task<IEnumerable<QualificationCatalogueDto>> GetAllAsync()
     {
+        var tenantId = GetTenantId();
         var items = await _repository.GetAllAsync();
-        return items.OrderBy(x => x.Name).Select(MapToDto);
+        return items.Where(x => x.TenantId == tenantId).OrderBy(x => x.Name).Select(MapToDto);
     }
 
-    public async Task<IEnumerable<QualificationCatalogueDto>> GetActiveAsync()
+    public Task<IEnumerable<QualificationCatalogueDto>> GetActiveAsync()
+        => GetActiveAsync(GetTenantId());
+
+    // Anonymous callers (public career portal) have no tenant claim, so the tenant is passed in
+    // from the X-Tenant-Id header instead. Both overloads share one filter so they cannot drift.
+    public async Task<IEnumerable<QualificationCatalogueDto>> GetActiveAsync(Guid tenantId)
     {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant id is required.", nameof(tenantId));
+
         var items = await _repository.GetActiveAsync();
-        return items.Select(MapToDto);
+        return items.Where(x => x.TenantId == tenantId).OrderBy(x => x.Name).Select(MapToDto);
     }
 
     public async Task<IEnumerable<QualificationCatalogueDto>> GetByTypeAsync(QualificationType type)
     {
+        var tenantId = GetTenantId();
         var items = await _repository.GetByTypeAsync(type);
-        return items.Select(MapToDto);
+        return items.Where(x => x.TenantId == tenantId).Select(MapToDto);
     }
 
     public async Task<QualificationCatalogueDto?> GetByNameAsync(string name)
     {
         var entity = await _repository.GetByNameAsync(name);
-        return entity == null ? null : MapToDto(entity);
+        return entity == null || entity.TenantId != GetTenantId() ? null : MapToDto(entity);
     }
 
     public async Task<QualificationCatalogueDto> CreateAsync(CreateQualificationCatalogueDto dto)
@@ -60,6 +85,7 @@ public sealed class QualificationCatalogueService : IQualificationCatalogueServi
 
         var entity = new Qualification
         {
+            TenantId = GetTenantId(),
             Name = dto.Name,
             ShortCode = dto.ShortCode?.Trim(),
             Description = dto.Description,
@@ -77,8 +103,9 @@ public sealed class QualificationCatalogueService : IQualificationCatalogueServi
 
     public async Task<QualificationCatalogueDto> UpdateAsync(Guid id, CreateQualificationCatalogueDto dto)
     {
-        var entity = await _repository.GetByIdAsync(id)
-            ?? throw new InvalidOperationException($"Qualification with ID {id} not found.");
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new InvalidOperationException($"Qualification with ID {id} not found.");
 
         if (!string.Equals(entity.Name, dto.Name, StringComparison.Ordinal)
             && await _repository.NameExistsAsync(dto.Name))
@@ -102,6 +129,10 @@ public sealed class QualificationCatalogueService : IQualificationCatalogueServi
 
     public async Task<bool> DeleteAsync(Guid id)
     {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            return false;
+
         await _repository.DeleteAsync(id);
         await _repository.SaveChangesAsync();
         _logger.LogInformation("Qualification catalogue entry soft-deleted: {Id}", id);

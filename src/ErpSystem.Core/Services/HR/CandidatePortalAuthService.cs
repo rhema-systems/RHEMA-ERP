@@ -325,13 +325,22 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
 </div>
 </body></html>";
 
-        await _email.SendEmailAsync(new()
+        // Best-effort: the account row is already committed by the time this runs. Failing the
+        // request here would leave the candidate with an account they cannot verify or re-register.
+        try
         {
-            To      = account.Email,
-            Subject = subject,
-            Body    = body,
-            IsHtml  = true,
-        });
+            await _email.SendEmailAsync(new()
+            {
+                To      = account.Email,
+                Subject = subject,
+                Body    = body,
+                IsHtml  = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send verification email to {Email}", account.Email);
+        }
     }
 
     private async Task SendPasswordResetEmailAsync(CandidatePortalAccount account, CancellationToken ct)
@@ -357,13 +366,22 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
 </div>
 </body></html>";
 
-        await _email.SendEmailAsync(new()
+        // Best-effort: the reset token is already committed, so a mail failure must not surface as an
+        // error that tells an anonymous caller whether the address exists.
+        try
         {
-            To      = account.Email,
-            Subject = subject,
-            Body    = body,
-            IsHtml  = true,
-        });
+            await _email.SendEmailAsync(new()
+            {
+                To      = account.Email,
+                Subject = subject,
+                Body    = body,
+                IsHtml  = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send password reset email to {Email}", account.Email);
+        }
     }
 
     private async Task SendAccountActivatedEmailAsync(CandidatePortalAccount account, CancellationToken ct)

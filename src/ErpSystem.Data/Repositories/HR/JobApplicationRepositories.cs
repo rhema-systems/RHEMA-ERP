@@ -187,6 +187,12 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
         return $"APP-{next:D7}";
     }
 
+    public async Task<string> GetNextApplicationNumberAsync(Guid tenantId)
+    {
+        var next = await _sequences.NextAsync("APP", tenantId);
+        return $"APP-{next:D7}";
+    }
+
     public async Task<JobApplication?> GetByTrackingTokenAsync(string token)
     {
         return await _dbSet

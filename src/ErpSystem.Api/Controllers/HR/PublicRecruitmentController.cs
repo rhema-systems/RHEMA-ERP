@@ -132,11 +132,8 @@ public class PublicRecruitmentController : ControllerBase
             return BadRequest(ModelState);
 
         // Resolve tenant from the X-Tenant-Id header (required for public portal)
-        if (!Request.Headers.TryGetValue("X-Tenant-Id", out var tenantHeader)
-            || !Guid.TryParse(tenantHeader, out var tenantId))
-        {
+        if (!TryGetTenantId(out var tenantId))
             return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
-        }
 
         try
         {
@@ -236,7 +233,10 @@ public class PublicRecruitmentController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetCountries(CancellationToken ct = default)
     {
-        var countries = await _countryService.GetActiveCountriesAsync();
+        if (!TryGetTenantId(out var tenantId))
+            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
+
+        var countries = await _countryService.GetActiveCountriesAsync(tenantId);
         return Ok(countries.Select(c => new { c.Id, c.Name, c.Code, c.Alpha2Code }));
     }
 
@@ -247,7 +247,10 @@ public class PublicRecruitmentController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetCatalogueSkills(CancellationToken ct = default)
     {
-        var skills = await _skillService.GetActiveSkillsAsync();
+        if (!TryGetTenantId(out var tenantId))
+            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
+
+        var skills = await _skillService.GetActiveSkillsAsync(tenantId);
         return Ok(skills.Select(s => new { s.Id, s.Name }));
     }
 
@@ -258,7 +261,10 @@ public class PublicRecruitmentController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetCatalogueQualifications(CancellationToken ct = default)
     {
-        var quals = await _qualificationCatalogueService.GetActiveAsync();
+        if (!TryGetTenantId(out var tenantId))
+            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
+
+        var quals = await _qualificationCatalogueService.GetActiveAsync(tenantId);
         return Ok(quals.Select(q => new { q.Id, q.Name }));
     }
 

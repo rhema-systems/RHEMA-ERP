@@ -37,6 +37,12 @@ public interface IJobCandidateRepository : IGenericRepository<JobCandidate>
     /// <summary>Returns the next candidate number for auto-generation.</summary>
     Task<string> GetNextCandidateNumberAsync();
 
+    /// <summary>
+    /// Tenant-explicit overload for anonymous callers (public career portal), which have no
+    /// authenticated tenant claim for the underlying number sequence to resolve.
+    /// </summary>
+    Task<string> GetNextCandidateNumberAsync(Guid tenantId);
+
     // ── Talent pool — filtered queries ────────────────────────────────────────
 
     /// <summary>Returns paged talent pool candidates matching the given filter.</summary>

@@ -40,9 +40,16 @@ public class CountryService : ICountryService
         return countries.Where(c => c.TenantId == tenantId).OrderBy(c => c.Name).Select(MapToDto);
     }
 
-    public async Task<IEnumerable<CountryDto>> GetActiveCountriesAsync()
+    public Task<IEnumerable<CountryDto>> GetActiveCountriesAsync()
+        => GetActiveCountriesAsync(GetTenantId());
+
+    // Anonymous callers (public career portal) have no tenant claim, so the tenant is passed in
+    // from the X-Tenant-Id header instead. Both overloads share one filter so they cannot drift.
+    public async Task<IEnumerable<CountryDto>> GetActiveCountriesAsync(Guid tenantId)
     {
-        var tenantId = GetTenantId();
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant id is required.", nameof(tenantId));
+
         var countries = await _repo.GetActiveCountriesAsync();
         return countries.Where(c => c.TenantId == tenantId).OrderBy(c => c.Name).Select(MapToDto);
     }

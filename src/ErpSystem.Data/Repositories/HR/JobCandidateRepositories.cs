@@ -79,6 +79,12 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
         return $"CAND-{next:D6}";
     }
 
+    public async Task<string> GetNextCandidateNumberAsync(Guid tenantId)
+    {
+        var next = await _sequences.NextAsync("CAND", tenantId);
+        return $"CAND-{next:D6}";
+    }
+
     // ── Talent pool — filtered queries ────────────────────────────────────────
 
     public async Task<(List<JobCandidate> Items, int TotalCount)> GetTalentPoolFilteredAsync(
