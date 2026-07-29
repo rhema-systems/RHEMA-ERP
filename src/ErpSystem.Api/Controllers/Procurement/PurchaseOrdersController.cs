@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Data;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
@@ -334,6 +335,7 @@ public class PurchaseOrdersController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<PurchaseOrderDetailDto>> CreatePurchaseOrder([FromBody] CreatePurchaseOrderDto createDto)
     {
+        var ownsSourceClaimTransaction = false;
         try
         {
             if (!ModelState.IsValid)
@@ -434,6 +436,21 @@ public class PurchaseOrdersController : ControllerBase
             var totalAmount = subtotal + taxAmount + totalAdditionalCost - discountAmount;
             var costAllocationMethod = NormalizeCostAllocationMethod(createDto.CostAllocationMethod);
             var costApportionmentBasis = NormalizeCostApportionmentBasis(createDto.CostApportionmentBasis);
+            await _purchaseOrderSources.ValidateOrderAsync(
+                approvedSource,
+                createDto.Items.Select(item =>
+                    new ProcurementPurchaseOrderSourceOrderLine
+                    {
+                        InventoryItemId = item.InventoryItemId,
+                        ItemDescription = item.ItemDescription,
+                        OrderedQuantity = item.OrderedQuantity,
+                        UnitOfMeasure = item.UnitOfMeasure,
+                        UnitPrice = item.UnitPrice
+                    }).ToList(),
+                totalAmount,
+                approvedSource.CurrencyCode,
+                correlationId,
+                HttpContext.RequestAborted);
 
             if (costAllocationMethod == GLExpense && string.IsNullOrWhiteSpace(createDto.ExpenseGLAccount))
             {
@@ -473,6 +490,14 @@ public class PurchaseOrdersController : ControllerBase
             };
             _purchaseOrderSources.Apply(purchaseOrder, approvedSource);
 
+            ownsSourceClaimTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsSourceClaimTransaction)
+            {
+                await _unitOfWork.BeginTransactionAsync(
+                    IsolationLevel.Serializable,
+                    HttpContext.RequestAborted);
+            }
+
             await _purchaseOrderRepository.CreatePurchaseOrderAsync(purchaseOrder);
 
             var newItems = createDto.Items.Select(itemDto => new PurchaseOrderItem
@@ -510,12 +535,22 @@ public class PurchaseOrdersController : ControllerBase
             }
 
             // CRITICAL: Save changes to database
-            await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.SaveChangesAsync(HttpContext.RequestAborted);
+            if (approvedSource.SourceType ==
+                ProcurementPurchaseOrderSourceType.TenderAward)
+            {
+                await _purchaseOrderSources.ClaimTenderAwardAsync(
+                    approvedSource.SourceId,
+                    purchaseOrder,
+                    HttpContext.RequestAborted);
+            }
             await _purchaseOrderSources.RecordBoundAsync(
                 purchaseOrder,
                 "PurchaseOrderCreated",
                 correlationId,
                 HttpContext.RequestAborted);
+            if (ownsSourceClaimTransaction)
+                await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
 
             // Return the created purchase order
             var createdPurchaseOrder = await GetPurchaseOrderDetailDto(purchaseOrder.Id);
@@ -563,6 +598,22 @@ public class PurchaseOrdersController : ControllerBase
         {
             _logger.LogError(ex, "Error creating purchase order");
             return StatusCode(500, "An error occurred while creating the purchase order");
+        }
+        finally
+        {
+            if (ownsSourceClaimTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                try
+                {
+                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(
+                        rollbackException,
+                        "Failed to roll back purchase-order source claim");
+                }
+            }
         }
     }
 
@@ -616,8 +667,12 @@ public class PurchaseOrdersController : ControllerBase
                     message = "The supplier is owned by the approved source and cannot be changed."
                 });
             }
-            await _purchaseOrderSources.RevalidateAsync(
-                purchaseOrder, "Update", CorrelationId(), HttpContext.RequestAborted);
+            var sourceCorrelationId = CorrelationId();
+            var currentSource = await _purchaseOrderSources.RevalidateAsync(
+                purchaseOrder,
+                "Update",
+                sourceCorrelationId,
+                HttpContext.RequestAborted);
 
             // Get tenant ID from current user
             var tenantId = _currentUserService.TenantId;
@@ -636,6 +691,21 @@ public class PurchaseOrdersController : ControllerBase
             var totalAmount = subtotal + taxAmount + totalAdditionalCost - discountAmount;
             var costAllocationMethod = NormalizeCostAllocationMethod(updateDto.CostAllocationMethod);
             var costApportionmentBasis = NormalizeCostApportionmentBasis(updateDto.CostApportionmentBasis);
+            await _purchaseOrderSources.ValidateOrderAsync(
+                currentSource,
+                updateDto.Items.Select(item =>
+                    new ProcurementPurchaseOrderSourceOrderLine
+                    {
+                        InventoryItemId = item.InventoryItemId,
+                        ItemDescription = item.ItemDescription,
+                        OrderedQuantity = item.OrderedQuantity,
+                        UnitOfMeasure = item.UnitOfMeasure,
+                        UnitPrice = item.UnitPrice
+                    }).ToList(),
+                totalAmount,
+                purchaseOrder.Currency,
+                sourceCorrelationId,
+                HttpContext.RequestAborted);
 
             if (costAllocationMethod == GLExpense && string.IsNullOrWhiteSpace(updateDto.ExpenseGLAccount))
             {

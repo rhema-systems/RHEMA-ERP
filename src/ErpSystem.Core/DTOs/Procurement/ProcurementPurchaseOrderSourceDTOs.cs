@@ -20,6 +20,27 @@ public sealed class ProcurementPurchaseOrderSourceOptionDto
     public string CurrencyCode { get; set; } = string.Empty;
 }
 
+public sealed class ProcurementPurchaseOrderSourceLineDto
+{
+    public Guid SourceLineId { get; init; }
+    public Guid? InventoryItemId { get; init; }
+    public string ItemCode { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
+    public decimal Quantity { get; init; }
+    public string UnitOfMeasure { get; init; } = string.Empty;
+    public decimal UnitPrice { get; init; }
+    public decimal LineTotal { get; init; }
+}
+
+public sealed class ProcurementPurchaseOrderSourceOrderLine
+{
+    public Guid? InventoryItemId { get; init; }
+    public string? ItemDescription { get; init; }
+    public decimal OrderedQuantity { get; init; }
+    public string UnitOfMeasure { get; init; } = string.Empty;
+    public decimal UnitPrice { get; init; }
+}
+
 public sealed class ProcurementPurchaseOrderSourceResolution
 {
     public ProcurementPurchaseOrderSourceType SourceType { get; init; }
@@ -32,6 +53,8 @@ public sealed class ProcurementPurchaseOrderSourceResolution
     public Guid AwardReadinessDecisionId { get; init; }
     public Guid BusinessPartnerId { get; init; }
     public string CurrencyCode { get; init; } = string.Empty;
+    public decimal? ApprovedAmount { get; init; }
+    public IReadOnlyList<ProcurementPurchaseOrderSourceLineDto> ApprovedLines { get; init; } = [];
     public string SourceSnapshotJson { get; init; } = "{}";
     public string SourceIntegrityHash { get; init; } = string.Empty;
     public DateTime ValidatedAtUtc { get; init; }

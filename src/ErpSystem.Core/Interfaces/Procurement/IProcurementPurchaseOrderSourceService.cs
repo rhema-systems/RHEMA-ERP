@@ -26,10 +26,23 @@ public interface IProcurementPurchaseOrderSourceService
         string correlationId,
         CancellationToken cancellationToken = default);
 
-    Task RevalidateAsync(
+    Task<ProcurementPurchaseOrderSourceResolution> RevalidateAsync(
         PurchaseOrder purchaseOrder,
         string action,
         string correlationId,
+        CancellationToken cancellationToken = default);
+
+    Task ValidateOrderAsync(
+        ProcurementPurchaseOrderSourceResolution source,
+        IReadOnlyCollection<ProcurementPurchaseOrderSourceOrderLine> lines,
+        decimal totalAmount,
+        string? currencyCode,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
+    Task ClaimTenderAwardAsync(
+        Guid tenderAwardId,
+        PurchaseOrder purchaseOrder,
         CancellationToken cancellationToken = default);
 
     Task RecordBoundAsync(

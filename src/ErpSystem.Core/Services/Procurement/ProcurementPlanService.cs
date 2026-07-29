@@ -1,3 +1,4 @@
+using System.Data;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
@@ -1521,6 +1522,22 @@ public class ProcurementPlanService : IProcurementPlanService
                 "PO_SOURCE_PLAN_ITEM_MISMATCH",
                 "The approved source does not belong to this procurement plan item.");
         }
+        var lineTotal = planItem.EstimatedQuantity * planItem.EstimatedUnitPrice;
+        await _purchaseOrderSources.ValidateOrderAsync(
+            approvedSource,
+            [
+                new ProcurementPurchaseOrderSourceOrderLine
+                {
+                    InventoryItemId = planItem.InventoryItemId,
+                    ItemDescription = planItem.ItemDescription,
+                    OrderedQuantity = planItem.EstimatedQuantity,
+                    UnitOfMeasure = planItem.UnitOfMeasure,
+                    UnitPrice = planItem.EstimatedUnitPrice
+                }
+            ],
+            lineTotal,
+            planItem.Currency,
+            sourceCorrelationId);
 
         // Generate PO number
         var poNumber = await _purchaseOrderRepository.GenerateOrderNumberAsync();
@@ -1546,43 +1563,66 @@ public class ProcurementPlanService : IProcurementPlanService
         };
         _purchaseOrderSources.Apply(purchaseOrder, approvedSource);
 
-        await _purchaseOrderRepository.AddAsync(purchaseOrder);
-
-        // Create purchase order item
-        var lineTotal = planItem.EstimatedQuantity * planItem.EstimatedUnitPrice;
-        var poItem = new PurchaseOrderItem
+        var ownsSourceClaimTransaction = !_unitOfWork.HasActiveTransaction;
+        if (ownsSourceClaimTransaction)
         {
-            Id = Guid.NewGuid(),
-            PurchaseOrderId = purchaseOrder.Id,
-            InventoryItemId = planItem.InventoryItemId ?? Guid.Empty,
-            ItemDescription = planItem.ItemDescription,
-            OrderedQuantity = planItem.EstimatedQuantity,
-            UnitPrice = planItem.EstimatedUnitPrice,
-            LineTotal = lineTotal,
-            ReceivedQuantity = 0,
-            TenantId = _currentUserProvider.TenantId,
-            CreatedById = _currentUserProvider.UserId,
-            CreatedAt = DateTime.UtcNow
-        };
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+        }
+        try
+        {
+            await _purchaseOrderRepository.AddAsync(purchaseOrder);
 
-        await _purchaseOrderItemRepository.AddAsync(poItem);
+            // Create purchase order item
+            var poItem = new PurchaseOrderItem
+            {
+                Id = Guid.NewGuid(),
+                PurchaseOrderId = purchaseOrder.Id,
+                InventoryItemId = planItem.InventoryItemId,
+                ItemDescription = planItem.ItemDescription,
+                OrderedQuantity = planItem.EstimatedQuantity,
+                UnitOfMeasure = planItem.UnitOfMeasure,
+                UnitPrice = planItem.EstimatedUnitPrice,
+                LineTotal = lineTotal,
+                ReceivedQuantity = 0,
+                TenantId = _currentUserProvider.TenantId,
+                CreatedById = _currentUserProvider.UserId,
+                CreatedAt = DateTime.UtcNow
+            };
 
-        // Update totals
-        purchaseOrder.SubTotal = lineTotal;
-        purchaseOrder.TotalAmount = lineTotal;
-        await _purchaseOrderRepository.UpdateAsync(purchaseOrder);
+            await _purchaseOrderItemRepository.AddAsync(poItem);
 
-        // Update plan item with PO reference and procurement method
-        planItem.PurchaseOrderId = purchaseOrder.Id;
-        planItem.Status = "InProgress";
-        planItem.ProcurementMethod = "DirectPurchase"; // Set the actual procurement method used
-        await _itemRepository.UpdateAsync(planItem);
+            // Update totals
+            purchaseOrder.SubTotal = lineTotal;
+            purchaseOrder.TotalAmount = lineTotal;
+            await _purchaseOrderRepository.UpdateAsync(purchaseOrder);
 
-        await _unitOfWork.SaveChangesAsync();
-        await _purchaseOrderSources.RecordBoundAsync(
-            purchaseOrder,
-            "PlanItemPurchaseOrderCreated",
-            sourceCorrelationId);
+            // Update plan item with PO reference and procurement method
+            planItem.PurchaseOrderId = purchaseOrder.Id;
+            planItem.Status = "InProgress";
+            planItem.ProcurementMethod = "DirectPurchase"; // Set the actual procurement method used
+            await _itemRepository.UpdateAsync(planItem);
+
+            await _unitOfWork.SaveChangesAsync();
+            if (approvedSource.SourceType ==
+                ProcurementPurchaseOrderSourceType.TenderAward)
+            {
+                await _purchaseOrderSources.ClaimTenderAwardAsync(
+                    approvedSource.SourceId,
+                    purchaseOrder);
+            }
+            await _purchaseOrderSources.RecordBoundAsync(
+                purchaseOrder,
+                "PlanItemPurchaseOrderCreated",
+                sourceCorrelationId);
+            if (ownsSourceClaimTransaction)
+                await _unitOfWork.CommitAsync();
+        }
+        catch
+        {
+            if (ownsSourceClaimTransaction && _unitOfWork.HasActiveTransaction)
+                await _unitOfWork.RollbackAsync();
+            throw;
+        }
 
         // Commit budget when PO is created
         if (plan != null)

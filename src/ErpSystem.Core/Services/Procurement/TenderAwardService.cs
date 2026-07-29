@@ -1,3 +1,4 @@
+using System.Data;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
@@ -434,6 +435,7 @@ public class TenderAwardService : ITenderAwardService
 
     public async Task<PurchaseOrderFromAwardResponseDto> CreatePurchaseOrderFromAwardAsync(CreatePurchaseOrderFromAwardDto dto)
     {
+        var ownsSourceClaimTransaction = false;
         try
         {
             // Get the tender award
@@ -465,8 +467,12 @@ public class TenderAwardService : ITenderAwardService
                 sourceCorrelationId);
 
             // Get bid items
-            var bidItems = await _bidItemRepository.GetByBidIdAsync(bid.Id);
-            if (!bidItems.Any())
+            var bidItems = (await _bidItemRepository.GetByBidIdAsync(bid.Id))
+                .Where(item =>
+                    !award.BidLotId.HasValue ||
+                    item.BidLotId == award.BidLotId.Value)
+                .ToList();
+            if (bidItems.Count == 0)
             {
                 throw new InvalidOperationException("Cannot create PO: No items found in the bid");
             }
@@ -488,6 +494,31 @@ public class TenderAwardService : ITenderAwardService
                         negotiation.Id, negotiatedItemsMap.Count);
                 }
             }
+
+            await _purchaseOrderSources.ValidateOrderAsync(
+                approvedSource,
+                bidItems.Select(item =>
+                {
+                    negotiatedItemsMap.TryGetValue(item.Id, out var negotiatedItem);
+                    return new ProcurementPurchaseOrderSourceOrderLine
+                    {
+                        InventoryItemId = null,
+                        ItemDescription =
+                            item.TenderItem?.Description ?? "Item from tender",
+                        OrderedQuantity =
+                            negotiatedItem?.Quantity > 0
+                                ? negotiatedItem.Quantity
+                                : item.OfferedQuantity,
+                        UnitOfMeasure =
+                            item.TenderItem?.UnitOfMeasure ?? "EA",
+                        UnitPrice =
+                            negotiatedItem?.NegotiatedUnitPrice ??
+                            item.UnitPrice
+                    };
+                }).ToList(),
+                award.AwardedAmount,
+                award.Currency ?? tender.Currency ?? "USD",
+                sourceCorrelationId);
 
             // Generate PO number
             var orderNumber = await _purchaseOrderRepository.GenerateOrderNumberAsync();
@@ -539,6 +570,13 @@ public class TenderAwardService : ITenderAwardService
             };
             _purchaseOrderSources.Apply(purchaseOrder, approvedSource);
 
+            ownsSourceClaimTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsSourceClaimTransaction)
+            {
+                await _unitOfWork.BeginTransactionAsync(
+                    IsolationLevel.Serializable);
+            }
+
             await _purchaseOrderRepository.CreatePurchaseOrderAsync(purchaseOrder);
 
             // Create PO items from bid items, using negotiated prices if available
@@ -554,7 +592,14 @@ public class TenderAwardService : ITenderAwardService
                 {
                     // Use negotiated prices
                     unitPrice = negotiatedItem.NegotiatedUnitPrice ?? bidItem.UnitPrice;
-                    lineTotal = negotiatedItem.NegotiatedTotalPrice ?? bidItem.TotalPrice;
+                    var orderedQuantity = negotiatedItem.Quantity > 0
+                        ? negotiatedItem.Quantity
+                        : bidItem.OfferedQuantity;
+                    lineTotal = negotiatedItem.NegotiatedTotalPrice ??
+                        decimal.Round(
+                            orderedQuantity * unitPrice,
+                            2,
+                            MidpointRounding.AwayFromZero);
                     
                     // Add negotiation note
                     var savingsPerUnit = bidItem.UnitPrice - unitPrice;
@@ -573,9 +618,13 @@ public class TenderAwardService : ITenderAwardService
                     PurchaseOrderId = purchaseOrder.Id,
                     InventoryItemId = null, // TenderItem doesn't have InventoryItemId - needs to be mapped separately or created later
                     ItemDescription = bidItem.TenderItem?.Description ?? "Item from tender",
-                    OrderedQuantity = bidItem.OfferedQuantity,
+                    OrderedQuantity = negotiatedItem?.Quantity > 0
+                        ? negotiatedItem.Quantity
+                        : bidItem.OfferedQuantity,
                     ReceivedQuantity = 0,
-                    RemainingQuantity = bidItem.OfferedQuantity,
+                    RemainingQuantity = negotiatedItem?.Quantity > 0
+                        ? negotiatedItem.Quantity
+                        : bidItem.OfferedQuantity,
                     UnitOfMeasure = bidItem.TenderItem?.UnitOfMeasure ?? "EA",
                     UnitPrice = unitPrice,
                     LineTotal = lineTotal,
@@ -590,16 +639,16 @@ public class TenderAwardService : ITenderAwardService
                 itemCount++;
             }
 
-            // Update award with PO reference
-            award.PurchaseOrderId = purchaseOrder.Id;
-            award.UpdatedAt = DateTime.UtcNow;
-            await _awardRepository.UpdateAsync(award);
-
             await _unitOfWork.SaveChangesAsync();
+            await _purchaseOrderSources.ClaimTenderAwardAsync(
+                award.Id,
+                purchaseOrder);
             await _purchaseOrderSources.RecordBoundAsync(
                 purchaseOrder,
                 "TenderAwardPurchaseOrderCreated",
                 sourceCorrelationId);
+            if (ownsSourceClaimTransaction)
+                await _unitOfWork.CommitAsync();
 
             var logMessage = negotiation != null
                 ? $"Created purchase order {orderNumber} from tender award {award.Id} with {itemCount} items using negotiated prices (Negotiation: {negotiation.Id})"
@@ -624,6 +673,19 @@ public class TenderAwardService : ITenderAwardService
         }
         catch (Exception ex)
         {
+            if (ownsSourceClaimTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                try
+                {
+                    await _unitOfWork.RollbackAsync();
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(
+                        rollbackException,
+                        "Failed to roll back tender-award purchase-order creation");
+                }
+            }
             _logger.LogError(ex, "Error creating purchase order from tender award {AwardId}", dto.TenderAwardId);
             throw;
         }

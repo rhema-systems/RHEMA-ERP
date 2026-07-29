@@ -658,6 +658,38 @@ public class RfqService : IRfqService
                             eligibility);
                 }
 
+                // Persist the final RFQ state and authoritative award lines before
+                // resolving the immutable PO snapshot. Revalidation must hash the
+                // same final status and commercial terms as creation.
+                var awardRepo = _unitOfWork.Repository<RequestForQuotationAwardLine>();
+                foreach (var (item, quote, quoteItem) in selections)
+                {
+                    await awardRepo.AddAsync(new RequestForQuotationAwardLine
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = _currentUserProvider.TenantId,
+                        RfqId = rfq.Id,
+                        RfqItemId = item.Id,
+                        BusinessPartnerId = quote.BusinessPartnerId,
+                        QuoteId = quote.Id,
+                        QuoteItemId = quoteItem.Id,
+                        UnitPrice = quoteItem.UnitPrice,
+                        LineTotal = quoteItem.LineTotal,
+                        AwardReason = awardReasonByItemId.TryGetValue(
+                            item.Id,
+                            out var reason)
+                            ? reason
+                            : null,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedById = _currentUserProvider.UserId
+                    });
+                }
+                rfq.Status = "Awarded";
+                rfq.UpdatedAt = DateTime.UtcNow;
+                rfq.LastModifiedById = _currentUserProvider.UserId;
+                await _rfqRepository.UpdateAsync(rfq);
+                await _unitOfWork.SaveChangesAsync();
+
                 // Create PO headers first (save immediately) to avoid:
                 // - OrderNumber duplicate race
                 // - FK failure when PO items are inserted but PO header insert fails
@@ -676,6 +708,21 @@ public class RfqService : IRfqService
                         awardCorrelationId);
 
                     var subTotal = group.Sum(x => x.QuoteItem.LineTotal);
+                    await _purchaseOrderSources.ValidateOrderAsync(
+                        approvedSource,
+                        group.Select(line =>
+                            new ProcurementPurchaseOrderSourceOrderLine
+                            {
+                                InventoryItemId = line.Item.InventoryItemId,
+                                ItemDescription = line.Item.Description,
+                                OrderedQuantity = line.Item.Quantity,
+                                UnitOfMeasure =
+                                    line.Item.UnitOfMeasure ?? "EA",
+                                UnitPrice = line.QuoteItem.UnitPrice
+                            }).ToList(),
+                        subTotal,
+                        rfq.Currency,
+                        awardCorrelationId);
 
                     var po = new PurchaseOrder
                     {
@@ -714,8 +761,6 @@ public class RfqService : IRfqService
 
                     await _purchaseOrderRepository.CreatePurchaseOrderAsync(po);
                     await SaveChangesWithPurchaseOrderNumberRetryAsync(po);
-                    await _purchaseOrderSources.RecordBoundAsync(
-                        po, "RfqAwardPurchaseOrderCreated", awardCorrelationId);
 
                     createdPos[supplierId] = po;
                     response.PurchaseOrders.Add(new CreatedPurchaseOrderFromRfqDto
@@ -728,30 +773,11 @@ public class RfqService : IRfqService
                     });
                 }
 
-                // Create award audit lines + PO items + PR item links.
-                var awardRepo = _unitOfWork.Repository<RequestForQuotationAwardLine>();
-
+                // Create PO items + PR item links from the persisted award lines.
                 foreach (var (item, quote, quoteItem) in selections)
                 {
                     var supplierId = quote.BusinessPartnerId;
                     var po = createdPos[supplierId];
-
-                    // Award audit
-                    var award = new RequestForQuotationAwardLine
-                    {
-                        TenantId = _currentUserProvider.TenantId,
-                        RfqId = rfq.Id,
-                        RfqItemId = item.Id,
-                        BusinessPartnerId = quote.BusinessPartnerId,
-                        QuoteId = quote.Id,
-                        QuoteItemId = quoteItem.Id,
-                        UnitPrice = quoteItem.UnitPrice,
-                        LineTotal = quoteItem.LineTotal,
-                        AwardReason = awardReasonByItemId.TryGetValue(item.Id, out var reason) ? reason : null,
-                        CreatedAt = DateTime.UtcNow,
-                        CreatedById = _currentUserProvider.UserId
-                    };
-                    await awardRepo.AddAsync(award);
 
                     // PO item
                     var orderedQty = item.Quantity;
@@ -792,11 +818,13 @@ public class RfqService : IRfqService
                     }
                 }
 
-                // Mark RFQ as awarded to prevent re-award and further edits.
-                rfq.Status = "Awarded";
-                rfq.UpdatedAt = DateTime.UtcNow;
-                rfq.LastModifiedById = _currentUserProvider.UserId;
-                await _rfqRepository.UpdateAsync(rfq);
+                foreach (var purchaseOrder in createdPos.Values)
+                {
+                    await _purchaseOrderSources.RecordBoundAsync(
+                        purchaseOrder,
+                        "RfqAwardPurchaseOrderCreated",
+                        awardCorrelationId);
+                }
 
                 await _unitOfWork.CommitAsync();
             }

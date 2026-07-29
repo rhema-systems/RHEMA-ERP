@@ -119,7 +119,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 };
 
             var resolution = await ResolveCoreAsync(
-                sourceType, sourceId, businessPartnerId, cancellationToken);
+                sourceType, sourceId, businessPartnerId, null, cancellationToken);
 
             await RecordAsync(
                 resolution.SourceId,
@@ -181,6 +181,11 @@ public sealed class ProcurementPurchaseOrderSourceService :
         purchaseOrder.SourceSnapshotJson = source.SourceSnapshotJson;
         purchaseOrder.SourceIntegrityHash = source.SourceIntegrityHash;
         purchaseOrder.SourceValidatedAtUtc = source.ValidatedAtUtc;
+        purchaseOrder.Currency = source.CurrencyCode;
+        if (source.SourceType == ProcurementPurchaseOrderSourceType.TenderAward)
+            purchaseOrder.TenderAwardId = source.SourceId;
+        if (source.SourceType == ProcurementPurchaseOrderSourceType.Contract)
+            purchaseOrder.ContractId = source.SourceId;
     }
 
     public async Task<ProcurementPurchaseOrderSourceResolution> ResolveFrameworkCallOffAsync(
@@ -238,7 +243,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
             snapshot);
     }
 
-    public async Task RevalidateAsync(
+    public async Task<ProcurementPurchaseOrderSourceResolution> RevalidateAsync(
         PurchaseOrder purchaseOrder,
         string action,
         string correlationId,
@@ -294,6 +299,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
                     purchaseOrder.ProcurementSourceType.Value,
                     purchaseOrder.ProcurementSourceId.Value,
                     purchaseOrder.BusinessPartnerId,
+                    purchaseOrder.Id,
                     cancellationToken);
             }
 
@@ -306,6 +312,30 @@ public sealed class ProcurementPurchaseOrderSourceService :
             {
                 throw Invalid("PO_SOURCE_LINEAGE_CHANGED",
                     "The persisted purchase-order source snapshot no longer matches the authoritative approved source.");
+            }
+
+            if (current.SourceType !=
+                ProcurementPurchaseOrderSourceType.FrameworkCallOff)
+            {
+                var persistedLines = await _unitOfWork.Repository<PurchaseOrderItem>()
+                    .GetQueryable(item =>
+                        item.TenantId == _currentUser.TenantId &&
+                        item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted)
+                    .AsNoTracking()
+                    .Select(item => new ProcurementPurchaseOrderSourceOrderLine
+                    {
+                        InventoryItemId = item.InventoryItemId,
+                        ItemDescription = item.ItemDescription,
+                        OrderedQuantity = item.OrderedQuantity,
+                        UnitOfMeasure = item.UnitOfMeasure,
+                        UnitPrice = item.UnitPrice
+                    })
+                    .ToListAsync(cancellationToken);
+                EnsureOrderMatchesSource(
+                    current,
+                    persistedLines,
+                    purchaseOrder.TotalAmount,
+                    purchaseOrder.Currency);
             }
 
             purchaseOrder.SourceValidatedAtUtc = current.ValidatedAtUtc;
@@ -331,6 +361,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 purchaseOrder,
                 action,
                 cancellationToken);
+            return current;
         }
         catch (ProcurementPurchaseOrderSourceValidationException exception)
         {
@@ -349,6 +380,116 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 cancellationToken);
             throw;
         }
+    }
+
+    public async Task ValidateOrderAsync(
+        ProcurementPurchaseOrderSourceResolution source,
+        IReadOnlyCollection<ProcurementPurchaseOrderSourceOrderLine> lines,
+        decimal totalAmount,
+        string? currencyCode,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            EnsureOrderMatchesSource(source, lines, totalAmount, currencyCode);
+            await RecordAsync(
+                source.SourceId,
+                source.SourceReference,
+                "SourceCommercialTermsValidated",
+                ProcurementControlEventResult.Allowed,
+                correlationId,
+                "The purchase-order lines, quantities, prices, currency, and total match the authoritative approved source.",
+                new
+                {
+                    source.SourceType,
+                    source.SourceId,
+                    source.ApprovedAmount,
+                    ApprovedLineCount = source.ApprovedLines.Count,
+                    SubmittedLineCount = lines.Count,
+                    TotalAmount = totalAmount,
+                    CurrencyCode = currencyCode
+                },
+                cancellationToken);
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException exception)
+        {
+            await TryRecordDeniedAsync(
+                source.SourceId,
+                source.SourceReference,
+                "SourceCommercialTermsDenied",
+                correlationId,
+                exception,
+                new
+                {
+                    source.SourceType,
+                    source.SourceId,
+                    source.ApprovedAmount,
+                    ApprovedLineCount = source.ApprovedLines.Count,
+                    SubmittedLineCount = lines.Count,
+                    TotalAmount = totalAmount,
+                    CurrencyCode = currencyCode
+                },
+                cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task ClaimTenderAwardAsync(
+        Guid tenderAwardId,
+        PurchaseOrder purchaseOrder,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_unitOfWork.HasActiveTransaction)
+        {
+            throw Invalid(
+                "PO_SOURCE_CLAIM_TRANSACTION_REQUIRED",
+                "Tender-award consumption must occur inside the purchase-order transaction.");
+        }
+        if (tenderAwardId == Guid.Empty ||
+            purchaseOrder.TenantId != _currentUser.TenantId ||
+            purchaseOrder.BusinessPartnerId == Guid.Empty)
+        {
+            throw Invalid(
+                "PO_TENDER_AWARD_CLAIM_INVALID",
+                "The tender-award claim does not match the purchase order tenant and supplier.");
+        }
+
+        var affected = await _unitOfWork.Repository<TenderAward>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == tenderAwardId &&
+                item.BusinessPartnerId == purchaseOrder.BusinessPartnerId &&
+                item.PurchaseOrderId == null &&
+                !item.IsDeleted)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(item => item.PurchaseOrderId, purchaseOrder.Id)
+                    .SetProperty(item => item.UpdatedAt, DateTime.UtcNow)
+                    .SetProperty(item => item.LastModifiedById, _currentUser.UserId),
+                cancellationToken);
+        if (affected == 1)
+            return;
+
+        var existingOwner = await _unitOfWork.Repository<TenderAward>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == tenderAwardId && !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item => new
+            {
+                item.BusinessPartnerId,
+                item.PurchaseOrderId
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (existingOwner?.PurchaseOrderId == purchaseOrder.Id)
+            return;
+
+        throw Invalid(
+            "PO_TENDER_AWARD_ALREADY_CONSUMED",
+            existingOwner?.PurchaseOrderId.HasValue == true
+                ? $"The tender award has already been consumed by purchase order {existingOwner.PurchaseOrderId}."
+                : "The tender award is unavailable or does not match the purchase-order supplier.");
     }
 
     public async Task RecordBoundAsync(
@@ -387,13 +528,18 @@ public sealed class ProcurementPurchaseOrderSourceService :
         ProcurementPurchaseOrderSourceType sourceType,
         Guid sourceId,
         Guid businessPartnerId,
+        Guid? owningPurchaseOrderId,
         CancellationToken cancellationToken) =>
         sourceType switch
         {
             ProcurementPurchaseOrderSourceType.RfqAward =>
                 ResolveRfqAsync(sourceId, businessPartnerId, cancellationToken),
             ProcurementPurchaseOrderSourceType.TenderAward =>
-                ResolveTenderAwardAsync(sourceId, businessPartnerId, cancellationToken),
+                ResolveTenderAwardAsync(
+                    sourceId,
+                    businessPartnerId,
+                    owningPurchaseOrderId,
+                    cancellationToken),
             ProcurementPurchaseOrderSourceType.Contract =>
                 ResolveContractAsync(sourceId, businessPartnerId, cancellationToken),
             ProcurementPurchaseOrderSourceType.ApprovedException =>
@@ -429,6 +575,11 @@ public sealed class ProcurementPurchaseOrderSourceService :
             rfq.Id,
             businessPartnerId,
             cancellationToken);
+        var approvedLines = await ResolveRfqLinesAsync(
+            rfq.Id,
+            businessPartnerId,
+            cancellationToken);
+        var approvedAmount = approvedLines.Sum(item => item.LineTotal);
         return BuildResolution(
             ProcurementPurchaseOrderSourceType.RfqAward,
             rfq.Id,
@@ -451,13 +602,27 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 AwardReadinessDecisionId = readiness.Id,
                 readiness.IntegrityHash,
                 BusinessPartnerId = businessPartnerId,
-                rfq.Currency
-            });
+                rfq.Currency,
+                ApprovedAmount = approvedAmount,
+                ApprovedLines = approvedLines.Select(line => new
+                {
+                    line.SourceLineId,
+                    line.ItemCode,
+                    line.Description,
+                    line.Quantity,
+                    line.UnitOfMeasure,
+                    line.UnitPrice,
+                    line.LineTotal
+                })
+            },
+            approvedLines,
+            approvedAmount);
     }
 
     private async Task<ProcurementPurchaseOrderSourceResolution> ResolveTenderAwardAsync(
         Guid awardId,
         Guid businessPartnerId,
+        Guid? owningPurchaseOrderId,
         CancellationToken cancellationToken)
     {
         var award = await _unitOfWork.Repository<TenderAward>()
@@ -470,6 +635,13 @@ public sealed class ProcurementPurchaseOrderSourceService :
         if (award.BusinessPartnerId != businessPartnerId)
             throw Invalid("PO_SOURCE_SUPPLIER_MISMATCH",
                 "The selected supplier is not the awarded supplier.");
+        if (award.PurchaseOrderId.HasValue &&
+            award.PurchaseOrderId.Value != owningPurchaseOrderId)
+        {
+            throw Invalid(
+                "PO_TENDER_AWARD_ALREADY_CONSUMED",
+                $"The tender award has already been consumed by purchase order {award.PurchaseOrderId}.");
+        }
         if (!string.Equals(award.Status, "Awarded", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(award.Status, "ContractSigned", StringComparison.OrdinalIgnoreCase))
         {
@@ -484,6 +656,11 @@ public sealed class ProcurementPurchaseOrderSourceService :
             ProcurementAwardReadinessSourceType.Tender,
             tender.Id,
             businessPartnerId,
+            cancellationToken);
+        var approvedLines = await ResolveTenderBidLinesAsync(
+            award.TenderBidId,
+            award.BidLotId,
+            award.NegotiationId,
             cancellationToken);
         return BuildResolution(
             ProcurementPurchaseOrderSourceType.TenderAward,
@@ -510,8 +687,20 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 AwardReadinessDecisionId = readiness.Id,
                 readiness.IntegrityHash,
                 award.BusinessPartnerId,
-                award.Currency
-            });
+                award.Currency,
+                ApprovedLines = approvedLines.Select(line => new
+                {
+                    line.SourceLineId,
+                    line.ItemCode,
+                    line.Description,
+                    line.Quantity,
+                    line.UnitOfMeasure,
+                    line.UnitPrice,
+                    line.LineTotal
+                })
+            },
+            approvedLines,
+            award.AwardedAmount);
     }
 
     private async Task<ProcurementPurchaseOrderSourceResolution> ResolveContractAsync(
@@ -548,6 +737,11 @@ public sealed class ProcurementPurchaseOrderSourceService :
             tender.Id,
             businessPartnerId,
             cancellationToken);
+        var approvedLines = await ResolveTenderBidLinesAsync(
+            award.TenderBidId,
+            award.BidLotId,
+            award.NegotiationId,
+            cancellationToken);
         return BuildResolution(
             ProcurementPurchaseOrderSourceType.Contract,
             contract.Id,
@@ -576,8 +770,20 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 SourcingReleaseId = link.SourcingCase.SourcingReleaseId,
                 SourcingCaseId = link.SourcingCase.Id,
                 AwardReadinessDecisionId = readiness.Id,
-                readiness.IntegrityHash
-            });
+                readiness.IntegrityHash,
+                ApprovedLines = approvedLines.Select(line => new
+                {
+                    line.SourceLineId,
+                    line.ItemCode,
+                    line.Description,
+                    line.Quantity,
+                    line.UnitOfMeasure,
+                    line.UnitPrice,
+                    line.LineTotal
+                })
+            },
+            approvedLines,
+            contract.ContractValue);
     }
 
     private async Task<ProcurementPurchaseOrderSourceResolution> ResolveExceptionAsync(
@@ -618,6 +824,12 @@ public sealed class ProcurementPurchaseOrderSourceService :
             control.Id,
             businessPartnerId,
             cancellationToken);
+        var approvedLines = await ResolveTenderBidLinesAsync(
+            bid.Id,
+            null,
+            control.NegotiationId,
+            cancellationToken);
+        var approvedAmount = control.NegotiatedAmount ?? bid.TotalBidAmount;
         return BuildResolution(
             ProcurementPurchaseOrderSourceType.ApprovedException,
             control.Id,
@@ -649,8 +861,162 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 AwardReadinessDecisionId = readiness.Id,
                 readiness.IntegrityHash,
                 bid.BusinessPartnerId,
-                bid.Currency
-            });
+                bid.Currency,
+                ApprovedAmount = approvedAmount,
+                ApprovedLines = approvedLines
+            },
+            approvedLines,
+            approvedAmount);
+    }
+
+    private async Task<IReadOnlyList<ProcurementPurchaseOrderSourceLineDto>>
+        ResolveRfqLinesAsync(
+            Guid rfqId,
+            Guid businessPartnerId,
+            CancellationToken cancellationToken)
+    {
+        var awardLines = await _unitOfWork
+            .Repository<RequestForQuotationAwardLine>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.RfqId == rfqId &&
+                item.BusinessPartnerId == businessPartnerId &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .OrderBy(item => item.RfqItemId)
+            .ThenBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (awardLines.Count == 0)
+        {
+            throw Invalid(
+                "PO_RFQ_AWARD_LINES_NOT_FOUND",
+                "The RFQ has no awarded commercial lines for the selected supplier.");
+        }
+
+        var itemIds = awardLines.Select(item => item.RfqItemId).Distinct().ToList();
+        var rfqItems = await _unitOfWork.Repository<RequestForQuotationItem>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.RfqId == rfqId &&
+                itemIds.Contains(item.Id) &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        if (rfqItems.Count != itemIds.Count)
+        {
+            throw Invalid(
+                "PO_RFQ_AWARD_LINEAGE_INCOMPLETE",
+                "One or more RFQ award lines no longer identify an authoritative RFQ item.");
+        }
+
+        return awardLines.Select(award =>
+        {
+            var item = rfqItems[award.RfqItemId];
+            return new ProcurementPurchaseOrderSourceLineDto
+            {
+                SourceLineId = award.Id,
+                InventoryItemId = item.InventoryItemId,
+                ItemCode = item.ItemCode ?? string.Empty,
+                Description = item.Description,
+                Quantity = item.Quantity,
+                UnitOfMeasure = string.IsNullOrWhiteSpace(item.UnitOfMeasure)
+                    ? "EA"
+                    : item.UnitOfMeasure.Trim(),
+                UnitPrice = award.UnitPrice,
+                LineTotal = award.LineTotal
+            };
+        }).ToList();
+    }
+
+    private async Task<IReadOnlyList<ProcurementPurchaseOrderSourceLineDto>>
+        ResolveTenderBidLinesAsync(
+            Guid tenderBidId,
+            Guid? bidLotId,
+            Guid? negotiationId,
+            CancellationToken cancellationToken)
+    {
+        var bidItemsQuery = _unitOfWork.Repository<TenderBidItem>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.TenderBidId == tenderBidId &&
+                !item.IsDeleted);
+        if (bidLotId.HasValue)
+            bidItemsQuery = bidItemsQuery.Where(item => item.BidLotId == bidLotId.Value);
+
+        var bidItems = await bidItemsQuery
+            .AsNoTracking()
+            .OrderBy(item => item.TenderItemId)
+            .ThenBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (bidItems.Count == 0)
+        {
+            throw Invalid(
+                "PO_TENDER_AWARD_LINES_NOT_FOUND",
+                "The awarded tender bid has no authoritative commercial lines.");
+        }
+
+        var tenderItemIds = bidItems.Select(item => item.TenderItemId).Distinct().ToList();
+        var tenderItems = await _unitOfWork.Repository<TenderItem>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                tenderItemIds.Contains(item.Id) &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        if (tenderItems.Count != tenderItemIds.Count)
+        {
+            throw Invalid(
+                "PO_TENDER_AWARD_LINEAGE_INCOMPLETE",
+                "One or more awarded bid lines no longer identify an authoritative tender item.");
+        }
+
+        var negotiationByBidItem = new Dictionary<Guid, TenderNegotiationItem>();
+        if (negotiationId.HasValue)
+        {
+            negotiationByBidItem = await _unitOfWork
+                .Repository<TenderNegotiationItem>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.NegotiationId == negotiationId.Value &&
+                    !item.IsDeleted)
+                .AsNoTracking()
+                .ToDictionaryAsync(
+                    item => item.TenderBidItemId,
+                    cancellationToken);
+        }
+
+        return bidItems.Select(bidItem =>
+        {
+            var tenderItem = tenderItems[bidItem.TenderItemId];
+            negotiationByBidItem.TryGetValue(bidItem.Id, out var negotiation);
+            var quantity = negotiation?.Quantity > 0
+                ? negotiation.Quantity
+                : bidItem.OfferedQuantity;
+            var unitPrice =
+                negotiation?.NegotiatedUnitPrice ?? bidItem.UnitPrice;
+            var lineTotal =
+                negotiation?.NegotiatedTotalPrice ??
+                decimal.Round(
+                    quantity * unitPrice,
+                    2,
+                    MidpointRounding.AwayFromZero);
+            return new ProcurementPurchaseOrderSourceLineDto
+            {
+                SourceLineId = bidItem.Id,
+                // Tender lines do not own a stable inventory-item FK. Item-code
+                // lookups can change after award and must not alter the approved
+                // source identity or its immutable snapshot.
+                InventoryItemId = null,
+                ItemCode = tenderItem.ItemCode ?? string.Empty,
+                Description = tenderItem.Description,
+                Quantity = quantity,
+                UnitOfMeasure = string.IsNullOrWhiteSpace(tenderItem.UnitOfMeasure)
+                    ? "EA"
+                    : tenderItem.UnitOfMeasure.Trim(),
+                UnitPrice = unitPrice,
+                LineTotal = lineTotal
+            };
+        }).ToList();
     }
 
     private async Task AddTenderAwardOptionsAsync(
@@ -669,7 +1035,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
             try
             {
                 var resolution = await ResolveTenderAwardAsync(
-                    award.Id, award.BusinessPartnerId, cancellationToken);
+                    award.Id, award.BusinessPartnerId, null, cancellationToken);
                 if (requisitionId.HasValue &&
                     resolution.PurchaseRequisitionId != requisitionId.Value)
                     continue;
@@ -949,7 +1315,9 @@ public sealed class ProcurementPurchaseOrderSourceService :
         ProcurementAwardReadinessDecision readiness,
         Guid businessPartnerId,
         string currencyCode,
-        object snapshot)
+        object snapshot,
+        IReadOnlyList<ProcurementPurchaseOrderSourceLineDto>? approvedLines = null,
+        decimal? approvedAmount = null)
     {
         var json = JsonSerializer.Serialize(snapshot, JsonOptions);
         return new ProcurementPurchaseOrderSourceResolution
@@ -966,11 +1334,31 @@ public sealed class ProcurementPurchaseOrderSourceService :
             CurrencyCode = string.IsNullOrWhiteSpace(currencyCode)
                 ? "USD"
                 : currencyCode.Trim().ToUpperInvariant(),
+            ApprovedAmount = approvedAmount,
+            ApprovedLines = approvedLines ?? [],
             SourceSnapshotJson = json,
             SourceIntegrityHash = Convert.ToHexString(
                 SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant(),
             ValidatedAtUtc = DateTime.UtcNow
         };
+    }
+
+    private static void EnsureOrderMatchesSource(
+        ProcurementPurchaseOrderSourceResolution source,
+        IReadOnlyCollection<ProcurementPurchaseOrderSourceOrderLine> lines,
+        decimal totalAmount,
+        string? currencyCode)
+    {
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            source.SourceType,
+            source.ApprovedLines,
+            lines,
+            source.ApprovedAmount,
+            totalAmount,
+            source.CurrencyCode,
+            currencyCode);
+        if (!result.IsValid)
+            throw Invalid(result.Code, result.Message);
     }
 
     private async Task EnsureCapabilityAsync(
