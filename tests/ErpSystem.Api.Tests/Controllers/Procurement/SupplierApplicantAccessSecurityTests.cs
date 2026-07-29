@@ -1,11 +1,13 @@
 using System.Reflection;
 using System.Security.Claims;
 using ErpSystem.Api.Controllers.Procurement;
+using ErpSystem.Api.Controllers.DocumentManagement;
 using ErpSystem.Api.Controllers;
 using ErpSystem.Api.Services;
 using ErpSystem.Api.Middleware;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
@@ -29,6 +31,8 @@ public sealed class SupplierApplicantAccessSecurityTests
         Policy(controller, nameof(SupplierApplicantAccessController.UpdateApplication))
             .Should().Be("SupplierApplicantOnly");
         Policy(controller, nameof(SupplierApplicantAccessController.Submit))
+            .Should().Be("SupplierApplicantOnly");
+        Policy(controller, nameof(SupplierApplicantAccessController.DownloadDocument))
             .Should().Be("SupplierApplicantOnly");
         Policy(controller, nameof(SupplierApplicantAccessController.GetSummary))
             .Should().Be("InternalOnly");
@@ -110,6 +114,10 @@ public sealed class SupplierApplicantAccessSecurityTests
         Policy(controller, nameof(BusinessPartnerRegistrationsController.SubmitRegistration))
             .Should().Be("InternalOnly");
         Policy(controller, nameof(BusinessPartnerRegistrationsController.UploadDocument))
+            .Should().Be("InternalOnly");
+        Policy(controller, nameof(BusinessPartnerRegistrationsController.GetDocuments))
+            .Should().Be("InternalOnly");
+        Policy(controller, nameof(BusinessPartnerRegistrationsController.DownloadDocument))
             .Should().Be("InternalOnly");
         Policy(controller, nameof(BusinessPartnerRegistrationsController.ReviewRegistration))
             .Should().Be("InternalOnly");
@@ -202,9 +210,14 @@ public sealed class SupplierApplicantAccessSecurityTests
                 BindingFlags.Instance | BindingFlags.NonPublic)
             .SingleOrDefault(item =>
                 item.FieldType == typeof(IControlledFileUploadService));
+        var dmsField = typeof(DocumentManagementController).GetFields(
+                BindingFlags.Instance | BindingFlags.NonPublic)
+            .SingleOrDefault(item =>
+                item.FieldType == typeof(IControlledFileUploadService));
 
         sharedField.Should().NotBeNull();
         applicantField.Should().NotBeNull();
+        dmsField.Should().NotBeNull();
     }
 
     private static string? Policy(Type controller, string method) =>
@@ -229,6 +242,7 @@ public sealed class SupplierApplicantAccessSecurityTests
             registrations,
             applicantAccess ?? Mock.Of<IProcurementSupplierApplicantAccessService>(),
             Mock.Of<IControlledFileUploadService>(),
+            Mock.Of<ICentralDocumentRepositoryFileService>(),
             Mock.Of<IFileStorageService>(),
             Mock.Of<ICurrentUserService>(),
             NullLogger<BusinessPartnerRegistrationsController>.Instance);

@@ -532,6 +532,8 @@ public partial class LocalFileStorageService : IFileStorageService
     private static bool IsPrivateCategory(string? category)
         => !string.IsNullOrWhiteSpace(category)
             && (category.StartsWith("central-dms", StringComparison.OrdinalIgnoreCase)
+                || category.Equals(ControlledFileUploadCategories.DocumentManagement, StringComparison.OrdinalIgnoreCase)
+                || category.Equals(ControlledFileUploadCategories.SupplierRegistrationEvidence, StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("estate-land-acquisition-documents", StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("estate-managed-asset-documents", StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("procedure-case-documents", StringComparison.OrdinalIgnoreCase));

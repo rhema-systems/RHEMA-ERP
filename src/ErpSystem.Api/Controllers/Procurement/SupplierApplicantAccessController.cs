@@ -7,6 +7,7 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
@@ -30,6 +31,8 @@ public sealed class SupplierApplicantAccessController : ControllerBase
     private readonly ICaptchaVerificationService _captcha;
     private readonly IProcurementSupplierApplicantJwtService _jwt;
     private readonly IControlledFileUploadService _controlledFiles;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SupplierApplicantAccessController> _logger;
 
@@ -44,6 +47,8 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         ICaptchaVerificationService captcha,
         IProcurementSupplierApplicantJwtService jwt,
         IControlledFileUploadService controlledFiles,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
         IUnitOfWork unitOfWork,
         ILogger<SupplierApplicantAccessController> logger)
     {
@@ -57,6 +62,8 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         _captcha = captcha;
         _jwt = jwt;
         _controlledFiles = controlledFiles;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -359,13 +366,46 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                     TenantId = session.TenantId,
                     ActorUserId = session.SystemActorUserId,
                     ActorName = "Supplier Applicant",
-                    Category = "supplier-registration-evidence",
+                    Category = ControlledFileUploadCategories.DocumentManagement,
                     FileName = safeName,
                     ContentType = file.ContentType,
                     FileSize = file.Length,
                     OpenReadStream = file.OpenReadStream
                 },
                 cancellationToken);
+            CentralDocumentRepositoryLink centralDocument;
+            try
+            {
+                centralDocument = await _centralDocuments.RegisterAsync(
+                    new CentralDocumentRepositoryRegistration
+                    {
+                        TenantId = session.TenantId,
+                        ActorUserId = session.SystemActorUserId,
+                        ActorName = "Supplier Applicant",
+                        FileUploadRecordId = upload.Record.Id,
+                        SourceModule = "Procurement",
+                        SourceLabel = "Supplier registration evidence",
+                        SourceEntityType = "BusinessPartnerRegistration",
+                        SourceRecordId = session.RegistrationId,
+                        SourceRecordReference = session.RegistrationId.ToString(),
+                        Title = safeName,
+                        DocumentType = documentType.Trim(),
+                        MetadataTemplateCode = "PROC-SUP-EVD",
+                        AccessProfile = "Procurement restricted",
+                        ChangeSummary = "Supplier registration evidence uploaded through applicant access."
+                    },
+                    cancellationToken);
+            }
+            catch
+            {
+                await _controlledFiles.DeleteAsync(
+                    session.TenantId,
+                    upload.Record.Id,
+                    session.SystemActorUserId,
+                    cancellationToken);
+                throw;
+            }
+
             BusinessPartnerRegistrationDocumentDto document;
             try
             {
@@ -374,10 +414,12 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                     new CreateBusinessPartnerDocumentDto
                     {
                         FileUploadRecordId = upload.Record.Id,
+                        CentralDocumentRecordId = centralDocument.DocumentRecordId,
+                        CentralDocumentVersionId = centralDocument.DocumentVersionId,
                         DocumentType = documentType.Trim(),
                         DocumentName = safeName,
-                        DocumentPath = upload.Record.FilePath,
-                        FilePath = upload.Record.FilePath,
+                        DocumentPath = null,
+                        FilePath = string.Empty,
                         FileSize = upload.Record.FileSize,
                         MimeType = upload.Record.ContentType,
                         EvidenceRequirementCode = evidenceRequirementCode,
@@ -390,9 +432,9 @@ public sealed class SupplierApplicantAccessController : ControllerBase
             }
             catch
             {
-                await _controlledFiles.DeleteAsync(
+                await _centralDocuments.DeleteAsync(
                     session.TenantId,
-                    upload.Record.Id,
+                    centralDocument.DocumentRecordId,
                     session.SystemActorUserId,
                     cancellationToken);
                 throw;
@@ -400,6 +442,85 @@ public sealed class SupplierApplicantAccessController : ControllerBase
             return Created(
                 $"/api/procurement/supplier-applicant-access/portal/documents/{document.Id}",
                 document);
+        }
+        catch (Exception exception)
+        {
+            return Problem(exception);
+        }
+    }
+
+    [HttpGet("portal/documents/{documentId:guid}/download")]
+    [Authorize(Policy = "SupplierApplicantOnly")]
+    public async Task<IActionResult> DownloadDocument(
+        Guid documentId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var session = await _applicantAccess.ValidateSessionAsync(
+                SessionReference(),
+                Correlation("document-download-session"),
+                cancellationToken);
+            if (session.PaymentOnly)
+            {
+                return Conflict(new
+                {
+                    code = "SUPPLIER_APPLICANT_PAYMENT_REQUIRED",
+                    message = "Payment or an approved exemption is required before downloading documents."
+                });
+            }
+
+            var document = await _registrations.GetDocumentByIdAsync(
+                session.RegistrationId, documentId);
+            if (document is null)
+            {
+                return NotFound(new
+                {
+                    code = "SUPPLIER_APPLICANT_DOCUMENT_NOT_FOUND",
+                    message = "The registration document was not found."
+                });
+            }
+
+            ApplySensitiveDownloadHeaders();
+            if (document.CentralDocumentRecordId.HasValue &&
+                document.CentralDocumentVersionId.HasValue)
+            {
+                var centralContent = await _centralDocuments.OpenAsync(
+                    session.TenantId,
+                    document.CentralDocumentRecordId.Value,
+                    document.CentralDocumentVersionId.Value,
+                    cancellationToken);
+                if (centralContent is null)
+                {
+                    return NotFound(new
+                    {
+                        code = "SUPPLIER_APPLICANT_DOCUMENT_CONTENT_NOT_FOUND",
+                        message = "The document content was not found in the central DMS."
+                    });
+                }
+
+                return File(
+                    centralContent.Content,
+                    centralContent.ContentType,
+                    centralContent.FileName);
+            }
+
+            if (string.IsNullOrWhiteSpace(document.InternalStoragePath))
+            {
+                return NotFound(new
+                {
+                    code = "SUPPLIER_APPLICANT_DOCUMENT_CONTENT_NOT_FOUND",
+                    message = "The document content was not found."
+                });
+            }
+
+            var legacyContent = await _fileStorage.DownloadFileAsync(
+                document.InternalStoragePath,
+                document.FileUploadRecordId ?? document.Id);
+            return File(
+                legacyContent,
+                document.MimeType ?? "application/octet-stream",
+                document.DocumentName);
         }
         catch (Exception exception)
         {
@@ -440,7 +561,15 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                         session.RegistrationId,
                         documentId,
                         session.SystemActorUserId);
-                    if (document.FileUploadRecordId.HasValue)
+                    if (document.CentralDocumentRecordId.HasValue)
+                    {
+                        await _centralDocuments.DeleteAsync(
+                            session.TenantId,
+                            document.CentralDocumentRecordId.Value,
+                            session.SystemActorUserId,
+                            cancellationToken);
+                    }
+                    else if (document.FileUploadRecordId.HasValue)
                     {
                         await _controlledFiles.DeleteAsync(
                             session.TenantId,
@@ -470,6 +599,13 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         {
             return Problem(exception);
         }
+    }
+
+    private void ApplySensitiveDownloadHeaders()
+    {
+        Response.Headers.CacheControl = "no-store, private";
+        Response.Headers.Pragma = "no-cache";
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
     }
 
     [HttpGet("admin/summary")]

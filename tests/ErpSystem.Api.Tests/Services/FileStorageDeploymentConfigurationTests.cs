@@ -8,6 +8,8 @@ public sealed class FileStorageDeploymentConfigurationTests
 {
     private const string SharedUploadMount =
         "- erp-uploads:/app/wwwroot/uploads";
+    private const string SharedSecureFileMount =
+        "- erp-secure-files:/app/secure-file-storage";
 
     [Fact]
     public void ProductionApiNodesUseOneSharedUploadVolume()
@@ -20,11 +22,25 @@ public sealed class FileStorageDeploymentConfigurationTests
             .Should().HaveCount(
                 4,
                 "each production API node must see the same local-storage namespace");
+        Regex.Matches(compose, Regex.Escape(SharedSecureFileMount))
+            .Should().HaveCount(
+                4,
+                "each production API node must see the same private DMS namespace");
         compose.Should().Contain(
             """
               erp-uploads:
                 driver: local
             """);
+        compose.Should().Contain(
+            """
+              erp-secure-files:
+                driver: local
+            """);
+        Regex.Matches(
+                compose,
+                Regex.Escape(
+                    "FileStorage__Local__PrivateBasePath=/app/secure-file-storage"))
+            .Should().HaveCount(4);
     }
 
     [Fact]
@@ -36,7 +52,7 @@ public sealed class FileStorageDeploymentConfigurationTests
             "ErpSystem.Api",
             "Dockerfile"));
         var preparation = dockerfile.IndexOf(
-            "mkdir -p /app/wwwroot/uploads",
+            "mkdir -p /app/wwwroot/uploads /app/secure-file-storage",
             StringComparison.Ordinal);
         var nonRootSwitch = dockerfile.IndexOf(
             "USER erpuser",
@@ -45,6 +61,27 @@ public sealed class FileStorageDeploymentConfigurationTests
         preparation.Should().BeGreaterThanOrEqualTo(0);
         nonRootSwitch.Should().BeGreaterThan(preparation);
         dockerfile.Should().Contain("chown -R erpuser:erpuser /app");
+    }
+
+    [Fact]
+    public void LegacySupplierEvidenceIsBlockedBeforeStaticFileServing()
+    {
+        var program = File.ReadAllText(Path.Combine(
+            RepositoryRoot(),
+            "src",
+            "ErpSystem.Api",
+            "Program.cs"));
+        var block = program.IndexOf(
+            "/uploads/supplier-registration-evidence",
+            StringComparison.Ordinal);
+        var staticFiles = program.IndexOf(
+            "app.UseStaticFiles();",
+            StringComparison.Ordinal);
+
+        block.Should().BeGreaterThanOrEqualTo(0);
+        staticFiles.Should().BeGreaterThan(block);
+        program.Should().Contain(
+            "context.Response.StatusCode = StatusCodes.Status404NotFound");
     }
 
     private static string RepositoryRoot()

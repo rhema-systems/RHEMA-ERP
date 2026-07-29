@@ -7418,6 +7418,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 table.HasTrigger("TR_BusinessPartnerRegistrationDocuments_ControlledFileGuard"));
             entity.HasIndex(bprd => bprd.RegistrationId);
             entity.HasIndex(bprd => new { bprd.TenantId, bprd.FileUploadRecordId });
+            entity.HasIndex(bprd => new { bprd.TenantId, bprd.CentralDocumentRecordId });
+            entity.HasIndex(bprd => new { bprd.TenantId, bprd.CentralDocumentVersionId });
             entity.HasIndex(bprd => bprd.DocumentType);
             entity.HasIndex(bprd => bprd.IsVerified);
 
@@ -7429,6 +7431,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(bprd => bprd.FileUploadRecord)
                 .WithMany()
                 .HasForeignKey(bprd => bprd.FileUploadRecordId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<CentralDocumentRecord>()
+                .WithMany()
+                .HasForeignKey(bprd => bprd.CentralDocumentRecordId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<CentralDocumentVersion>()
+                .WithMany()
+                .HasForeignKey(bprd => bprd.CentralDocumentVersionId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(bprd => bprd.VerifiedBy)

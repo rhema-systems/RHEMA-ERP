@@ -300,6 +300,19 @@ public sealed class ControlledFileUploadService : IControlledFileUploadService
                 "The file cannot be deleted while it is referenced by active supplier registration evidence.",
                 409);
 
+        var isCentralDocumentVersion = await _db.CentralDocumentVersions
+            .IgnoreQueryFilters()
+            .AnyAsync(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.FileUploadRecordId == fileUploadRecordId,
+                cancellationToken);
+        if (isCentralDocumentVersion)
+            throw Failure(
+                "FILE_RECORD_REFERENCED_BY_CENTRAL_DMS",
+                "The file cannot be deleted while it is referenced by an active central DMS version.",
+                409);
+
         if (record.IsDeleted)
         {
             if (!record.StorageDeletedAtUtc.HasValue &&

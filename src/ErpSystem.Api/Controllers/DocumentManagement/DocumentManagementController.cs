@@ -29,6 +29,7 @@ public sealed class DocumentManagementController : ControllerBase
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
     private readonly IFileStorageService _fileStorageService;
+    private readonly IControlledFileUploadService _controlledFiles;
     private readonly ICentralDocumentRenditionService _renditionService;
     private readonly INotificationService _notificationService;
 
@@ -37,6 +38,7 @@ public sealed class DocumentManagementController : ControllerBase
         ApplicationDbContext db,
         ICurrentUserService currentUserService,
         IFileStorageService fileStorageService,
+        IControlledFileUploadService controlledFiles,
         ICentralDocumentRenditionService renditionService,
         INotificationService notificationService)
     {
@@ -44,6 +46,7 @@ public sealed class DocumentManagementController : ControllerBase
         _db = db;
         _currentUserService = currentUserService;
         _fileStorageService = fileStorageService;
+        _controlledFiles = controlledFiles;
         _renditionService = renditionService;
         _notificationService = notificationService;
     }
@@ -1523,52 +1526,16 @@ public sealed class DocumentManagementController : ControllerBase
             return Forbid();
         }
 
-        await using var stream = file.OpenReadStream();
-        var storageResult = await _fileStorageService.UploadFileAsync(new FileUploadRequest
-        {
-            FileStream = stream,
-            FileName = file.FileName,
-            ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
-            FileSize = file.Length,
-            Category = "central-dms",
-            TenantId = tenantId.ToString(),
-            Metadata =
-            {
-                ["DocumentRecordId"] = record.Id.ToString(),
-                ["DocumentReference"] = record.DocumentReference,
-                ["SourceModule"] = record.SourceModule
-            }
-        });
-
-        if (!storageResult.Success)
-        {
-            return BadRequest(new { success = false, message = storageResult.ErrorMessage ?? "Unable to upload the DMS document file." });
-        }
-
-        var now = DateTime.UtcNow;
-        var uploadRecord = new FileUploadRecord
-        {
-            TenantId = tenantId,
-            Category = "central-dms",
-            FilePath = storageResult.FilePath,
-            StoredFileName = storageResult.FileName,
-            OriginalFileName = storageResult.OriginalFileName,
-            ContentType = storageResult.ContentType,
-            FileSize = storageResult.FileSize,
-            StorageProvider = storageResult.StorageProvider,
-            UploadedByUserId = GetUserId() ?? Guid.Empty,
-            VirusScanStatus = FileVirusScanStatus.Skipped,
-            CreatedAt = now,
-            CreatedBy = _currentUserService.UserName ?? "System",
-            CreatedById = GetUserId()
-        };
-        _db.FileUploadRecords.Add(uploadRecord);
-
-        var isPdf = IsPdfFile(storageResult.ContentType, storageResult.OriginalFileName);
         var clientRenditionPath = TrimToNull(renditionPath);
-        if (!isPdf
+        var incomingIsPdf = IsPdfFile(file.ContentType, file.FileName);
+        if (!incomingIsPdf
             && !string.IsNullOrWhiteSpace(clientRenditionPath)
-            && !await IsRepositoryPathOwnedByRecordAsync(tenantId, record.Id, record.RepositoryPath, clientRenditionPath, cancellationToken))
+            && !await IsRepositoryPathOwnedByRecordAsync(
+                tenantId,
+                record.Id,
+                record.RepositoryPath,
+                clientRenditionPath,
+                cancellationToken))
         {
             return BadRequest(new
             {
@@ -1577,7 +1544,43 @@ public sealed class DocumentManagementController : ControllerBase
             });
         }
 
-        var pdfRenditionPath = isPdf ? storageResult.FilePath : clientRenditionPath;
+        ControlledFileUploadResult upload;
+        try
+        {
+            upload = await _controlledFiles.UploadAsync(
+                new ControlledFileUploadRequest
+                {
+                    TenantId = tenantId,
+                    ActorUserId = GetUserId() ??
+                        throw new UnauthorizedAccessException(
+                            "A valid authenticated user is required."),
+                    ActorName = _currentUserService.UserName,
+                    Category = ControlledFileUploadCategories.DocumentManagement,
+                    FileName = file.FileName,
+                    ContentType = string.IsNullOrWhiteSpace(file.ContentType)
+                        ? "application/octet-stream"
+                        : file.ContentType,
+                    FileSize = file.Length,
+                    OpenReadStream = file.OpenReadStream
+                },
+                cancellationToken);
+        }
+        catch (ControlledFileUploadException exception)
+        {
+            return StatusCode(exception.StatusCode, new ProblemDetails
+            {
+                Title = "DMS upload failed",
+                Status = exception.StatusCode,
+                Detail = exception.Message,
+                Extensions = { ["code"] = exception.Code }
+            });
+        }
+
+        var now = DateTime.UtcNow;
+        var uploadRecord = upload.Record;
+
+        var isPdf = IsPdfFile(uploadRecord.ContentType, uploadRecord.OriginalFileName);
+        var pdfRenditionPath = isPdf ? uploadRecord.FilePath : clientRenditionPath;
         CentralDocumentRenditionResult? renditionResult = null;
 
         if (!isPdf && string.IsNullOrWhiteSpace(pdfRenditionPath))
@@ -1585,8 +1588,10 @@ public sealed class DocumentManagementController : ControllerBase
             await using var renditionSourceStream = file.OpenReadStream();
             renditionResult = await _renditionService.CreatePdfRenditionAsync(new CentralDocumentRenditionRequest(
                 renditionSourceStream,
-                storageResult.OriginalFileName,
-                storageResult.ContentType,
+                uploadRecord.OriginalFileName,
+                string.IsNullOrWhiteSpace(uploadRecord.ContentType)
+                    ? "application/octet-stream"
+                    : uploadRecord.ContentType,
                 tenantId,
                 record.Id,
                 record.DocumentReference,
@@ -1604,11 +1609,11 @@ public sealed class DocumentManagementController : ControllerBase
             DocumentRecordId = record.Id,
             VersionNumber = string.IsNullOrWhiteSpace(versionNumber) ? NextVersionNumber(record.CurrentVersion) : versionNumber.Trim(),
             Status = string.IsNullOrWhiteSpace(status) ? "Submitted" : status.Trim(),
-            RepositoryPath = storageResult.FilePath,
+            RepositoryPath = uploadRecord.FilePath,
             RenditionPath = pdfRenditionPath,
-            FileName = storageResult.OriginalFileName,
-            ContentType = storageResult.ContentType,
-            FileSize = storageResult.FileSize,
+            FileName = uploadRecord.OriginalFileName,
+            ContentType = uploadRecord.ContentType,
+            FileSize = uploadRecord.FileSize,
             FileUploadRecordId = uploadRecord.Id,
             ChangeSummary = BuildVersionChangeSummary(changeSummary, renditionResult),
             CreatedByUserId = GetUserId(),

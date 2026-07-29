@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -29,6 +30,10 @@ public sealed class BusinessPartnerRegistrationDocumentControlTests
             fixture.ActorId);
 
         result.FileUploadRecordId.Should().Be(fixture.FileRecord.Id);
+        result.CentralDocumentRecordId.Should().Be(fixture.CentralDocumentRecordId);
+        result.CentralDocumentVersionId.Should().Be(fixture.CentralDocumentVersionId);
+        result.FilePath.Should().BeEmpty();
+        result.DocumentPath.Should().BeNull();
         result.VirusScanStatus.Should().Be(FileVirusScanStatus.Clean);
         result.ChecksumSha256.Should().Be(fixture.Checksum);
         var persisted = await fixture.Db.BusinessPartnerRegistrationDocuments
@@ -36,6 +41,9 @@ public sealed class BusinessPartnerRegistrationDocumentControlTests
         persisted.TenantId.Should().Be(fixture.TenantId);
         persisted.RegistrationId.Should().Be(fixture.RegistrationId);
         persisted.FileUploadRecordId.Should().Be(fixture.FileRecord.Id);
+        persisted.CentralDocumentRecordId.Should().Be(fixture.CentralDocumentRecordId);
+        persisted.CentralDocumentVersionId.Should().Be(fixture.CentralDocumentVersionId);
+        persisted.DocumentPath.Should().StartWith("dms://");
     }
 
     [Fact]
@@ -114,6 +122,8 @@ public sealed class BusinessPartnerRegistrationDocumentControlTests
         public Guid ActorId { get; }
         public Guid RegistrationId { get; }
         public string Checksum { get; }
+        public Guid CentralDocumentRecordId { get; }
+        public Guid CentralDocumentVersionId { get; }
         public ApplicationDbContext Db { get; }
         public FileUploadRecord FileRecord { get; }
         public BusinessPartnerRegistrationService Service { get; }
@@ -123,6 +133,8 @@ public sealed class BusinessPartnerRegistrationDocumentControlTests
             Guid actorId,
             Guid registrationId,
             string checksum,
+            Guid centralDocumentRecordId,
+            Guid centralDocumentVersionId,
             ApplicationDbContext db,
             FileUploadRecord fileRecord,
             BusinessPartnerRegistrationService service)
@@ -131,6 +143,8 @@ public sealed class BusinessPartnerRegistrationDocumentControlTests
             ActorId = actorId;
             RegistrationId = registrationId;
             Checksum = checksum;
+            CentralDocumentRecordId = centralDocumentRecordId;
+            CentralDocumentVersionId = centralDocumentVersionId;
             Db = db;
             FileRecord = fileRecord;
             Service = service;
@@ -166,7 +180,37 @@ public sealed class BusinessPartnerRegistrationDocumentControlTests
                 CreatedAt = DateTime.UtcNow,
                 CreatedById = fileActorId ?? actorId
             };
+            var centralRecord = new CentralDocumentRecord
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                DocumentReference = "DMS-PROC-TEST",
+                Title = "Evidence",
+                SourceModule = "Procurement",
+                SourceLabel = "Supplier registration evidence",
+                SourceEntityType = "BusinessPartnerRegistration",
+                SourceRecordId = registrationId,
+                RepositoryStatus = "Linked",
+                RepositoryPath = fileRecord.FilePath,
+                CurrentVersion = "v1.0",
+                VersionStatus = "Submitted"
+            };
+            var centralVersion = new CentralDocumentVersion
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                DocumentRecordId = centralRecord.Id,
+                VersionNumber = "v1.0",
+                Status = "Submitted",
+                RepositoryPath = fileRecord.FilePath,
+                FileName = fileRecord.OriginalFileName,
+                ContentType = fileRecord.ContentType,
+                FileSize = fileRecord.FileSize,
+                FileUploadRecordId = fileRecord.Id
+            };
             db.FileUploadRecords.Add(fileRecord);
+            db.CentralDocumentRecords.Add(centralRecord);
+            db.CentralDocumentVersions.Add(centralVersion);
             await db.SaveChangesAsync();
 
             var registration = new BusinessPartnerRegistration
@@ -210,6 +254,8 @@ public sealed class BusinessPartnerRegistrationDocumentControlTests
                 actorId,
                 registrationId,
                 checksum,
+                centralRecord.Id,
+                centralVersion.Id,
                 db,
                 fileRecord,
                 service);
@@ -220,6 +266,8 @@ public sealed class BusinessPartnerRegistrationDocumentControlTests
             new()
             {
                 FileUploadRecordId = fileRecord.Id,
+                CentralDocumentRecordId = CentralDocumentRecordId,
+                CentralDocumentVersionId = CentralDocumentVersionId,
                 DocumentType = "Tax Clearance",
                 DocumentName = fileRecord.OriginalFileName,
                 DocumentPath = fileRecord.FilePath,

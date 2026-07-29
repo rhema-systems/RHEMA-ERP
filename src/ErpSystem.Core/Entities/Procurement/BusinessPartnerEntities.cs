@@ -705,6 +705,10 @@ public class BusinessPartnerRegistrationDocument : TenantEntity
 
     public Guid? FileUploadRecordId { get; set; }
 
+    public Guid? CentralDocumentRecordId { get; set; }
+
+    public Guid? CentralDocumentVersionId { get; set; }
+
     [Required]
     [MaxLength(100)]
     public string DocumentType { get; set; } = string.Empty;

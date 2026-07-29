@@ -1,13 +1,17 @@
 using ErpSystem.Api.Controllers;
 using ErpSystem.Api.Services;
+using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Models;
+using ErpSystem.Core.Services;
 using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -17,6 +21,121 @@ namespace ErpSystem.Api.Tests.Services;
 
 public sealed class ControlledFileUploadServiceTests
 {
+    [Fact]
+    public async Task CentralRepositoryRegistersOnlyTenantCleanControlledUpload()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var sourceRecordId = Guid.NewGuid();
+        var uploadId = Guid.NewGuid();
+        await using var db = Database();
+        db.FileUploadRecords.Add(new FileUploadRecord
+        {
+            Id = uploadId,
+            TenantId = tenantId,
+            Category = ControlledFileUploadCategories.DocumentManagement,
+            FilePath = "private/document-management/evidence.pdf",
+            StoredFileName = "evidence.pdf",
+            OriginalFileName = "evidence.pdf",
+            ContentType = "application/pdf",
+            FileSize = 25,
+            StorageProvider = "test",
+            UploadedByUserId = actorId,
+            VirusScanStatus = FileVirusScanStatus.Clean
+        });
+        await db.SaveChangesAsync();
+        var storage = new Mock<IFileStorageService>();
+        var controlled = new Mock<IControlledFileUploadService>();
+        var service = new CentralDocumentRepositoryFileService(
+            db, storage.Object, controlled.Object);
+
+        var link = await service.RegisterAsync(
+            new CentralDocumentRepositoryRegistration
+            {
+                TenantId = tenantId,
+                ActorUserId = actorId,
+                ActorName = "Applicant",
+                FileUploadRecordId = uploadId,
+                SourceModule = "Procurement",
+                SourceLabel = "Supplier registration evidence",
+                SourceEntityType = "BusinessPartnerRegistration",
+                SourceRecordId = sourceRecordId,
+                Title = "Tax clearance",
+                DocumentType = "TaxClearance",
+                AccessProfile = "Procurement restricted"
+            });
+
+        link.FileUploadRecordId.Should().Be(uploadId);
+        var record = await db.CentralDocumentRecords.SingleAsync();
+        record.Id.Should().Be(link.DocumentRecordId);
+        record.TenantId.Should().Be(tenantId);
+        record.SourceRecordId.Should().Be(sourceRecordId);
+        record.RepositoryPath.Should().Be(
+            "private/document-management/evidence.pdf");
+        var version = await db.CentralDocumentVersions.SingleAsync();
+        version.Id.Should().Be(link.DocumentVersionId);
+        version.FileUploadRecordId.Should().Be(uploadId);
+
+        (await service.OpenAsync(
+                Guid.NewGuid(), record.Id, version.Id))
+            .Should().BeNull();
+        storage.Verify(item => item.DownloadFileAsync(
+            It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(ControlledFileUploadCategories.DocumentManagement)]
+    [InlineData(ControlledFileUploadCategories.SupplierRegistrationEvidence)]
+    public async Task SensitiveCategoriesAreStoredOutsideThePublicWebRoot(
+        string category)
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(), $"erp-private-storage-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var environment = new Mock<IHostEnvironment>();
+            environment.SetupGet(item => item.ContentRootPath).Returns(root);
+            var service = new LocalFileStorageService(
+                NullLogger<LocalFileStorageService>.Instance,
+                Options.Create(new StorageProviderOptions
+                {
+                    Local = new LocalStorageOptions
+                    {
+                        BasePath = "uploads",
+                        PrivateBasePath = "secure-file-storage",
+                        UseWebRoot = true
+                    }
+                }),
+                environment.Object);
+            await using var content = new MemoryStream([1, 2, 3]);
+
+            var result = await service.UploadFileAsync(new FileUploadRequest
+            {
+                FileStream = content,
+                FileName = "evidence.pdf",
+                ContentType = "application/pdf",
+                FileSize = content.Length,
+                Category = category,
+                TenantId = Guid.NewGuid().ToString()
+            });
+
+            result.Success.Should().BeTrue();
+            result.FilePath.Should().StartWith("private/");
+            result.PublicUrl.Should().BeEmpty();
+            File.Exists(Path.Combine(
+                    root,
+                    "secure-file-storage",
+                    result.FilePath["private/".Length..]
+                        .Replace('/', Path.DirectorySeparatorChar)))
+                .Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void ModelEnforcesOneActiveSupplierApplicationPerTenantContact()
     {

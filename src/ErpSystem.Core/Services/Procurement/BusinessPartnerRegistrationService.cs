@@ -923,11 +923,14 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             Id = d.Id,
             RegistrationId = d.RegistrationId,
             FileUploadRecordId = d.FileUploadRecordId,
+            CentralDocumentRecordId = d.CentralDocumentRecordId,
+            CentralDocumentVersionId = d.CentralDocumentVersionId,
             VirusScanStatus = d.FileUploadRecord?.VirusScanStatus,
             DocumentType = d.DocumentType,
             DocumentName = d.DocumentName,
-            FilePath = d.DocumentPath,
-            DocumentPath = d.DocumentPath,
+            FilePath = string.Empty,
+            DocumentPath = null,
+            InternalStoragePath = d.FileUploadRecord?.FilePath ?? d.DocumentPath,
             FileSize = d.FileSize ?? 0,
             MimeType = d.MimeType,
             EvidenceRequirementCode = d.EvidenceRequirementCode,
@@ -941,6 +944,21 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             RejectedDate = d.RejectedDate,
             UploadedAt = d.CreatedAt
         });
+    }
+
+    public async Task<IEnumerable<BusinessPartnerRegistrationDocumentDto>> GetDocumentsForInternalReviewAsync(
+        Guid registrationId,
+        Guid userId)
+    {
+        var registration = await _registrationRepository.GetByIdAsync(registrationId)
+            ?? throw new InvalidOperationException(
+                $"Registration with ID {registrationId} not found");
+        await EnsureInternalCapabilityAsync(
+            "procurement.supplier.review",
+            registration,
+            userId,
+            $"supplier-registration-document-list-{registrationId:N}");
+        return await GetDocumentsAsync(registrationId);
     }
 
     public async Task<BusinessPartnerRegistrationDocumentDto> UploadDocumentAsync(Guid registrationId, CreateBusinessPartnerDocumentDto dto, Guid userId)
@@ -974,6 +992,14 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             throw new InvalidOperationException(
                 "Registration evidence must reference a controlled file-upload record.");
         }
+        if (!dto.CentralDocumentRecordId.HasValue ||
+            dto.CentralDocumentRecordId == Guid.Empty ||
+            !dto.CentralDocumentVersionId.HasValue ||
+            dto.CentralDocumentVersionId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "Registration evidence must reference a central DMS record and version.");
+        }
         var fileRecord = await _unitOfWork.Repository<Entities.FileUploadRecord>()
             .GetQueryable(item =>
                 item.Id == dto.FileUploadRecordId.Value &&
@@ -992,17 +1018,32 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             throw new InvalidOperationException(
                 "Registration evidence must have a clean virus-scan result.");
         }
-        var requestedPath = (dto.DocumentPath ?? dto.FilePath ?? string.Empty)
-            .Replace('\\', '/');
-        if (!string.Equals(
-                fileRecord.FilePath.Replace('\\', '/'),
-                requestedPath,
-                StringComparison.OrdinalIgnoreCase) ||
-            fileRecord.FileSize != dto.FileSize)
+        if (fileRecord.FileSize != dto.FileSize)
         {
             throw new InvalidOperationException(
                 "Registration evidence metadata does not match the controlled upload.");
         }
+        var centralRecord = await _unitOfWork
+            .Repository<Entities.DocumentManagement.CentralDocumentRecord>()
+            .GetQueryable(item =>
+                item.Id == dto.CentralDocumentRecordId.Value &&
+                item.TenantId == registration.TenantId &&
+                item.SourceRecordId == registration.Id &&
+                !item.IsDeleted)
+            .SingleOrDefaultAsync()
+            ?? throw new InvalidOperationException(
+                "The central DMS record was not found for this registration.");
+        var centralVersion = await _unitOfWork
+            .Repository<Entities.DocumentManagement.CentralDocumentVersion>()
+            .GetQueryable(item =>
+                item.Id == dto.CentralDocumentVersionId.Value &&
+                item.DocumentRecordId == centralRecord.Id &&
+                item.TenantId == registration.TenantId &&
+                item.FileUploadRecordId == fileRecord.Id &&
+                !item.IsDeleted)
+            .SingleOrDefaultAsync()
+            ?? throw new InvalidOperationException(
+                "The central DMS version does not match the controlled upload.");
         var alreadyBound = await _unitOfWork
             .Repository<Entities.Procurement.BusinessPartnerRegistrationDocument>()
             .GetQueryable(item =>
@@ -1021,9 +1062,11 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             TenantId = registration.TenantId, // Set TenantId from registration
             RegistrationId = registrationId,
             FileUploadRecordId = fileRecord.Id,
+            CentralDocumentRecordId = centralRecord.Id,
+            CentralDocumentVersionId = centralVersion.Id,
             DocumentType = dto.DocumentType,
             DocumentName = dto.DocumentName,
-            DocumentPath = dto.DocumentPath ?? dto.FilePath ?? string.Empty,
+            DocumentPath = $"dms://{centralRecord.Id:N}/{centralVersion.Id:N}",
             FileSize = dto.FileSize,
             MimeType = dto.MimeType,
             EvidenceRequirementCode = dto.EvidenceRequirementCode,
@@ -1045,11 +1088,14 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             Id = created.Id,
             RegistrationId = created.RegistrationId,
             FileUploadRecordId = created.FileUploadRecordId,
+            CentralDocumentRecordId = created.CentralDocumentRecordId,
+            CentralDocumentVersionId = created.CentralDocumentVersionId,
             VirusScanStatus = fileRecord.VirusScanStatus,
             DocumentType = created.DocumentType,
             DocumentName = created.DocumentName,
-            FilePath = created.DocumentPath,
-            DocumentPath = created.DocumentPath,
+            FilePath = string.Empty,
+            DocumentPath = null,
+            InternalStoragePath = fileRecord.FilePath,
             FileSize = created.FileSize ?? 0,
             MimeType = created.MimeType,
             EvidenceRequirementCode = created.EvidenceRequirementCode,
@@ -1204,11 +1250,14 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             Id = document.Id,
             RegistrationId = document.RegistrationId,
             FileUploadRecordId = document.FileUploadRecordId,
+            CentralDocumentRecordId = document.CentralDocumentRecordId,
+            CentralDocumentVersionId = document.CentralDocumentVersionId,
             VirusScanStatus = document.FileUploadRecord?.VirusScanStatus,
             DocumentType = document.DocumentType,
             DocumentName = document.DocumentName,
-            FilePath = document.DocumentPath,
-            DocumentPath = document.DocumentPath,
+            FilePath = string.Empty,
+            DocumentPath = null,
+            InternalStoragePath = document.FileUploadRecord?.FilePath ?? document.DocumentPath,
             FileSize = document.FileSize ?? 0,
             MimeType = document.MimeType,
             EvidenceRequirementCode = document.EvidenceRequirementCode,
@@ -1222,6 +1271,22 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             RejectedDate = document.RejectedDate,
             UploadedAt = document.CreatedAt
         };
+    }
+
+    public async Task<BusinessPartnerRegistrationDocumentDto?> GetDocumentForInternalDownloadAsync(
+        Guid registrationId,
+        Guid documentId,
+        Guid userId)
+    {
+        var registration = await _registrationRepository.GetByIdAsync(registrationId)
+            ?? throw new InvalidOperationException(
+                $"Registration with ID {registrationId} not found");
+        await EnsureInternalCapabilityAsync(
+            "procurement.supplier.review",
+            registration,
+            userId,
+            $"supplier-registration-document-download-{documentId:N}");
+        return await GetDocumentByIdAsync(registrationId, documentId);
     }
 
     public async Task TrackDocumentDownloadAsync(Guid registrationId, Guid documentId, Guid userId)
@@ -1678,11 +1743,14 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
                 Id = d.Id,
                 RegistrationId = d.RegistrationId,
                 FileUploadRecordId = d.FileUploadRecordId,
+                CentralDocumentRecordId = d.CentralDocumentRecordId,
+                CentralDocumentVersionId = d.CentralDocumentVersionId,
                 VirusScanStatus = d.FileUploadRecord?.VirusScanStatus,
                 DocumentType = d.DocumentType,
                 DocumentName = d.DocumentName,
-                FilePath = d.DocumentPath,
-                DocumentPath = d.DocumentPath,
+                FilePath = string.Empty,
+                DocumentPath = null,
+                InternalStoragePath = d.FileUploadRecord?.FilePath ?? d.DocumentPath,
                 FileSize = d.FileSize ?? 0,
                 MimeType = d.MimeType,
                 EvidenceRequirementCode = d.EvidenceRequirementCode,

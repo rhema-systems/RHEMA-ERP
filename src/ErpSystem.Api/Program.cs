@@ -370,7 +370,22 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseResponseCaching();
 
-// Enable static file serving for uploaded files
+// Legacy supplier evidence may still exist under the historical public upload
+// tree. Never let static-file middleware bypass DMS/application authorization.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments(
+            "/uploads/supplier-registration-evidence",
+            StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    await next();
+});
+
+// Enable static file serving for non-sensitive public assets.
 app.UseStaticFiles();
 
 app.UseRouting();

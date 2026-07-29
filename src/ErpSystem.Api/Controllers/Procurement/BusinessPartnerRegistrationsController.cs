@@ -3,6 +3,7 @@ using ErpSystem.Api.Services;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,6 +18,7 @@ public class BusinessPartnerRegistrationsController : ControllerBase
     private readonly IBusinessPartnerRegistrationService _registrationService;
     private readonly IProcurementSupplierApplicantAccessService _applicantAccessService;
     private readonly IControlledFileUploadService _controlledFiles;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly IFileStorageService _fileStorage;
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<BusinessPartnerRegistrationsController> _logger;
@@ -25,6 +27,7 @@ public class BusinessPartnerRegistrationsController : ControllerBase
         IBusinessPartnerRegistrationService registrationService,
         IProcurementSupplierApplicantAccessService applicantAccessService,
         IControlledFileUploadService controlledFiles,
+        ICentralDocumentRepositoryFileService centralDocuments,
         IFileStorageService fileStorage,
         ICurrentUserService currentUser,
         ILogger<BusinessPartnerRegistrationsController> logger)
@@ -32,6 +35,7 @@ public class BusinessPartnerRegistrationsController : ControllerBase
         _registrationService = registrationService;
         _applicantAccessService = applicantAccessService;
         _controlledFiles = controlledFiles;
+        _centralDocuments = centralDocuments;
         _fileStorage = fileStorage;
         _currentUser = currentUser;
         _logger = logger;
@@ -530,12 +534,18 @@ public class BusinessPartnerRegistrationsController : ControllerBase
     /// Gets all documents for a registration
     /// </summary>
     [HttpGet("{id:guid}/documents")]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<IEnumerable<BusinessPartnerRegistrationDocumentDto>>> GetDocuments(Guid id)
     {
         try
         {
-            var documents = await _registrationService.GetDocumentsAsync(id);
+            var documents = await _registrationService
+                .GetDocumentsForInternalReviewAsync(id, AuthenticatedUserId());
             return Ok(documents);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return AuthorizationProblem(ex);
         }
         catch (Exception ex)
         {
@@ -575,13 +585,43 @@ public class BusinessPartnerRegistrationsController : ControllerBase
                     TenantId = tenantId,
                     ActorUserId = userId,
                     ActorName = _currentUser.UserName,
-                    Category = "supplier-registration-evidence",
+                    Category = ControlledFileUploadCategories.DocumentManagement,
                     FileName = Path.GetFileName(file.FileName),
                     ContentType = file.ContentType,
                     FileSize = file.Length,
                     OpenReadStream = file.OpenReadStream
                 },
                 HttpContext.RequestAborted);
+
+            CentralDocumentRepositoryLink centralDocument;
+            try
+            {
+                centralDocument = await _centralDocuments.RegisterAsync(
+                    new CentralDocumentRepositoryRegistration
+                    {
+                        TenantId = tenantId,
+                        ActorUserId = userId,
+                        ActorName = _currentUser.UserName,
+                        FileUploadRecordId = upload.Record.Id,
+                        SourceModule = "Procurement",
+                        SourceLabel = "Supplier registration evidence",
+                        SourceEntityType = "BusinessPartnerRegistration",
+                        SourceRecordId = id,
+                        SourceRecordReference = id.ToString(),
+                        Title = upload.Record.OriginalFileName,
+                        DocumentType = documentType,
+                        MetadataTemplateCode = "PROC-SUP-EVD",
+                        AccessProfile = "Procurement restricted",
+                        ChangeSummary = "Supplier registration evidence uploaded by an internal reviewer."
+                    },
+                    HttpContext.RequestAborted);
+            }
+            catch
+            {
+                await _controlledFiles.DeleteAsync(
+                    tenantId, upload.Record.Id, userId, HttpContext.RequestAborted);
+                throw;
+            }
 
             BusinessPartnerRegistrationDocumentDto document;
             try
@@ -591,10 +631,12 @@ public class BusinessPartnerRegistrationsController : ControllerBase
                     new CreateBusinessPartnerDocumentDto
                     {
                         FileUploadRecordId = upload.Record.Id,
+                        CentralDocumentRecordId = centralDocument.DocumentRecordId,
+                        CentralDocumentVersionId = centralDocument.DocumentVersionId,
                         DocumentType = documentType,
                         DocumentName = upload.Record.OriginalFileName,
-                        DocumentPath = upload.Record.FilePath,
-                        FilePath = upload.Record.FilePath,
+                        DocumentPath = null,
+                        FilePath = string.Empty,
                         FileSize = upload.Record.FileSize,
                         MimeType = upload.Record.ContentType,
                         EvidenceRequirementCode = evidenceRequirementCode,
@@ -607,8 +649,11 @@ public class BusinessPartnerRegistrationsController : ControllerBase
             }
             catch
             {
-                await _controlledFiles.DeleteAsync(
-                    tenantId, upload.Record.Id, userId, HttpContext.RequestAborted);
+                await _centralDocuments.DeleteAsync(
+                    tenantId,
+                    centralDocument.DocumentRecordId,
+                    userId,
+                    HttpContext.RequestAborted);
                 throw;
             }
             return Created($"/api/procurement/business-partner-registrations/{id}/documents/{document.Id}", document);
@@ -742,21 +787,57 @@ public class BusinessPartnerRegistrationsController : ControllerBase
     /// Downloads a document
     /// </summary>
     [HttpGet("{id:guid}/documents/{documentId:guid}/download")]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<IActionResult> DownloadDocument(Guid id, Guid documentId)
     {
         try
         {
-            var document = await _registrationService.GetDocumentByIdAsync(id, documentId);
+            var document = await _registrationService
+                .GetDocumentForInternalDownloadAsync(
+                    id, documentId, AuthenticatedUserId());
             if (document == null)
             {
                 return NotFound("Document not found");
             }
 
-            var contentType = document.MimeType ?? "application/octet-stream";
-            var content = await _fileStorage.DownloadFileAsync(
-                document.FilePath,
+            ApplySensitiveDownloadHeaders();
+            if (document.CentralDocumentRecordId.HasValue &&
+                document.CentralDocumentVersionId.HasValue)
+            {
+                var centralContent = await _centralDocuments.OpenAsync(
+                    _currentUser.TenantId ??
+                        throw new UnauthorizedAccessException(
+                            "Tenant context is required."),
+                    document.CentralDocumentRecordId.Value,
+                    document.CentralDocumentVersionId.Value,
+                    HttpContext.RequestAborted);
+                if (centralContent is null)
+                {
+                    return NotFound("Document content was not found in the central DMS.");
+                }
+
+                return File(
+                    centralContent.Content,
+                    centralContent.ContentType,
+                    centralContent.FileName);
+            }
+
+            if (string.IsNullOrWhiteSpace(document.InternalStoragePath))
+            {
+                return NotFound("Document content was not found.");
+            }
+
+            var legacyContent = await _fileStorage.DownloadFileAsync(
+                document.InternalStoragePath,
                 document.FileUploadRecordId ?? document.Id);
-            return File(content, contentType, document.DocumentName);
+            return File(
+                legacyContent,
+                document.MimeType ?? "application/octet-stream",
+                document.DocumentName);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return AuthorizationProblem(ex);
         }
         catch (Exception ex)
         {
@@ -772,6 +853,13 @@ public class BusinessPartnerRegistrationsController : ControllerBase
             throw new UnauthorizedAccessException(
                 "A valid authenticated user is required.");
         return userId;
+    }
+
+    private void ApplySensitiveDownloadHeaders()
+    {
+        Response.Headers.CacheControl = "no-store, private";
+        Response.Headers.Pragma = "no-cache";
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
     }
 
     private ObjectResult AuthorizationProblem(UnauthorizedAccessException exception) =>

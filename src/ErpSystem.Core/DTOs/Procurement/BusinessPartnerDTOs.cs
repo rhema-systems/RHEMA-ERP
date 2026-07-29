@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Validation;
 
@@ -651,6 +652,12 @@ public class CreateBusinessPartnerDocumentDto
     public Guid? FileUploadRecordId { get; set; }
 
     [Required]
+    public Guid? CentralDocumentRecordId { get; set; }
+
+    [Required]
+    public Guid? CentralDocumentVersionId { get; set; }
+
+    [Required]
     [MaxLength(100)]
     public string DocumentType { get; set; } = string.Empty;
 
@@ -925,11 +932,15 @@ public class BusinessPartnerRegistrationDocumentDto
     public Guid Id { get; set; }
     public Guid RegistrationId { get; set; }
     public Guid? FileUploadRecordId { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
     public FileVirusScanStatus? VirusScanStatus { get; set; }
     public string DocumentType { get; set; } = string.Empty;
     public string DocumentName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
     public string? DocumentPath { get; set; } // Alias for FilePath
+    [JsonIgnore]
+    public string? InternalStoragePath { get; set; }
     public long FileSize { get; set; }
     public string? MimeType { get; set; }
     public string? EvidenceRequirementCode { get; set; }

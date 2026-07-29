@@ -9,6 +9,7 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
@@ -96,6 +97,8 @@ public sealed class SupplierApplicantLifecycleControllerTests
             captcha.Object,
             Mock.Of<IProcurementSupplierApplicantJwtService>(),
             Mock.Of<IControlledFileUploadService>(),
+            Mock.Of<ICentralDocumentRepositoryFileService>(),
+            Mock.Of<IFileStorageService>(),
             TransactionalUnitOfWork().Object,
             NullLogger<SupplierApplicantAccessController>.Instance)
         {
@@ -134,6 +137,8 @@ public sealed class SupplierApplicantLifecycleControllerTests
         var sessionReference = Guid.NewGuid();
         var fileRecordId = Guid.NewGuid();
         var documentId = Guid.NewGuid();
+        var centralDocumentRecordId = Guid.NewGuid();
+        var centralDocumentVersionId = Guid.NewGuid();
         var paymentMethodId = Guid.NewGuid();
         var session = new SupplierApplicantSessionDto
         {
@@ -212,6 +217,24 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 ChecksumSha256 = new string('a', 64),
                 PublicUrl = "/files/evidence.pdf"
             });
+        var centralDocuments = new Mock<ICentralDocumentRepositoryFileService>();
+        centralDocuments.Setup(item => item.RegisterAsync(
+                It.IsAny<CentralDocumentRepositoryRegistration>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CentralDocumentRepositoryLink
+            {
+                DocumentRecordId = centralDocumentRecordId,
+                DocumentVersionId = centralDocumentVersionId,
+                FileUploadRecordId = fileRecordId,
+                DocumentReference = "DMS-PROCUREMENT-TEST",
+                VersionNumber = "v1.0"
+            });
+        centralDocuments.Setup(item => item.DeleteAsync(
+                tenantId,
+                centralDocumentRecordId,
+                actorId,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         CreateBusinessPartnerDocumentDto? capturedDocument = null;
         var registrations = new Mock<IBusinessPartnerRegistrationService>();
@@ -220,6 +243,8 @@ public sealed class SupplierApplicantLifecycleControllerTests
             Id = documentId,
             RegistrationId = registrationId,
             FileUploadRecordId = fileRecordId,
+            CentralDocumentRecordId = centralDocumentRecordId,
+            CentralDocumentVersionId = centralDocumentVersionId,
             DocumentType = "TaxClearance",
             DocumentName = "evidence.pdf",
             FilePath = "supplier-registration-evidence/evidence.pdf",
@@ -244,7 +269,8 @@ public sealed class SupplierApplicantLifecycleControllerTests
         var unitOfWork = TransactionalUnitOfWork();
         var controller = Controller(
             access.Object, tokens.Object, registrations.Object,
-            controlledFiles.Object, sessionReference, unitOfWork.Object);
+            controlledFiles.Object, sessionReference, unitOfWork.Object,
+            centralDocuments.Object);
 
         var methodsResult = await controller.GetPaymentMethods(CancellationToken.None);
         methodsResult.Should().BeOfType<OkObjectResult>()
@@ -289,10 +315,12 @@ public sealed class SupplierApplicantLifecycleControllerTests
         capturedUpload.Should().NotBeNull();
         capturedUpload!.TenantId.Should().Be(tenantId);
         capturedUpload.ActorUserId.Should().Be(actorId);
-        capturedUpload.Category.Should().Be("supplier-registration-evidence");
+        capturedUpload.Category.Should().Be(ControlledFileUploadCategories.DocumentManagement);
         capturedUpload.FileName.Should().Be("evidence.pdf");
         capturedDocument.Should().NotBeNull();
         capturedDocument!.FileUploadRecordId.Should().Be(fileRecordId);
+        capturedDocument.CentralDocumentRecordId.Should().Be(centralDocumentRecordId);
+        capturedDocument.CentralDocumentVersionId.Should().Be(centralDocumentVersionId);
         capturedDocument.ChecksumSha256.Should().Be(new string('a', 64));
         capturedDocument.EvidenceRequirementCode.Should().Be("SUP-TAX");
         capturedDocument.ClassificationCode.Should().Be("Restricted");
@@ -304,8 +332,11 @@ public sealed class SupplierApplicantLifecycleControllerTests
         deleteResult.Should().BeOfType<NoContentResult>();
         registrations.Verify(item => item.DeleteDocumentAsync(
             registrationId, documentId, actorId), Times.Once);
-        controlledFiles.Verify(item => item.DeleteAsync(
-            tenantId, fileRecordId, actorId, It.IsAny<CancellationToken>()),
+        centralDocuments.Verify(item => item.DeleteAsync(
+            tenantId,
+            centralDocumentRecordId,
+            actorId,
+            It.IsAny<CancellationToken>()),
             Times.Once);
         unitOfWork.Verify(item => item.BeginTransactionAsync(
             It.IsAny<CancellationToken>()), Times.Once);
@@ -762,7 +793,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
         IBusinessPartnerRegistrationService registrations,
         IControlledFileUploadService controlledFiles,
         Guid sessionReference,
-        IUnitOfWork? unitOfWork = null) =>
+        IUnitOfWork? unitOfWork = null,
+        ICentralDocumentRepositoryFileService? centralDocuments = null,
+        IFileStorageService? fileStorage = null) =>
         new(
             access,
             tokens,
@@ -774,6 +807,8 @@ public sealed class SupplierApplicantLifecycleControllerTests
             Mock.Of<ICaptchaVerificationService>(),
             Mock.Of<IProcurementSupplierApplicantJwtService>(),
             controlledFiles,
+            centralDocuments ?? Mock.Of<ICentralDocumentRepositoryFileService>(),
+            fileStorage ?? Mock.Of<IFileStorageService>(),
             unitOfWork ?? TransactionalUnitOfWork().Object,
             NullLogger<SupplierApplicantAccessController>.Instance)
         {
