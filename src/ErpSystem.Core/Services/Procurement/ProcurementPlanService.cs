@@ -1523,18 +1523,20 @@ public class ProcurementPlanService : IProcurementPlanService
                 "The approved source does not belong to this procurement plan item.");
         }
         var lineTotal = planItem.EstimatedQuantity * planItem.EstimatedUnitPrice;
+        var sourceOrderLines = new[]
+        {
+            new ProcurementPurchaseOrderSourceOrderLine
+            {
+                InventoryItemId = planItem.InventoryItemId,
+                ItemDescription = planItem.ItemDescription,
+                OrderedQuantity = planItem.EstimatedQuantity,
+                UnitOfMeasure = planItem.UnitOfMeasure,
+                UnitPrice = planItem.EstimatedUnitPrice
+            }
+        };
         await _purchaseOrderSources.ValidateOrderAsync(
             approvedSource,
-            [
-                new ProcurementPurchaseOrderSourceOrderLine
-                {
-                    InventoryItemId = planItem.InventoryItemId,
-                    ItemDescription = planItem.ItemDescription,
-                    OrderedQuantity = planItem.EstimatedQuantity,
-                    UnitOfMeasure = planItem.UnitOfMeasure,
-                    UnitPrice = planItem.EstimatedUnitPrice
-                }
-            ],
+            sourceOrderLines,
             lineTotal,
             planItem.Currency,
             sourceCorrelationId);
@@ -1570,6 +1572,13 @@ public class ProcurementPlanService : IProcurementPlanService
         }
         try
         {
+            await _purchaseOrderSources.ReserveAsync(
+                approvedSource,
+                sourceOrderLines,
+                lineTotal,
+                planItem.Currency,
+                purchaseOrder.Id,
+                sourceCorrelationId);
             await _purchaseOrderRepository.AddAsync(purchaseOrder);
 
             // Create purchase order item

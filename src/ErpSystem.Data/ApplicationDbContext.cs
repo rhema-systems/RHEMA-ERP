@@ -9537,6 +9537,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 po.ProcurementSourceType,
                 po.ProcurementSourceId
             });
+            entity.HasIndex(po => new
+                {
+                    po.TenantId,
+                    po.ProcurementSourceType,
+                    po.ProcurementSourceId,
+                    po.BusinessPartnerId
+                },
+                "UX_PurchaseOrders_OneTimeApprovedSource")
+                .IsUnique()
+                .HasFilter("[ProcurementSourceType] IN (0, 1, 3)");
             entity.HasIndex(po => po.SourcingReleaseId);
             entity.HasIndex(po => po.SourcingCaseId);
             entity.HasIndex(po => po.AwardReadinessDecisionId);

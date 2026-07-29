@@ -64540,6 +64540,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "ProcurementSourceType", "ProcurementSourceId");
 
+                    b.HasIndex("TenantId", "ProcurementSourceType", "ProcurementSourceId", "BusinessPartnerId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PurchaseOrders_OneTimeApprovedSource")
+                        .HasFilter("[ProcurementSourceType] IN (0, 1, 3)");
+
                     b.ToTable("PurchaseOrders", null, t =>
                         {
                             t.HasCheckConstraint("CK_PurchaseOrders_ApprovedSourceLineage", "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND [SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL))");

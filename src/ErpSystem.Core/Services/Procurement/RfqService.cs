@@ -708,18 +708,19 @@ public class RfqService : IRfqService
                         awardCorrelationId);
 
                     var subTotal = group.Sum(x => x.QuoteItem.LineTotal);
+                    var sourceOrderLines = group.Select(line =>
+                        new ProcurementPurchaseOrderSourceOrderLine
+                        {
+                            InventoryItemId = line.Item.InventoryItemId,
+                            ItemDescription = line.Item.Description,
+                            OrderedQuantity = line.Item.Quantity,
+                            UnitOfMeasure =
+                                line.Item.UnitOfMeasure ?? "EA",
+                            UnitPrice = line.QuoteItem.UnitPrice
+                        }).ToList();
                     await _purchaseOrderSources.ValidateOrderAsync(
                         approvedSource,
-                        group.Select(line =>
-                            new ProcurementPurchaseOrderSourceOrderLine
-                            {
-                                InventoryItemId = line.Item.InventoryItemId,
-                                ItemDescription = line.Item.Description,
-                                OrderedQuantity = line.Item.Quantity,
-                                UnitOfMeasure =
-                                    line.Item.UnitOfMeasure ?? "EA",
-                                UnitPrice = line.QuoteItem.UnitPrice
-                            }).ToList(),
+                        sourceOrderLines,
                         subTotal,
                         rfq.Currency,
                         awardCorrelationId);
@@ -758,6 +759,13 @@ public class RfqService : IRfqService
                         CreatedById = _currentUserProvider.UserId
                     };
                     _purchaseOrderSources.Apply(po, approvedSource);
+                    await _purchaseOrderSources.ReserveAsync(
+                        approvedSource,
+                        sourceOrderLines,
+                        subTotal,
+                        rfq.Currency,
+                        po.Id,
+                        awardCorrelationId);
 
                     await _purchaseOrderRepository.CreatePurchaseOrderAsync(po);
                     await SaveChangesWithPurchaseOrderNumberRetryAsync(po);

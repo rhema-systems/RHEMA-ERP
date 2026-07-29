@@ -40,6 +40,15 @@ public interface IProcurementPurchaseOrderSourceService
         string correlationId,
         CancellationToken cancellationToken = default);
 
+    Task ReserveAsync(
+        ProcurementPurchaseOrderSourceResolution source,
+        IReadOnlyCollection<ProcurementPurchaseOrderSourceOrderLine> lines,
+        decimal totalAmount,
+        string? currencyCode,
+        Guid purchaseOrderId,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
     Task ClaimTenderAwardAsync(
         Guid tenderAwardId,
         PurchaseOrder purchaseOrder,

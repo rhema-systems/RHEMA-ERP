@@ -336,6 +336,17 @@ public sealed class ProcurementPurchaseOrderSourceService :
                     persistedLines,
                     purchaseOrder.TotalAmount,
                     purchaseOrder.Currency);
+                if (current.SourceType ==
+                    ProcurementPurchaseOrderSourceType.Contract)
+                {
+                    await EnsureContractCapacityAsync(
+                        current,
+                        persistedLines,
+                        purchaseOrder.TotalAmount,
+                        purchaseOrder.Currency,
+                        purchaseOrder.Id,
+                        cancellationToken);
+                }
             }
 
             purchaseOrder.SourceValidatedAtUtc = current.ValidatedAtUtc;
@@ -427,6 +438,128 @@ public sealed class ProcurementPurchaseOrderSourceService :
                     source.ApprovedAmount,
                     ApprovedLineCount = source.ApprovedLines.Count,
                     SubmittedLineCount = lines.Count,
+                    TotalAmount = totalAmount,
+                    CurrencyCode = currencyCode
+                },
+                cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task ReserveAsync(
+        ProcurementPurchaseOrderSourceResolution source,
+        IReadOnlyCollection<ProcurementPurchaseOrderSourceOrderLine> lines,
+        decimal totalAmount,
+        string? currencyCode,
+        Guid purchaseOrderId,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_unitOfWork.HasActiveTransaction)
+        {
+            throw Invalid(
+                "PO_SOURCE_RESERVATION_TRANSACTION_REQUIRED",
+                "Approved-source reservation must occur inside the purchase-order transaction.");
+        }
+        if (purchaseOrderId == Guid.Empty)
+        {
+            throw Invalid(
+                "PO_SOURCE_RESERVATION_ORDER_REQUIRED",
+                "A purchase-order identifier is required to reserve an approved source.");
+        }
+
+        var lockSupplier = source.SourceType ==
+            ProcurementPurchaseOrderSourceType.Contract
+                ? Guid.Empty
+                : source.BusinessPartnerId;
+        try
+        {
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"TDC:PO-SOURCE:{_currentUser.TenantId:N}:{(int)source.SourceType}:{source.SourceId:N}:{lockSupplier:N}",
+                    cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                throw Invalid(
+                    "PO_SOURCE_RESERVATION_BUSY",
+                    "Another purchase order is currently reserving this approved source. Retry after that transaction completes.");
+            }
+
+            var current = await ResolveCoreAsync(
+                source.SourceType,
+                source.SourceId,
+                source.BusinessPartnerId,
+                purchaseOrderId,
+                cancellationToken);
+            if (!string.Equals(
+                    current.SourceIntegrityHash,
+                    source.SourceIntegrityHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw Invalid(
+                    "PO_SOURCE_LINEAGE_CHANGED",
+                    "The approved source changed before its purchase-order capacity could be reserved.");
+            }
+
+            EnsureOrderMatchesSource(current, lines, totalAmount, currencyCode);
+            if (current.SourceType ==
+                ProcurementPurchaseOrderSourceType.Contract)
+            {
+                await EnsureContractCapacityAsync(
+                    current,
+                    lines,
+                    totalAmount,
+                    currencyCode,
+                    purchaseOrderId,
+                    cancellationToken);
+            }
+            else
+            {
+                await EnsureOneTimeSourceAvailableAsync(
+                    current.SourceType,
+                    current.SourceId,
+                    current.BusinessPartnerId,
+                    purchaseOrderId,
+                    cancellationToken);
+            }
+
+            await RecordAsync(
+                current.SourceId,
+                current.SourceReference,
+                "SourceCapacityReserved",
+                ProcurementControlEventResult.Allowed,
+                correlationId,
+                current.SourceType ==
+                    ProcurementPurchaseOrderSourceType.Contract
+                    ? "The proposed purchase order remains within the transactionally reserved contract line and value capacity."
+                    : "The one-time approved source is transactionally reserved for this purchase order and supplier.",
+                new
+                {
+                    current.SourceType,
+                    current.SourceId,
+                    current.BusinessPartnerId,
+                    PurchaseOrderId = purchaseOrderId,
+                    TotalAmount = totalAmount,
+                    CurrencyCode = currencyCode
+                },
+                cancellationToken);
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException exception)
+        {
+            await TryRecordDeniedAsync(
+                source.SourceId,
+                source.SourceReference,
+                "SourceCapacityReservationDenied",
+                correlationId,
+                exception,
+                new
+                {
+                    source.SourceType,
+                    source.SourceId,
+                    source.BusinessPartnerId,
+                    PurchaseOrderId = purchaseOrderId,
                     TotalAmount = totalAmount,
                     CurrencyCode = currencyCode
                 },
@@ -533,7 +666,11 @@ public sealed class ProcurementPurchaseOrderSourceService :
         sourceType switch
         {
             ProcurementPurchaseOrderSourceType.RfqAward =>
-                ResolveRfqAsync(sourceId, businessPartnerId, cancellationToken),
+                ResolveRfqAsync(
+                    sourceId,
+                    businessPartnerId,
+                    owningPurchaseOrderId,
+                    cancellationToken),
             ProcurementPurchaseOrderSourceType.TenderAward =>
                 ResolveTenderAwardAsync(
                     sourceId,
@@ -543,7 +680,11 @@ public sealed class ProcurementPurchaseOrderSourceService :
             ProcurementPurchaseOrderSourceType.Contract =>
                 ResolveContractAsync(sourceId, businessPartnerId, cancellationToken),
             ProcurementPurchaseOrderSourceType.ApprovedException =>
-                ResolveExceptionAsync(sourceId, businessPartnerId, cancellationToken),
+                ResolveExceptionAsync(
+                    sourceId,
+                    businessPartnerId,
+                    owningPurchaseOrderId,
+                    cancellationToken),
             _ => throw Invalid(
                 "PO_SOURCE_TYPE_INVALID",
                 "The purchase-order source type is not supported.")
@@ -552,6 +693,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
     private async Task<ProcurementPurchaseOrderSourceResolution> ResolveRfqAsync(
         Guid rfqId,
         Guid businessPartnerId,
+        Guid? owningPurchaseOrderId,
         CancellationToken cancellationToken)
     {
         var rfq = await _unitOfWork.Repository<RequestForQuotation>()
@@ -567,6 +709,12 @@ public sealed class ProcurementPurchaseOrderSourceService :
             throw Invalid("PO_RFQ_SOURCE_NOT_APPROVED",
                 $"The RFQ award source is not approved or awarded (current status: {rfq.Status}).");
         }
+        await EnsureOneTimeSourceAvailableAsync(
+            ProcurementPurchaseOrderSourceType.RfqAward,
+            rfq.Id,
+            businessPartnerId,
+            owningPurchaseOrderId,
+            cancellationToken);
         var link = await RequireSourceLinkAsync(
             rfq.SourcePurchaseRequisitionId, rfq.SourcingReleaseId,
             rfq.SourcingCaseId, cancellationToken);
@@ -789,6 +937,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
     private async Task<ProcurementPurchaseOrderSourceResolution> ResolveExceptionAsync(
         Guid controlId,
         Guid businessPartnerId,
+        Guid? owningPurchaseOrderId,
         CancellationToken cancellationToken)
     {
         var control = await _unitOfWork.Repository<ProcurementExceptionalSourcingControl>()
@@ -815,6 +964,12 @@ public sealed class ProcurementPurchaseOrderSourceService :
         if (bid.BusinessPartnerId != businessPartnerId)
             throw Invalid("PO_SOURCE_SUPPLIER_MISMATCH",
                 "The selected supplier is not the approved-exception awarded supplier.");
+        await EnsureOneTimeSourceAvailableAsync(
+            ProcurementPurchaseOrderSourceType.ApprovedException,
+            control.Id,
+            businessPartnerId,
+            owningPurchaseOrderId,
+            cancellationToken);
         var tender = await RequireTenderAsync(control.TenderId, cancellationToken);
         var link = await RequireSourceLinkAsync(
             tender.SourcePurchaseRequisitionId, tender.SourcingReleaseId,
@@ -1068,8 +1223,24 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 if (requisitionId.HasValue &&
                     resolution.PurchaseRequisitionId != requisitionId.Value)
                     continue;
+                var committedAmount = await PurchaseOrders
+                    .GetQueryable(item =>
+                        item.TenantId == _currentUser.TenantId &&
+                        item.ProcurementSourceType ==
+                            ProcurementPurchaseOrderSourceType.Contract &&
+                        item.ProcurementSourceId == contract.Id &&
+                        item.BusinessPartnerId == contract.BusinessPartnerId &&
+                        !item.IsDeleted &&
+                        item.Status != "Cancelled" &&
+                        item.Status != "Rejected")
+                    .SumAsync(item => item.TotalAmount, cancellationToken);
+                var remainingAmount = Math.Max(
+                    0m,
+                    contract.ContractValue - committedAmount);
+                if (remainingAmount <= 0)
+                    continue;
                 result.Add(await MapOptionAsync(
-                    resolution, contract.ContractValue, cancellationToken));
+                    resolution, remainingAmount, cancellationToken));
             }
             catch (ProcurementPurchaseOrderSourceValidationException)
             {
@@ -1102,7 +1273,10 @@ public sealed class ProcurementPurchaseOrderSourceService :
             try
             {
                 var resolution = await ResolveExceptionAsync(
-                    control.Id, bid.BusinessPartnerId, cancellationToken);
+                    control.Id,
+                    bid.BusinessPartnerId,
+                    null,
+                    cancellationToken);
                 if (requisitionId.HasValue &&
                     resolution.PurchaseRequisitionId != requisitionId.Value)
                     continue;
@@ -1359,6 +1533,117 @@ public sealed class ProcurementPurchaseOrderSourceService :
             currencyCode);
         if (!result.IsValid)
             throw Invalid(result.Code, result.Message);
+    }
+
+    private async Task EnsureOneTimeSourceAvailableAsync(
+        ProcurementPurchaseOrderSourceType sourceType,
+        Guid sourceId,
+        Guid businessPartnerId,
+        Guid? owningPurchaseOrderId,
+        CancellationToken cancellationToken)
+    {
+        if (!ProcurementPurchaseOrderSourceRules.IsOneTime(sourceType))
+        {
+            return;
+        }
+
+        // A one-time award remains consumed even when its purchase order is
+        // soft-deleted. Keep this lookup aligned with the unfiltered unique
+        // database index so reuse fails as a controlled domain outcome rather
+        // than surfacing as a duplicate-key exception during SaveChanges.
+        var existing = await PurchaseOrders.GetQueryableIncludingDeleted(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.ProcurementSourceType == sourceType &&
+                item.ProcurementSourceId == sourceId &&
+                item.BusinessPartnerId == businessPartnerId &&
+                (!owningPurchaseOrderId.HasValue ||
+                    item.Id != owningPurchaseOrderId.Value))
+            .AsNoTracking()
+            .OrderBy(item => item.CreatedAt)
+            .Select(item => new { item.Id, item.OrderNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (existing is null)
+            return;
+
+        throw Invalid(
+            "PO_ONE_TIME_SOURCE_ALREADY_CONSUMED",
+            $"The {sourceType} source has already been consumed by purchase order {existing.OrderNumber} ({existing.Id}) for this supplier.");
+    }
+
+    private async Task EnsureContractCapacityAsync(
+        ProcurementPurchaseOrderSourceResolution source,
+        IReadOnlyCollection<ProcurementPurchaseOrderSourceOrderLine> proposedLines,
+        decimal proposedTotalAmount,
+        string? currencyCode,
+        Guid purchaseOrderId,
+        CancellationToken cancellationToken)
+    {
+        var existingOrders = await PurchaseOrders.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.ProcurementSourceType ==
+                    ProcurementPurchaseOrderSourceType.Contract &&
+                item.ProcurementSourceId == source.SourceId &&
+                item.BusinessPartnerId == source.BusinessPartnerId &&
+                item.Id != purchaseOrderId &&
+                !item.IsDeleted &&
+                item.Status != "Cancelled" &&
+                item.Status != "Rejected")
+            .AsNoTracking()
+            .Select(item => new
+            {
+                item.Id,
+                item.OrderNumber,
+                item.TotalAmount,
+                item.Currency
+            })
+            .ToListAsync(cancellationToken);
+        if (existingOrders.Any(item =>
+                !string.Equals(
+                    item.Currency?.Trim(),
+                    source.CurrencyCode,
+                    StringComparison.OrdinalIgnoreCase)))
+        {
+            throw Invalid(
+                "PO_CONTRACT_CAPACITY_CURRENCY_INVALID",
+                "An existing purchase order reserved against this contract has a different currency and must be remediated.");
+        }
+
+        var existingIds = existingOrders.Select(item => item.Id).ToList();
+        var cumulativeLines = existingIds.Count == 0
+            ? new List<ProcurementPurchaseOrderSourceOrderLine>()
+            : await _unitOfWork.Repository<PurchaseOrderItem>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    existingIds.Contains(item.PurchaseOrderId) &&
+                    !item.IsDeleted)
+                .AsNoTracking()
+                .Select(item => new ProcurementPurchaseOrderSourceOrderLine
+                {
+                    InventoryItemId = item.InventoryItemId,
+                    ItemDescription = item.ItemDescription,
+                    OrderedQuantity = item.OrderedQuantity,
+                    UnitOfMeasure = item.UnitOfMeasure,
+                    UnitPrice = item.UnitPrice
+                })
+                .ToListAsync(cancellationToken);
+        cumulativeLines.AddRange(proposedLines);
+
+        var cumulativeTotal =
+            existingOrders.Sum(item => item.TotalAmount) + proposedTotalAmount;
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.Contract,
+            source.ApprovedLines,
+            cumulativeLines,
+            source.ApprovedAmount,
+            cumulativeTotal,
+            source.CurrencyCode,
+            currencyCode);
+        if (!result.IsValid)
+        {
+            throw Invalid(
+                "PO_CONTRACT_CAPACITY_EXCEEDED",
+                $"The cumulative non-cancelled purchase orders exceed the approved contract capacity. {result.Message}");
+        }
     }
 
     private async Task EnsureCapabilityAsync(

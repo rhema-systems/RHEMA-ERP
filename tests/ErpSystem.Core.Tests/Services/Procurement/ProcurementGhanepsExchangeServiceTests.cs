@@ -2033,6 +2033,10 @@ public sealed class ProcurementGhanepsExchangeServiceTests
             IsolationLevel isolationLevel,
             CancellationToken cancellationToken = default) =>
             inner.BeginTransactionAsync(isolationLevel, cancellationToken);
+        public Task AcquireTransactionLockAsync(
+            string resource,
+            CancellationToken cancellationToken = default) =>
+            inner.AcquireTransactionLockAsync(resource, cancellationToken);
         public Task CommitAsync(CancellationToken cancellationToken = default) =>
             inner.CommitAsync(cancellationToken);
         public Task RollbackAsync(CancellationToken cancellationToken = default) =>

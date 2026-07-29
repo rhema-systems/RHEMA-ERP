@@ -436,17 +436,18 @@ public class PurchaseOrdersController : ControllerBase
             var totalAmount = subtotal + taxAmount + totalAdditionalCost - discountAmount;
             var costAllocationMethod = NormalizeCostAllocationMethod(createDto.CostAllocationMethod);
             var costApportionmentBasis = NormalizeCostApportionmentBasis(createDto.CostApportionmentBasis);
+            var proposedSourceLines = createDto.Items.Select(item =>
+                new ProcurementPurchaseOrderSourceOrderLine
+                {
+                    InventoryItemId = item.InventoryItemId,
+                    ItemDescription = item.ItemDescription,
+                    OrderedQuantity = item.OrderedQuantity,
+                    UnitOfMeasure = item.UnitOfMeasure,
+                    UnitPrice = item.UnitPrice
+                }).ToList();
             await _purchaseOrderSources.ValidateOrderAsync(
                 approvedSource,
-                createDto.Items.Select(item =>
-                    new ProcurementPurchaseOrderSourceOrderLine
-                    {
-                        InventoryItemId = item.InventoryItemId,
-                        ItemDescription = item.ItemDescription,
-                        OrderedQuantity = item.OrderedQuantity,
-                        UnitOfMeasure = item.UnitOfMeasure,
-                        UnitPrice = item.UnitPrice
-                    }).ToList(),
+                proposedSourceLines,
                 totalAmount,
                 approvedSource.CurrencyCode,
                 correlationId,
@@ -497,6 +498,14 @@ public class PurchaseOrdersController : ControllerBase
                     IsolationLevel.Serializable,
                     HttpContext.RequestAborted);
             }
+            await _purchaseOrderSources.ReserveAsync(
+                approvedSource,
+                proposedSourceLines,
+                totalAmount,
+                approvedSource.CurrencyCode,
+                purchaseOrder.Id,
+                correlationId,
+                HttpContext.RequestAborted);
 
             await _purchaseOrderRepository.CreatePurchaseOrderAsync(purchaseOrder);
 
@@ -623,6 +632,7 @@ public class PurchaseOrdersController : ControllerBase
     [HttpPut("{id}")]
     public async Task<ActionResult<PurchaseOrderDetailDto>> UpdatePurchaseOrder(Guid id, [FromBody] CreatePurchaseOrderDto updateDto)
     {
+        var ownsSourceCapacityTransaction = false;
         try
         {
             if (!ModelState.IsValid)
@@ -691,17 +701,18 @@ public class PurchaseOrdersController : ControllerBase
             var totalAmount = subtotal + taxAmount + totalAdditionalCost - discountAmount;
             var costAllocationMethod = NormalizeCostAllocationMethod(updateDto.CostAllocationMethod);
             var costApportionmentBasis = NormalizeCostApportionmentBasis(updateDto.CostApportionmentBasis);
+            var proposedSourceLines = updateDto.Items.Select(item =>
+                new ProcurementPurchaseOrderSourceOrderLine
+                {
+                    InventoryItemId = item.InventoryItemId,
+                    ItemDescription = item.ItemDescription,
+                    OrderedQuantity = item.OrderedQuantity,
+                    UnitOfMeasure = item.UnitOfMeasure,
+                    UnitPrice = item.UnitPrice
+                }).ToList();
             await _purchaseOrderSources.ValidateOrderAsync(
                 currentSource,
-                updateDto.Items.Select(item =>
-                    new ProcurementPurchaseOrderSourceOrderLine
-                    {
-                        InventoryItemId = item.InventoryItemId,
-                        ItemDescription = item.ItemDescription,
-                        OrderedQuantity = item.OrderedQuantity,
-                        UnitOfMeasure = item.UnitOfMeasure,
-                        UnitPrice = item.UnitPrice
-                    }).ToList(),
+                proposedSourceLines,
                 totalAmount,
                 purchaseOrder.Currency,
                 sourceCorrelationId,
@@ -766,6 +777,22 @@ public class PurchaseOrdersController : ControllerBase
                 }
             }
 
+            ownsSourceCapacityTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsSourceCapacityTransaction)
+            {
+                await _unitOfWork.BeginTransactionAsync(
+                    IsolationLevel.Serializable,
+                    HttpContext.RequestAborted);
+            }
+            await _purchaseOrderSources.ReserveAsync(
+                currentSource,
+                proposedSourceLines,
+                totalAmount,
+                purchaseOrder.Currency,
+                purchaseOrder.Id,
+                sourceCorrelationId,
+                HttpContext.RequestAborted);
+
             purchaseOrder.OrderType = orderType;
 
             await _purchaseOrderRepository.UpdatePurchaseOrderAsync(purchaseOrder);
@@ -823,7 +850,9 @@ public class PurchaseOrdersController : ControllerBase
             }
 
             // CRITICAL: Save changes to database
-            await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.SaveChangesAsync(HttpContext.RequestAborted);
+            if (ownsSourceCapacityTransaction)
+                await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
 
             // Return the updated purchase order
             var updatedPurchaseOrder = await GetPurchaseOrderDetailDto(purchaseOrder.Id);
@@ -842,6 +871,22 @@ public class PurchaseOrdersController : ControllerBase
         {
             _logger.LogError(ex, "Error updating purchase order {PurchaseOrderId}", id);
             return StatusCode(500, "An error occurred while updating the purchase order");
+        }
+        finally
+        {
+            if (ownsSourceCapacityTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                try
+                {
+                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(
+                        rollbackException,
+                        "Failed to roll back purchase-order source capacity reservation");
+                }
+            }
         }
     }
 

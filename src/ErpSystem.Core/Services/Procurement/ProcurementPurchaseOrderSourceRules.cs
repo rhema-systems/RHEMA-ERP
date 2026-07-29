@@ -24,6 +24,12 @@ public static class ProcurementPurchaseOrderSourceRules
             or ProcurementPurchaseOrderSourceType.Contract
             or ProcurementPurchaseOrderSourceType.ApprovedException;
 
+    public static bool IsOneTime(
+        ProcurementPurchaseOrderSourceType sourceType) =>
+        sourceType is ProcurementPurchaseOrderSourceType.RfqAward
+            or ProcurementPurchaseOrderSourceType.TenderAward
+            or ProcurementPurchaseOrderSourceType.ApprovedException;
+
     public static bool RequiresRevalidation(string? targetStatus) =>
         targetStatus is not null &&
         (targetStatus.Equals("Submitted", StringComparison.OrdinalIgnoreCase) ||
@@ -149,10 +155,7 @@ public static class ProcurementPurchaseOrderSourceRules
             }
         }
 
-        var exactAward = sourceType is
-            ProcurementPurchaseOrderSourceType.RfqAward or
-            ProcurementPurchaseOrderSourceType.TenderAward or
-            ProcurementPurchaseOrderSourceType.ApprovedException;
+        var exactAward = IsOneTime(sourceType);
 
         foreach (var (key, submitted) in submittedGroups)
         {

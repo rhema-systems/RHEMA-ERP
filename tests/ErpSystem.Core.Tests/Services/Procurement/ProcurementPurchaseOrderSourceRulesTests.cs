@@ -30,6 +30,19 @@ public sealed class ProcurementPurchaseOrderSourceRulesTests
     }
 
     [Theory]
+    [InlineData(ProcurementPurchaseOrderSourceType.RfqAward, true)]
+    [InlineData(ProcurementPurchaseOrderSourceType.TenderAward, true)]
+    [InlineData(ProcurementPurchaseOrderSourceType.ApprovedException, true)]
+    [InlineData(ProcurementPurchaseOrderSourceType.Contract, false)]
+    public void OneTimeSourcesAreExplicit(
+        ProcurementPurchaseOrderSourceType sourceType,
+        bool expected)
+    {
+        ProcurementPurchaseOrderSourceRules.IsOneTime(sourceType)
+            .Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData("Submitted")]
     [InlineData("Pending Approval")]
     [InlineData("Approved")]
@@ -222,6 +235,46 @@ public sealed class ProcurementPurchaseOrderSourceRulesTests
             "GHS");
         excess.IsValid.Should().BeFalse();
         excess.Code.Should().Be("PO_SOURCE_LINE_QUANTITY_MISMATCH");
+    }
+
+    [Fact]
+    public void ContractCumulativeOrdersCannotExceedAnApprovedLine()
+    {
+        var itemId = Guid.NewGuid();
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.Contract,
+            [ApprovedLine(itemId, "Contract item", 10m, 20m)],
+            [
+                OrderLine(itemId, "Contract item", 6m, 20m),
+                OrderLine(itemId, "Contract item", 5m, 20m)
+            ],
+            300m,
+            220m,
+            "GHS",
+            "GHS");
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_SOURCE_LINE_QUANTITY_MISMATCH");
+    }
+
+    [Fact]
+    public void ContractCumulativeOrdersCannotExceedTheContractValue()
+    {
+        var itemId = Guid.NewGuid();
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.Contract,
+            [ApprovedLine(itemId, "Contract item", 10m, 20m)],
+            [
+                OrderLine(itemId, "Contract item", 4m, 20m),
+                OrderLine(itemId, "Contract item", 4m, 20m)
+            ],
+            150m,
+            160m,
+            "GHS",
+            "GHS");
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_SOURCE_AMOUNT_EXCEEDED");
     }
 
     [Fact]

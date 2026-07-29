@@ -495,9 +495,7 @@ public class TenderAwardService : ITenderAwardService
                 }
             }
 
-            await _purchaseOrderSources.ValidateOrderAsync(
-                approvedSource,
-                bidItems.Select(item =>
+            var sourceOrderLines = bidItems.Select(item =>
                 {
                     negotiatedItemsMap.TryGetValue(item.Id, out var negotiatedItem);
                     return new ProcurementPurchaseOrderSourceOrderLine
@@ -515,7 +513,10 @@ public class TenderAwardService : ITenderAwardService
                             negotiatedItem?.NegotiatedUnitPrice ??
                             item.UnitPrice
                     };
-                }).ToList(),
+                }).ToList();
+            await _purchaseOrderSources.ValidateOrderAsync(
+                approvedSource,
+                sourceOrderLines,
                 award.AwardedAmount,
                 award.Currency ?? tender.Currency ?? "USD",
                 sourceCorrelationId);
@@ -576,6 +577,13 @@ public class TenderAwardService : ITenderAwardService
                 await _unitOfWork.BeginTransactionAsync(
                     IsolationLevel.Serializable);
             }
+            await _purchaseOrderSources.ReserveAsync(
+                approvedSource,
+                sourceOrderLines,
+                award.AwardedAmount,
+                award.Currency ?? tender.Currency ?? "USD",
+                purchaseOrder.Id,
+                sourceCorrelationId);
 
             await _purchaseOrderRepository.CreatePurchaseOrderAsync(purchaseOrder);
 
