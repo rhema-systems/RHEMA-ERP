@@ -189,6 +189,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
                 RegistrationId = fixture.Registration.Id
             },
             "issue-for-rotation");
+        var activeSession = await fixture.SeedApplicantSessionAsync(issued.Token.Id);
 
         var invalid = () => fixture.Service.ReissueAsync(
             issued.Token.Id,
@@ -216,6 +217,14 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         rotated.PlaintextToken.Should().NotBe(issued.PlaintextToken);
         rotated.Token.Generation.Should().Be(2);
         rotated.Token.ExpiredAtUtc.Should().BeNull();
+        var revokedSession = await fixture.Context.ProcurementSupplierApplicantSessions
+            .SingleAsync(item => item.Id == activeSession.Id);
+        revokedSession.Status.Should()
+            .Be(ProcurementSupplierApplicantSessionStatus.Revoked);
+        revokedSession.RevokedAtUtc.Should().NotBeNull();
+        revokedSession.RevocationReason.Should().Be("Application token reissued.");
+        revokedSession.LastModifiedById.Should().Be(fixture.UserId);
+        revokedSession.IntegrityHash.Should().HaveLength(64);
 
         var replay = await fixture.Service.ReissueAsync(
             issued.Token.Id,
@@ -227,6 +236,42 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             "rotate-valid");
         replay.Token.Generation.Should().Be(2);
         replay.PlaintextToken.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ApplicantBindingAuthorizesRetainedRegistrationWithoutReplacingAuditCreator()
+    {
+        await using var fixture = new Fixture(paid: false);
+        var originalAuditCreator = Guid.NewGuid();
+        fixture.Registration.CreatedById = originalAuditCreator;
+        await fixture.Context.SaveChangesAsync();
+        var issued = await fixture.Service.IssueAsync(
+            new IssueProcurementSupplierOnboardingTokenRequest
+            {
+                RegistrationId = fixture.Registration.Id
+            },
+            "issue-retained-registration");
+        var session = await fixture.SeedApplicantSessionAsync(issued.Token.Id);
+        fixture.UseApplicantSession(
+            fixture.Registration.Id,
+            issued.Token.Id,
+            session.SessionReference);
+
+        var retained = await fixture.Service.GetForRegistrationAsync(
+            fixture.Registration.Id);
+
+        retained.Should().NotBeNull();
+        retained!.Id.Should().Be(issued.Token.Id);
+        fixture.Registration.CreatedById.Should().Be(originalAuditCreator);
+
+        fixture.UseApplicantSession(
+            Guid.NewGuid(),
+            issued.Token.Id,
+            session.SessionReference);
+        var mismatchedClaim = () => fixture.Service.GetForRegistrationAsync(
+            fixture.Registration.Id);
+        await mismatchedClaim.Should()
+            .ThrowAsync<ProcurementSupplierOnboardingTokenAuthorizationException>();
     }
 
     [Fact]
@@ -442,6 +487,8 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         private Guid _tenantId;
         private Guid _userId;
         private bool _external;
+        private string _authenticationProvider = "Local";
+        private readonly Dictionary<string, string> _claims = new();
         private readonly UnitOfWork _unitOfWork;
 
         public Fixture(bool paid)
@@ -575,6 +622,9 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             current.SetupGet(item => item.IsExternalUser).Returns(() => _external);
             current.SetupGet(item => item.Username).Returns("supplier.controls");
             current.SetupGet(item => item.FullName).Returns("Supplier Controls");
+            current.SetupGet(item => item.AuthenticationProvider)
+                .Returns(() => _authenticationProvider);
+            current.SetupGet(item => item.Claims).Returns(_claims);
             current.SetupGet(item => item.Roles).Returns(() =>
                 _external ? ["External"] : ["TenantAdmin"]);
             current.Setup(item => item.HasRole(It.IsAny<string>()))
@@ -687,6 +737,57 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         public void SetExternal(bool value) => _external = value;
         public void SetTenant(Guid value) => _tenantId = value;
         public void SetUser(Guid value) => _userId = value;
+        public void UseApplicantSession(
+            Guid registrationId,
+            Guid tokenId,
+            Guid sessionReference)
+        {
+            _external = true;
+            _authenticationProvider = "ApplicantToken";
+            _claims["supplier_applicant_registration"] = registrationId.ToString();
+            _claims["supplier_applicant_token"] = tokenId.ToString();
+            _claims["supplier_applicant_session"] = sessionReference.ToString();
+        }
+
+        public async Task<ProcurementSupplierApplicantSession> SeedApplicantSessionAsync(
+            Guid tokenId)
+        {
+            var access = new ProcurementSupplierApplicantAccess
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                RegistrationId = Registration.Id,
+                TokenId = tokenId,
+                VerifiedChannel =
+                    ProcurementSupplierApplicantVerificationChannel.Email,
+                VerifiedContactHashSha256 = new string('a', 64),
+                VerifiedContactMasked = "ap***@tdc.test",
+                VerifiedContact = Registration.ApplicantEmail!,
+                VerifiedAtUtc = DateTime.UtcNow,
+                Status =
+                    ProcurementSupplierApplicantAccessStatus.ApplicationInProgress,
+                CreatedById = UserId,
+                IntegrityHash = new string('b', 64),
+                RowVersion = Guid.NewGuid().ToByteArray()
+            };
+            var session = new ProcurementSupplierApplicantSession
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                ApplicantAccessId = access.Id,
+                SessionReference = Guid.NewGuid(),
+                Status = ProcurementSupplierApplicantSessionStatus.Active,
+                IssuedAtUtc = DateTime.UtcNow,
+                ExpiresAtUtc = DateTime.UtcNow.AddHours(1),
+                CreatedById = UserId,
+                IntegrityHash = new string('c', 64),
+                RowVersion = Guid.NewGuid().ToByteArray()
+            };
+            Context.AddRange(access, session);
+            await Context.SaveChangesAsync();
+            return session;
+        }
+
         public Task BeginTransactionAsync() => _unitOfWork.BeginTransactionAsync();
         public Task RollbackAsync() => _unitOfWork.RollbackAsync();
         public void SeedSystemActor()

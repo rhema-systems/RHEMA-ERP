@@ -74,6 +74,10 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         _unitOfWork.Repository<ProcurementSupplierOnboardingPayment>();
     private IGenericRepository<ProcurementSupplierOnboardingExemption> Exemptions =>
         _unitOfWork.Repository<ProcurementSupplierOnboardingExemption>();
+    private IGenericRepository<ProcurementSupplierApplicantAccess> ApplicantAccesses =>
+        _unitOfWork.Repository<ProcurementSupplierApplicantAccess>();
+    private IGenericRepository<ProcurementSupplierApplicantSession> ApplicantSessions =>
+        _unitOfWork.Repository<ProcurementSupplierApplicantSession>();
     private IGenericRepository<BusinessPartnerRegistration> Registrations =>
         _unitOfWork.Repository<BusinessPartnerRegistration>();
     private IGenericRepository<ProcurementConfigurationProfile> ConfigurationProfiles =>
@@ -159,7 +163,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         CancellationToken cancellationToken = default)
     {
         var entity = await LoadAsync(id, tracked: false, cancellationToken);
-        EnsureReader(entity);
+        await EnsureReaderAsync(entity, cancellationToken);
         return Map(entity);
     }
 
@@ -175,7 +179,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         if (registration is null)
             throw NotFound("SUPPLIER_ONBOARDING_REGISTRATION_NOT_FOUND",
                 "The supplier registration was not found for this tenant.");
-        EnsureRegistrationReadAccess(registration);
+        await EnsureRegistrationReadAccessAsync(registration, cancellationToken);
 
         var token = await TokenQuery()
             .Include(item => item.Registration)
@@ -190,7 +194,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         GetPaymentMethodsAsync(Guid tokenId, CancellationToken cancellationToken = default)
     {
         var token = await LoadAsync(tokenId, tracked: false, cancellationToken);
-        EnsureReader(token);
+        await EnsureReaderAsync(token, cancellationToken);
         var allowed = Deserialize<List<string>>(token.PaymentChannelsJson)
             .Select(NormalizeCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return await PaymentMethods.GetQueryable(item =>
@@ -220,7 +224,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 item.CreationCorrelationId == correlation, cancellationToken);
         if (replay is not null)
         {
-            EnsureReader(replay);
+            await EnsureReaderAsync(replay, cancellationToken);
             return new ProcurementSupplierOnboardingTokenIssueResultDto { Token = Map(replay) };
         }
 
@@ -460,7 +464,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
     {
         var correlation = NormalizeCorrelation(correlationId);
         var entity = await LoadAsync(id, tracked: true, cancellationToken);
-        EnsureReader(entity);
+        await EnsureReaderAsync(entity, cancellationToken);
         await EnsureApplicantOwnerOrCapabilityAsync(
             entity.Registration, ManagePermission, entity.TokenReference,
             correlation, cancellationToken);
@@ -484,10 +488,37 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         Capture(entity);
         await ExecuteAsync(async () =>
         {
+            var activeSessions = await ApplicantSessions.GetQueryable(item =>
+                    item.TenantId == entity.TenantId &&
+                    !item.IsDeleted &&
+                    item.Status == ProcurementSupplierApplicantSessionStatus.Active &&
+                    item.ApplicantAccess.TenantId == entity.TenantId &&
+                    !item.ApplicantAccess.IsDeleted &&
+                    item.ApplicantAccess.TokenId == entity.Id)
+                .ToListAsync(cancellationToken);
+            foreach (var session in activeSessions)
+            {
+                session.Status = ProcurementSupplierApplicantSessionStatus.Revoked;
+                session.RevokedAtUtc = now;
+                session.RevocationReason = "Application token reissued.";
+                Touch(session, now);
+                Capture(session);
+                await ApplicantSessions.UpdateAsync(session);
+            }
+
             await Tokens.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordEventAsync(entity, "Reissued",
-                ProcurementControlEventResult.Succeeded, before, Snapshot(entity),
+                ProcurementControlEventResult.Succeeded, before, new
+                {
+                    Token = Snapshot(entity),
+                    RevokedApplicantSessions = activeSessions.Select(item => new
+                    {
+                        item.SessionReference,
+                        item.RevokedAtUtc,
+                        item.RevocationReason
+                    }).ToList()
+                },
                 request.Reason, [], correlation, now, cancellationToken);
         }, cancellationToken);
         return new ProcurementSupplierOnboardingTokenIssueResultDto
@@ -505,7 +536,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
     {
         var correlation = NormalizeCorrelation(correlationId);
         var entity = await LoadAsync(id, tracked: true, cancellationToken);
-        EnsureReader(entity);
+        await EnsureReaderAsync(entity, cancellationToken);
         await EnsureApplicantOwnerOrCapabilityAsync(
             entity.Registration, ManagePermission, entity.TokenReference,
             correlation, cancellationToken);
@@ -713,7 +744,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
     {
         var correlation = NormalizeCorrelation(correlationId);
         var entity = await LoadAsync(id, tracked: true, cancellationToken);
-        EnsureReader(entity);
+        await EnsureReaderAsync(entity, cancellationToken);
         await EnsureApplicantOwnerOrCapabilityAsync(
             entity.Registration, ManagePermission, entity.TokenReference,
             correlation, cancellationToken);
@@ -1220,7 +1251,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         EnsureAuthenticatedTenant();
         if (_currentUser.IsExternalUser)
         {
-            EnsureRegistrationReader(registration);
+            await EnsureRegistrationReaderAsync(registration, cancellationToken);
             return;
         }
         await EnsureCapabilityAsync(
@@ -1247,35 +1278,97 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             throw new ProcurementSupplierOnboardingTokenAuthorizationException(decision.Message);
     }
 
-    private void EnsureReader(ProcurementSupplierOnboardingToken token)
+    private async Task EnsureReaderAsync(
+        ProcurementSupplierOnboardingToken token,
+        CancellationToken cancellationToken)
     {
         EnsureAuthenticatedTenant();
         if (_currentUser.IsExternalUser)
         {
-            EnsureRegistrationReader(token.Registration);
+            await EnsureRegistrationReaderAsync(token.Registration, cancellationToken);
             return;
         }
         EnsureInternalReader();
     }
 
-    private void EnsureRegistrationReader(BusinessPartnerRegistration registration)
+    private async Task EnsureRegistrationReaderAsync(
+        BusinessPartnerRegistration registration,
+        CancellationToken cancellationToken)
     {
         if (registration.TenantId != _currentUser.TenantId)
             throw new ProcurementSupplierOnboardingTokenAuthorizationException(
                 "The supplier registration belongs to another tenant.");
-        if (_currentUser.IsExternalUser && registration.CreatedById != _currentUser.UserId)
+
+        if (!_currentUser.IsExternalUser)
+            return;
+
+        if (string.Equals(
+                _currentUser.AuthenticationProvider,
+                "ApplicantToken",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            if (await HasRestrictedApplicantAccessAsync(registration, cancellationToken))
+                return;
+            throw new ProcurementSupplierOnboardingTokenAuthorizationException(
+                "Supplier applicants can access only their bound application token.");
+        }
+
+        if (registration.CreatedById != _currentUser.UserId)
             throw new ProcurementSupplierOnboardingTokenAuthorizationException(
                 "Supplier applicants can access only their own application-bound token.");
     }
 
-    private void EnsureRegistrationReadAccess(BusinessPartnerRegistration registration)
+    private async Task EnsureRegistrationReadAccessAsync(
+        BusinessPartnerRegistration registration,
+        CancellationToken cancellationToken)
     {
         if (_currentUser.IsExternalUser)
         {
-            EnsureRegistrationReader(registration);
+            await EnsureRegistrationReaderAsync(registration, cancellationToken);
             return;
         }
         EnsureInternalReader();
+    }
+
+    private async Task<bool> HasRestrictedApplicantAccessAsync(
+        BusinessPartnerRegistration registration,
+        CancellationToken cancellationToken)
+    {
+        if (_currentUser.Claims is null ||
+            !_currentUser.Claims.TryGetValue(
+                "supplier_applicant_registration",
+                out var registrationClaim) ||
+            !Guid.TryParse(registrationClaim, out var claimedRegistrationId) ||
+            claimedRegistrationId != registration.Id ||
+            !_currentUser.Claims.TryGetValue(
+                "supplier_applicant_token",
+                out var tokenClaim) ||
+            !Guid.TryParse(tokenClaim, out var claimedTokenId) ||
+            !_currentUser.Claims.TryGetValue(
+                "supplier_applicant_session",
+                out var sessionClaim) ||
+            !Guid.TryParse(sessionClaim, out var claimedSessionReference))
+        {
+            return false;
+        }
+
+        var now = DateTime.UtcNow;
+        return await ApplicantAccesses.GetQueryable(item =>
+                item.TenantId == registration.TenantId &&
+                item.RegistrationId == registration.Id &&
+                item.TokenId == claimedTokenId &&
+                item.CreatedById == _currentUser.UserId &&
+                item.Status ==
+                    ProcurementSupplierApplicantAccessStatus.ApplicationInProgress &&
+                !item.TerminalAtUtc.HasValue &&
+                !item.IsDeleted &&
+                item.Sessions.Any(session =>
+                    session.TenantId == registration.TenantId &&
+                    session.SessionReference == claimedSessionReference &&
+                    session.Status == ProcurementSupplierApplicantSessionStatus.Active &&
+                    session.ExpiresAtUtc > now &&
+                    !session.IsDeleted))
+            .AnyAsync(cancellationToken);
     }
 
     private void EnsureInternalReader()
@@ -1627,6 +1720,21 @@ public sealed class ProcurementSupplierOnboardingTokenService :
     private static void Capture(ProcurementSupplierOnboardingExemption entity) =>
         entity.IntegrityHash = Hash(Serialize(ExemptionSnapshot(entity)));
 
+    private static void Capture(ProcurementSupplierApplicantSession entity) =>
+        entity.IntegrityHash = Hash(Serialize(new
+        {
+            entity.Id,
+            entity.TenantId,
+            entity.ApplicantAccessId,
+            entity.SessionReference,
+            entity.Status,
+            entity.IssuedAtUtc,
+            entity.ExpiresAtUtc,
+            entity.LastUsedAtUtc,
+            entity.RevokedAtUtc,
+            entity.RevocationReason
+        }));
+
     private void Touch(
         ProcurementSupplierOnboardingToken entity,
         string operation,
@@ -1663,6 +1771,14 @@ public sealed class ProcurementSupplierOnboardingTokenService :
     {
         entity.LastOperation = operation;
         entity.LastOperationCorrelationId = correlation;
+        entity.UpdatedAt = now;
+        entity.UpdatedBy = ActorName;
+        entity.LastModifiedById = _currentUser.UserId;
+        entity.RowVersion = Guid.NewGuid().ToByteArray();
+    }
+
+    private void Touch(ProcurementSupplierApplicantSession entity, DateTime now)
+    {
         entity.UpdatedAt = now;
         entity.UpdatedBy = ActorName;
         entity.LastModifiedById = _currentUser.UserId;
