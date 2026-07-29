@@ -1756,23 +1756,28 @@ public class WorkflowEngine : IWorkflowEngine
         var errors = new List<string>();
         var taskConfig = config?.TaskConfig;
         var requiresDocument = taskConfig?.RequiresDocument == true ||
+            taskConfig?.DocumentRequirements?.Any(requirement => requirement.IsRequired) == true ||
             string.Equals(taskConfig?.TaskActionType, "document", StringComparison.OrdinalIgnoreCase);
         var attachments = GetWorkflowTaskAttachments(existingResultData);
 
         if (requiresDocument)
         {
-            var requirementKey = taskConfig?.DocumentRequirementKey?.Trim();
-            var hasRequiredDocument = attachments.Any(attachment =>
-                string.IsNullOrWhiteSpace(requirementKey) ||
-                string.Equals(attachment.RequirementKey, requirementKey, StringComparison.OrdinalIgnoreCase));
-
-            if (!hasRequiredDocument)
+            // Enforce every required stage-level document before the task can advance.
+            var requirements = GetTaskDocumentRequirements(taskConfig);
+            foreach (var requirement in requirements.Where(requirement => requirement.IsRequired))
             {
-                var configuredDocumentName = taskConfig?.DocumentName?.Trim();
-                var documentName = string.IsNullOrWhiteSpace(configuredDocumentName)
-                    ? "the required document"
-                    : configuredDocumentName;
-                errors.Add($"Attach {documentName} before completing this workflow task.");
+                var requirementKey = requirement.RequirementKey.Trim();
+                var hasRequiredDocument = attachments.Any(attachment =>
+                    string.IsNullOrWhiteSpace(requirementKey) ||
+                    string.Equals(attachment.RequirementKey, requirementKey, StringComparison.OrdinalIgnoreCase));
+
+                if (!hasRequiredDocument)
+                {
+                    var documentName = string.IsNullOrWhiteSpace(requirement.DocumentName)
+                        ? "the required document"
+                        : requirement.DocumentName.Trim();
+                    errors.Add($"Attach {documentName} before completing this workflow task.");
+                }
             }
         }
 
@@ -1786,6 +1791,88 @@ public class WorkflowEngine : IWorkflowEngine
         }
 
         return errors;
+    }
+
+    private static List<WorkflowDocumentRequirementDto> GetTaskDocumentRequirements(WorkflowTaskConfigDto? taskConfig)
+    {
+        if (taskConfig == null)
+        {
+            return new List<WorkflowDocumentRequirementDto>();
+        }
+
+        var configured = taskConfig.DocumentRequirements?
+            .Where(requirement =>
+                requirement != null &&
+                (!string.IsNullOrWhiteSpace(requirement.DocumentName) ||
+                 !string.IsNullOrWhiteSpace(requirement.RequirementKey)))
+            .Select((requirement, index) => new WorkflowDocumentRequirementDto
+            {
+                Id = string.IsNullOrWhiteSpace(requirement.Id) ? $"document-{index + 1}" : requirement.Id,
+                RequirementKey = string.IsNullOrWhiteSpace(requirement.RequirementKey)
+                    ? BuildRequirementKey(requirement.DocumentName, index)
+                    : requirement.RequirementKey.Trim(),
+                DocumentName = string.IsNullOrWhiteSpace(requirement.DocumentName)
+                    ? $"Document {index + 1}"
+                    : requirement.DocumentName.Trim(),
+                DocumentType = string.IsNullOrWhiteSpace(requirement.DocumentType) ? null : requirement.DocumentType.Trim(),
+                IsRequired = requirement.IsRequired,
+            })
+            .ToList() ?? new List<WorkflowDocumentRequirementDto>();
+
+        if (configured.Count > 0)
+        {
+            if ((taskConfig.RequiresDocument ||
+                    string.Equals(taskConfig.TaskActionType, "document", StringComparison.OrdinalIgnoreCase)) &&
+                configured.All(requirement => !requirement.IsRequired))
+            {
+                configured.Add(new WorkflowDocumentRequirementDto
+                {
+                    Id = "document-required",
+                    RequirementKey = string.Empty,
+                    DocumentName = string.IsNullOrWhiteSpace(taskConfig.DocumentName)
+                        ? "at least one stage document"
+                        : taskConfig.DocumentName.Trim(),
+                    IsRequired = true,
+                });
+            }
+
+            return configured;
+        }
+
+        if (taskConfig.RequiresDocument ||
+            string.Equals(taskConfig.TaskActionType, "document", StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrWhiteSpace(taskConfig.DocumentName))
+        {
+            return new List<WorkflowDocumentRequirementDto>
+            {
+                new()
+                {
+                    Id = "document-1",
+                    RequirementKey = string.IsNullOrWhiteSpace(taskConfig.DocumentRequirementKey)
+                        ? string.Empty
+                        : taskConfig.DocumentRequirementKey.Trim(),
+                    DocumentName = string.IsNullOrWhiteSpace(taskConfig.DocumentName)
+                        ? "Required document"
+                        : taskConfig.DocumentName.Trim(),
+                    IsRequired = true,
+                },
+            };
+        }
+
+        return configured;
+    }
+
+    private static string BuildRequirementKey(string? value, int index)
+    {
+        var source = string.IsNullOrWhiteSpace(value) ? $"document-{index + 1}" : value.Trim().ToLowerInvariant();
+        var chars = source.Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray();
+        var key = new string(chars).Trim('-');
+        while (key.Contains("--", StringComparison.Ordinal))
+        {
+            key = key.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        return string.IsNullOrWhiteSpace(key) ? $"document-{index + 1}" : key;
     }
 
     private static List<WorkflowTaskAttachmentDto> GetWorkflowTaskAttachments(string? resultData)
@@ -1876,6 +1963,19 @@ public class WorkflowEngine : IWorkflowEngine
             {
                 return assignedId;
             }
+
+            // Role-owned workflow tasks are intentionally unassigned to a specific user.
+            // This keeps the stage available to every user in the configured role instead
+            // of carrying forward the actor who completed the previous step.
+            if (stepDefinition.AssignmentType.Equals("Role", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(stepDefinition.RequiredRole))
+        {
+            return null;
         }
 
         return defaultUserId;

@@ -127,6 +127,30 @@ export default function ProjectOperationsPage() {
         <Card><CardHeader className="pb-2"><CardDescription>Active Initiatives</CardDescription><CardTitle>{stats.activeInitiativeCount}</CardTitle></CardHeader></Card>
       </div>
 
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <CardTitle>Estate Callback</CardTitle>
+              <Badge variant="outline" className="mt-3 w-fit">
+                Source: Estate Land Bank - Project Management - Estate / Property Management
+              </Badge>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="outline" size="sm">
+                <Link href="/estate/land-management">Estate Land Bank</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/development/projects">Project Units</Link>
+              </Button>
+              <Button asChild size="sm">
+                <Link href="/estate/property-management/EstatePropertyManagementPropertyUnit">Property Receiving</Link>
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>

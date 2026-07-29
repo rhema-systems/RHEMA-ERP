@@ -439,6 +439,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.Workflow.IWorkflowApprovalPolicyResolver, ErpSystem.Core.Services.Workflow.WorkflowApprovalPolicyResolver>();
             services.AddScoped<ErpSystem.Core.Services.Workflow.IWorkflowRuntimeGovernanceService, ErpSystem.Data.Services.WorkflowRuntimeGovernanceService>();
             services.AddScoped<ErpSystem.Core.Services.Workflow.IWorkflowSignatureSubmissionStore, ErpSystem.Data.Services.WorkflowSignatureSubmissionStore>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowEntityTypeCatalogService, ErpSystem.Core.Services.Workflow.WorkflowEntityTypeCatalogService>();
             services.AddHostedService<ErpSystem.Api.Services.Workflow.WorkflowSlaEscalationBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.Workflow.WorkflowIntegrationQueueBackgroundService>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapterRegistry, ErpSystem.Core.Services.Workflow.WorkflowStatusAdapterRegistry>();
@@ -457,6 +458,40 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Settings services
             services.AddScoped<ISettingsService, SettingsService>();
+            // Estate/DMS integration services: registered centrally so existing modules can call them through explicit handoffs.
+            services.AddScoped<ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentManagementService, ErpSystem.Core.Services.DocumentManagement.CentralDocumentManagementService>();
+            services.AddScoped<ErpSystem.Api.Services.DocumentManagement.ICentralDocumentRenditionService, ErpSystem.Api.Services.DocumentManagement.CentralDocumentRenditionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Legal.ILegalProcedureCatalogService, ErpSystem.Core.Services.Legal.LegalProcedureCatalogService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Estate.IFacilitiesProcedureCatalogService, ErpSystem.Core.Services.Estate.FacilitiesProcedureCatalogService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Estate.IPropertyManagementProcedureCatalogService, ErpSystem.Core.Services.Estate.PropertyManagementProcedureCatalogService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Estate.IEstateProcedureCatalogService, ErpSystem.Core.Services.Estate.EstateProcedureCatalogService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Estate.IEstateManagedAssetService, ErpSystem.Core.Services.Estate.EstateManagedAssetService>();
+            services
+                .AddOptions<ErpSystem.Api.Services.Estate.EstateGisNetworkSecurityOptions>()
+                .Configure<IConfiguration>((options, configuration) =>
+                    configuration
+                        .GetSection(ErpSystem.Api.Services.Estate.EstateGisNetworkSecurityOptions.SectionName)
+                        .Bind(options));
+            services.AddSingleton<ErpSystem.Api.Services.Estate.EstateGisNetworkPolicy>();
+            services
+                .AddHttpClient<ErpSystem.Api.Services.Estate.IEstateGisIntegrationService, ErpSystem.Api.Services.Estate.EstateGisIntegrationService>(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(20);
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("RHEMA-ERP-Estate-GIS/1.0");
+                })
+                .ConfigurePrimaryHttpMessageHandler(serviceProvider =>
+                {
+                    var networkPolicy = serviceProvider.GetRequiredService<ErpSystem.Api.Services.Estate.EstateGisNetworkPolicy>();
+                    return new SocketsHttpHandler
+                    {
+                        AllowAutoRedirect = false,
+                        UseProxy = false,
+                        ConnectTimeout = TimeSpan.FromSeconds(10),
+                        ConnectCallback = networkPolicy.ConnectHttpAsync
+                    };
+                });
+            services.AddScoped<ErpSystem.Core.Interfaces.Planning.IPlanningProcedureCatalogService, ErpSystem.Core.Services.Planning.PlanningProcedureCatalogService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procedures.IProcedureCaseService, ErpSystem.Api.Services.ProcedureCaseService>();
 
             // Email template services
             services.AddScoped<IEmailTemplateService, EmailTemplateService>();
@@ -1597,8 +1632,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             return services;
         }
 
-        public static IServiceCollection AddErpSystemRateLimiting(this IServiceCollection services)
+        public static IServiceCollection AddErpSystemRateLimiting(
+            this IServiceCollection services,
+            IHostEnvironment environment)
         {
+            var anonymousAuthPermitLimit = environment.IsDevelopment() ? 120 : 30;
+            var authPolicyPermitLimit = environment.IsDevelopment() ? 120 : 10;
+
             services.AddRateLimiter(rateLimiterOptions =>
             {
                 // Global limiter applies to every request (external portal included)
@@ -1622,7 +1662,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                             partitionKey: key,
                             factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                             {
-                                PermitLimit = isAuth ? 30 : 120,
+                                PermitLimit = isAuth ? anonymousAuthPermitLimit : 120,
                                 Window = TimeSpan.FromMinutes(1),
                                 QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
                                 QueueLimit = 0
@@ -1669,7 +1709,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 // Stricter rate limiting for authentication endpoints
                 rateLimiterOptions.AddFixedWindowLimiter(policyName: "AuthPolicy", options =>
                 {
-                    options.PermitLimit = 10;
+                    options.PermitLimit = authPolicyPermitLimit;
                     options.Window = TimeSpan.FromMinutes(1);
                     options.QueueLimit = 2;
                 });

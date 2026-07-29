@@ -242,7 +242,16 @@ export interface WorkflowTaskConfigDto {
   documentName?: string;
   requiresDocument: boolean;
   documentRequirementKey?: string;
+  documentRequirements?: WorkflowDocumentRequirementDto[];
   instructions?: string;
+}
+
+export interface WorkflowDocumentRequirementDto {
+  id?: string;
+  requirementKey: string;
+  documentName: string;
+  documentType?: string;
+  isRequired: boolean;
 }
 
 export interface WorkflowTaskAttachmentDto {

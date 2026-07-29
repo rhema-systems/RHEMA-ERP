@@ -316,7 +316,18 @@ public class WorkflowTaskConfigDto
     public string? DocumentName { get; set; }
     public bool RequiresDocument { get; set; }
     public string? DocumentRequirementKey { get; set; }
+    // Stage document requirements are kept at task level so checklist items remain evidence-free controls.
+    public List<WorkflowDocumentRequirementDto> DocumentRequirements { get; set; } = new();
     public string? Instructions { get; set; }
+}
+
+public class WorkflowDocumentRequirementDto
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string RequirementKey { get; set; } = string.Empty;
+    public string DocumentName { get; set; } = string.Empty;
+    public string? DocumentType { get; set; }
+    public bool IsRequired { get; set; } = true;
 }
 
 public class WorkflowTaskAttachmentDto

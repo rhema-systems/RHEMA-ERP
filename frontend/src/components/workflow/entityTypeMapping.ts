@@ -19,6 +19,62 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
   hr: ['Employee', 'PayrollRun', 'PayrollSalaryAdvance', 'PayrollBonusSetup', 'PayrollBackpaySetup'],
   helpdesk: ['EhcTicket', 'ServiceRequest'],
   projects: ['Project'],
+  // Estate/DMS integration: Planning, Estate, and Legal entries make existing Workflow filters aware of our procedure cases.
+  planning: [
+    'PlanningLandAllocationVetting',
+    'PlanningChangeOfUseReview',
+    'PlanningSchemeLayoutPreparation',
+    'PlanningSiteReport',
+    'PlanningSitePlanPreparation',
+    'PlanningOfficialSearchData',
+    'PlanningDevelopmentPermitConformity',
+    'PlanningRegularization',
+    'PlanningLayoutReviewCorrection',
+    'PlanningComplianceInspection',
+    'PlanningDisputeComplaint',
+    'PlanningAssemblySpatialCommittee'
+  ],
+  // Estate/DMS integration: Estate procedure and land-acquisition cases use Workflow approvals instead of a separate approval engine.
+  estate: [
+    'LandAcquisition',
+    'EstateFacilityPropertySite',
+    'EstateFacilityLease',
+    'EstateFacilityMaintenance',
+    'EstateFacilityComplaint',
+    'EstateFacilityServiceProvider',
+    'EstateFacilityStaffCleaner',
+    'EstateFacilityAssetRegister',
+    'EstateFacilityDocument',
+    'EstateRegistrySecretariat',
+    'EstateRecordsManagement',
+    'EstateInspection',
+    'EstateSearchApplication',
+    'EstateRecordAmendment',
+    'EstateCertifiedTrueCopy',
+    'EstateJointOwnership',
+    'EstateTransfer',
+    'EstateAssignment',
+    'EstateLeasePreparation',
+    'EstateLeaseRenewal',
+    'EstateServicedPlotAllocation',
+    'EstateLandsPartiallyServiced',
+    'EstateHousingHomeOwnership',
+    'EstateTraditionalLands',
+    'EstateTenancyRegularisation',
+    'EstateReportingControls'
+  ],
+  // Estate/DMS integration: Legal procedures are exposed to Workflow so Estate handoffs can still route through Legal-owned review.
+  legal: [
+    'LegalProcedure',
+    'LegalMortgage',
+    'LegalMortgageInPrinciple',
+    'LegalCourtProcess',
+    'LegalOtherCourtProcess',
+    'LegalTerminationRecognition',
+    'LegalAssignmentSubleaseVesting',
+    'LegalLeaseVariationRenewalSublease',
+    'LegalTransfer'
+  ],
   sales: ['Customer', 'SalesOrder', 'SalesAgreement', 'SalesAllocation', 'PlotAllocation', 'Refund', 'CreditNote'],
   quality: ['Quality']
 };

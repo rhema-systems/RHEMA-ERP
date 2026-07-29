@@ -630,7 +630,8 @@ WHERE [Id] = {delta.AccountId}
 
     private void SyncTrackedAccountBalanceSnapshot(Guid tenantId, AccountBalanceDelta delta)
     {
-        foreach (var entry in _context.ChangeTracker.Entries<Account>())
+        var trackedAccountEntries = _context.ChangeTracker.Entries<Account>().ToArray();
+        foreach (var entry in trackedAccountEntries)
         {
             if (entry.Entity.TenantId != tenantId ||
                 entry.Entity.Id != delta.AccountId ||

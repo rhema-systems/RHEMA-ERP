@@ -1,9 +1,12 @@
+using ErpSystem.Api.Services.Notifications;
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -17,17 +20,23 @@ public class ProjectsController : ControllerBase
     private readonly IProjectService _projectService;
     private readonly IInventoryRequisitionService _inventoryRequisitionService;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly INotificationService _notificationService;
+    private readonly ApplicationDbContext _db;
     private readonly ILogger<ProjectsController> _logger;
 
     public ProjectsController(
         IProjectService projectService,
         IInventoryRequisitionService inventoryRequisitionService,
         ICurrentUserProvider currentUserProvider,
+        INotificationService notificationService,
+        ApplicationDbContext db,
         ILogger<ProjectsController> logger)
     {
         _projectService = projectService;
         _inventoryRequisitionService = inventoryRequisitionService;
         _currentUserProvider = currentUserProvider;
+        _notificationService = notificationService;
+        _db = db;
         _logger = logger;
     }
 
@@ -1214,6 +1223,64 @@ public class ProjectsController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("units/{unitId:guid}/publish-to-estate")]
+    public async Task<ActionResult<EstateManagedAssetDto>> PublishProjectUnitToEstate(Guid unitId)
+    {
+        try
+        {
+            // Estate/Project integration: Project remains the source of constructed units; Estate receives the managed asset.
+            var asset = await _projectService.PublishProjectUnitToEstateAsync(unitId);
+            await NotifyEstateProjectUnitHandoffAsync(asset);
+            return Ok(asset);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    private async Task NotifyEstateProjectUnitHandoffAsync(EstateManagedAssetDto asset)
+    {
+        try
+        {
+            // Estate/Project integration: notify Estate roles about the handoff without changing Project module ownership.
+            await RoleNotificationDispatcher.NotifyRolesAsync(
+                _db,
+                _notificationService,
+                _currentUserProvider.TenantId,
+                _currentUserProvider.UserId,
+                new[] { "Property Manager", "Property Officer", "Estate Manager", "Estate Officer", "Facilities Manager" },
+                "Project unit pushed to Estate / Property Management",
+                $"{asset.ProjectCode} unit {asset.ProjectUnitCode ?? asset.AssetCode} is ready in Estate / Property Management.",
+                "project.unit.estate-handoff",
+                "EstateManagedAsset",
+                asset.Id,
+                "/estate/property-management/EstatePropertyManagementPropertyUnit",
+                new Dictionary<string, object>
+                {
+                    ["sourceLabel"] = "Source: Project Management -> Estate / Property Management",
+                    ["sourceModule"] = "Project Management",
+                    ["targetModule"] = "Estate / Property Management",
+                    ["assetCode"] = asset.AssetCode,
+                    ["assetName"] = asset.Name,
+                    ["projectId"] = asset.ProjectId?.ToString() ?? string.Empty,
+                    ["projectCode"] = asset.ProjectCode ?? string.Empty,
+                    ["projectTitle"] = asset.ProjectTitle ?? string.Empty,
+                    ["projectUnitId"] = asset.ProjectUnitId?.ToString() ?? string.Empty,
+                    ["projectUnitCode"] = asset.ProjectUnitCode ?? string.Empty
+                },
+                HttpContext.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Estate notification failed for project unit handoff {AssetId}", asset.Id);
         }
     }
 

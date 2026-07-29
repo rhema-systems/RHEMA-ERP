@@ -33,6 +33,9 @@ public sealed class ExternalUserAccessMiddleware : IMiddleware
         // Project portal endpoints for linked external parties
         "/api/projects/external",
 
+        // Estate/customer portal integration: allow only curated external Estate listing, service, and document endpoints.
+        "/api/estate/external",
+
         // Profile self-service endpoints
         "/api/user/profile",
         "/api/user/change-password",

@@ -34,6 +34,7 @@
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
+    <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\PaymentMethodControllerTests.cs" />
     <Compile Include="Controllers\Finance\ChequesControllerTests.cs" />
@@ -81,6 +82,9 @@
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
+    <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
+    <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
+    <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
@@ -125,6 +129,7 @@
     <Compile Include="Services\ControlledFileUploadServiceTests.cs" />
     <Compile Include="Services\ClamAvFileVirusScanServiceTests.cs" />
     <Compile Include="Services\FileStorageDeploymentConfigurationTests.cs" />
+    <Compile Include="Services\Workflow\WorkflowLegacyDocumentRequirementTests.cs" />
     <Compile Include="Services\WorkflowDefinitionServiceAdapterCloneTests.cs" />
   </ItemGroup>
 
