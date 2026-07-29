@@ -26,6 +26,7 @@ public class TenderAwardService : ITenderAwardService
     private readonly IProcurementTenderControlService _tenderControlService;
     private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
     private readonly IProcurementAwardReadinessService _awardReadiness;
+    private readonly IProcurementPurchaseOrderSourceService _purchaseOrderSources;
 
     public TenderAwardService(
         ITenderAwardRepository awardRepository,
@@ -43,6 +44,7 @@ public class TenderAwardService : ITenderAwardService
         IProcurementTenderControlService tenderControlService,
         IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
         IProcurementAwardReadinessService awardReadiness,
+        IProcurementPurchaseOrderSourceService purchaseOrderSources,
         ILogger<TenderAwardService> logger)
     {
         _awardRepository = awardRepository;
@@ -60,6 +62,7 @@ public class TenderAwardService : ITenderAwardService
         _tenderControlService = tenderControlService;
         _exceptionalSourcingControlService = exceptionalSourcingControlService;
         _awardReadiness = awardReadiness;
+        _purchaseOrderSources = purchaseOrderSources;
         _logger = logger;
     }
 
@@ -349,7 +352,6 @@ public class TenderAwardService : ITenderAwardService
 
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
-
             award.AwardedAmount = dto.AwardedAmount;
             award.Currency = dto.Currency ?? "USD";
             award.AwardDate = dto.AwardDate ?? award.AwardDate;
@@ -451,6 +453,16 @@ public class TenderAwardService : ITenderAwardService
 
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
+            var sourceCorrelationId = Guid.NewGuid().ToString("N");
+            var sourceType = dto.ContractId.HasValue
+                ? ProcurementPurchaseOrderSourceType.Contract
+                : ProcurementPurchaseOrderSourceType.TenderAward;
+            var sourceId = dto.ContractId ?? award.Id;
+            var approvedSource = await _purchaseOrderSources.ResolveAsync(
+                sourceType,
+                sourceId,
+                award.BusinessPartnerId,
+                sourceCorrelationId);
 
             // Get bid items
             var bidItems = await _bidItemRepository.GetByBidIdAsync(bid.Id);
@@ -525,6 +537,7 @@ public class TenderAwardService : ITenderAwardService
                 CreatedAt = DateTime.UtcNow,
                 CreatedById = _currentUserProvider.UserId
             };
+            _purchaseOrderSources.Apply(purchaseOrder, approvedSource);
 
             await _purchaseOrderRepository.CreatePurchaseOrderAsync(purchaseOrder);
 
@@ -583,6 +596,10 @@ public class TenderAwardService : ITenderAwardService
             await _awardRepository.UpdateAsync(award);
 
             await _unitOfWork.SaveChangesAsync();
+            await _purchaseOrderSources.RecordBoundAsync(
+                purchaseOrder,
+                "TenderAwardPurchaseOrderCreated",
+                sourceCorrelationId);
 
             var logMessage = negotiation != null
                 ? $"Created purchase order {orderNumber} from tender award {award.Id} with {itemCount} items using negotiated prices (Negotiation: {negotiation.Id})"

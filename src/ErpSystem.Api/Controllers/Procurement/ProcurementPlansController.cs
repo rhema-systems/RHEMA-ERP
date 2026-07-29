@@ -433,6 +433,15 @@ public class ProcurementPlansController : ControllerBase
             var result = await _planService.ConvertItemToPurchaseOrderAsync(dto);
             return Ok(result);
         }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
         catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
         catch (Exception ex)

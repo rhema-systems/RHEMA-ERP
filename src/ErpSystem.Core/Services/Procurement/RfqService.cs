@@ -28,6 +28,7 @@ public class RfqService : IRfqService
     private readonly IProcurementRfqControlService _rfqControlService;
     private readonly IProcurementTenderDocumentControlService _tenderDocumentControlService;
     private readonly ISupplierValidationService _supplierValidation;
+    private readonly IProcurementPurchaseOrderSourceService _purchaseOrderSources;
     private readonly ILogger<RfqService> _logger;
 
     public RfqService(
@@ -47,6 +48,7 @@ public class RfqService : IRfqService
         IProcurementRfqControlService rfqControlService,
         IProcurementTenderDocumentControlService tenderDocumentControlService,
         ISupplierValidationService supplierValidation,
+        IProcurementPurchaseOrderSourceService purchaseOrderSources,
         ILogger<RfqService> logger)
     {
         _rfqRepository = rfqRepository;
@@ -65,6 +67,7 @@ public class RfqService : IRfqService
         _rfqControlService = rfqControlService;
         _tenderDocumentControlService = tenderDocumentControlService;
         _supplierValidation = supplierValidation;
+        _purchaseOrderSources = purchaseOrderSources;
         _logger = logger;
     }
 
@@ -666,6 +669,11 @@ public class RfqService : IRfqService
                     var supplierId = group.Key;
                     var first = group.First();
                     var supplierName = first.Quote.BusinessPartner?.PartnerName ?? string.Empty;
+                    var approvedSource = await _purchaseOrderSources.ResolveAsync(
+                        ProcurementPurchaseOrderSourceType.RfqAward,
+                        rfq.Id,
+                        supplierId,
+                        awardCorrelationId);
 
                     var subTotal = group.Sum(x => x.QuoteItem.LineTotal);
 
@@ -702,9 +710,12 @@ public class RfqService : IRfqService
                         CreatedAt = DateTime.UtcNow,
                         CreatedById = _currentUserProvider.UserId
                     };
+                    _purchaseOrderSources.Apply(po, approvedSource);
 
                     await _purchaseOrderRepository.CreatePurchaseOrderAsync(po);
                     await SaveChangesWithPurchaseOrderNumberRetryAsync(po);
+                    await _purchaseOrderSources.RecordBoundAsync(
+                        po, "RfqAwardPurchaseOrderCreated", awardCorrelationId);
 
                     createdPos[supplierId] = po;
                     response.PurchaseOrders.Add(new CreatedPurchaseOrderFromRfqDto

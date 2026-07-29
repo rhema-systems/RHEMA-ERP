@@ -278,6 +278,58 @@ export default function PurchaseOrderDetailPage() {
 
         {/* Overview Tab */}
         <TabsContent value="overview" className="space-y-6">
+          <Card className={
+            order.procurementSourceType === 'HistoricalMigration'
+              ? 'border-amber-300 bg-amber-50/60'
+              : 'border-emerald-300 bg-emerald-50/60'
+          }>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CheckCircle className="h-5 w-5" />
+                Approved Source Lineage
+              </CardTitle>
+              <CardDescription>
+                Immutable requisition, sourcing case, and award-readiness trace.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 text-sm md:grid-cols-3">
+              <div>
+                <Label className="text-muted-foreground">Source</Label>
+                <p className="font-medium">
+                  {order.procurementSourceType || 'Missing'} ·{' '}
+                  {order.procurementSourceReference || 'No reference'}
+                </p>
+              </div>
+              <div>
+                <Label className="text-muted-foreground">Requisition</Label>
+                <p className="font-medium">
+                  {order.sourceRequisitionNumber || order.sourceRequisitionId || 'Not retained'}
+                </p>
+              </div>
+              <div>
+                <Label className="text-muted-foreground">Last validated</Label>
+                <p className="font-medium">
+                  {order.sourceValidatedAtUtc
+                    ? format(new Date(order.sourceValidatedAtUtc), 'MMM dd, yyyy HH:mm')
+                    : 'Not validated'}
+                </p>
+              </div>
+              {order.procurementSourceType === 'HistoricalMigration' && (
+                <div className="md:col-span-3 rounded-md border border-amber-300 bg-amber-100 p-3 text-amber-950">
+                  This retained historical PO cannot enter a new approval or issue
+                  lifecycle until its governed source is remediated.
+                </div>
+              )}
+              {order.sourcingCaseId && (
+                <div className="md:col-span-3 break-all font-mono text-xs text-muted-foreground">
+                  Case {order.sourcingCaseId} · Release {order.sourcingReleaseId} ·
+                  Readiness {order.awardReadinessDecisionId} · Hash{' '}
+                  {order.sourceIntegrityHash}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Order Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Left Column */}

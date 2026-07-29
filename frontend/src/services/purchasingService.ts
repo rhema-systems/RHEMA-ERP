@@ -503,6 +503,39 @@ export interface CreatePurchaseRequisitionItemDto {
 // PURCHASE ORDER INTERFACES
 // ============================================================================
 
+export type ProcurementPurchaseOrderSourceType =
+  | 'RfqAward'
+  | 'TenderAward'
+  | 'Contract'
+  | 'ApprovedException'
+  | 'FrameworkCallOff'
+  | 'HistoricalMigration';
+
+export interface ProcurementPurchaseOrderSourceOptionDto {
+  sourceType: ProcurementPurchaseOrderSourceType;
+  sourceId: string;
+  sourceReference: string;
+  sourceLabel: string;
+  purchaseRequisitionId: string;
+  purchaseRequisitionNumber: string;
+  sourcingCaseId: string;
+  sourcingReleaseId: string;
+  awardReadinessDecisionId: string;
+  businessPartnerId: string;
+  businessPartnerName: string;
+  approvedAmount?: number;
+  currencyCode: string;
+}
+
+export interface ProcurementPurchaseOrderSourceStatusDto {
+  ready: boolean;
+  permission: string;
+  candidateCount: number;
+  blockedReasons: string[];
+  sources: ProcurementPurchaseOrderSourceOptionDto[];
+  frameworkCallOffRoute: string;
+}
+
 export interface PurchaseOrderSummaryDto {
   id: string;
   orderNumber: string;
@@ -517,6 +550,8 @@ export interface PurchaseOrderSummaryDto {
   itemCount: number;
   requestedByName?: string;
   currentWorkflowStepName?: string;
+  procurementSourceType?: ProcurementPurchaseOrderSourceType;
+  procurementSourceReference?: string;
 }
 
 export interface PurchaseOrderDetailDto extends PurchaseOrderSummaryDto {
@@ -545,6 +580,14 @@ export interface PurchaseOrderDetailDto extends PurchaseOrderSummaryDto {
   supplierPhone?: string;
   supplierEmail?: string;
   supplierAddress?: string;
+  procurementSourceId?: string;
+  sourceRequisitionId?: string;
+  sourceRequisitionNumber?: string;
+  sourcingReleaseId?: string;
+  sourcingCaseId?: string;
+  awardReadinessDecisionId?: string;
+  sourceIntegrityHash?: string;
+  sourceValidatedAtUtc?: string;
   items: PurchaseOrderItemDto[];
   receipts: PurchaseOrderReceiptDto[];
 }
@@ -667,6 +710,8 @@ const normalizePurchaseOrderLandedCostPlanDto = (
 };
 
 export interface CreatePurchaseOrderDto {
+  sourceType: ProcurementPurchaseOrderSourceType;
+  sourceId: string;
   supplierId: string; // Maps to BusinessPartnerId
   orderType?: string;
   requiredDate?: string;
@@ -1135,6 +1180,23 @@ export const purchasingService = {
     if (!response.ok) {
       const error = await response.text();
       throw new Error(error || 'Failed to create purchase order');
+    }
+    return response.json();
+  },
+
+  async getPurchaseOrderSourceOptions(
+    purchaseRequisitionId?: string
+  ): Promise<ProcurementPurchaseOrderSourceStatusDto> {
+    const query = purchaseRequisitionId
+      ? `?purchaseRequisitionId=${encodeURIComponent(purchaseRequisitionId)}`
+      : '';
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrders/source-options${query}`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to load approved purchase-order sources');
     }
     return response.json();
   },

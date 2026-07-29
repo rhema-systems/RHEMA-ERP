@@ -1,0 +1,1122 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace ErpSystem.Core.Services.Procurement;
+
+public sealed class ProcurementPurchaseOrderSourceService :
+    IProcurementPurchaseOrderSourceService
+{
+    private const string Permission = "procurement.purchase-order.create";
+    private const string EventType = "ProcurementPurchaseOrderSourceControl";
+    private static readonly IReadOnlyList<string> DecisionKeys =
+        Enumerable.Range(1, 14).Select(number => $"DEC-{number:000}").ToArray();
+    private static readonly JsonSerializerOptions JsonOptions =
+        new(JsonSerializerDefaults.Web);
+
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUser;
+    private readonly IProcurementAccessControlService _accessControl;
+    private readonly IProcurementControlEventService _controlEvents;
+    private readonly INotificationTopicPublisher _notificationTopics;
+    private readonly ILogger<ProcurementPurchaseOrderSourceService> _logger;
+
+    public ProcurementPurchaseOrderSourceService(
+        IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUser,
+        IProcurementAccessControlService accessControl,
+        IProcurementControlEventService controlEvents,
+        INotificationTopicPublisher notificationTopics,
+        ILogger<ProcurementPurchaseOrderSourceService> logger)
+    {
+        _unitOfWork = unitOfWork;
+        _currentUser = currentUser;
+        _accessControl = accessControl;
+        _controlEvents = controlEvents;
+        _notificationTopics = notificationTopics;
+        _logger = logger;
+    }
+
+    private IGenericRepository<PurchaseOrder> PurchaseOrders =>
+        _unitOfWork.Repository<PurchaseOrder>();
+    private IGenericRepository<PurchaseRequisition> Requisitions =>
+        _unitOfWork.Repository<PurchaseRequisition>();
+    private IGenericRepository<ProcurementSourcingCase> SourcingCases =>
+        _unitOfWork.Repository<ProcurementSourcingCase>();
+    private IGenericRepository<ProcurementRequisitionSourcingRelease> SourcingReleases =>
+        _unitOfWork.Repository<ProcurementRequisitionSourcingRelease>();
+    private IGenericRepository<ProcurementAwardReadinessDecision> ReadinessDecisions =>
+        _unitOfWork.Repository<ProcurementAwardReadinessDecision>();
+
+    public async Task<ProcurementPurchaseOrderSourceStatusDto> GetOptionsAsync(
+        Guid? purchaseRequisitionId,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureCapabilityAsync(
+            purchaseRequisitionId?.ToString() ?? "source-options",
+            correlationId,
+            cancellationToken);
+
+        var options = new List<ProcurementPurchaseOrderSourceOptionDto>();
+        await AddTenderAwardOptionsAsync(options, purchaseRequisitionId, cancellationToken);
+        await AddContractOptionsAsync(options, purchaseRequisitionId, cancellationToken);
+        await AddExceptionOptionsAsync(options, purchaseRequisitionId, cancellationToken);
+        options = options
+            .OrderBy(item => item.SourceType)
+            .ThenBy(item => item.SourceReference)
+            .ToList();
+
+        var blocked = new List<string>();
+        if (options.Count == 0)
+        {
+            blocked.Add(purchaseRequisitionId.HasValue
+                ? "No approved award, active contract, or awarded approved-exception source is available for this requisition."
+                : "No approved ordinary-PO source is currently available. Complete sourcing and award, or use the dedicated framework call-off route.");
+        }
+
+        return new ProcurementPurchaseOrderSourceStatusDto
+        {
+            Ready = options.Count != 0,
+            CandidateCount = options.Count,
+            BlockedReasons = blocked,
+            Sources = options
+        };
+    }
+
+    public async Task<ProcurementPurchaseOrderSourceResolution> ResolveAsync(
+        ProcurementPurchaseOrderSourceType sourceType,
+        Guid sourceId,
+        Guid businessPartnerId,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureCapabilityAsync(sourceId.ToString(), correlationId, cancellationToken);
+        try
+        {
+            if (sourceId == Guid.Empty)
+                throw Invalid("PO_SOURCE_REQUIRED", "An approved purchase-order source is required.");
+            if (businessPartnerId == Guid.Empty)
+                throw Invalid("PO_SOURCE_SUPPLIER_REQUIRED", "A source supplier is required.");
+            if (!ProcurementPurchaseOrderSourceRules.CanCreate(sourceType))
+                throw sourceType switch
+                {
+                    ProcurementPurchaseOrderSourceType.FrameworkCallOff =>
+                        Invalid("PO_FRAMEWORK_DEDICATED_ROUTE_REQUIRED",
+                            "Framework purchase orders must be created through the dedicated framework call-off route."),
+                    ProcurementPurchaseOrderSourceType.HistoricalMigration =>
+                        Invalid("PO_HISTORICAL_SOURCE_FORBIDDEN",
+                            "HistoricalMigration is reserved for migration backfill and cannot create a purchase order."),
+                    _ => Invalid("PO_SOURCE_TYPE_INVALID",
+                        "The purchase-order source type is not supported.")
+                };
+
+            var resolution = await ResolveCoreAsync(
+                sourceType, sourceId, businessPartnerId, cancellationToken);
+
+            await RecordAsync(
+                resolution.SourceId,
+                resolution.SourceReference,
+                "SourceValidated",
+                ProcurementControlEventResult.Allowed,
+                correlationId,
+                "The approved source lineage passed tenant, requisition, sourcing-case, award-readiness, and supplier checks.",
+                new
+                {
+                    resolution.SourceType,
+                    resolution.PurchaseRequisitionId,
+                    resolution.SourcingReleaseId,
+                    resolution.SourcingCaseId,
+                    resolution.AwardReadinessDecisionId,
+                    resolution.BusinessPartnerId,
+                    resolution.SourceIntegrityHash
+                },
+                cancellationToken);
+            return resolution;
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException exception)
+        {
+            await TryRecordDeniedAsync(
+                sourceId,
+                sourceId == Guid.Empty ? "missing" : sourceId.ToString(),
+                "SourceValidationDenied",
+                correlationId,
+                exception,
+                new
+                {
+                    SourceType = sourceType,
+                    BusinessPartnerId = businessPartnerId
+                },
+                cancellationToken);
+            throw;
+        }
+    }
+
+    public void Apply(
+        PurchaseOrder purchaseOrder,
+        ProcurementPurchaseOrderSourceResolution source)
+    {
+        if (purchaseOrder.TenantId != _currentUser.TenantId ||
+            purchaseOrder.BusinessPartnerId != source.BusinessPartnerId)
+        {
+            throw Invalid("PO_SOURCE_TENANT_OR_SUPPLIER_MISMATCH",
+                "The purchase order does not match the validated source tenant and supplier.");
+        }
+
+        purchaseOrder.ProcurementSourceType = source.SourceType;
+        purchaseOrder.ProcurementSourceId = source.SourceId;
+        purchaseOrder.ProcurementSourceReference = source.SourceReference;
+        purchaseOrder.SourceRequisitionId = source.PurchaseRequisitionId;
+        purchaseOrder.SourceRequisitionNumber = source.PurchaseRequisitionNumber;
+        purchaseOrder.SourcingReleaseId = source.SourcingReleaseId;
+        purchaseOrder.SourcingCaseId = source.SourcingCaseId;
+        purchaseOrder.AwardReadinessDecisionId = source.AwardReadinessDecisionId;
+        purchaseOrder.SourceSnapshotJson = source.SourceSnapshotJson;
+        purchaseOrder.SourceIntegrityHash = source.SourceIntegrityHash;
+        purchaseOrder.SourceValidatedAtUtc = source.ValidatedAtUtc;
+    }
+
+    public async Task<ProcurementPurchaseOrderSourceResolution> ResolveFrameworkCallOffAsync(
+        ProcurementFrameworkCallOff callOff,
+        ProcurementFrameworkAgreement agreement,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (callOff.TenantId != _currentUser.TenantId ||
+            agreement.TenantId != _currentUser.TenantId ||
+            callOff.AgreementId != agreement.Id ||
+            callOff.BusinessPartnerId != agreement.BusinessPartnerId)
+        {
+            throw Invalid("PO_FRAMEWORK_SOURCE_MISMATCH",
+                "The framework call-off does not match its governed agreement.");
+        }
+
+        var readiness = await ReadinessDecisions.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == agreement.AwardReadinessDecisionId && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_SOURCE_READINESS_NOT_FOUND",
+                "The framework agreement award-readiness decision was not found.");
+        EnsureReady(readiness);
+        var sourceLink = await ResolveSourceLinkAsync(
+            readiness.SourceType, readiness.SourceId, cancellationToken);
+        var requisition = await RequireApprovedRequisitionAsync(
+            callOff.SourceRequisitionId, cancellationToken);
+        var snapshot = new
+        {
+            SourceType = ProcurementPurchaseOrderSourceType.FrameworkCallOff,
+            SourceId = callOff.Id,
+            SourceReference = callOff.CallOffNumber,
+            callOff.AgreementId,
+            agreement.AgreementNumber,
+            agreement.Version,
+            DemandRequisitionId = requisition.Id,
+            DemandRequisitionNumber = requisition.RequisitionNumber,
+            AwardSourcingCaseId = sourceLink.SourcingCase.Id,
+            AwardSourcingReleaseId = sourceLink.SourcingCase.SourcingReleaseId,
+            agreement.AwardReadinessDecisionId,
+            agreement.BusinessPartnerId,
+            agreement.CurrencyCode,
+            agreement.IntegrityHash
+        };
+        return BuildResolution(
+            ProcurementPurchaseOrderSourceType.FrameworkCallOff,
+            callOff.Id,
+            callOff.CallOffNumber,
+            requisition,
+            sourceLink.SourcingCase,
+            readiness,
+            agreement.BusinessPartnerId,
+            agreement.CurrencyCode,
+            snapshot);
+    }
+
+    public async Task RevalidateAsync(
+        PurchaseOrder purchaseOrder,
+        string action,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (purchaseOrder.TenantId != _currentUser.TenantId)
+                throw new ProcurementPurchaseOrderSourceAuthorizationException(
+                    "The purchase order is not in the current tenant.");
+            if (!purchaseOrder.ProcurementSourceType.HasValue ||
+                !purchaseOrder.ProcurementSourceId.HasValue)
+            {
+                throw Invalid("PO_SOURCE_REQUIRED",
+                    "The purchase order has no governed approved source lineage.");
+            }
+            if (purchaseOrder.ProcurementSourceType ==
+                ProcurementPurchaseOrderSourceType.HistoricalMigration)
+            {
+                throw Invalid("PO_HISTORICAL_SOURCE_REVALIDATION_REQUIRED",
+                    "This historical purchase order predates mandatory source lineage and cannot enter a new approval lifecycle without remediation.");
+            }
+
+            ProcurementPurchaseOrderSourceResolution current;
+            if (purchaseOrder.ProcurementSourceType ==
+                ProcurementPurchaseOrderSourceType.FrameworkCallOff)
+            {
+                var callOff = await _unitOfWork.Repository<ProcurementFrameworkCallOff>()
+                    .GetQueryable(item =>
+                        item.TenantId == _currentUser.TenantId &&
+                        item.Id == purchaseOrder.ProcurementSourceId.Value &&
+                        item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted)
+                    .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+                    ?? throw Invalid("PO_FRAMEWORK_SOURCE_NOT_FOUND",
+                        "The linked framework call-off was not found.");
+                if (callOff.Status is ProcurementFrameworkCallOffStatus.Rejected or
+                    ProcurementFrameworkCallOffStatus.Cancelled)
+                {
+                    throw Invalid("PO_FRAMEWORK_SOURCE_TERMINAL",
+                        "A rejected or cancelled framework call-off cannot authorize a purchase order.");
+                }
+                var agreement = await _unitOfWork.Repository<ProcurementFrameworkAgreement>()
+                    .GetQueryable(item =>
+                        item.TenantId == _currentUser.TenantId &&
+                        item.Id == callOff.AgreementId && !item.IsDeleted)
+                    .AsNoTracking().SingleAsync(cancellationToken);
+                current = await ResolveFrameworkCallOffAsync(
+                    callOff, agreement, correlationId, cancellationToken);
+            }
+            else
+            {
+                current = await ResolveCoreAsync(
+                    purchaseOrder.ProcurementSourceType.Value,
+                    purchaseOrder.ProcurementSourceId.Value,
+                    purchaseOrder.BusinessPartnerId,
+                    cancellationToken);
+            }
+
+            if (current.PurchaseRequisitionId != purchaseOrder.SourceRequisitionId ||
+                current.SourcingReleaseId != purchaseOrder.SourcingReleaseId ||
+                current.SourcingCaseId != purchaseOrder.SourcingCaseId ||
+                current.AwardReadinessDecisionId != purchaseOrder.AwardReadinessDecisionId ||
+                !string.Equals(current.SourceIntegrityHash,
+                    purchaseOrder.SourceIntegrityHash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw Invalid("PO_SOURCE_LINEAGE_CHANGED",
+                    "The persisted purchase-order source snapshot no longer matches the authoritative approved source.");
+            }
+
+            purchaseOrder.SourceValidatedAtUtc = current.ValidatedAtUtc;
+            await RecordAsync(
+                purchaseOrder.Id,
+                purchaseOrder.OrderNumber,
+                $"SourceRevalidatedFor{NormalizeAction(action)}",
+                ProcurementControlEventResult.Allowed,
+                correlationId,
+                "The immutable approved source lineage remains authoritative.",
+                new
+                {
+                    purchaseOrder.ProcurementSourceType,
+                    purchaseOrder.ProcurementSourceId,
+                    purchaseOrder.SourceRequisitionId,
+                    purchaseOrder.SourcingCaseId,
+                    purchaseOrder.AwardReadinessDecisionId,
+                    purchaseOrder.SourceIntegrityHash
+                },
+                cancellationToken);
+            await PublishNotificationAsync(
+                "procurement.purchase-order.source-revalidated",
+                purchaseOrder,
+                action,
+                cancellationToken);
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException exception)
+        {
+            await TryRecordDeniedAsync(
+                purchaseOrder.Id,
+                purchaseOrder.OrderNumber,
+                $"SourceRevalidationDeniedFor{NormalizeAction(action)}",
+                correlationId,
+                exception,
+                new
+                {
+                    purchaseOrder.ProcurementSourceType,
+                    purchaseOrder.ProcurementSourceId,
+                    purchaseOrder.BusinessPartnerId
+                },
+                cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task RecordBoundAsync(
+        PurchaseOrder purchaseOrder,
+        string action,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        await RecordAsync(
+            purchaseOrder.Id,
+            purchaseOrder.OrderNumber,
+            NormalizeAction(action),
+            ProcurementControlEventResult.Succeeded,
+            correlationId,
+            "The purchase order was bound to an immutable approved source snapshot.",
+            new
+            {
+                purchaseOrder.ProcurementSourceType,
+                purchaseOrder.ProcurementSourceId,
+                purchaseOrder.ProcurementSourceReference,
+                purchaseOrder.SourceRequisitionId,
+                purchaseOrder.SourcingReleaseId,
+                purchaseOrder.SourcingCaseId,
+                purchaseOrder.AwardReadinessDecisionId,
+                purchaseOrder.SourceIntegrityHash
+            },
+            cancellationToken);
+        await PublishNotificationAsync(
+            "procurement.purchase-order.source-bound",
+            purchaseOrder,
+            action,
+            cancellationToken);
+    }
+
+    private Task<ProcurementPurchaseOrderSourceResolution> ResolveCoreAsync(
+        ProcurementPurchaseOrderSourceType sourceType,
+        Guid sourceId,
+        Guid businessPartnerId,
+        CancellationToken cancellationToken) =>
+        sourceType switch
+        {
+            ProcurementPurchaseOrderSourceType.RfqAward =>
+                ResolveRfqAsync(sourceId, businessPartnerId, cancellationToken),
+            ProcurementPurchaseOrderSourceType.TenderAward =>
+                ResolveTenderAwardAsync(sourceId, businessPartnerId, cancellationToken),
+            ProcurementPurchaseOrderSourceType.Contract =>
+                ResolveContractAsync(sourceId, businessPartnerId, cancellationToken),
+            ProcurementPurchaseOrderSourceType.ApprovedException =>
+                ResolveExceptionAsync(sourceId, businessPartnerId, cancellationToken),
+            _ => throw Invalid(
+                "PO_SOURCE_TYPE_INVALID",
+                "The purchase-order source type is not supported.")
+        };
+
+    private async Task<ProcurementPurchaseOrderSourceResolution> ResolveRfqAsync(
+        Guid rfqId,
+        Guid businessPartnerId,
+        CancellationToken cancellationToken)
+    {
+        var rfq = await _unitOfWork.Repository<RequestForQuotation>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == rfqId && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_RFQ_SOURCE_NOT_FOUND",
+                "The RFQ award source was not found in the current tenant.");
+        if (!string.Equals(rfq.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(rfq.Status, "Awarded", StringComparison.OrdinalIgnoreCase))
+        {
+            throw Invalid("PO_RFQ_SOURCE_NOT_APPROVED",
+                $"The RFQ award source is not approved or awarded (current status: {rfq.Status}).");
+        }
+        var link = await RequireSourceLinkAsync(
+            rfq.SourcePurchaseRequisitionId, rfq.SourcingReleaseId,
+            rfq.SourcingCaseId, cancellationToken);
+        var readiness = await RequireCurrentReadinessAsync(
+            ProcurementAwardReadinessSourceType.RequestForQuotation,
+            rfq.Id,
+            businessPartnerId,
+            cancellationToken);
+        return BuildResolution(
+            ProcurementPurchaseOrderSourceType.RfqAward,
+            rfq.Id,
+            rfq.RfqNumber,
+            link.Requisition,
+            link.SourcingCase,
+            readiness,
+            businessPartnerId,
+            rfq.Currency,
+            new
+            {
+                SourceType = ProcurementPurchaseOrderSourceType.RfqAward,
+                SourceId = rfq.Id,
+                SourceReference = rfq.RfqNumber,
+                rfq.Status,
+                link.Requisition.Id,
+                link.Requisition.RequisitionNumber,
+                SourcingReleaseId = link.SourcingCase.SourcingReleaseId,
+                SourcingCaseId = link.SourcingCase.Id,
+                AwardReadinessDecisionId = readiness.Id,
+                readiness.IntegrityHash,
+                BusinessPartnerId = businessPartnerId,
+                rfq.Currency
+            });
+    }
+
+    private async Task<ProcurementPurchaseOrderSourceResolution> ResolveTenderAwardAsync(
+        Guid awardId,
+        Guid businessPartnerId,
+        CancellationToken cancellationToken)
+    {
+        var award = await _unitOfWork.Repository<TenderAward>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == awardId && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_TENDER_AWARD_NOT_FOUND",
+                "The tender award was not found in the current tenant.");
+        if (award.BusinessPartnerId != businessPartnerId)
+            throw Invalid("PO_SOURCE_SUPPLIER_MISMATCH",
+                "The selected supplier is not the awarded supplier.");
+        if (!string.Equals(award.Status, "Awarded", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(award.Status, "ContractSigned", StringComparison.OrdinalIgnoreCase))
+        {
+            throw Invalid("PO_TENDER_AWARD_NOT_APPROVED",
+                $"The tender award is not usable (current status: {award.Status}).");
+        }
+        var tender = await RequireTenderAsync(award.TenderId, cancellationToken);
+        var link = await RequireSourceLinkAsync(
+            tender.SourcePurchaseRequisitionId, tender.SourcingReleaseId,
+            tender.SourcingCaseId, cancellationToken);
+        var readiness = await RequireCurrentReadinessAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            tender.Id,
+            businessPartnerId,
+            cancellationToken);
+        return BuildResolution(
+            ProcurementPurchaseOrderSourceType.TenderAward,
+            award.Id,
+            $"{tender.TenderNumber}/{award.Id:N}",
+            link.Requisition,
+            link.SourcingCase,
+            readiness,
+            businessPartnerId,
+            award.Currency ?? tender.Currency ?? "USD",
+            new
+            {
+                SourceType = ProcurementPurchaseOrderSourceType.TenderAward,
+                SourceId = award.Id,
+                SourceReference = tender.TenderNumber,
+                award.TenderId,
+                award.TenderBidId,
+                award.Status,
+                award.AwardedAmount,
+                link.Requisition.Id,
+                link.Requisition.RequisitionNumber,
+                SourcingReleaseId = link.SourcingCase.SourcingReleaseId,
+                SourcingCaseId = link.SourcingCase.Id,
+                AwardReadinessDecisionId = readiness.Id,
+                readiness.IntegrityHash,
+                award.BusinessPartnerId,
+                award.Currency
+            });
+    }
+
+    private async Task<ProcurementPurchaseOrderSourceResolution> ResolveContractAsync(
+        Guid contractId,
+        Guid businessPartnerId,
+        CancellationToken cancellationToken)
+    {
+        var contract = await _unitOfWork.Repository<Contract>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == contractId && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_CONTRACT_SOURCE_NOT_FOUND",
+                "The contract source was not found in the current tenant.");
+        if (contract.BusinessPartnerId != businessPartnerId)
+            throw Invalid("PO_SOURCE_SUPPLIER_MISMATCH",
+                "The selected supplier is not the contract supplier.");
+        if (!string.Equals(contract.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            throw Invalid("PO_CONTRACT_NOT_ACTIVE",
+                $"Only an active contract can authorize a purchase order (current status: {contract.Status}).");
+        var award = await _unitOfWork.Repository<TenderAward>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == contract.TenderAwardId && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_CONTRACT_AWARD_NOT_FOUND",
+                "The contract's tender award was not found.");
+        var tender = await RequireTenderAsync(contract.TenderId, cancellationToken);
+        var link = await RequireSourceLinkAsync(
+            tender.SourcePurchaseRequisitionId, tender.SourcingReleaseId,
+            tender.SourcingCaseId, cancellationToken);
+        var readiness = await RequireCurrentReadinessAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            tender.Id,
+            businessPartnerId,
+            cancellationToken);
+        return BuildResolution(
+            ProcurementPurchaseOrderSourceType.Contract,
+            contract.Id,
+            contract.ContractNumber,
+            link.Requisition,
+            link.SourcingCase,
+            readiness,
+            businessPartnerId,
+            contract.Currency,
+            new
+            {
+                SourceType = ProcurementPurchaseOrderSourceType.Contract,
+                SourceId = contract.Id,
+                SourceReference = contract.ContractNumber,
+                contract.Status,
+                contract.TenderAwardId,
+                contract.TenderId,
+                contract.BusinessPartnerId,
+                contract.ContractValue,
+                contract.Currency,
+                contract.StartDate,
+                contract.EndDate,
+                AwardStatus = award.Status,
+                link.Requisition.Id,
+                link.Requisition.RequisitionNumber,
+                SourcingReleaseId = link.SourcingCase.SourcingReleaseId,
+                SourcingCaseId = link.SourcingCase.Id,
+                AwardReadinessDecisionId = readiness.Id,
+                readiness.IntegrityHash
+            });
+    }
+
+    private async Task<ProcurementPurchaseOrderSourceResolution> ResolveExceptionAsync(
+        Guid controlId,
+        Guid businessPartnerId,
+        CancellationToken cancellationToken)
+    {
+        var control = await _unitOfWork.Repository<ProcurementExceptionalSourcingControl>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == controlId && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_EXCEPTION_SOURCE_NOT_FOUND",
+                "The approved-exception sourcing control was not found in the current tenant.");
+        if (control.Status < ProcurementExceptionalSourcingControlStatus.Awarded ||
+            control.Status > ProcurementExceptionalSourcingControlStatus.Filed ||
+            !control.AwardBidId.HasValue)
+        {
+            throw Invalid("PO_EXCEPTION_SOURCE_NOT_AWARDED",
+                $"The approved-exception source has not reached an awarded outcome (current status: {control.Status}).");
+        }
+        var bid = await _unitOfWork.Repository<TenderBid>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == control.AwardBidId.Value && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_EXCEPTION_AWARD_BID_NOT_FOUND",
+                "The approved-exception award bid was not found.");
+        if (bid.BusinessPartnerId != businessPartnerId)
+            throw Invalid("PO_SOURCE_SUPPLIER_MISMATCH",
+                "The selected supplier is not the approved-exception awarded supplier.");
+        var tender = await RequireTenderAsync(control.TenderId, cancellationToken);
+        var link = await RequireSourceLinkAsync(
+            tender.SourcePurchaseRequisitionId, tender.SourcingReleaseId,
+            control.SourcingCaseId, cancellationToken);
+        var readiness = await RequireCurrentReadinessAsync(
+            ProcurementAwardReadinessSourceType.ExceptionalSourcing,
+            control.Id,
+            businessPartnerId,
+            cancellationToken);
+        return BuildResolution(
+            ProcurementPurchaseOrderSourceType.ApprovedException,
+            control.Id,
+            control.AwardReference ?? $"EXC-{control.Id:N}",
+            link.Requisition,
+            link.SourcingCase,
+            readiness,
+            businessPartnerId,
+            bid.Currency ?? tender.Currency ?? "USD",
+            new
+            {
+                SourceType = ProcurementPurchaseOrderSourceType.ApprovedException,
+                SourceId = control.Id,
+                SourceReference = control.AwardReference,
+                control.Status,
+                control.TenderId,
+                control.SourcingCaseId,
+                control.ExceptionRuleId,
+                control.ExceptionRuleCode,
+                control.WorkflowInstanceId,
+                control.ApprovedAtUtc,
+                control.AwardBidId,
+                control.AwardReference,
+                control.AwardEvidenceReference,
+                control.AwardedAtUtc,
+                link.Requisition.Id,
+                link.Requisition.RequisitionNumber,
+                SourcingReleaseId = link.SourcingCase.SourcingReleaseId,
+                AwardReadinessDecisionId = readiness.Id,
+                readiness.IntegrityHash,
+                bid.BusinessPartnerId,
+                bid.Currency
+            });
+    }
+
+    private async Task AddTenderAwardOptionsAsync(
+        ICollection<ProcurementPurchaseOrderSourceOptionDto> result,
+        Guid? requisitionId,
+        CancellationToken cancellationToken)
+    {
+        var awards = await _unitOfWork.Repository<TenderAward>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.PurchaseOrderId == null &&
+                (item.Status == "Awarded" || item.Status == "ContractSigned"))
+            .AsNoTracking().ToListAsync(cancellationToken);
+        foreach (var award in awards)
+        {
+            try
+            {
+                var resolution = await ResolveTenderAwardAsync(
+                    award.Id, award.BusinessPartnerId, cancellationToken);
+                if (requisitionId.HasValue &&
+                    resolution.PurchaseRequisitionId != requisitionId.Value)
+                    continue;
+                result.Add(await MapOptionAsync(
+                    resolution, award.AwardedAmount, cancellationToken));
+            }
+            catch (ProcurementPurchaseOrderSourceValidationException)
+            {
+                // Fail closed: invalid/stale sources are intentionally omitted.
+            }
+        }
+    }
+
+    private async Task AddContractOptionsAsync(
+        ICollection<ProcurementPurchaseOrderSourceOptionDto> result,
+        Guid? requisitionId,
+        CancellationToken cancellationToken)
+    {
+        var contracts = await _unitOfWork.Repository<Contract>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.Status == "Active")
+            .AsNoTracking().ToListAsync(cancellationToken);
+        foreach (var contract in contracts)
+        {
+            try
+            {
+                var resolution = await ResolveContractAsync(
+                    contract.Id, contract.BusinessPartnerId, cancellationToken);
+                if (requisitionId.HasValue &&
+                    resolution.PurchaseRequisitionId != requisitionId.Value)
+                    continue;
+                result.Add(await MapOptionAsync(
+                    resolution, contract.ContractValue, cancellationToken));
+            }
+            catch (ProcurementPurchaseOrderSourceValidationException)
+            {
+                // Fail closed: invalid/stale sources are intentionally omitted.
+            }
+        }
+    }
+
+    private async Task AddExceptionOptionsAsync(
+        ICollection<ProcurementPurchaseOrderSourceOptionDto> result,
+        Guid? requisitionId,
+        CancellationToken cancellationToken)
+    {
+        var controls = await _unitOfWork.Repository<ProcurementExceptionalSourcingControl>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.Status >= ProcurementExceptionalSourcingControlStatus.Awarded &&
+                item.Status <= ProcurementExceptionalSourcingControlStatus.Filed &&
+                item.AwardBidId != null)
+            .AsNoTracking().ToListAsync(cancellationToken);
+        foreach (var control in controls)
+        {
+            var bid = await _unitOfWork.Repository<TenderBid>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.Id == control.AwardBidId!.Value && !item.IsDeleted)
+                .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+            if (bid is null)
+                continue;
+            try
+            {
+                var resolution = await ResolveExceptionAsync(
+                    control.Id, bid.BusinessPartnerId, cancellationToken);
+                if (requisitionId.HasValue &&
+                    resolution.PurchaseRequisitionId != requisitionId.Value)
+                    continue;
+                result.Add(await MapOptionAsync(
+                    resolution, control.NegotiatedAmount, cancellationToken));
+            }
+            catch (ProcurementPurchaseOrderSourceValidationException)
+            {
+                // Fail closed: invalid/stale sources are intentionally omitted.
+            }
+        }
+    }
+
+    private async Task<ProcurementPurchaseOrderSourceOptionDto> MapOptionAsync(
+        ProcurementPurchaseOrderSourceResolution source,
+        decimal? approvedAmount,
+        CancellationToken cancellationToken)
+    {
+        var supplierName = await _unitOfWork.Repository<BusinessPartner>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == source.BusinessPartnerId && !item.IsDeleted)
+            .Select(item => item.PartnerName)
+            .SingleOrDefaultAsync(cancellationToken) ?? "Supplier";
+        return new ProcurementPurchaseOrderSourceOptionDto
+        {
+            SourceType = source.SourceType,
+            SourceId = source.SourceId,
+            SourceReference = source.SourceReference,
+            SourceLabel = $"{source.SourceType}: {source.SourceReference}",
+            PurchaseRequisitionId = source.PurchaseRequisitionId,
+            PurchaseRequisitionNumber = source.PurchaseRequisitionNumber,
+            SourcingCaseId = source.SourcingCaseId,
+            SourcingReleaseId = source.SourcingReleaseId,
+            AwardReadinessDecisionId = source.AwardReadinessDecisionId,
+            BusinessPartnerId = source.BusinessPartnerId,
+            BusinessPartnerName = supplierName,
+            ApprovedAmount = approvedAmount,
+            CurrencyCode = source.CurrencyCode
+        };
+    }
+
+    private async Task<(PurchaseRequisition Requisition, ProcurementSourcingCase SourcingCase)>
+        RequireSourceLinkAsync(
+            Guid? requisitionId,
+            Guid? sourcingReleaseId,
+            Guid? sourcingCaseId,
+            CancellationToken cancellationToken)
+    {
+        if (!requisitionId.HasValue || !sourcingReleaseId.HasValue ||
+            !sourcingCaseId.HasValue)
+        {
+            throw Invalid("PO_SOURCE_LINEAGE_INCOMPLETE",
+                "The approved source does not identify its requisition, sourcing release, and sourcing case.");
+        }
+        var requisition = await RequireApprovedRequisitionAsync(
+            requisitionId.Value, cancellationToken);
+        var sourcingCase = await SourcingCases.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == sourcingCaseId.Value &&
+                item.PurchaseRequisitionId == requisition.Id &&
+                item.SourcingReleaseId == sourcingReleaseId.Value &&
+                !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_SOURCING_CASE_NOT_FOUND",
+                "The source sourcing case was not found or does not match the requisition release.");
+        EnsureSourcingCaseUsable(sourcingCase);
+        var releaseExists = await SourcingReleases.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == sourcingCase.SourcingReleaseId &&
+                item.PurchaseRequisitionId == requisition.Id &&
+                !item.IsDeleted)
+            .AsNoTracking().AnyAsync(cancellationToken);
+        if (!releaseExists)
+            throw Invalid("PO_SOURCING_RELEASE_NOT_FOUND",
+                "The immutable sourcing release was not found.");
+        return (requisition, sourcingCase);
+    }
+
+    private async Task<(PurchaseRequisition Requisition, ProcurementSourcingCase SourcingCase)>
+        ResolveSourceLinkAsync(
+            ProcurementAwardReadinessSourceType sourceType,
+            Guid sourceId,
+            CancellationToken cancellationToken)
+    {
+        return sourceType switch
+        {
+            ProcurementAwardReadinessSourceType.RequestForQuotation =>
+                await ResolveRfqSourceLinkAsync(sourceId, cancellationToken),
+            ProcurementAwardReadinessSourceType.Tender =>
+                await ResolveTenderSourceLinkAsync(sourceId, cancellationToken),
+            ProcurementAwardReadinessSourceType.ExceptionalSourcing =>
+                await ResolveExceptionSourceLinkAsync(sourceId, cancellationToken),
+            _ => throw Invalid("PO_SOURCE_TYPE_INVALID",
+                "The award-readiness source type is not supported.")
+        };
+    }
+
+    private async Task<(PurchaseRequisition Requisition, ProcurementSourcingCase SourcingCase)>
+        ResolveRfqSourceLinkAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var source = await _unitOfWork.Repository<RequestForQuotation>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                item.Id == id && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_RFQ_SOURCE_NOT_FOUND", "The RFQ source was not found.");
+        return await RequireSourceLinkAsync(
+            source.SourcePurchaseRequisitionId, source.SourcingReleaseId,
+            source.SourcingCaseId, cancellationToken);
+    }
+
+    private async Task<(PurchaseRequisition Requisition, ProcurementSourcingCase SourcingCase)>
+        ResolveTenderSourceLinkAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var source = await RequireTenderAsync(id, cancellationToken);
+        return await RequireSourceLinkAsync(
+            source.SourcePurchaseRequisitionId, source.SourcingReleaseId,
+            source.SourcingCaseId, cancellationToken);
+    }
+
+    private async Task<(PurchaseRequisition Requisition, ProcurementSourcingCase SourcingCase)>
+        ResolveExceptionSourceLinkAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var control = await _unitOfWork.Repository<ProcurementExceptionalSourcingControl>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                item.Id == id && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_EXCEPTION_SOURCE_NOT_FOUND",
+                "The approved-exception source was not found.");
+        var tender = await RequireTenderAsync(control.TenderId, cancellationToken);
+        return await RequireSourceLinkAsync(
+            tender.SourcePurchaseRequisitionId, tender.SourcingReleaseId,
+            control.SourcingCaseId, cancellationToken);
+    }
+
+    private async Task<PurchaseRequisition> RequireApprovedRequisitionAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var requisition = await Requisitions.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == id && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_SOURCE_REQUISITION_NOT_FOUND",
+                "The source purchase requisition was not found in the current tenant.");
+        if (!ProcurementPurchaseOrderSourceRules.IsApprovedRequisitionStatus(
+                requisition.Status))
+        {
+            throw Invalid("PO_SOURCE_REQUISITION_NOT_APPROVED",
+                $"The source purchase requisition is not approved (current status: {requisition.Status}).");
+        }
+        return requisition;
+    }
+
+    private async Task<Tender> RequireTenderAsync(
+        Guid id,
+        CancellationToken cancellationToken) =>
+        await _unitOfWork.Repository<Tender>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                item.Id == id && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+        ?? throw Invalid("PO_TENDER_SOURCE_NOT_FOUND",
+            "The tender source was not found in the current tenant.");
+
+    private async Task<ProcurementAwardReadinessDecision>
+        RequireCurrentReadinessAsync(
+            ProcurementAwardReadinessSourceType sourceType,
+            Guid sourceId,
+            Guid businessPartnerId,
+            CancellationToken cancellationToken)
+    {
+        var readiness = await ReadinessDecisions.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.SourceType == sourceType &&
+                item.SourceId == sourceId && !item.IsDeleted)
+            .OrderByDescending(item => item.DecisionSequence)
+            .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_SOURCE_READINESS_NOT_FOUND",
+                "No award-readiness decision exists for the selected source.");
+        EnsureReady(readiness);
+        if (!ProcurementPurchaseOrderSourceRules.ContainsApprovedSupplier(
+                readiness.RecommendedBusinessPartnerIdsJson, businessPartnerId))
+        {
+            throw Invalid("PO_SOURCE_SUPPLIER_NOT_RECOMMENDED",
+                "The selected supplier is not part of the approved award-readiness decision.");
+        }
+        return readiness;
+    }
+
+    private static void EnsureReady(ProcurementAwardReadinessDecision readiness)
+    {
+        if (readiness.Status != ProcurementAwardReadinessDecisionStatus.Ready)
+            throw Invalid("PO_SOURCE_READINESS_BLOCKED",
+                "The latest award-readiness decision does not permit purchase-order creation.");
+    }
+
+    private static void EnsureSourcingCaseUsable(ProcurementSourcingCase sourcingCase)
+    {
+        if (sourcingCase.Status == ProcurementSourcingCaseStatus.Cancelled)
+            throw Invalid("PO_SOURCING_CASE_CANCELLED",
+                "A cancelled sourcing case cannot authorize a purchase order.");
+    }
+
+    private static ProcurementPurchaseOrderSourceResolution BuildResolution(
+        ProcurementPurchaseOrderSourceType sourceType,
+        Guid sourceId,
+        string sourceReference,
+        PurchaseRequisition requisition,
+        ProcurementSourcingCase sourcingCase,
+        ProcurementAwardReadinessDecision readiness,
+        Guid businessPartnerId,
+        string currencyCode,
+        object snapshot)
+    {
+        var json = JsonSerializer.Serialize(snapshot, JsonOptions);
+        return new ProcurementPurchaseOrderSourceResolution
+        {
+            SourceType = sourceType,
+            SourceId = sourceId,
+            SourceReference = sourceReference,
+            PurchaseRequisitionId = requisition.Id,
+            PurchaseRequisitionNumber = requisition.RequisitionNumber,
+            SourcingCaseId = sourcingCase.Id,
+            SourcingReleaseId = sourcingCase.SourcingReleaseId,
+            AwardReadinessDecisionId = readiness.Id,
+            BusinessPartnerId = businessPartnerId,
+            CurrencyCode = string.IsNullOrWhiteSpace(currencyCode)
+                ? "USD"
+                : currencyCode.Trim().ToUpperInvariant(),
+            SourceSnapshotJson = json,
+            SourceIntegrityHash = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant(),
+            ValidatedAtUtc = DateTime.UtcNow
+        };
+    }
+
+    private async Task EnsureCapabilityAsync(
+        string sourceReference,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        if (!_currentUser.IsAuthenticated || _currentUser.TenantId == Guid.Empty ||
+            _currentUser.UserId == Guid.Empty || _currentUser.IsExternalUser)
+        {
+            throw new ProcurementPurchaseOrderSourceAuthorizationException(
+                "An authenticated internal tenant user is required.");
+        }
+        await _accessControl.EnforceCapabilityAsync(
+            new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = Permission,
+                SourceType = "PurchaseOrderSource",
+                SourceReference = sourceReference
+            },
+            NormalizeCorrelation(correlationId),
+            cancellationToken);
+    }
+
+    private Task RecordAsync(
+        Guid sourceId,
+        string sourceReference,
+        string action,
+        ProcurementControlEventResult result,
+        string correlationId,
+        string reason,
+        object values,
+        CancellationToken cancellationToken) =>
+        _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
+        {
+            EventKey = ProcurementControlEventKey.Create(
+                "purchase-order-source",
+                _currentUser.TenantId,
+                sourceId,
+                $"{NormalizeAction(action)}-{NormalizeCorrelation(correlationId)}"),
+            EventType = EventType,
+            Action = NormalizeAction(action),
+            Result = result,
+            RuleCode = "PO_APPROVED_SOURCE_REQUIRED",
+            RuleId = sourceId,
+            DecisionKeys = DecisionKeys.ToList(),
+            SourceType = "PurchaseOrder",
+            SourceId = sourceId,
+            SourceReference = sourceReference,
+            Reason = reason,
+            ResultValues = values,
+            CorrelationId = NormalizeCorrelation(correlationId),
+            CausationId = NormalizeCorrelation(correlationId),
+            OccurredAtUtc = DateTime.UtcNow
+        }, cancellationToken);
+
+    private async Task TryRecordDeniedAsync(
+        Guid sourceId,
+        string sourceReference,
+        string action,
+        string correlationId,
+        ProcurementPurchaseOrderSourceValidationException exception,
+        object values,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RecordAsync(
+                sourceId,
+                sourceReference,
+                action,
+                ProcurementControlEventResult.Denied,
+                correlationId,
+                $"{exception.Code}: {exception.Message}",
+                values,
+                cancellationToken);
+        }
+        catch (Exception auditException)
+        {
+            _logger.LogWarning(
+                auditException,
+                "Failed to record purchase-order source denial {Code} for {SourceId}",
+                exception.Code,
+                sourceId);
+        }
+    }
+
+    private async Task PublishNotificationAsync(
+        string topic,
+        PurchaseOrder purchaseOrder,
+        string action,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _notificationTopics.PublishAsync(new NotificationTopicEvent
+            {
+                TenantId = purchaseOrder.TenantId,
+                TopicKey = topic,
+                NotificationType = EventType,
+                EntityType = "PurchaseOrder",
+                EntityId = purchaseOrder.Id,
+                TriggeredByUserId = _currentUser.UserId,
+                Data = new Dictionary<string, object>
+                {
+                    ["orderNumber"] = purchaseOrder.OrderNumber,
+                    ["action"] = NormalizeAction(action),
+                    ["sourceType"] = purchaseOrder.ProcurementSourceType?.ToString()
+                        ?? string.Empty,
+                    ["sourceId"] = purchaseOrder.ProcurementSourceId ?? Guid.Empty,
+                    ["sourceReference"] =
+                        purchaseOrder.ProcurementSourceReference ?? string.Empty,
+                    ["purchaseRequisitionId"] =
+                        purchaseOrder.SourceRequisitionId ?? Guid.Empty,
+                    ["sourcingCaseId"] = purchaseOrder.SourcingCaseId ?? Guid.Empty,
+                    ["awardReadinessDecisionId"] =
+                        purchaseOrder.AwardReadinessDecisionId ?? Guid.Empty,
+                    ["supplierId"] = purchaseOrder.BusinessPartnerId,
+                    ["status"] = purchaseOrder.Status
+                }
+            }, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Failed to publish purchase-order source notification {Topic} for {PurchaseOrderId}",
+                topic,
+                purchaseOrder.Id);
+        }
+    }
+
+    private static string NormalizeCorrelation(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? Guid.NewGuid().ToString("N")
+            : value.Trim().Length <= 100
+                ? value.Trim()
+                : value.Trim()[..100];
+
+    private static string NormalizeAction(string? value)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? "Validated" : value.Trim();
+        return normalized.Length <= 100 ? normalized : normalized[..100];
+    }
+
+    private static ProcurementPurchaseOrderSourceValidationException Invalid(
+        string code,
+        string message) => new(code, message);
+}

@@ -49,6 +49,14 @@
     <Compile Include="Migrations\20260727005601_AddProcurementSupplierPerformanceScorecards.Designer.cs" />
     <Compile Include="Migrations\20260727101510_AddProcurementSupplierMasterChangeRollout.Designer.cs" />
     <Compile Include="Migrations\20260727113854_AddProcurementSupplierApplicantAccess.Designer.cs" />
+    <Compile Include="Migrations\20260729084856_TDC0401FrameworkAgreements.Designer.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Tdc0402FocusedEfBuild)' == 'true'">
+    <!-- TDC-0402 source/model feedback without recompiling historical generated designers. -->
+    <Compile Remove="Migrations\*.Designer.cs" />
+    <Compile Include="Migrations\20260729084856_TDC0401FrameworkAgreements.Designer.cs" />
+    <Compile Include="Migrations\20260729124416_TDC0402FrameworkCallOffs.Designer.cs" />
   </ItemGroup>
 
 </Project>

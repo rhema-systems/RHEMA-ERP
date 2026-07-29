@@ -44,7 +44,9 @@ import {
   CreatePurchaseOrderDto,
   CreatePurchaseOrderItemDto,
   PurchaseRequisitionDetailDto,
-  LandedCostAllocationMethod
+  LandedCostAllocationMethod,
+  ProcurementPurchaseOrderSourceOptionDto,
+  ProcurementPurchaseOrderSourceStatusDto
 } from '@/services/purchasingService';
 import { inventoryManagementService, InventoryItemDto, WarehouseDto, ItemUnitOfMeasureDto, WarehouseItemDto } from '@/services/inventoryManagementService';
 import { businessPartnerService, BusinessPartnerDto, BusinessPartnerDetailDto } from '@/services/businessPartnerService';
@@ -102,6 +104,10 @@ function NewPurchaseOrderPageContent() {
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loadingRequisition, setLoadingRequisition] = useState(false);
+  const [loadingSources, setLoadingSources] = useState(true);
+  const [sourceStatus, setSourceStatus] =
+    useState<ProcurementPurchaseOrderSourceStatusDto | null>(null);
+  const [selectedSourceKey, setSelectedSourceKey] = useState('');
   
   // Form data
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
@@ -211,6 +217,41 @@ function NewPurchaseOrderPageContent() {
 
     loadData();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSources = async () => {
+      try {
+        setLoadingSources(true);
+        const status = await purchasingService.getPurchaseOrderSourceOptions(
+          fromRequisitionId || undefined
+        );
+        if (!cancelled) setSourceStatus(status);
+      } catch (error) {
+        console.error('Error loading approved PO sources:', error);
+        if (!cancelled) {
+          setSourceStatus({
+            ready: false,
+            permission: 'procurement.purchase-order.create',
+            candidateCount: 0,
+            blockedReasons: [
+              error instanceof Error
+                ? error.message
+                : 'Approved source options could not be loaded.'
+            ],
+            sources: [],
+            frameworkCallOffRoute: '/procurement/framework-call-offs'
+          });
+        }
+      } finally {
+        if (!cancelled) setLoadingSources(false);
+      }
+    };
+    loadSources();
+    return () => {
+      cancelled = true;
+    };
+  }, [fromRequisitionId]);
 
   // Load requisition if creating from PR
   useEffect(() => {
@@ -506,6 +547,24 @@ function NewPurchaseOrderPageContent() {
     }
   };
 
+  const selectedSource = useMemo<ProcurementPurchaseOrderSourceOptionDto | null>(
+    () =>
+      sourceStatus?.sources.find(
+        source => `${source.sourceType}:${source.sourceId}` === selectedSourceKey
+      ) ?? null,
+    [selectedSourceKey, sourceStatus]
+  );
+
+  const handleSourceChange = (key: string) => {
+    setSelectedSourceKey(key);
+    const source = sourceStatus?.sources.find(
+      item => `${item.sourceType}:${item.sourceId}` === key
+    );
+    if (!source) return;
+    setSelectedSupplierId(source.businessPartnerId);
+    loadSupplierDetails(source.businessPartnerId);
+  };
+
   const handleInlineWarehouseSelect = async (warehouseId: string) => {
     if (!editingItem) return;
 
@@ -723,6 +782,10 @@ function NewPurchaseOrderPageContent() {
 
   // Save as draft
   const handleSaveDraft = async () => {
+    if (!selectedSource) {
+      toast.error('Select an approved procurement source before creating the purchase order');
+      return;
+    }
     if (!selectedSupplierId) {
       toast.error('Please select a supplier');
       return;
@@ -756,6 +819,8 @@ function NewPurchaseOrderPageContent() {
         deliveryWarehouseId && deliveryWarehouseId !== '__none__' ? deliveryWarehouseId : undefined;
 
       const createData: CreatePurchaseOrderDto = {
+        sourceType: selectedSource.sourceType,
+        sourceId: selectedSource.sourceId,
         supplierId: selectedSupplierId,
         orderType,
         requiredDate: requiredDate || undefined,
@@ -818,6 +883,10 @@ function NewPurchaseOrderPageContent() {
 
   // Submit for approval
   const handleSubmit = async () => {
+    if (!selectedSource) {
+      toast.error('Select an approved procurement source before creating the purchase order');
+      return;
+    }
     if (!selectedSupplierId) {
       toast.error('Please select a supplier');
       return;
@@ -851,6 +920,8 @@ function NewPurchaseOrderPageContent() {
         deliveryWarehouseId && deliveryWarehouseId !== '__none__' ? deliveryWarehouseId : undefined;
 
       const createData: CreatePurchaseOrderDto = {
+        sourceType: selectedSource.sourceType,
+        sourceId: selectedSource.sourceId,
         supplierId: selectedSupplierId,
         orderType,
         requiredDate: requiredDate || undefined,
@@ -968,6 +1039,96 @@ function NewPurchaseOrderPageContent() {
         </BreadcrumbList>
       </Breadcrumb>
 
+      <Card className="border-amber-300 bg-amber-50/60">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Check className="h-5 w-5 text-amber-700" />
+            Approved Procurement Source
+          </CardTitle>
+          <CardDescription>
+            Every purchase order must retain an approved requisition, sourcing case,
+            award-readiness decision, and award, contract, or approved exception.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {loadingSources ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Checking approved sources...
+            </div>
+          ) : sourceStatus?.ready ? (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="approvedSource">Approved source *</Label>
+                <Select value={selectedSourceKey} onValueChange={handleSourceChange}>
+                  <SelectTrigger id="approvedSource">
+                    <SelectValue placeholder="Select an approved source" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sourceStatus.sources.map(source => (
+                      <SelectItem
+                        key={`${source.sourceType}:${source.sourceId}`}
+                        value={`${source.sourceType}:${source.sourceId}`}
+                      >
+                        {source.sourceLabel} · PR {source.purchaseRequisitionNumber} ·{' '}
+                        {source.businessPartnerName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {selectedSource && (
+                <div className="grid gap-3 rounded-lg border bg-background p-4 text-sm md:grid-cols-3">
+                  <div>
+                    <p className="text-muted-foreground">Requisition</p>
+                    <p className="font-medium">{selectedSource.purchaseRequisitionNumber}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Supplier</p>
+                    <p className="font-medium">{selectedSource.businessPartnerName}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Approved value</p>
+                    <p className="font-medium">
+                      {selectedSource.approvedAmount == null
+                        ? 'Source-controlled'
+                        : `${selectedSource.currencyCode} ${selectedSource.approvedAmount.toLocaleString()}`}
+                    </p>
+                  </div>
+                  <div className="md:col-span-3">
+                    <p className="text-muted-foreground">Immutable lineage</p>
+                    <p className="break-all font-mono text-xs">
+                      Case {selectedSource.sourcingCaseId} · Readiness{' '}
+                      {selectedSource.awardReadinessDecisionId}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-amber-300 bg-amber-100 p-3 text-sm text-amber-950">
+                {(sourceStatus?.blockedReasons ?? ['No approved source is available.']).map(
+                  reason => <p key={reason}>{reason}</p>
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  router.push(
+                    sourceStatus?.frameworkCallOffRoute ||
+                      '/procurement/framework-call-offs'
+                  )
+                }
+              >
+                Open governed framework call-offs
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Source Requisition Info */}
       {sourceRequisition && (
         <Card className="border-blue-200 bg-blue-50">
@@ -998,7 +1159,11 @@ function NewPurchaseOrderPageContent() {
         <CardContent className="space-y-6">
           <div className="space-y-2">
             <Label htmlFor="supplier">Supplier *</Label>
-            <Select value={selectedSupplierId} onValueChange={handleSupplierChange}>
+            <Select
+              value={selectedSupplierId}
+              onValueChange={handleSupplierChange}
+              disabled={Boolean(selectedSource)}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select a supplier" />
               </SelectTrigger>
@@ -1011,6 +1176,11 @@ function NewPurchaseOrderPageContent() {
                 ))}
               </SelectContent>
             </Select>
+            {selectedSource && (
+              <p className="text-xs text-muted-foreground">
+                Supplier is locked to the approved source.
+              </p>
+            )}
           </div>
           
           {/* Supplier Details */}

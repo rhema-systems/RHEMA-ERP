@@ -1,0 +1,50 @@
+using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
+
+namespace ErpSystem.Core.Interfaces.Procurement;
+
+public interface IProcurementPurchaseOrderSourceService
+{
+    Task<ProcurementPurchaseOrderSourceStatusDto> GetOptionsAsync(
+        Guid? purchaseRequisitionId,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
+    Task<ProcurementPurchaseOrderSourceResolution> ResolveAsync(
+        ProcurementPurchaseOrderSourceType sourceType,
+        Guid sourceId,
+        Guid businessPartnerId,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
+    void Apply(PurchaseOrder purchaseOrder, ProcurementPurchaseOrderSourceResolution source);
+
+    Task<ProcurementPurchaseOrderSourceResolution> ResolveFrameworkCallOffAsync(
+        ProcurementFrameworkCallOff callOff,
+        ProcurementFrameworkAgreement agreement,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
+    Task RevalidateAsync(
+        PurchaseOrder purchaseOrder,
+        string action,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
+    Task RecordBoundAsync(
+        PurchaseOrder purchaseOrder,
+        string action,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class ProcurementPurchaseOrderSourceValidationException(
+    string code,
+    string message) : InvalidOperationException(message)
+{
+    public string Code { get; } = code;
+}
+
+public sealed class ProcurementPurchaseOrderSourceAuthorizationException(string message)
+    : UnauthorizedAccessException(message);

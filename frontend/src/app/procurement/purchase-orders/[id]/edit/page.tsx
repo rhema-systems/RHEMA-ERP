@@ -43,7 +43,8 @@ import {
   PurchaseOrderDetailDto,
   CreatePurchaseOrderDto,
   CreatePurchaseOrderItemDto,
-  LandedCostAllocationMethod
+  LandedCostAllocationMethod,
+  ProcurementPurchaseOrderSourceType
 } from '@/services/purchasingService';
 import { inventoryManagementService, InventoryItemDto, WarehouseDto, ItemUnitOfMeasureDto, WarehouseItemDto } from '@/services/inventoryManagementService';
 import { businessPartnerService, BusinessPartnerDto } from '@/services/businessPartnerService';
@@ -106,6 +107,9 @@ export default function EditPurchaseOrderPage() {
   const [orderDate, setOrderDate] = useState('');
   const [supplierId, setSupplierId] = useState('');
   const [supplierName, setSupplierName] = useState('');
+  const [sourceType, setSourceType] =
+    useState<ProcurementPurchaseOrderSourceType>('HistoricalMigration');
+  const [sourceId, setSourceId] = useState('');
   const [requiredDate, setRequiredDate] = useState('');
   const [promisedDate, setPromisedDate] = useState('');
   const [paymentTerms, setPaymentTerms] = useState('');
@@ -197,6 +201,8 @@ export default function EditPurchaseOrderPage() {
         setOrderDate(po.orderDate);
         setSupplierId(po.supplierId);
         setSupplierName(po.supplierName);
+        setSourceType(po.procurementSourceType || 'HistoricalMigration');
+        setSourceId(po.procurementSourceId || '');
         setRequiredDate(po.requiredDate ? po.requiredDate.split('T')[0] : '');
         setPromisedDate(po.promisedDate ? po.promisedDate.split('T')[0] : '');
         setPaymentTerms(po.paymentTerms || '');
@@ -764,6 +770,8 @@ export default function EditPurchaseOrderPage() {
         deliveryWarehouseId && deliveryWarehouseId !== '__none__' ? deliveryWarehouseId : undefined;
 
       const updateData: CreatePurchaseOrderDto = {
+        sourceType,
+        sourceId,
         supplierId,
         orderType,
         requiredDate: requiredDate || undefined,
