@@ -40,7 +40,7 @@ COPY --from=publish /app/publish .
 
 # Create a non-root user
 RUN groupadd -r erpuser && useradd --no-log-init -r -g erpuser erpuser
-RUN chown -R erpuser:erpuser /app
+RUN mkdir -p /app/wwwroot/uploads && chown -R erpuser:erpuser /app
 USER erpuser
 
 # Health check

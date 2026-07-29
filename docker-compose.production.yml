@@ -56,6 +56,7 @@ services:
     volumes:
       - erp-api-logs-1:/var/log/erp-api
       - erp-dpkeys:/var/dpkeys
+      - erp-uploads:/app/wwwroot/uploads
     networks:
       - erp-network
     depends_on:
@@ -102,6 +103,7 @@ services:
     volumes:
       - erp-api-logs-2:/var/log/erp-api
       - erp-dpkeys:/var/dpkeys
+      - erp-uploads:/app/wwwroot/uploads
     networks:
       - erp-network
     depends_on:
@@ -148,6 +150,7 @@ services:
     volumes:
       - erp-api-logs-3:/var/log/erp-api
       - erp-dpkeys:/var/dpkeys
+      - erp-uploads:/app/wwwroot/uploads
     networks:
       - erp-network
     depends_on:
@@ -195,6 +198,7 @@ services:
     volumes:
       - erp-api-logs-backup:/var/log/erp-api
       - erp-dpkeys:/var/dpkeys
+      - erp-uploads:/app/wwwroot/uploads
     networks:
       - erp-network
     depends_on:
@@ -553,6 +557,8 @@ volumes:
   erp-api-logs-backup:
     driver: local
   erp-dpkeys:
+    driver: local
+  erp-uploads:
     driver: local
   erp-clamav-data:
     driver: local

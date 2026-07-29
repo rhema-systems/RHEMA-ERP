@@ -443,6 +443,58 @@ public sealed class SupplierApplicantLifecycleControllerTests
     }
 
     [Fact]
+    public async Task PaymentOnlyApplicantCannotDeleteDocuments()
+    {
+        var sessionReference = Guid.NewGuid();
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.ValidateSessionAsync(
+                sessionReference,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupplierApplicantSessionDto
+            {
+                SessionReference = sessionReference,
+                SystemActorUserId = Guid.NewGuid(),
+                TenantId = Guid.NewGuid(),
+                RegistrationId = Guid.NewGuid(),
+                TokenId = Guid.NewGuid(),
+                ExpiresAtUtc = DateTime.UtcNow.AddHours(1),
+                PaymentOnly = true
+            });
+        var registrations = new Mock<IBusinessPartnerRegistrationService>();
+        var controlledFiles = new Mock<IControlledFileUploadService>();
+        var unitOfWork = TransactionalUnitOfWork();
+        var controller = Controller(
+            access.Object,
+            Mock.Of<IProcurementSupplierOnboardingTokenService>(),
+            registrations.Object,
+            controlledFiles.Object,
+            sessionReference,
+            unitOfWork.Object);
+
+        var result = await controller.DeleteDocument(
+            Guid.NewGuid(), CancellationToken.None);
+
+        var conflict = result.Should().BeOfType<ConflictObjectResult>().Subject;
+        conflict.Value.Should().BeEquivalentTo(new
+        {
+            code = "SUPPLIER_APPLICANT_PAYMENT_REQUIRED",
+            message = "Payment or an approved exemption is required before deleting documents."
+        });
+        registrations.Verify(item => item.GetDocumentByIdAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+        registrations.Verify(item => item.DeleteDocumentAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+        controlledFiles.Verify(item => item.DeleteAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<Guid>(),
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        unitOfWork.Verify(item => item.BeginTransactionAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task SuccessfulPasswordReplacementClearsForcedStateAndActivatesSupplier()
     {
         var tenantId = Guid.NewGuid();

@@ -67,6 +67,20 @@ outcomes never reach storage for mandatory clean-scan categories. The legacy
 `NoOpFileVirusScanService` is retained only as an explicit test/custom-host
 type and is no longer the application runtime default.
 
+## Multi-node local storage
+
+Every API instance that uses the `Local` provider must see the same physical
+storage namespace. The production Compose topology mounts the single
+`erp-uploads` volume at `/app/wwwroot/uploads` in all four API containers, and
+the API image prepares that mount point for its non-root runtime user.
+
+This shared mount makes an absent file authoritative to every cleanup worker
+and allows a request routed to any API node to read an uploaded object. Do not
+replace the mount with separate node-local volumes. For deployments across
+multiple Docker hosts, configure a genuinely shared filesystem or an
+object-storage provider such as Azure Blob rather than the local Docker
+volume.
+
 ## Linking uploaded files
 
 Domain records should retain the returned `FileUploadRecord.Id`, checksum,

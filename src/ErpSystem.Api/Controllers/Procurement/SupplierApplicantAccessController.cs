@@ -417,6 +417,12 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         {
             var session = await _applicantAccess.ValidateSessionAsync(
                 SessionReference(), Correlation("document-delete-session"), cancellationToken);
+            if (session.PaymentOnly)
+                return Conflict(new
+                {
+                    code = "SUPPLIER_APPLICANT_PAYMENT_REQUIRED",
+                    message = "Payment or an approved exemption is required before deleting documents."
+                });
             var document = await _registrations.GetDocumentByIdAsync(
                 session.RegistrationId, documentId);
             if (document is null)

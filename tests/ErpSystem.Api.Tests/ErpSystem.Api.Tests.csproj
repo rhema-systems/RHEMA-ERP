@@ -124,6 +124,7 @@
     <Compile Include="Services\TenantSettingsServiceTests.cs" />
     <Compile Include="Services\ControlledFileUploadServiceTests.cs" />
     <Compile Include="Services\ClamAvFileVirusScanServiceTests.cs" />
+    <Compile Include="Services\FileStorageDeploymentConfigurationTests.cs" />
     <Compile Include="Services\WorkflowDefinitionServiceAdapterCloneTests.cs" />
   </ItemGroup>
 
