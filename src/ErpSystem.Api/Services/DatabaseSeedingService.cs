@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ErpSystem.Api.Configuration;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
@@ -42,6 +43,7 @@ namespace ErpSystem.Web.Services
         private readonly IWebHostEnvironment _environment;
         private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
         private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
+        private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
 
         private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinanceApprovalStages =
             new List<WorkflowApprovalStageSeed>
@@ -81,7 +83,8 @@ namespace ErpSystem.Web.Services
             ILogger<DatabaseSeedingService> logger,
             IWebHostEnvironment environment,
             ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
-            ProcurementAccessControlSeeder? procurementAccessControlSeeder = null)
+            ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
+            IConfiguration? configuration = null)
         {
             _context = context;
             _userManager = userManager;
@@ -90,6 +93,9 @@ namespace ErpSystem.Web.Services
             _environment = environment;
             _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
             _procurementAccessControlSeeder = procurementAccessControlSeeder;
+            _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
+                StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
+                false) ?? false;
         }
 
         public Task SeedAsync() => SeedCoreAsync(applyMigrations: true);
@@ -176,7 +182,9 @@ namespace ErpSystem.Web.Services
                 }
 
                 // Ensure development test users exist without changing passwords for existing accounts.
-                if (_environment.IsDevelopment())
+                if (StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(
+                    _environment.EnvironmentName,
+                    _allowDevelopmentDataSeedingOutsideDevelopment))
                 {
                     _logger.LogInformation("Ensuring development test users exist...");
                     await SeedTestUsersAsync();

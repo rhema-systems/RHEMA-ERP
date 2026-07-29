@@ -13,6 +13,12 @@ public interface IUnitOfWork : IDisposable
     IAccountSegmentValueRepository AccountSegmentValues { get; }
     ISegmentLookupValueRepository SegmentLookupValues { get; }
 
+    /// <summary>
+    /// Indicates that this scoped unit of work is already participating in a
+    /// caller-owned database transaction.
+    /// </summary>
+    bool HasActiveTransaction { get; }
+
 
     /// <summary>
     /// Save all pending changes to the database
@@ -45,6 +51,12 @@ public interface IUnitOfWork : IDisposable
     /// Rollback the current transaction
     /// </summary>
     Task RollbackAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Detach all tracked entities after a rejected or rolled-back operation so a later
+    /// audit write cannot accidentally flush pending business changes.
+    /// </summary>
+    void ClearTrackedChanges();
 
     /// <summary>
     /// Get repository for specific entity type

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -144,6 +145,15 @@ public class ContractsController : ControllerBase
         {
             var contract = await _contractService.CreateFromAwardAsync(dto);
             return CreatedAtAction(nameof(GetContract), new { id = contract.Id }, contract);
+        }
+        catch (SupplierEligibilityException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                eligibility = ex.Result
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -631,4 +641,3 @@ public class TerminateContractRequest
 {
     public string Reason { get; set; } = string.Empty;
 }
-

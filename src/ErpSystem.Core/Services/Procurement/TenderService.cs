@@ -34,7 +34,9 @@ public class TenderService : ITenderService
     private readonly IAppEventBus _appEventBus;
     private readonly IProcurementSourcingCaseService _sourcingCaseService;
     private readonly IProcurementTenderControlService _tenderControlService;
+    private readonly IProcurementTenderDocumentControlService _tenderDocumentControlService;
     private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
+    private readonly IProcurementEvaluationCommitteeControlService _evaluationCommittee;
 
     public TenderService(
         ITenderRepository tenderRepository,
@@ -57,7 +59,9 @@ public class TenderService : ITenderService
         IAppEventBus appEventBus,
         IProcurementSourcingCaseService sourcingCaseService,
         IProcurementTenderControlService tenderControlService,
+        IProcurementTenderDocumentControlService tenderDocumentControlService,
         IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
+        IProcurementEvaluationCommitteeControlService evaluationCommittee,
         ILogger<TenderService> logger)
     {
         _tenderRepository = tenderRepository;
@@ -80,7 +84,9 @@ public class TenderService : ITenderService
         _appEventBus = appEventBus;
         _sourcingCaseService = sourcingCaseService;
         _tenderControlService = tenderControlService;
+        _tenderDocumentControlService = tenderDocumentControlService;
         _exceptionalSourcingControlService = exceptionalSourcingControlService;
+        _evaluationCommittee = evaluationCommittee;
         _logger = logger;
     }
 
@@ -520,6 +526,22 @@ public class TenderService : ITenderService
             if (tender.EstimatedValue != gate.EstimatedValue || !string.Equals(tender.Currency, gate.CurrencyCode, StringComparison.OrdinalIgnoreCase))
                 throw new ProcurementRequisitionSourcingValidationException("TENDER_CASE_VALUE_MISMATCH", "Tender value and currency no longer match the locked sourcing case.");
 
+            if (gate.SelectedMethod is ProcurementMethodType.RestrictedTendering or ProcurementMethodType.SingleSource)
+            {
+                throw new ProcurementExceptionalSourcingConflictException(
+                    "EXCEPTIONAL_CONTROL_REQUIRED",
+                    "Restricted Tendering and Single Source tenders must be prepared, approved, and released through the dedicated exceptional-sourcing control.");
+            }
+
+            var documentCorrelationId = Guid.NewGuid().ToString("N");
+            await _tenderDocumentControlService.EnsurePublicationReadyAsync(
+                ProcurementTenderDocumentSourceType.Tender, tender.Id, dto.SubmissionDeadline,
+                documentCorrelationId);
+            await _tenderDocumentControlService.EnsureDispatchReadyAsync(
+                ProcurementTenderDocumentSourceType.Tender, tender.Id,
+                dto.InvitedBusinessPartnerIds.Where(item => item != Guid.Empty).Distinct().ToList(),
+                dto.ExternalRecipientEmails.Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
+                documentCorrelationId);
             if (gate.SelectedMethod is ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering)
             {
                 if (!dto.OpeningDate.HasValue)
@@ -536,13 +558,6 @@ public class TenderService : ITenderService
                     OpeningScheduledAtUtc = dto.OpeningDate.Value
                 }, Guid.NewGuid().ToString("N"));
             }
-            else if (gate.SelectedMethod is ProcurementMethodType.RestrictedTendering or ProcurementMethodType.SingleSource)
-            {
-                throw new ProcurementExceptionalSourcingConflictException(
-                    "EXCEPTIONAL_CONTROL_REQUIRED",
-                    "Restricted Tendering and Single Source tenders must be prepared, approved, and released through the dedicated exceptional-sourcing control.");
-            }
-
             tender.Status = "Published";
             tender.PublishDate = DateTime.UtcNow; // Always publish immediately
             tender.SubmissionDeadline = dto.SubmissionDeadline;
@@ -1039,6 +1054,7 @@ public class TenderService : ITenderService
         {
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            await EnsureStandaloneEvaluatorAssignmentMutableAsync(tender.Id);
 
             var evaluatorIds = new List<Guid>();
 
@@ -1120,6 +1136,9 @@ public class TenderService : ITenderService
     {
         try
         {
+            var evaluator = await _evaluatorRepository.GetByIdAsync(evaluatorId)
+                ?? throw new InvalidOperationException($"Evaluator with ID {evaluatorId} not found");
+            await EnsureStandaloneEvaluatorAssignmentMutableAsync(evaluator.TenderId);
             await _evaluatorRepository.DeleteAsync(evaluatorId);
             await _unitOfWork.SaveChangesAsync();
 
@@ -1489,6 +1508,20 @@ public class TenderService : ITenderService
             RequiredDeliveryDate = item.RequiredDeliveryDate,
             DeliveryLocation = item.DeliveryLocation
         };
+    }
+
+    private async Task EnsureStandaloneEvaluatorAssignmentMutableAsync(Guid tenderId)
+    {
+        var readiness = await _evaluationCommittee.GetReadinessAsync(
+            ProcurementEvaluationSourceType.Tender,
+            tenderId,
+            CancellationToken.None);
+        if (readiness.HasControl)
+        {
+            throw new ProcurementEvaluationCommitteeConflictException(
+                "EVALUATION_COMMITTEE_MEMBERSHIP_REQUIRED",
+                "This source is bound to the controlled evaluation committee. Manage evaluator membership through that exact committee; standalone evaluator assignments cannot grant or remove scoring access.");
+        }
     }
 
     private static bool IsRequestForQuotation(string? tenderType) =>

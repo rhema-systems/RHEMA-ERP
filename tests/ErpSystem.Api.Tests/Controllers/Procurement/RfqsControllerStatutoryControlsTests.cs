@@ -96,6 +96,55 @@ public sealed class RfqsControllerStatutoryControlsTests
         Assert.Contains("TDC_EVALUATOR", evaluationRoles);
         Assert.DoesNotContain("TDC_EVALUATOR", decisionRoles);
         Assert.Contains("TDC_HEAD_OF_PROCUREMENT", decisionRoles);
+
+        var awardAuthorization = controllerType
+            .GetMethod(nameof(RfqsController.AwardRfqAndCreatePurchaseOrders))!
+            .GetCustomAttribute<AuthorizeAttribute>()!;
+        Assert.Null(awardAuthorization.Roles);
+        Assert.Null(controllerType
+            .GetMethod(nameof(RfqsController.AwardRfqAndCreatePurchaseOrders))!
+            .GetCustomAttribute<AllowAnonymousAttribute>());
+    }
+
+    [Theory]
+    [InlineData("cross-tenant", 404, "AWARD_READINESS_SOURCE_NOT_FOUND")]
+    [InlineData("evaluator-or-external", 403, "AWARD_READINESS_ACCESS_FORBIDDEN")]
+    [InlineData("blocked", 422, "AWARD_READINESS_BLOCKED")]
+    public async Task AwardDirectRouteMapsReadinessHardStopsWithoutRolePreemption(
+        string failure,
+        int expectedStatus,
+        string expectedCode)
+    {
+        var fixture = new Fixture();
+        var rfqId = Guid.NewGuid();
+        var request = new CreatePurchaseOrdersFromRfqDto();
+        fixture.Rfqs.Setup(service =>
+                service.CreatePurchaseOrdersFromAwardAsync(rfqId, request))
+            .ThrowsAsync(failure switch
+            {
+                "cross-tenant" => new ProcurementAwardReadinessNotFoundException(
+                    "AWARD_READINESS_SOURCE_NOT_FOUND",
+                    "The source was not found in the current tenant."),
+                "evaluator-or-external" => new ProcurementAwardReadinessAuthorizationException(
+                    "An evaluator cannot approve the same award."),
+                _ => new ProcurementAwardReadinessBlockedException(
+                    "AWARD_READINESS_BLOCKED",
+                    "Award readiness controls are not satisfied.",
+                    new ProcurementAwardReadinessDto { SourceId = rfqId })
+            });
+
+        var response = await fixture.Controller
+            .AwardRfqAndCreatePurchaseOrders(rfqId, request);
+
+        var result = Assert.IsAssignableFrom<ObjectResult>(response.Result);
+        Assert.Equal(expectedStatus, result.StatusCode);
+        Assert.NotNull(result.Value);
+        var body = result.Value!;
+        Assert.Equal(expectedStatus,
+            body.GetType().GetProperty("status")!.GetValue(body));
+        Assert.Equal(expectedCode,
+            body.GetType().GetProperty("code")!.GetValue(body));
+        fixture.Rfqs.VerifyAll();
     }
 
     private sealed class Fixture
@@ -103,7 +152,7 @@ public sealed class RfqsControllerStatutoryControlsTests
         public Fixture()
         {
             Controller = new RfqsController(
-                Mock.Of<IRfqService>(),
+                Rfqs.Object,
                 Controls.Object,
                 Mock.Of<IRfqInvitationDocumentService>(),
                 Mock.Of<IBusinessPartnerRepository>(),
@@ -118,6 +167,7 @@ public sealed class RfqsControllerStatutoryControlsTests
             };
         }
 
+        public Mock<IRfqService> Rfqs { get; } = new();
         public Mock<IProcurementRfqControlService> Controls { get; } = new();
         public RfqsController Controller { get; }
     }

@@ -271,8 +271,10 @@ public partial class LocalFileStorageService : IFileStorageService
 
             if (!File.Exists(fullPath))
             {
-                _logger.LogWarning("Attempted to delete non-existent file: {FilePath}", filePath);
-                return false;
+                _logger.LogDebug(
+                    "File is already absent; treating storage deletion as successful: {FilePath}",
+                    filePath);
+                return true;
             }
 
             File.Delete(fullPath);
@@ -530,6 +532,8 @@ public partial class LocalFileStorageService : IFileStorageService
     private static bool IsPrivateCategory(string? category)
         => !string.IsNullOrWhiteSpace(category)
             && (category.StartsWith("central-dms", StringComparison.OrdinalIgnoreCase)
+                || category.Equals(ControlledFileUploadCategories.DocumentManagement, StringComparison.OrdinalIgnoreCase)
+                || category.Equals(ControlledFileUploadCategories.SupplierRegistrationEvidence, StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("estate-land-acquisition-documents", StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("estate-managed-asset-documents", StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("procedure-case-documents", StringComparison.OrdinalIgnoreCase));

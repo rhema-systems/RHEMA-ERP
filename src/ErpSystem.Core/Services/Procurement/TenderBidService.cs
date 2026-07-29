@@ -28,6 +28,7 @@ public class TenderBidService : ITenderBidService
     private readonly ILogger<TenderBidService> _logger;
     private readonly IAppEventBus _appEventBus;
     private readonly IProcurementTenderControlService _tenderControlService;
+    private readonly IProcurementTenderDocumentControlService _tenderDocumentControlService;
     private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
 
     public TenderBidService(
@@ -47,6 +48,7 @@ public class TenderBidService : ITenderBidService
         ICurrentUserProvider currentUserProvider,
         IAppEventBus appEventBus,
         IProcurementTenderControlService tenderControlService,
+        IProcurementTenderDocumentControlService tenderDocumentControlService,
         IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
         ILogger<TenderBidService> logger)
     {
@@ -66,6 +68,7 @@ public class TenderBidService : ITenderBidService
         _currentUserProvider = currentUserProvider;
         _appEventBus = appEventBus;
         _tenderControlService = tenderControlService;
+        _tenderDocumentControlService = tenderDocumentControlService;
         _exceptionalSourcingControlService = exceptionalSourcingControlService;
         _logger = logger;
     }
@@ -556,6 +559,9 @@ public class TenderBidService : ITenderBidService
 
             var submittedAtUtc = DateTime.UtcNow;
             await _exceptionalSourcingControlService.EnsureBidSupplierAllowedAsync(tender.Id, bid.BusinessPartnerId);
+            await _tenderDocumentControlService.EnsureSubmissionReadyAsync(
+                ProcurementTenderDocumentSourceType.Tender, tender.Id, bid.BusinessPartnerId,
+                Guid.NewGuid().ToString("N"));
             var isNctOrIct = await _tenderControlService.IsNctOrIctAsync(tender.Id);
             if (!isNctOrIct && submittedAtUtc > tender.SubmissionDeadline)
             {

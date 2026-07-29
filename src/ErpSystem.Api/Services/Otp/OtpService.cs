@@ -13,7 +13,8 @@ public enum OtpChannel
 public enum OtpPurpose
 {
     Login = 1,
-    PhoneVerification = 2
+    PhoneVerification = 2,
+    SupplierApplicantVerification = 3
 }
 
 public interface IOtpService

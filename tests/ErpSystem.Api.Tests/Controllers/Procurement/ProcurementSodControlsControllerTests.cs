@@ -88,6 +88,47 @@ public sealed class ProcurementSodControlsControllerTests
     }
 
     [Fact]
+    public async Task PublicRuntimeGuardCannotBindInternalIndependentActorOverrides()
+    {
+        ProcurementSodGuardRequest? boundRequest = null;
+        var service = new Mock<IProcurementSodGuardService>();
+        service.Setup(item => item.EnforceAsync(
+                It.IsAny<ProcurementSodGuardRequest>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<ProcurementSodGuardRequest, string, CancellationToken>(
+                (request, _, _) => boundRequest = request)
+            .ReturnsAsync(new ProcurementSodGuardDecisionDto
+            {
+                Allowed = true,
+                Code = "SOD_ALLOWED"
+            });
+        using var factory = CreateFactory(PolicyAuthorizationMode.Success, service);
+        using var client = factory.CreateClient();
+        var injectedActorId = Guid.NewGuid();
+        var payload = new Dictionary<string, object?>
+        {
+            ["controlCode"] =
+                ProcurementSodRequiredControlRegistry.Definitions[0].Code,
+            ["sourceType"] = "PurchaseRequisition",
+            ["sourceReference"] = "PR-API-INJECTION",
+            ["prohibitedActorUserIds"] = new[] { Guid.NewGuid() },
+            ["independentActorUserIds"] = new[] { injectedActorId },
+            ["requireSoleActorConflict"] = true
+        };
+
+        var response = await client.PostAsync(
+            "/api/procurement/sod-controls/enforce",
+            JsonContent(payload));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        boundRequest.Should().NotBeNull();
+        boundRequest!.IndependentActorUserIds.Should().BeEmpty();
+        boundRequest.RequireSoleActorConflict.Should().BeFalse();
+        service.VerifyAll();
+    }
+
+    [Fact]
     public async Task AuthorizedAdministratorCanReadSixControlCoverageAndBlockedAttempts()
     {
         var service = new Mock<IProcurementSodGuardService>();

@@ -10,7 +10,10 @@ public enum ProcurementMasterDataResourceType
     UnitOfMeasure = 5,
     Warehouse = 6,
     WarehouseLocation = 7,
-    ProcurementPolicySensitive = 8
+    ProcurementPolicySensitive = 8,
+    SupplierOwnershipDetails = 9,
+    SupplierCategoryAssignments = 10,
+    SupplierComplianceStatus = 11
 }
 
 public enum ProcurementMasterDataPolicyStatus

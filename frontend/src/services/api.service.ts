@@ -66,6 +66,8 @@ export interface UserInfo {
   lastLoginAt?: string;
   tenantId?: string;
   authenticationProvider?: 'Local' | 'LDAP';
+  mustChangePassword?: boolean;
+  temporaryPasswordExpiresAtUtc?: string;
 }
 
 export interface UserTenantInfo {
@@ -799,6 +801,14 @@ class ApiService {
     if (data instanceof FormData) {
       options.body = data;
     } else if (data !== undefined && data !== null) {
+      options.body = JSON.stringify(data);
+    }
+    return this.privateRequest<T>(endpoint, options);
+  }
+
+  public async delete<T = any>(endpoint: string, data?: any): Promise<T> {
+    const options: RequestInit = { method: 'DELETE' };
+    if (data) {
       options.body = JSON.stringify(data);
     }
     return this.privateRequest<T>(endpoint, options);

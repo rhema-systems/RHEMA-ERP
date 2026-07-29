@@ -1,4 +1,5 @@
 using System.Text;
+using ErpSystem.Api.Configuration;
 using ErpSystem.Api.Data;
 using ErpSystem.Api.Extensions;
 using ErpSystem.Api.Middleware;
@@ -252,6 +253,9 @@ builder.Services.AddErpSystemDatabase(builder.Configuration);
 builder.Services.AddErpSystemIdentity();
 builder.Services.AddErpSystemRepositories();
 builder.Services.AddErpSystemServices();
+builder.Services.Configure<ErpSystem.Core.DTOs.Procurement.SupplierApplicantAccessOptions>(
+    builder.Configuration.GetSection(
+        ErpSystem.Core.DTOs.Procurement.SupplierApplicantAccessOptions.SectionName));
 builder.Services.AddErpSystemFinanceServices();
 builder.Services.AddErpSystemJwtAuthentication(builder.Configuration);
 builder.Services.AddErpSystemAuthorization();
@@ -366,13 +370,32 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseResponseCaching();
 
-// Enable static file serving for uploaded files
+// Legacy supplier evidence may still exist under the historical public upload
+// tree. Never let static-file middleware bypass DMS/application authorization.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments(
+            "/uploads/supplier-registration-evidence",
+            StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    await next();
+});
+
+// Enable static file serving for non-sensitive public assets.
 app.UseStaticFiles();
 
 app.UseRouting();
 
 // CORS must be after UseRouting and before UseAuthentication
 app.UseCors("ErpSystemCorsPolicy");
+
+// Keep framework-generated authentication and method failures structured for
+// the source-scoped GHANEPS exchange API without changing other API contracts.
+app.UseMiddleware<ProcurementGhanepsProblemDetailsMiddleware>();
 
 app.UseAuthentication();
 app.UseMiddleware<JwtBlacklistMiddleware>();
@@ -381,6 +404,8 @@ app.UseMiddleware<JwtBlacklistMiddleware>();
 // Auth endpoints remain anonymous here, so login/password-reset throttling still applies by IP.
 app.UseRateLimiter();
 
+app.UseMiddleware<SupplierApplicantAccessMiddleware>();
+app.UseMiddleware<TemporaryPasswordChangeMiddleware>();
 app.UseMiddleware<ExternalUserAccessMiddleware>();
 app.UseAuthorization();
 
@@ -411,6 +436,13 @@ var failFastOnDatabaseInitializationError = app.Configuration.GetValue(
     "StartupInitialization:FailFastOnDatabaseInitializationError",
     true);
 var seedDevelopmentData = app.Configuration.GetValue("StartupInitialization:SeedDevelopmentData", true);
+var allowDevelopmentDataSeedingOutsideDevelopment = app.Configuration.GetValue(
+    StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
+    false);
+var developmentDataSeedingPermitted =
+    StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(
+        app.Environment.EnvironmentName,
+        allowDevelopmentDataSeedingOutsideDevelopment);
 var seedWorkflowDefinitions = app.Configuration.GetValue("StartupInitialization:SeedWorkflowDefinitions", true);
 var failFastOnDevelopmentSeedError = app.Configuration.GetValue(
     "StartupInitialization:FailFastOnDevelopmentSeedError",
@@ -472,9 +504,16 @@ if (!skipStartupInitialization)
         }
     }
 
-    // Seed demo/basic data in Development to make local testing easier.
-    if (app.Environment.IsDevelopment() && seedDevelopmentData && databaseInitializationSucceeded)
+    // Seed demo/basic data in Development, or on an explicitly opted-in non-production test host.
+    if (seedDevelopmentData && developmentDataSeedingPermitted && databaseInitializationSucceeded)
     {
+        if (!app.Environment.IsDevelopment())
+        {
+            app.Logger.LogWarning(
+                "Development data seeding is explicitly enabled outside the Development environment. " +
+                "This setting is intended only for isolated test servers.");
+        }
+
         app.Logger.LogInformation("Starting Development data seeding...");
         try
         {
@@ -490,10 +529,18 @@ if (!skipStartupInitialization)
             }
         }
     }
-    else if (app.Environment.IsDevelopment() && seedDevelopmentData)
+    else if (seedDevelopmentData && developmentDataSeedingPermitted)
     {
         app.Logger.LogWarning(
             "Skipping Development data seeding because database initialization did not complete successfully.");
+    }
+    else if (seedDevelopmentData)
+    {
+        app.Logger.LogInformation(
+            "Development data seeding was requested but is not permitted in environment {EnvironmentName}. " +
+            "Set {OverrideKey}=true only on an isolated test server.",
+            app.Environment.EnvironmentName,
+            StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey);
     }
 }
 else

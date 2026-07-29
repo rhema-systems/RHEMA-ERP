@@ -34,6 +34,9 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
     private readonly IProcurementSourcingCaseService _sourcingCases;
     private readonly IWorkflowService _workflowService;
     private readonly ISupplierValidationService _supplierValidation;
+    private readonly IProcurementTenderDocumentControlService _tenderDocumentControlService;
+    private readonly IProcurementEvaluationCommitteeControlService _evaluationCommittee;
+    private readonly IProcurementAwardReadinessService _awardReadiness;
 
     public ProcurementTenderControlService(
         IUnitOfWork unitOfWork,
@@ -43,7 +46,10 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         IProcurementControlEventService controlEvents,
         IProcurementSourcingCaseService sourcingCases,
         IWorkflowService workflowService,
-        ISupplierValidationService supplierValidation)
+        ISupplierValidationService supplierValidation,
+        IProcurementTenderDocumentControlService tenderDocumentControlService,
+        IProcurementEvaluationCommitteeControlService evaluationCommittee,
+        IProcurementAwardReadinessService awardReadiness)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -53,6 +59,9 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         _sourcingCases = sourcingCases;
         _workflowService = workflowService;
         _supplierValidation = supplierValidation;
+        _tenderDocumentControlService = tenderDocumentControlService;
+        _evaluationCommittee = evaluationCommittee;
+        _awardReadiness = awardReadiness;
     }
 
     private IGenericRepository<Tender> Tenders => _unitOfWork.Repository<Tender>();
@@ -101,10 +110,15 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             throw Validation("TENDER_DEADLINE_INVALID", "The submission deadline must be in the future.");
         if (opening < deadline)
             throw Validation("TENDER_OPENING_INVALID", "The public opening cannot be scheduled before the submission deadline.");
+        var effectiveDocument = await _tenderDocumentControlService.EnsurePublicationReadyAsync(
+            ProcurementTenderDocumentSourceType.Tender, tenderId, deadline, correlation, cancellationToken);
+        var documentRegister = await _tenderDocumentControlService.GetRegisterAsync(
+            ProcurementTenderDocumentSourceType.Tender, tenderId, cancellationToken);
+        if (request.DocumentFee != documentRegister.FeeAmount)
+            throw Validation("TENDER_DOCUMENT_FEE_MISMATCH",
+                $"The exact controlled document fee is {documentRegister.FeeAmount:0.00} {documentRegister.CurrencyCode}.");
         Require(request.AdvertisementReference, "TENDER_ADVERTISEMENT_REFERENCE_REQUIRED", "Advertisement reference is required.");
         Require(request.PublicationChannel, "TENDER_PUBLICATION_CHANNEL_REQUIRED", "Publication channel is required.");
-        Require(request.TenderDocumentReference, "TENDER_DOCUMENT_REFERENCE_REQUIRED", "Approved tender-document reference is required.");
-        Require(request.TenderDocumentVersion, "TENDER_DOCUMENT_VERSION_REQUIRED", "Approved tender-document version is required.");
         Require(request.AdvertisementEvidenceReference, "TENDER_ADVERTISEMENT_EVIDENCE_REQUIRED", "Advertisement evidence is required.");
         if (!lineage.MethodRule.WorkflowDefinitionId.HasValue)
             throw Validation("TENDER_AWARD_WORKFLOW_REQUIRED", "The locked NCT/ICT method rule must select the shared award-approval workflow.");
@@ -124,9 +138,9 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             Status = ProcurementTenderControlStatus.Advertised,
             AdvertisementReference = request.AdvertisementReference.Trim(),
             PublicationChannel = request.PublicationChannel.Trim(),
-            TenderDocumentReference = request.TenderDocumentReference.Trim(),
-            TenderDocumentVersion = request.TenderDocumentVersion.Trim(),
-            DocumentFee = request.DocumentFee,
+            TenderDocumentReference = effectiveDocument.EffectiveTemplateReference,
+            TenderDocumentVersion = effectiveDocument.EffectiveTemplateVersionId.ToString("D"),
+            DocumentFee = documentRegister.FeeAmount,
             AdvertisementEvidenceReference = request.AdvertisementEvidenceReference.Trim(),
             AdvertisedAtUtc = now,
             SubmissionDeadlineUtc = deadline,
@@ -148,7 +162,17 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         await Tenders.UpdateAsync(tender);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await RecordAsync(control, "TenderAdvertised", ProcurementControlEventResult.Allowed,
-            new { request.AdvertisementReference, request.PublicationChannel, request.TenderDocumentReference, request.TenderDocumentVersion, request.DocumentFee },
+            new
+            {
+                request.AdvertisementReference,
+                request.PublicationChannel,
+                RequestedTenderDocumentReference = request.TenderDocumentReference,
+                RequestedTenderDocumentVersion = request.TenderDocumentVersion,
+                RequestedDocumentFee = request.DocumentFee,
+                ControlledTemplateReference = effectiveDocument.EffectiveTemplateReference,
+                ControlledTemplateVersionId = effectiveDocument.EffectiveTemplateVersionId,
+                ControlledDocumentFee = documentRegister.FeeAmount
+            },
             new { control.Id, control.Method, control.SubmissionDeadlineUtc, control.OpeningScheduledAtUtc, control.IntegrityHash },
             correlation, cancellationToken, External(control.AdvertisementEvidenceReference, "Tender advertisement", "SRC-006"));
         return Map(await LoadControlAsync(tenderId, tracked: false, cancellationToken));
@@ -180,9 +204,14 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             if (!validation.IsValid)
                 throw Validation("TENDER_DOCUMENT_RECIPIENT_INELIGIBLE", string.Join("; ", validation.Errors));
         }
-        if (await Issues.ExistsAsync(item => item.TenantId == _currentUser.TenantId &&
-                item.TenderControlId == control.Id && item.IssueReceiptNumber == request.IssueReceiptNumber.Trim() && !item.IsDeleted))
-            throw Conflict("TENDER_DOCUMENT_RECEIPT_DUPLICATE", "This issue or sale receipt number is already registered.");
+        var activeIssue = await _tenderDocumentControlService.IssueTenderCompatibilityAsync(
+            tenderId, request, correlation, cancellationToken);
+        var existingIssue = await Issues.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                item.TenderControlId == control.Id &&
+                item.IssueReceiptNumber == request.IssueReceiptNumber.Trim() && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        if (existingIssue is not null)
+            return MapIssue(existingIssue);
 
         var now = DateTime.UtcNow;
         var issue = new ProcurementTenderDocumentIssue
@@ -191,8 +220,8 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             BusinessPartnerId = request.BusinessPartnerId, RecipientName = request.RecipientName.Trim(),
             RecipientEmail = NullIfWhiteSpace(request.RecipientEmail), RecipientPhone = NullIfWhiteSpace(request.RecipientPhone),
             AmountPaid = request.AmountPaid, PaymentReference = NullIfWhiteSpace(request.PaymentReference),
-            IssueReceiptNumber = request.IssueReceiptNumber.Trim(), IssuedAtUtc = now,
-            IssuedByUserId = _currentUser.UserId, EvidenceReference = request.EvidenceReference.Trim(),
+            IssueReceiptNumber = activeIssue.ReceiptNumber, IssuedAtUtc = activeIssue.IssuedAtUtc,
+            IssuedByUserId = activeIssue.IssuedByUserId, EvidenceReference = activeIssue.EvidenceReference,
             CreatedAt = now, CreatedBy = _currentUser.Username, CreatedById = _currentUser.UserId
         };
         issue.IntegrityHash = ComputeHash(JsonSerializer.Serialize(new
@@ -360,6 +389,11 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         var control = await LoadControlAsync(tenderId, tracked: true, cancellationToken);
         await EnsureCapabilityAsync(EvaluatePermission, control.Tender.TenderNumber, correlation, cancellationToken);
         await RevalidateAsync(control.Tender, correlation, cancellationToken);
+        var scorerEligibility = await EnsureCommitteeScorerAsync(
+            tenderId,
+            technical ? ProcurementEvaluationPhase.Technical : ProcurementEvaluationPhase.Financial,
+            correlation,
+            cancellationToken);
         EnsureRowVersion(control.RowVersion, rowVersion);
         Require(evidenceReference, "TENDER_EVALUATION_EVIDENCE_REQUIRED", "Signed evaluation evidence is required.");
         var onTimeBids = control.SubmissionReceipts.Where(item => !item.IsDeleted &&
@@ -368,7 +402,10 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         string snapshot;
         if (technical)
         {
-            EnsureStatus(control, ProcurementTenderControlStatus.Opened, "TENDER_TECHNICAL_EVALUATION_NOT_READY");
+            if (scorerEligibility.AuthorizedAttempt == 1)
+                EnsureStatus(control, ProcurementTenderControlStatus.Opened, "TENDER_TECHNICAL_EVALUATION_NOT_READY");
+            else
+                EnsureStatus(control, ProcurementTenderControlStatus.TechnicalEvaluated, "TENDER_TECHNICAL_RECALL_WINDOW_CLOSED");
             var typed = (List<ProcurementTenderTechnicalScoreRequest>)scores;
             if (typed.Count != onTimeBids.Count || typed.Select(item => item.BidId).Distinct().Count() != typed.Count ||
                 typed.Any(item => !onTimeBids.Contains(item.BidId)))
@@ -379,15 +416,13 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 evaluatorUserId = _currentUser.UserId, evaluatorName = ActorName(), evidenceReference = evidenceReference.Trim(),
                 scores = typed.OrderBy(item => item.BidId).Select(item => new { item.BidId, item.Score, item.Qualified, item.Reason }).ToArray()
             }, JsonOptions);
-            control.TechnicalEvaluatedAtUtc = now;
-            control.TechnicalEvaluationEvidenceReference = evidenceReference.Trim();
-            control.TechnicalEvaluationSnapshotJson = snapshot;
-            control.TechnicalEvaluationIntegrityHash = ComputeHash(snapshot);
-            control.Status = ProcurementTenderControlStatus.TechnicalEvaluated;
         }
         else
         {
-            EnsureStatus(control, ProcurementTenderControlStatus.TechnicalEvaluated, "TENDER_FINANCIAL_EVALUATION_NOT_READY");
+            if (scorerEligibility.AuthorizedAttempt == 1)
+                EnsureStatus(control, ProcurementTenderControlStatus.TechnicalEvaluated, "TENDER_FINANCIAL_EVALUATION_NOT_READY");
+            else
+                EnsureStatus(control, ProcurementTenderControlStatus.FinancialEvaluated, "TENDER_FINANCIAL_RECALL_WINDOW_CLOSED");
             var technicalEvaluators = SnapshotUserIds(
                 control.TechnicalEvaluationSnapshotJson, "evaluatorUserId").Distinct().ToList();
             if (technicalEvaluators.Count != 0)
@@ -415,16 +450,49 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 recommendedBidId, recommendationReason = recommendationReason!.Trim(),
                 scores = typed.OrderBy(item => item.BidId).Select(item => new { item.BidId, item.Score, item.EvaluatedAmount, item.Reason }).ToArray()
             }, JsonOptions);
-            control.FinancialEvaluatedAtUtc = now;
-            control.FinancialEvaluationEvidenceReference = evidenceReference.Trim();
-            control.FinancialEvaluationSnapshotJson = snapshot;
-            control.FinancialEvaluationIntegrityHash = ComputeHash(snapshot);
-            control.RecommendedBidId = recommendedBidId;
-            control.Status = ProcurementTenderControlStatus.FinancialEvaluated;
         }
-        Touch(control, now);
-        await Controls.UpdateAsync(control);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await LockCommitteeScoreSheetAsync(
+                    tenderId,
+                    technical ? ProcurementEvaluationPhase.Technical : ProcurementEvaluationPhase.Financial,
+                    "ProcurementTenderControl",
+                    tenderId,
+                    snapshot,
+                    evidenceReference.Trim(),
+                    correlation,
+                    cancellationToken);
+                if (technical)
+                {
+                    control.TechnicalEvaluatedAtUtc = now;
+                    control.TechnicalEvaluationEvidenceReference = evidenceReference.Trim();
+                    control.TechnicalEvaluationSnapshotJson = snapshot;
+                    control.TechnicalEvaluationIntegrityHash = ComputeHash(snapshot);
+                    control.Status = ProcurementTenderControlStatus.TechnicalEvaluated;
+                }
+                else
+                {
+                    control.FinancialEvaluatedAtUtc = now;
+                    control.FinancialEvaluationEvidenceReference = evidenceReference.Trim();
+                    control.FinancialEvaluationSnapshotJson = snapshot;
+                    control.FinancialEvaluationIntegrityHash = ComputeHash(snapshot);
+                    control.RecommendedBidId = recommendedBidId;
+                    control.Status = ProcurementTenderControlStatus.FinancialEvaluated;
+                }
+                Touch(control, now);
+                await Controls.UpdateAsync(control);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }, cancellationToken);
         await RecordAsync(control, technical ? "TechnicalEvaluationSigned" : "FinancialEvaluationAndRecommendationSigned",
             ProcurementControlEventResult.Allowed, new { EvidenceReference = evidenceReference, EvaluatorUserId = _currentUser.UserId },
             new { control.Status, Hash = technical ? control.TechnicalEvaluationIntegrityHash : control.FinancialEvaluationIntegrityHash, control.RecommendedBidId },
@@ -444,6 +512,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         await RevalidateAsync(control.Tender, correlation, cancellationToken);
         EnsureStatus(control, ProcurementTenderControlStatus.FinancialEvaluated, "TENDER_APPROVAL_NOT_READY");
         EnsureRowVersion(control.RowVersion, request.RowVersion);
+        await EnsureCommitteeDecisionReadyAsync(control, correlation, cancellationToken);
         if (!control.WorkflowDefinitionId.HasValue)
             throw Validation("TENDER_AWARD_WORKFLOW_REQUIRED", "The locked method rule has no award approval workflow.");
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
@@ -492,6 +561,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         var lineage = await RevalidateAsync(control.Tender, correlation, cancellationToken);
         EnsureStatus(control, ProcurementTenderControlStatus.PendingApproval, "TENDER_APPROVAL_NOT_PENDING");
         EnsureRowVersion(control.RowVersion, request.RowVersion);
+        await EnsureCommitteeDecisionReadyAsync(control, correlation, cancellationToken);
         if (!control.WorkflowInstanceId.HasValue || !await _workflowService.CanUserApproveAsync(ApprovalSourceType, control.TenderId, _currentUser.UserId))
             throw new ProcurementTenderControlAuthorizationException("The current user is not assigned to the active tender-award workflow.");
         var action = request.Action.Trim().ToLowerInvariant();
@@ -564,6 +634,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         await RevalidateAsync(control.Tender, correlation, cancellationToken);
         EnsureStatus(control, ProcurementTenderControlStatus.Approved, "TENDER_AWARD_NOT_READY");
         EnsureRowVersion(control.RowVersion, request.RowVersion);
+        await EnsureCommitteeDecisionReadyAsync(control, correlation, cancellationToken);
         if (!control.RecommendedBidId.HasValue || request.BidId != control.RecommendedBidId.Value)
             throw Validation("TENDER_AWARD_RECOMMENDATION_MISMATCH", "The award must use the approved recommended bid.");
         Require(request.AwardReference, "TENDER_AWARD_REFERENCE_REQUIRED", "Award reference is required.");
@@ -572,9 +643,25 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 item.Disposition == ProcurementTenderSubmissionDisposition.OnTimeAccepted)
             .Select(item => item.TenderBid).SingleOrDefault(item => item.Id == request.BidId)
             ?? throw Validation("TENDER_AWARD_BID_INVALID", "The recommended on-time opened bid was not found.");
-        var supplier = await _supplierValidation.ValidateForTenderAsync(
-            bid.BusinessPartnerId, control.Tender.RequiresPrequalification, control.Tender.MinimumPerformanceRating);
+        var supplier = await _supplierValidation.EvaluateEligibilityAsync(new SupplierEligibilityEvaluationRequest
+        {
+            BusinessPartnerId = bid.BusinessPartnerId,
+            Boundary = SupplierEligibilityBoundary.Award,
+            RequiresPrequalification = control.Tender.RequiresPrequalification,
+            MinimumPerformanceRating = control.Tender.MinimumPerformanceRating
+        }, cancellationToken);
         if (!supplier.IsValid) throw Validation("TENDER_AWARD_SUPPLIER_INELIGIBLE", string.Join("; ", supplier.Errors));
+        await _awardReadiness.EnsureAwardReadyAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            tenderId,
+            ProcurementAwardReadinessGateRequestFactory.Create(
+                ProcurementAwardReadinessSourceType.Tender,
+                tenderId,
+                correlation,
+                [bid.Id],
+                [bid.BusinessPartnerId]),
+            correlation,
+            cancellationToken);
         var now = DateTime.UtcNow;
         control.AwardBidId = bid.Id;
         control.AwardReference = request.AwardReference.Trim();
@@ -744,6 +831,199 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         }, cancellationToken);
     }
 
+    private async Task<ProcurementEvaluationScorerEligibilityDto> EnsureCommitteeScorerAsync(
+        Guid tenderId,
+        ProcurementEvaluationPhase phase,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _evaluationCommittee.EnsureScoreSubjectEligibleAsync(
+                ProcurementEvaluationSourceType.Tender,
+                tenderId,
+                phase,
+                "ProcurementTenderControl",
+                tenderId,
+                correlationId,
+                cancellationToken);
+            if (!result.Allowed)
+            {
+                var message = string.Join(" ", result.BlockedReasons);
+                if (result.BlockedReasons.Any(reason =>
+                        reason.Contains("not appointed", StringComparison.OrdinalIgnoreCase)))
+                    throw new ProcurementTenderControlAuthorizationException(message);
+                throw Conflict("EVALUATION_SCORER_INELIGIBLE", message);
+            }
+            return result;
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException exception)
+        {
+            throw new ProcurementTenderControlAuthorizationException(exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeNotFoundException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeConflictException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeValidationException exception)
+        {
+            throw Validation(exception.Code, exception.Message);
+        }
+    }
+
+    private async Task LockCommitteeScoreSheetAsync(
+        Guid tenderId,
+        ProcurementEvaluationPhase phase,
+        string subjectType,
+        Guid subjectId,
+        string scoreSnapshotJson,
+        string evidenceReference,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var eligibility = await _evaluationCommittee.EnsureScoreSubjectEligibleAsync(
+                ProcurementEvaluationSourceType.Tender,
+                tenderId,
+                phase,
+                subjectType,
+                subjectId,
+                correlationId,
+                cancellationToken);
+            if (!eligibility.Allowed)
+            {
+                var message = string.Join(" ", eligibility.BlockedReasons);
+                if (eligibility.BlockedReasons.Any(reason =>
+                        reason.Contains("not appointed", StringComparison.OrdinalIgnoreCase)))
+                    throw new ProcurementTenderControlAuthorizationException(message);
+                throw Conflict("EVALUATION_SCORER_INELIGIBLE", message);
+            }
+            var committee = await _evaluationCommittee.GetAsync(
+                ProcurementEvaluationSourceType.Tender,
+                tenderId,
+                cancellationToken);
+            var appointment = committee.Members.Single(item => item.Id == eligibility.AppointmentId);
+            var meeting = committee.Meetings.Single(item => item.Id == eligibility.MeetingId);
+            var idempotencyKey = $"TDC0208-{ComputeHash(
+                $"{tenderId:N}|{phase}|{subjectId:N}|{_currentUser.UserId:N}|{eligibility.AuthorizedAttempt}")[..32]}";
+
+            await _evaluationCommittee.LockScoreSheetAsync(
+                new LockProcurementEvaluationScoreSheetRequest
+                {
+                    SourceType = ProcurementEvaluationSourceType.Tender,
+                    SourceId = tenderId,
+                    Phase = phase,
+                    ScoreSubjectType = subjectType,
+                    ScoreSubjectId = subjectId,
+                    MeetingId = meeting.Id,
+                    AppointmentId = appointment.Id,
+                    CommitteeRowVersion = committee.RowVersion,
+                    MeetingRowVersion = meeting.RowVersion,
+                    AppointmentRowVersion = appointment.RowVersion,
+                    ScoreSnapshotJson = scoreSnapshotJson,
+                    SignatureReference = evidenceReference,
+                    EvidenceReference = evidenceReference,
+                    IdempotencyKey = idempotencyKey
+                },
+                correlationId,
+                cancellationToken);
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException exception)
+        {
+            throw new ProcurementTenderControlAuthorizationException(exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeNotFoundException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeConflictException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeValidationException exception)
+        {
+            throw Validation(exception.Code, exception.Message);
+        }
+    }
+
+    private async Task EnsureCommitteeDecisionReadyAsync(
+        ProcurementTenderControl control,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var committee = await _evaluationCommittee.GetAsync(
+                ProcurementEvaluationSourceType.Tender,
+                control.TenderId,
+                cancellationToken);
+            if (!committee.CompositionReady || !committee.QuorumMet)
+                throw Conflict(
+                    "EVALUATION_COMMITTEE_NOT_READY",
+                    "Committee composition and signed quorum must remain complete before recommendation approval or award.");
+
+            foreach (var phase in new[]
+                     {
+                         ProcurementEvaluationPhase.Technical,
+                         ProcurementEvaluationPhase.Financial
+                     })
+            {
+                var sheets = committee.ScoreSheets.Where(item =>
+                    item.Phase == phase &&
+                    item.ScoreSubjectType == "ProcurementTenderControl" &&
+                    item.ScoreSubjectId == control.TenderId).ToList();
+                var latest = sheets
+                    .GroupBy(item => new { item.AppointmentId, item.Phase, item.ScoreSubjectType })
+                    .Select(group => group
+                        .OrderByDescending(item => item.Attempt)
+                        .ThenByDescending(item => item.SubmittedAtUtc)
+                        .First())
+                    .ToList();
+                if (latest.Count == 0 || latest.Any(item => item.Status != ProcurementEvaluationScoreSheetStatus.Locked))
+                    throw Conflict(
+                        "EVALUATION_SCORE_SHEETS_NOT_CURRENT",
+                        $"A current locked {phase} score-sheet attempt is required; recalled attempts cannot satisfy approval readiness.");
+                var expectedSnapshot = phase == ProcurementEvaluationPhase.Technical
+                    ? control.TechnicalEvaluationSnapshotJson
+                    : control.FinancialEvaluationSnapshotJson;
+                var normalizedExpectedSnapshot = NormalizeJson(expectedSnapshot);
+                if (latest.Any(item => NormalizeJson(item.ScoreSnapshotJson) != normalizedExpectedSnapshot))
+                    throw Conflict(
+                        "EVALUATION_SCORE_PROJECTION_MISMATCH",
+                        $"The current locked {phase} score-sheet snapshot does not match the exact retained tender-control projection.");
+                var currentIds = latest.Select(item => item.Id).ToHashSet();
+                if (committee.Recalls.Any(item =>
+                        currentIds.Contains(item.ScoreSheetId) &&
+                        item.Status is ProcurementEvaluationScoreRecallStatus.PendingApproval or
+                            ProcurementEvaluationScoreRecallStatus.Approved))
+                    throw Conflict(
+                        "EVALUATION_SCORE_RECALL_UNRESOLVED",
+                        $"The {phase} evaluation cannot proceed while the current score sheet has a pending recall or an approved recall without its authorized locked replacement attempt.");
+            }
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException exception)
+        {
+            throw new ProcurementTenderControlAuthorizationException(exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeNotFoundException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeConflictException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeValidationException exception)
+        {
+            throw Validation(exception.Code, exception.Message);
+        }
+    }
+
     private static void Touch(ProcurementTenderControl control, DateTime now)
     {
         control.UpdatedAt = now;
@@ -768,6 +1048,19 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             control.ContractedAtUtc, control.BidderAcceptanceReference, control.AcceptedAtUtc
         }, JsonOptions);
         control.IntegrityHash = ComputeHash(control.LifecycleSnapshotJson);
+    }
+
+    private static string NormalizeJson(string value)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            return JsonSerializer.Serialize(document.RootElement, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return value.Trim();
+        }
     }
 
     private static HashSet<Guid> QualifiedBidIds(ProcurementTenderControl control)

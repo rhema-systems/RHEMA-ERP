@@ -16,7 +16,7 @@ import { rfqService, type CreatePurchaseOrdersFromRfqResponseDto, type RfqDetail
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { purchasingService, type SuggestedSupplierDto } from '@/services/purchasingService';
 import { toast } from 'sonner';
-import { ArrowLeft, CheckCircle2, Loader2, Printer, Send, Save, Users, Mail, Package } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileText, Loader2, Printer, Send, Save, Users, Mail, Package } from 'lucide-react';
 
 export default function EditRfqPage() {
   const params = useParams();
@@ -335,6 +335,18 @@ export default function EditRfqPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href={`/procurement/rfqs/${rfqId}/document-controls`}>
+              <FileText className="h-4 w-4 mr-2" />
+              Document register
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={`/procurement/rfqs/${rfqId}/committee-controls`}>
+              <Users className="h-4 w-4 mr-2" />
+              Committee controls
+            </Link>
+          </Button>
           <Button onClick={handleSave} disabled={saving || sending || isSent} variant="outline">
             {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
             Save

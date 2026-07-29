@@ -133,6 +133,24 @@ public class BusinessPartner : TenantEntity
     [MaxLength(200)]
     public string? GeographicCoverage { get; set; }
 
+    // Controlled supplier ownership and compliance master data.
+    [Column(TypeName = "nvarchar(max)")]
+    public string? BeneficialOwnershipJson { get; set; }
+
+    public DateTime? OwnershipVerifiedAtUtc { get; set; }
+
+    [MaxLength(50)]
+    public string? ComplianceStatus { get; set; }
+
+    public DateTime? ComplianceReviewDateUtc { get; set; }
+    public DateTime? ComplianceValidUntilUtc { get; set; }
+
+    [MaxLength(2000)]
+    public string? ComplianceNotes { get; set; }
+
+    [NotMapped]
+    public List<Guid> CategoryIds { get; set; } = new();
+
     // Status & Approval
     [Required]
     [MaxLength(50)]
@@ -334,8 +352,8 @@ public class BusinessPartner : TenantEntity
 
     // User Account Link (for external portal access)
     /// <summary>
-    /// Links this business partner to the user account that manages it in the external portal
-    /// This is the user ID from the registration process (CreatedById from BusinessPartnerRegistration)
+    /// Links this business partner to its primary external-portal user.
+    /// Registration and approval actors remain in their dedicated audit fields.
     /// </summary>
     public Guid? UserId { get; set; }
 
@@ -640,6 +658,8 @@ public class BusinessPartnerRegistration : TenantEntity
     [MaxLength(20)]
     public string PartnerType { get; set; } = "Supplier"; // Supplier, Contractor, Both
 
+    public ProcurementSupplierRegistrationCategory? RegistrationCategory { get; set; }
+
     // Status Tracking
     [Required]
     [MaxLength(50)]
@@ -670,6 +690,9 @@ public class BusinessPartnerRegistration : TenantEntity
     public virtual BusinessPartner? BusinessPartner { get; set; }
     public virtual ICollection<BusinessPartnerRegistrationDocument> Documents { get; set; } = new List<BusinessPartnerRegistrationDocument>();
     public virtual ICollection<BusinessPartnerRegistrationStatusHistory> StatusHistory { get; set; } = new List<BusinessPartnerRegistrationStatusHistory>();
+    public virtual ProcurementSupplierRegistrationEvidencePackBinding? EvidencePackBinding { get; set; }
+    public virtual ProcurementSupplierOnboardingToken? OnboardingToken { get; set; }
+    public virtual ProcurementSupplierApplicantAccess? ApplicantAccess { get; set; }
 }
 
 /// <summary>
@@ -679,6 +702,12 @@ public class BusinessPartnerRegistrationDocument : TenantEntity
 {
     [Required]
     public Guid RegistrationId { get; set; }
+
+    public Guid? FileUploadRecordId { get; set; }
+
+    public Guid? CentralDocumentRecordId { get; set; }
+
+    public Guid? CentralDocumentVersionId { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -697,6 +726,18 @@ public class BusinessPartnerRegistrationDocument : TenantEntity
     [MaxLength(100)]
     public string? MimeType { get; set; }
 
+    [MaxLength(50)]
+    public string? EvidenceRequirementCode { get; set; }
+
+    [MaxLength(100)]
+    public string? ClassificationCode { get; set; }
+
+    public DateTime? IssuedAtUtc { get; set; }
+    public DateTime? ExpiresAtUtc { get; set; }
+
+    [MaxLength(64)]
+    public string? ChecksumSha256 { get; set; }
+
     public bool IsVerified { get; set; } = false;
     public Guid? VerifiedById { get; set; }
     public DateTime? VerifiedDate { get; set; }
@@ -713,6 +754,7 @@ public class BusinessPartnerRegistrationDocument : TenantEntity
 
     // Navigation Properties
     public virtual BusinessPartnerRegistration Registration { get; set; } = null!;
+    public virtual FileUploadRecord? FileUploadRecord { get; set; }
     public virtual ApplicationUser? VerifiedBy { get; set; }
 }
 

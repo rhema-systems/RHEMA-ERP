@@ -26,6 +26,8 @@ public class RfqService : IRfqService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IProcurementSourcingCaseService _sourcingCaseService;
     private readonly IProcurementRfqControlService _rfqControlService;
+    private readonly IProcurementTenderDocumentControlService _tenderDocumentControlService;
+    private readonly ISupplierValidationService _supplierValidation;
     private readonly ILogger<RfqService> _logger;
 
     public RfqService(
@@ -43,6 +45,8 @@ public class RfqService : IRfqService
         IUnitOfWork unitOfWork,
         IProcurementSourcingCaseService sourcingCaseService,
         IProcurementRfqControlService rfqControlService,
+        IProcurementTenderDocumentControlService tenderDocumentControlService,
+        ISupplierValidationService supplierValidation,
         ILogger<RfqService> logger)
     {
         _rfqRepository = rfqRepository;
@@ -59,6 +63,8 @@ public class RfqService : IRfqService
         _unitOfWork = unitOfWork;
         _sourcingCaseService = sourcingCaseService;
         _rfqControlService = rfqControlService;
+        _tenderDocumentControlService = tenderDocumentControlService;
+        _supplierValidation = supplierValidation;
         _logger = logger;
     }
 
@@ -250,6 +256,9 @@ public class RfqService : IRfqService
 
         var correlationId = Guid.NewGuid().ToString("N");
         await _rfqControlService.EnsureDispatchReadyAsync(rfq.Id, supplierIds, correlationId);
+        await _tenderDocumentControlService.EnsureDispatchReadyAsync(
+            ProcurementTenderDocumentSourceType.RequestForQuotation, rfq.Id,
+            supplierIds, ParseEmails(externalEmails), correlationId);
 
         rfq.ExternalRecipientEmails = externalEmails;
         rfq.Status = "Sent";
@@ -308,6 +317,9 @@ public class RfqService : IRfqService
         var invitation = invitations.FirstOrDefault(i => i.RfqId == rfqId);
         if (invitation == null)
             throw new InvalidOperationException("You are not invited to this RFQ");
+        await _tenderDocumentControlService.EnsureSubmissionReadyAsync(
+            ProcurementTenderDocumentSourceType.RequestForQuotation, rfq.Id,
+            businessPartnerId, Guid.NewGuid().ToString("N"));
 
         var rfqItems = (rfq.Items ?? new List<RequestForQuotationItem>())
             .Where(i => !i.IsDeleted)
@@ -623,6 +635,25 @@ public class RfqService : IRfqService
                 var groups = selections
                     .GroupBy(x => x.Quote.BusinessPartnerId)
                     .ToList();
+
+                foreach (var group in groups)
+                {
+                    var eligibility = await _supplierValidation.EvaluateEligibilityAsync(
+                        new SupplierEligibilityEvaluationRequest
+                        {
+                            BusinessPartnerId = group.Key,
+                            Boundary = SupplierEligibilityBoundary.Award,
+                            SourceType = "RequestForQuotation",
+                            SourceId = rfq.Id,
+                            SourceReference = rfq.RfqNumber,
+                            CorrelationId = awardCorrelationId
+                        });
+                    if (!eligibility.IsValid)
+                        throw new SupplierEligibilityException(
+                            eligibility.ValidationCode,
+                            $"RFQ award supplier is ineligible: {string.Join("; ", eligibility.Errors)}",
+                            eligibility);
+                }
 
                 // Create PO headers first (save immediately) to avoid:
                 // - OrderNumber duplicate race

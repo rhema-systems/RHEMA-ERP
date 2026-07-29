@@ -634,6 +634,39 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProcurementTenderControl> ProcurementTenderControls { get; set; }
     public DbSet<ProcurementTenderDocumentIssue> ProcurementTenderDocumentIssues { get; set; }
     public DbSet<ProcurementTenderSubmissionReceipt> ProcurementTenderSubmissionReceipts { get; set; }
+    public DbSet<ProcurementTenderDocumentTemplateVersion> ProcurementTenderDocumentTemplateVersions { get; set; }
+    public DbSet<ProcurementSupplierEvidencePackVersion> ProcurementSupplierEvidencePackVersions { get; set; }
+    public DbSet<ProcurementSupplierEvidenceRequirement> ProcurementSupplierEvidenceRequirements { get; set; }
+    public DbSet<ProcurementSupplierRegistrationEvidencePackBinding> ProcurementSupplierRegistrationEvidencePackBindings { get; set; }
+    public DbSet<ProcurementSupplierOnboardingToken> ProcurementSupplierOnboardingTokens { get; set; }
+    public DbSet<ProcurementSupplierOnboardingPayment> ProcurementSupplierOnboardingPayments { get; set; }
+    public DbSet<ProcurementSupplierOnboardingExemption> ProcurementSupplierOnboardingExemptions { get; set; }
+    public DbSet<ProcurementSupplierApplicantAccess> ProcurementSupplierApplicantAccesses { get; set; }
+    public DbSet<ProcurementSupplierApplicantSession> ProcurementSupplierApplicantSessions { get; set; }
+    public DbSet<ProcurementSupplierDueDiligenceReview> ProcurementSupplierDueDiligenceReviews { get; set; }
+    public DbSet<ProcurementSupplierDueDiligenceCheck> ProcurementSupplierDueDiligenceChecks { get; set; }
+    public DbSet<ProcurementSupplierDueDiligenceEvidenceLink> ProcurementSupplierDueDiligenceEvidenceLinks { get; set; }
+    public DbSet<ProcurementSupplierAvlRegister> ProcurementSupplierAvlRegisters { get; set; }
+    public DbSet<ProcurementSupplierAvlEntry> ProcurementSupplierAvlEntries { get; set; }
+    public DbSet<ProcurementSupplierAvlEntryStatusHistory> ProcurementSupplierAvlEntryStatusHistories { get; set; }
+    public DbSet<ProcurementSupplierAvlPublicationSnapshot> ProcurementSupplierAvlPublicationSnapshots { get; set; }
+    public DbSet<ProcurementSupplierRiskAssessment> ProcurementSupplierRiskAssessments { get; set; }
+    public DbSet<ProcurementSupplierRiskAlert> ProcurementSupplierRiskAlerts { get; set; }
+    public DbSet<ProcurementSupplierPerformanceScorecard> ProcurementSupplierPerformanceScorecards { get; set; }
+    public DbSet<ProcurementTenderDocumentTemplateMethod> ProcurementTenderDocumentTemplateMethods { get; set; }
+    public DbSet<ProcurementTenderDocumentRegister> ProcurementTenderDocumentRegisters { get; set; }
+    public DbSet<ProcurementTenderDocumentIssuance> ProcurementTenderDocumentIssuances { get; set; }
+    public DbSet<ProcurementTenderDocumentChange> ProcurementTenderDocumentChanges { get; set; }
+    public DbSet<ProcurementTenderDocumentChangeRecipient> ProcurementTenderDocumentChangeRecipients { get; set; }
+    public DbSet<ProcurementTenderDocumentAcknowledgement> ProcurementTenderDocumentAcknowledgements { get; set; }
+    public DbSet<ProcurementEvaluationCommitteeControl> ProcurementEvaluationCommitteeControls { get; set; }
+    public DbSet<ProcurementEvaluationCommitteeRoleRequirement> ProcurementEvaluationCommitteeRoleRequirements { get; set; }
+    public DbSet<ProcurementEvaluationCommitteeAppointment> ProcurementEvaluationCommitteeAppointments { get; set; }
+    public DbSet<ProcurementEvaluationConflictDeclaration> ProcurementEvaluationConflictDeclarations { get; set; }
+    public DbSet<ProcurementEvaluationMeeting> ProcurementEvaluationMeetings { get; set; }
+    public DbSet<ProcurementEvaluationAttendanceRecord> ProcurementEvaluationAttendanceRecords { get; set; }
+    public DbSet<ProcurementEvaluationScoreSheet> ProcurementEvaluationScoreSheets { get; set; }
+    public DbSet<ProcurementEvaluationScoreRecall> ProcurementEvaluationScoreRecalls { get; set; }
     public DbSet<ProcurementExceptionalSourcingControl> ProcurementExceptionalSourcingControls { get; set; }
     public DbSet<ProcurementPrequalificationExercise> ProcurementPrequalificationExercises { get; set; }
     public DbSet<ProcurementPrequalificationCriterion> ProcurementPrequalificationCriteria { get; set; }
@@ -675,6 +708,22 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<TenderAwardVerificationBidder> TenderAwardVerificationBidders { get; set; }
     public DbSet<TenderAwardVerificationItemResult> TenderAwardVerificationItemResults { get; set; }
     public DbSet<TenderAwardVerificationItemDocument> TenderAwardVerificationItemDocuments { get; set; }
+    public DbSet<ProcurementAwardReadinessDecision> ProcurementAwardReadinessDecisions { get; set; }
+    public DbSet<ProcurementBidderCommunicationRegister> ProcurementBidderCommunicationRegisters { get; set; }
+    public DbSet<ProcurementBidderCommunicationRecipient> ProcurementBidderCommunicationRecipients { get; set; }
+    public DbSet<ProcurementBidderCommunicationLetterVersion> ProcurementBidderCommunicationLetterVersions { get; set; }
+    public DbSet<ProcurementBidderCommunicationDispatch> ProcurementBidderCommunicationDispatches { get; set; }
+    public DbSet<ProcurementBidderCommunicationDelivery> ProcurementBidderCommunicationDeliveries { get; set; }
+    public DbSet<ProcurementBidderCommunicationAcknowledgement> ProcurementBidderCommunicationAcknowledgements { get; set; }
+    public DbSet<ProcurementBidderAppeal> ProcurementBidderAppeals { get; set; }
+    public DbSet<ProcurementBidderAppealDecision> ProcurementBidderAppealDecisions { get; set; }
+    public DbSet<ProcurementTenderSecurityInstrument> ProcurementTenderSecurityInstruments { get; set; }
+    public DbSet<ProcurementTenderSecurityAction> ProcurementTenderSecurityActions { get; set; }
+    public DbSet<ProcurementGhanepsExchangeEvent> ProcurementGhanepsExchangeEvents { get; set; }
+    public DbSet<ProcurementGhanepsExchangePayload> ProcurementGhanepsExchangePayloads { get; set; }
+    public DbSet<ProcurementGhanepsExchangeAttempt> ProcurementGhanepsExchangeAttempts { get; set; }
+    public DbSet<ProcurementGhanepsExchangeAcknowledgement> ProcurementGhanepsExchangeAcknowledgements { get; set; }
+    public DbSet<ProcurementGhanepsExchangeReconciliation> ProcurementGhanepsExchangeReconciliations { get; set; }
 
     // Performance Bonds
     public DbSet<PerformanceBondRequest> PerformanceBondRequests { get; set; }
@@ -1015,6 +1064,39 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProcurementTenderControlConfiguration());
         builder.ApplyConfiguration(new ProcurementTenderDocumentIssueConfiguration());
         builder.ApplyConfiguration(new ProcurementTenderSubmissionReceiptConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentTemplateVersionConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentTemplateMethodConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentRegisterConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentIssuanceConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentChangeConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentChangeRecipientConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentAcknowledgementConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierEvidencePackVersionConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierEvidenceRequirementConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierRegistrationEvidencePackBindingConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierOnboardingTokenConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierOnboardingPaymentConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierOnboardingExemptionConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierApplicantAccessConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierApplicantSessionConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceReviewConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceCheckConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceEvidenceLinkConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlRegisterConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlEntryConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlEntryStatusHistoryConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlPublicationSnapshotConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierRiskAssessmentConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierRiskAlertConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierPerformanceScorecardConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationCommitteeControlConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationCommitteeRoleRequirementConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationCommitteeAppointmentConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationConflictDeclarationConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationMeetingConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationAttendanceRecordConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationScoreSheetConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationScoreRecallConfiguration());
         builder.ApplyConfiguration(new ProcurementExceptionalSourcingControlConfiguration());
         builder.ApplyConfiguration(new ProcurementPrequalificationExerciseConfiguration());
         builder.ApplyConfiguration(new ProcurementPrequalificationCriterionConfiguration());
@@ -3066,6 +3148,22 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new TenderAwardVerificationBidderConfiguration());
         builder.ApplyConfiguration(new TenderAwardVerificationItemResultConfiguration());
         builder.ApplyConfiguration(new TenderAwardVerificationItemDocumentConfiguration());
+        builder.ApplyConfiguration(new ProcurementAwardReadinessDecisionConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationRegisterConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationRecipientConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationLetterVersionConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationDispatchConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationDeliveryConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationAcknowledgementConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderAppealConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderAppealDecisionConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderSecurityInstrumentConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderSecurityActionConfiguration());
+        builder.ApplyConfiguration(new ProcurementGhanepsExchangeEventConfiguration());
+        builder.ApplyConfiguration(new ProcurementGhanepsExchangePayloadConfiguration());
+        builder.ApplyConfiguration(new ProcurementGhanepsExchangeAttemptConfiguration());
+        builder.ApplyConfiguration(new ProcurementGhanepsExchangeAcknowledgementConfiguration());
+        builder.ApplyConfiguration(new ProcurementGhanepsExchangeReconciliationConfiguration());
 
         // Contract Management configurations
         builder.ApplyConfiguration(new ContractConfiguration());
@@ -3400,10 +3498,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
         builder.Entity<FileUploadRecord>(entity =>
         {
+            entity.ToTable("FileUploadRecords", table =>
+                table.HasTrigger(
+                    "TR_FileUploadRecords_RegistrationEvidenceDeleteGuard"));
             entity.HasIndex(x => new { x.TenantId, x.Category });
             entity.HasIndex(x => new { x.TenantId, x.CreatedAt });
             entity.HasIndex(x => new { x.TenantId, x.FilePath }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.UploadedByUserId });
+            entity.HasIndex(x => new
+            {
+                x.IsDeleted,
+                x.StorageDeletedAtUtc,
+                x.StorageDeleteNextAttemptAtUtc
+            });
         });
 
         // Configure SecurityAlert entity
@@ -7106,6 +7213,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Configure BusinessPartner entity
         builder.Entity<BusinessPartner>(entity =>
         {
+            entity.ToTable("BusinessPartners", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_BusinessPartners_BeneficialOwnershipJson",
+                    "[BeneficialOwnershipJson] IS NULL OR ISJSON([BeneficialOwnershipJson]) = 1");
+                table.HasCheckConstraint(
+                    "CK_BusinessPartners_CompliancePeriod",
+                    "[ComplianceReviewDateUtc] IS NULL OR [ComplianceValidUntilUtc] IS NULL OR [ComplianceValidUntilUtc] >= [ComplianceReviewDateUtc]");
+                table.HasCheckConstraint(
+                    "CK_BusinessPartners_BlacklistEvidence",
+                    "[IsBlacklisted] = 0 OR (NULLIF(LTRIM(RTRIM([BlacklistReason])), '') IS NOT NULL AND [BlacklistDate] IS NOT NULL)");
+            });
+
             entity.HasIndex(bp => bp.PartnerCode).IsUnique();
             entity.HasIndex(bp => bp.PartnerName);
             entity.HasIndex(bp => bp.PartnerType);
@@ -7294,7 +7414,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // Configure BusinessPartnerRegistrationDocument entity
         builder.Entity<BusinessPartnerRegistrationDocument>(entity =>
         {
+            entity.ToTable("BusinessPartnerRegistrationDocuments", table =>
+                table.HasTrigger("TR_BusinessPartnerRegistrationDocuments_ControlledFileGuard"));
             entity.HasIndex(bprd => bprd.RegistrationId);
+            entity.HasIndex(bprd => new { bprd.TenantId, bprd.FileUploadRecordId });
+            entity.HasIndex(bprd => new { bprd.TenantId, bprd.CentralDocumentRecordId });
+            entity.HasIndex(bprd => new { bprd.TenantId, bprd.CentralDocumentVersionId });
             entity.HasIndex(bprd => bprd.DocumentType);
             entity.HasIndex(bprd => bprd.IsVerified);
 
@@ -7302,6 +7427,21 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany(r => r.Documents)
                 .HasForeignKey(bprd => bprd.RegistrationId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(bprd => bprd.FileUploadRecord)
+                .WithMany()
+                .HasForeignKey(bprd => bprd.FileUploadRecordId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<CentralDocumentRecord>()
+                .WithMany()
+                .HasForeignKey(bprd => bprd.CentralDocumentRecordId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<CentralDocumentVersion>()
+                .WithMany()
+                .HasForeignKey(bprd => bprd.CentralDocumentVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(bprd => bprd.VerifiedBy)
                 .WithMany()
@@ -10833,6 +10973,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.Property(item => item.DecisionKey).IsUnicode(false).IsFixedLength();
             entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasAlternateKey(item => new { item.TenantId, item.ProfileId, item.Id });
             entity.HasIndex(item => new { item.TenantId, item.ProfileId, item.DecisionKey }).IsUnique();
             entity.HasIndex(item => new { item.TenantId, item.DecisionKey, item.Status });
             entity.ToTable(table =>

@@ -207,6 +207,21 @@ namespace ErpSystem.Api.Controllers
 
         private async Task<IActionResult> CompleteSuccessfulLoginAsync(ApplicationUser user, Tenant? tenant, string usernameForLogs, string details)
         {
+            if (user.MustChangePassword &&
+                (!user.TemporaryPasswordExpiresAtUtc.HasValue ||
+                 user.TemporaryPasswordExpiresAtUtc.Value <= DateTime.UtcNow))
+            {
+                _logger.LogWarning(
+                    "Expired one-time credential denied for user {UserId}",
+                    user.Id);
+                return Unauthorized(new
+                {
+                    message =
+                        "The one-time temporary password has expired. Ask a supplier administrator to resend it.",
+                    code = "TEMPORARY_PASSWORD_EXPIRED"
+                });
+            }
+
             // Determine the effective tenant ID for this login session
             var effectiveTenantId = tenant?.Id ?? user.TenantId;
 
@@ -357,13 +372,15 @@ namespace ErpSystem.Api.Controllers
                 {
                     Id = user.Id,
                     Username = user.UserName!,
-                    Email = user.Email!,
+                    Email = user.Email ?? string.Empty,
                     FirstName = user.FirstName,
                     LastName = user.LastName,
                     CurrentTenantId = effectiveTenantId,
                     CurrentTenantCode = tenant?.Code,
                     CurrentTenantName = tenant?.Name,
                     IsActive = user.IsActive,
+                    MustChangePassword = user.MustChangePassword,
+                    TemporaryPasswordExpiresAtUtc = user.TemporaryPasswordExpiresAtUtc,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList(),
                     Permissions = await GetUserPermissionsAsync(user),
                     AuthenticationProvider = user.AuthenticationProvider.ToString()
@@ -789,6 +806,17 @@ namespace ErpSystem.Api.Controllers
                     return Unauthorized(new { message = "Invalid token" });
                 }
 
+                if (user.MustChangePassword &&
+                    (!user.TemporaryPasswordExpiresAtUtc.HasValue ||
+                     user.TemporaryPasswordExpiresAtUtc.Value <= DateTime.UtcNow))
+                {
+                    return Unauthorized(new
+                    {
+                        code = "TEMPORARY_PASSWORD_EXPIRED",
+                        message = "The temporary password has expired. Ask the supplier administrator to resend credentials."
+                    });
+                }
+
                 // TODO: Validate refresh token from database
 
                 var newToken = await _tokenService.GenerateTokenAsync(user);
@@ -803,11 +831,13 @@ namespace ErpSystem.Api.Controllers
                     {
                         Id = user.Id,
                         Username = user.UserName!,
-                        Email = user.Email!,
+                        Email = user.Email ?? string.Empty,
                         FirstName = user.FirstName,
                         LastName = user.LastName,
                         CurrentTenantId = user.TenantId,
                         IsActive = user.IsActive,
+                        MustChangePassword = user.MustChangePassword,
+                        TemporaryPasswordExpiresAtUtc = user.TemporaryPasswordExpiresAtUtc,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList(),
                         Permissions = await GetUserPermissionsAsync(user),
                         AuthenticationProvider = user.AuthenticationProvider.ToString()
@@ -1157,7 +1187,7 @@ namespace ErpSystem.Api.Controllers
                 {
                     Id = user.Id,
                     Username = user.UserName!,
-                    Email = user.Email!,
+                    Email = user.Email ?? string.Empty,
                     FirstName = user.FirstName,
                     LastName = user.LastName,
                     PhoneNumber = user.PhoneNumber,
@@ -1335,7 +1365,7 @@ namespace ErpSystem.Api.Controllers
                     {
                         Id = user.Id,
                         Username = user.UserName!,
-                        Email = user.Email!,
+                        Email = user.Email ?? string.Empty,
                         FirstName = user.FirstName,
                         LastName = user.LastName,
                         CurrentTenantId = tenant.Id,

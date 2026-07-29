@@ -107,6 +107,8 @@ namespace ErpSystem.Api.Models
         public List<UserTenantInfo> AccessibleTenants { get; set; } = new();
 
         public bool IsActive { get; set; }
+        public bool MustChangePassword { get; set; }
+        public DateTime? TemporaryPasswordExpiresAtUtc { get; set; }
         public List<string> Roles { get; set; } = new();
         public List<string> Permissions { get; set; } = new();
 

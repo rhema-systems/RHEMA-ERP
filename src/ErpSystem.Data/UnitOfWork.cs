@@ -42,6 +42,9 @@ public class UnitOfWork : IUnitOfWork
     public ISegmentLookupValueRepository SegmentLookupValues =>
         _segmentLookupValueRepository ??= new SegmentLookupValueRepository(_context);
 
+    public bool HasActiveTransaction =>
+        _transaction is not null || _context.Database.CurrentTransaction is not null;
+
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         return await _context.SaveChangesAsync(cancellationToken);
@@ -141,6 +144,11 @@ public class UnitOfWork : IUnitOfWork
             _transaction = null;
             _ownsTransaction = false;
         }
+    }
+
+    public void ClearTrackedChanges()
+    {
+        _context.ChangeTracker.Clear();
     }
 
     public IGenericRepository<T> Repository<T>() where T : BaseEntity

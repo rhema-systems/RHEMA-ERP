@@ -3,7 +3,13 @@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { type RegistrationFormData } from '@/services/businessPartnerRegistrationService';
 
 interface CompanyInformationProps {
@@ -11,13 +17,17 @@ interface CompanyInformationProps {
   updateFormData: (data: Partial<RegistrationFormData>) => void;
 }
 
-export default function CompanyInformation({ formData, updateFormData }: CompanyInformationProps) {
+export default function CompanyInformation({
+  formData,
+  updateFormData,
+}: CompanyInformationProps) {
   return (
     <div className="space-y-6">
       {/* Required Fields Notice */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
         <p className="text-sm text-blue-800">
-          <span className="text-red-500 font-bold">*</span> indicates required fields
+          <span className="text-red-500 font-bold">*</span> indicates required
+          fields
         </p>
       </div>
 
@@ -40,6 +50,32 @@ export default function CompanyInformation({ formData, updateFormData }: Company
               <SelectItem value="Both">Both (Supplier & Contractor)</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="registrationCategory">
+            Registration Category <span className="text-red-500">*</span>
+          </Label>
+          <Select
+            value={formData.registrationCategory}
+            onValueChange={(value) =>
+              updateFormData({
+                registrationCategory: value as 'Goods' | 'Works' | 'Services',
+              })
+            }
+          >
+            <SelectTrigger id="registrationCategory">
+              <SelectValue placeholder="Select Goods, Works, or Services" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Goods">Goods</SelectItem>
+              <SelectItem value="Works">Works</SelectItem>
+              <SelectItem value="Services">Services</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            This selects the Published TDC evidence pack used for submission.
+          </p>
         </div>
 
         {/* Company Name */}
@@ -69,11 +105,15 @@ export default function CompanyInformation({ formData, updateFormData }: Company
 
         {/* Registration Number */}
         <div className="space-y-2">
-          <Label htmlFor="registrationNumber">Company Registration Number</Label>
+          <Label htmlFor="registrationNumber">
+            Company Registration Number
+          </Label>
           <Input
             id="registrationNumber"
             value={formData.registrationNumber || ''}
-            onChange={(e) => updateFormData({ registrationNumber: e.target.value })}
+            onChange={(e) =>
+              updateFormData({ registrationNumber: e.target.value })
+            }
             placeholder="Enter registration number"
           />
         </div>
@@ -118,7 +158,11 @@ export default function CompanyInformation({ formData, updateFormData }: Company
             id="yearsInBusiness"
             type="number"
             value={formData.yearsInBusiness || ''}
-            onChange={(e) => updateFormData({ yearsInBusiness: parseInt(e.target.value) || undefined })}
+            onChange={(e) =>
+              updateFormData({
+                yearsInBusiness: parseInt(e.target.value) || undefined,
+              })
+            }
             placeholder="Enter years in business"
             min="0"
           />
@@ -131,7 +175,11 @@ export default function CompanyInformation({ formData, updateFormData }: Company
             id="numberOfEmployees"
             type="number"
             value={formData.numberOfEmployees || ''}
-            onChange={(e) => updateFormData({ numberOfEmployees: parseInt(e.target.value) || undefined })}
+            onChange={(e) =>
+              updateFormData({
+                numberOfEmployees: parseInt(e.target.value) || undefined,
+              })
+            }
             placeholder="Enter number of employees"
             min="1"
           />
@@ -144,7 +192,11 @@ export default function CompanyInformation({ formData, updateFormData }: Company
             id="annualRevenue"
             type="number"
             value={formData.annualRevenue || ''}
-            onChange={(e) => updateFormData({ annualRevenue: parseFloat(e.target.value) || undefined })}
+            onChange={(e) =>
+              updateFormData({
+                annualRevenue: parseFloat(e.target.value) || undefined,
+              })
+            }
             placeholder="Enter annual revenue"
             min="0"
             step="0.01"
@@ -166,4 +218,3 @@ export default function CompanyInformation({ formData, updateFormData }: Company
     </div>
   );
 }
-

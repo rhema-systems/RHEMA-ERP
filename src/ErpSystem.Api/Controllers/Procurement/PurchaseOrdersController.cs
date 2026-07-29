@@ -9,6 +9,7 @@ using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Interfaces.Services;
+using ErpSystem.Core.Services.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -49,6 +50,7 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IWorkflowService _workflowService;
+    private readonly ISupplierValidationService _supplierValidation;
     private readonly ILogger<PurchaseOrdersController> _logger;
 
     private const string SpreadToItemCost = "SpreadToItemCost";
@@ -75,6 +77,7 @@ public class PurchaseOrdersController : ControllerBase
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IWorkflowService workflowService,
+        ISupplierValidationService supplierValidation,
         ILogger<PurchaseOrdersController> logger)
     {
         _purchaseOrderRepository = purchaseOrderRepository;
@@ -94,6 +97,7 @@ public class PurchaseOrdersController : ControllerBase
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _workflowService = workflowService;
+        _supplierValidation = supplierValidation;
         _logger = logger;
     }
 
@@ -292,43 +296,6 @@ public class PurchaseOrdersController : ControllerBase
                 return BadRequest(ModelState);
             }
 
-            // Verify business partner exists
-            var businessPartner = await _businessPartnerRepository.GetByIdAsync(createDto.SupplierId);
-            if (businessPartner == null)
-            {
-                return BadRequest($"Business partner with ID {createDto.SupplierId} not found");
-            }
-
-            // Only approved + operationally active suppliers can be used on a PO.
-            // (Portal applicants remain pending until approved; deactivated suppliers must not be selectable.)
-            if (!string.Equals(businessPartner.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
-            {
-                return BadRequest($"Cannot create purchase order. Supplier '{businessPartner.PartnerName}' is not approved.");
-            }
-
-            var supplierStatus = businessPartner.RegistrationStatus ?? string.Empty;
-            if (!(string.Equals(supplierStatus, "Active", StringComparison.OrdinalIgnoreCase) ||
-                  string.Equals(supplierStatus, "Approved", StringComparison.OrdinalIgnoreCase)))
-            {
-                return BadRequest($"Cannot create purchase order. Supplier '{businessPartner.PartnerName}' is not active (current status: '{supplierStatus}').");
-            }
-
-            // BLACKLIST ENFORCEMENT: Check if business partner is blacklisted
-            if (businessPartner.IsBlacklisted)
-            {
-                var message = $"Cannot create purchase order. Business partner '{businessPartner.PartnerName}' is blacklisted.";
-                if (!string.IsNullOrEmpty(businessPartner.BlacklistReason))
-                {
-                    message += $" Reason: {businessPartner.BlacklistReason}";
-                }
-                if (businessPartner.BlacklistExpiryDate.HasValue)
-                {
-                    message += $" Blacklist expires on: {businessPartner.BlacklistExpiryDate.Value:yyyy-MM-dd}";
-                }
-                _logger.LogWarning("Attempted to create purchase order for blacklisted business partner {BusinessPartnerId}", createDto.SupplierId);
-                return BadRequest(message);
-            }
-
             // Get tenant ID from current user
             var tenantId = _currentUserService.TenantId;
             if (tenantId == Guid.Empty)
@@ -337,6 +304,21 @@ public class PurchaseOrdersController : ControllerBase
             }
 
             var orderType = NormalizeOrderType(createDto.OrderType);
+            await _supplierValidation.EnforceEligibilityAsync(new SupplierEligibilityEvaluationRequest
+            {
+                BusinessPartnerId = createDto.SupplierId,
+                Boundary = string.Equals(orderType, "Blanket", StringComparison.OrdinalIgnoreCase)
+                    ? SupplierEligibilityBoundary.FrameworkCallOff
+                    : SupplierEligibilityBoundary.ManualPurchaseOrder,
+                RecordAudit = true,
+                SourceType = "PurchaseOrder",
+                SourceReference = string.IsNullOrWhiteSpace(createDto.ReferenceNumber)
+                    ? orderType
+                    : createDto.ReferenceNumber,
+                CorrelationId = Request.Headers["X-Correlation-ID"].FirstOrDefault() ??
+                    Guid.NewGuid().ToString("N")
+            });
+
             if (string.Equals(orderType, "Consignment", StringComparison.OrdinalIgnoreCase))
             {
                 if (!createDto.DeliveryWarehouseId.HasValue || createDto.DeliveryWarehouseId.Value == Guid.Empty)
@@ -461,6 +443,17 @@ public class PurchaseOrdersController : ControllerBase
             // Return the created purchase order
             var createdPurchaseOrder = await GetPurchaseOrderDetailDto(purchaseOrder.Id);
             return CreatedAtAction(nameof(GetPurchaseOrder), new { id = purchaseOrder.Id }, createdPurchaseOrder);
+        }
+        catch (SupplierEligibilityException ex)
+        {
+            _logger.LogWarning(ex,
+                "Supplier eligibility denied purchase order creation for {SupplierId}", createDto.SupplierId);
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                eligibility = ex.Result
+            });
         }
         catch (Exception ex)
         {

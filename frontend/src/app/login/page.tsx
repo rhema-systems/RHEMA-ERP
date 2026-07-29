@@ -175,6 +175,11 @@ function LoginFormWithSearchParams() {
 
   const redirectAfterLogin = useCallback(async (response: LoginResponse) => {
     if (response.token) {
+      if (response.user?.mustChangePassword) {
+        router.push('/change-temporary-password');
+        return;
+      }
+
       const isExternalUser = isExternalPortalUser(response.user);
 
       // External portal users should land in the portal, while internal users continue to tenant selection.
@@ -963,6 +968,15 @@ function LoginFormWithSearchParams() {
                   </div>
                 </div>
                 <div className="mt-6">
+                  <Link href="/supplier-application">
+                    <Button
+                      type="button"
+                      className="mb-3 h-12 w-full text-base font-semibold"
+                    >
+                      <Shield className="mr-2 h-4 w-4" />
+                      Apply as a supplier
+                    </Button>
+                  </Link>
                   <Link href="/register">
                     <Button
                       type="button"
@@ -974,7 +988,8 @@ function LoginFormWithSearchParams() {
                     </Button>
                   </Link>
                   <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                    New to the platform? Create an external user account
+                    Supplier applicants verify a contact and use an
+                    application token; other services may create an account.
                   </p>
                 </div>
               </div>

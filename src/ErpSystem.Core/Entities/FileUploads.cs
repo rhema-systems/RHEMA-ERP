@@ -68,5 +68,18 @@ public class FileUploadRecord : TenantEntity
 
     [StringLength(500)]
     public string? VirusScanMessage { get; set; }
-}
 
+    // Physical storage cleanup is intentionally asynchronous. IsDeleted and
+    // these fields are committed with the owning domain transaction before a
+    // background worker is allowed to remove the stored object.
+    public DateTime? StorageDeletedAtUtc { get; set; }
+
+    public int StorageDeleteAttemptCount { get; set; }
+
+    public DateTime? StorageDeleteLastAttemptAtUtc { get; set; }
+
+    public DateTime? StorageDeleteNextAttemptAtUtc { get; set; }
+
+    [StringLength(2000)]
+    public string? StorageDeleteLastError { get; set; }
+}

@@ -34,6 +34,8 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
     private readonly IWorkflowService _workflowService;
     private readonly ISupplierValidationService _supplierValidation;
     private readonly ITenderNotificationService _notifications;
+    private readonly IProcurementTenderDocumentControlService _tenderDocumentControlService;
+    private readonly IProcurementAwardReadinessService _awardReadiness;
 
     public ProcurementExceptionalSourcingControlService(
         IUnitOfWork unitOfWork,
@@ -44,7 +46,9 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         IProcurementSourcingCaseService sourcingCases,
         IWorkflowService workflowService,
         ISupplierValidationService supplierValidation,
-        ITenderNotificationService notifications)
+        ITenderNotificationService notifications,
+        IProcurementTenderDocumentControlService tenderDocumentControlService,
+        IProcurementAwardReadinessService awardReadiness)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -55,6 +59,8 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         _workflowService = workflowService;
         _supplierValidation = supplierValidation;
         _notifications = notifications;
+        _tenderDocumentControlService = tenderDocumentControlService;
+        _awardReadiness = awardReadiness;
     }
 
     private IGenericRepository<Tender> Tenders => _unitOfWork.Repository<Tender>();
@@ -302,6 +308,16 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             if (!sod.Allowed) throw new ProcurementExceptionalSourcingAuthorizationException(sod.Message);
         }
 
+        if (action == "approve")
+        {
+            var supplierIds = SuppliersFrom(control).Select(item => item.BusinessPartnerId).ToList();
+            await _tenderDocumentControlService.EnsurePublicationReadyAsync(
+                ProcurementTenderDocumentSourceType.Tender, control.TenderId,
+                control.Tender.SubmissionDeadline!.Value, correlation, cancellationToken);
+            await _tenderDocumentControlService.EnsureDispatchReadyAsync(
+                ProcurementTenderDocumentSourceType.Tender, control.TenderId,
+                supplierIds, [], correlation, cancellationToken);
+        }
         var result = await _workflowService.ProcessApprovalStepAsync(
             ApprovalSourceType, control.TenderId, _currentUser.UserId, action, request.Comments);
         if (!result.Success)
@@ -314,6 +330,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         control.PpaApprovalReference = ppaReference;
         if (action == "approve" && result.Status == WorkflowInstanceStatus.Completed)
         {
+            var supplierIds = SuppliersFrom(control).Select(item => item.BusinessPartnerId).ToList();
             control.Status = ProcurementExceptionalSourcingControlStatus.Approved;
             control.ApprovedAtUtc = now;
             control.ApprovedById = _currentUser.UserId;
@@ -322,7 +339,6 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             control.Tender.PublishDate = now;
             control.Tender.PublishedById = _currentUser.UserId;
             control.Tender.UpdatedAt = now;
-            var supplierIds = SuppliersFrom(control).Select(item => item.BusinessPartnerId).ToList();
             var existing = await Invitations.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                     item.TenderId == control.TenderId && supplierIds.Contains(item.BusinessPartnerId) && !item.IsDeleted)
                 .Select(item => item.BusinessPartnerId).ToListAsync(cancellationToken);
@@ -440,8 +456,13 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         if (negotiation.TenderBidId != request.BidId)
             throw Validation("EXCEPTIONAL_RECOMMENDATION_BID_MISMATCH", "The recommendation must use the bid whose negotiation was completed.");
         var bid = await LoadBidAsync(tenderId, request.BidId, cancellationToken);
-        var supplier = await _supplierValidation.ValidateForTenderAsync(
-            bid.BusinessPartnerId, control.Tender.RequiresPrequalification, control.Tender.MinimumPerformanceRating);
+        var supplier = await _supplierValidation.EvaluateEligibilityAsync(new SupplierEligibilityEvaluationRequest
+        {
+            BusinessPartnerId = bid.BusinessPartnerId,
+            Boundary = SupplierEligibilityBoundary.Award,
+            RequiresPrequalification = control.Tender.RequiresPrequalification,
+            MinimumPerformanceRating = control.Tender.MinimumPerformanceRating
+        }, cancellationToken);
         if (!supplier.IsValid) throw Validation("EXCEPTIONAL_RECOMMENDATION_SUPPLIER_INELIGIBLE", string.Join("; ", supplier.Errors));
         var now = DateTime.UtcNow;
         control.RecommendedBidId = bid.Id;
@@ -482,9 +503,25 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         }, correlation, cancellationToken);
         if (!sod.Allowed) throw new ProcurementExceptionalSourcingAuthorizationException(sod.Message);
         var bid = await LoadBidAsync(tenderId, request.BidId, cancellationToken);
-        var supplier = await _supplierValidation.ValidateForTenderAsync(
-            bid.BusinessPartnerId, control.Tender.RequiresPrequalification, control.Tender.MinimumPerformanceRating);
+        var supplier = await _supplierValidation.EvaluateEligibilityAsync(new SupplierEligibilityEvaluationRequest
+        {
+            BusinessPartnerId = bid.BusinessPartnerId,
+            Boundary = SupplierEligibilityBoundary.Award,
+            RequiresPrequalification = control.Tender.RequiresPrequalification,
+            MinimumPerformanceRating = control.Tender.MinimumPerformanceRating
+        }, cancellationToken);
         if (!supplier.IsValid) throw Validation("EXCEPTIONAL_AWARD_SUPPLIER_INELIGIBLE", string.Join("; ", supplier.Errors));
+        await _awardReadiness.EnsureAwardReadyAsync(
+            ProcurementAwardReadinessSourceType.ExceptionalSourcing,
+            tenderId,
+            ProcurementAwardReadinessGateRequestFactory.Create(
+                ProcurementAwardReadinessSourceType.ExceptionalSourcing,
+                tenderId,
+                correlation,
+                [bid.Id],
+                [bid.BusinessPartnerId]),
+            correlation,
+            cancellationToken);
         var now = DateTime.UtcNow;
         control.AwardBidId = bid.Id; control.AwardReference = request.AwardReference.Trim();
         control.AwardEvidenceReference = request.EvidenceReference.Trim(); control.AwardedAtUtc = now;

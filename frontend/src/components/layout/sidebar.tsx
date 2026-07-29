@@ -69,6 +69,7 @@ import {
   Search,
   ArrowRightLeft,
   Repeat2,
+  KeyRound,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -442,6 +443,12 @@ const navigationItems: NavItem[] = [
         icon: Gavel,
         children: [
           { title: 'Tenders', href: '/procurement/tenders', icon: Gavel },
+          {
+            title: 'Tender Documents',
+            href: '/procurement/tender-documents',
+            icon: BookTemplate,
+            permissions: ['procurement.records.read'],
+          },
           {
             title: 'Prequalification',
             href: '/procurement/prequalification',
@@ -875,6 +882,15 @@ const navigationItems: NavItem[] = [
           { title: 'SOD Controls', href: '/administration/procurement/sod-controls', icon: Swords },
           { title: 'Access & Committees', href: '/administration/procurement/access-controls', icon: Users },
           { title: 'Master Data Changes', href: '/administration/procurement/master-data-changes', icon: FileCheck },
+          { title: 'Supplier Master Changes', href: '/administration/procurement/supplier-master-changes', icon: Building2 },
+          { title: 'Supplier Evidence Packs', href: '/administration/procurement/supplier-evidence-packs', icon: FileCheck },
+          { title: 'Supplier Onboarding Tokens', href: '/administration/procurement/supplier-onboarding-tokens', icon: KeyRound },
+          { title: 'Supplier Applicant Access', href: '/administration/procurement/supplier-applicant-access', icon: ShieldCheck },
+          { title: 'Supplier Eligibility', href: '/administration/procurement/supplier-eligibility', icon: ClipboardCheck },
+          { title: 'Supplier Due Diligence', href: '/administration/procurement/supplier-due-diligence', icon: ShieldCheck },
+          { title: 'Approved Vendor List', href: '/administration/procurement/supplier-avl', icon: ListTree },
+          { title: 'Supplier Risk & Concentration', href: '/administration/procurement/supplier-risk', icon: TrendingUp },
+          { title: 'Supplier Performance', href: '/administration/procurement/supplier-performance', icon: Activity },
           { title: 'Control Events', href: '/administration/procurement/control-events', icon: Activity },
           { title: 'Pending Partners', href: '/administration/procurement/business-partners/pending', icon: Users },
           { title: 'Business Partners', href: '/procurement/business-partners', icon: Users },

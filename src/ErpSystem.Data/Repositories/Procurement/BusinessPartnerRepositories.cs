@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -184,8 +185,9 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         var query = _dbSet.Where(bp =>
             !bp.IsDeleted &&
             !bp.IsBlacklisted &&
-            bp.ApprovalStatus == "Approved" &&
-            (bp.RegistrationStatus == "Active" || bp.RegistrationStatus == "Approved"));
+            bp.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
+            (bp.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
+             bp.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus));
         if (!string.IsNullOrWhiteSpace(partnerType))
         {
             query = query.Where(bp => bp.PartnerType == partnerType);
@@ -200,8 +202,9 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
             bp.IsPreferred &&
             !bp.IsDeleted &&
             !bp.IsBlacklisted &&
-            bp.ApprovalStatus == "Approved" &&
-            (bp.RegistrationStatus == "Active" || bp.RegistrationStatus == "Approved"));
+            bp.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
+            (bp.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
+             bp.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus));
         if (!string.IsNullOrWhiteSpace(partnerType))
         {
             query = query.Where(bp => bp.PartnerType == partnerType);
@@ -313,15 +316,18 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
             partner.ApprovalStatus = approvalStatus;
             partner.ApprovedById = approvedById;
             partner.ApprovedDate = DateTime.UtcNow;
-            if (string.Equals(approvalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+            if (BusinessPartnerLifecyclePolicy.IsApproved(approvalStatus))
             {
                 // Once approved, ensure the partner is operationally usable unless explicitly deactivated later.
                 if (partner.RegistrationStatus == "PendingApproval" || string.IsNullOrWhiteSpace(partner.RegistrationStatus))
                 {
-                    partner.RegistrationStatus = "Active";
+                    partner.RegistrationStatus =
+                        BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus;
                 }
 
-                partner.IsActive = partner.RegistrationStatus == "Active" || partner.RegistrationStatus == "Approved";
+                partner.IsActive =
+                    BusinessPartnerLifecyclePolicy.IsOperationalRegistration(
+                        partner.RegistrationStatus);
             }
             partner.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();

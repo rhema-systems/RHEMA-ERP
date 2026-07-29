@@ -1,5 +1,7 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -21,6 +23,7 @@ public class TenderEvaluationService : ITenderEvaluationService
     private readonly IAppEventBus _appEventBus;
     private readonly IProcurementTenderControlService _tenderControlService;
     private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
+    private readonly IProcurementEvaluationCommitteeControlService _evaluationCommittee;
 
     public TenderEvaluationService(
         ITenderEvaluationRepository evaluationRepository,
@@ -34,6 +37,7 @@ public class TenderEvaluationService : ITenderEvaluationService
         IAppEventBus appEventBus,
         IProcurementTenderControlService tenderControlService,
         IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
+        IProcurementEvaluationCommitteeControlService evaluationCommittee,
         ILogger<TenderEvaluationService> logger)
     {
         _evaluationRepository = evaluationRepository;
@@ -47,6 +51,7 @@ public class TenderEvaluationService : ITenderEvaluationService
         _appEventBus = appEventBus;
         _tenderControlService = tenderControlService;
         _exceptionalSourcingControlService = exceptionalSourcingControlService;
+        _evaluationCommittee = evaluationCommittee;
         _logger = logger;
     }
 
@@ -123,13 +128,23 @@ public class TenderEvaluationService : ITenderEvaluationService
             var bid = await _bidRepository.GetByIdAsync(dto.TenderBidId)
                 ?? throw new InvalidOperationException($"Bid with ID {dto.TenderBidId} not found");
             await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
+            await EnsureCommitteeScorerAsync(bid.TenderId, bid.Id);
 
             // Get evaluator assignment for current user
             var evaluators = await _evaluatorRepository.GetByUserIdAsync(_currentUserProvider.UserId);
-            var evaluator = evaluators.FirstOrDefault();
+            var evaluator = evaluators.FirstOrDefault(item => item.TenderId == bid.TenderId);
             if (evaluator == null)
             {
                 throw new InvalidOperationException("Current user is not assigned as an evaluator");
+            }
+            var existingEvaluations = await _evaluationRepository.GetByBidIdAsync(bid.Id);
+            if (existingEvaluations.Any(item =>
+                    item.TenderEvaluatorId == evaluator.Id &&
+                    string.Equals(item.Status, "Draft", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ProcurementEvaluationCommitteeConflictException(
+                    "EVALUATION_DRAFT_ALREADY_EXISTS",
+                    "A Draft evaluation already exists for this bid and evaluator. Complete or delete it before creating another authorized attempt.");
             }
 
             // Calculate total score - use EvaluationCriteriaJson if provided, otherwise use legacy scores
@@ -216,7 +231,8 @@ public class TenderEvaluationService : ITenderEvaluationService
         {
             var evaluation = await _evaluationRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Evaluation with ID {id} not found");
-            await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
+            var tenderId = await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
+            await EnsureCommitteeScorerAsync(tenderId, evaluation.TenderBidId);
 
             if (evaluation.Status == "Submitted")
             {
@@ -276,7 +292,8 @@ public class TenderEvaluationService : ITenderEvaluationService
         {
             var evaluation = await _evaluationRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Evaluation with ID {id} not found");
-            await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
+            var tenderId = await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
+            await EnsureCommitteeScorerAsync(tenderId, evaluation.TenderBidId);
 
             if (evaluation.Status == "Submitted")
             {
@@ -287,13 +304,42 @@ public class TenderEvaluationService : ITenderEvaluationService
             {
                 throw new InvalidOperationException("Submission must be confirmed");
             }
+            if (string.IsNullOrWhiteSpace(dto.SignatureReference) ||
+                string.IsNullOrWhiteSpace(dto.EvidenceReference) ||
+                string.IsNullOrWhiteSpace(dto.IdempotencyKey))
+            {
+                throw new ProcurementEvaluationCommitteeValidationException(
+                    "EVALUATION_SCORE_SIGNATURE_REQUIRED",
+                    "A score-sheet signature, evidence reference, and idempotency key are required.");
+            }
 
-            evaluation.Status = "Submitted";
-            evaluation.SubmittedDate = DateTime.UtcNow;
-            evaluation.UpdatedAt = DateTime.UtcNow;
+            var submittedAtUtc = DateTime.UtcNow;
 
-            await _evaluationRepository.UpdateAsync(evaluation);
-            await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync();
+                try
+                {
+                    await LockCommitteeScoreSheetAsync(
+                        tenderId,
+                        evaluation,
+                        submittedAtUtc,
+                        dto.SignatureReference.Trim(),
+                        dto.EvidenceReference.Trim(),
+                        dto.IdempotencyKey.Trim());
+                    evaluation.Status = "Submitted";
+                    evaluation.SubmittedDate = submittedAtUtc;
+                    evaluation.UpdatedAt = submittedAtUtc;
+                    await _evaluationRepository.UpdateAsync(evaluation);
+                    await _unitOfWork.SaveChangesAsync();
+                    await _unitOfWork.CommitAsync();
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync();
+                    throw;
+                }
+            });
 
             _logger.LogInformation("Submitted evaluation {EvaluationId}", id);
 
@@ -515,12 +561,20 @@ public class TenderEvaluationService : ITenderEvaluationService
         {
             var evaluation = await _evaluationRepository.GetByIdAsync(id);
             if (evaluation != null)
-                await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
-            if (evaluation != null && evaluation.Status != "Submitted")
+            {
+                var tenderId = await EnsureLegacyEvaluationAllowedForBidAsync(evaluation.TenderBidId);
+                await EnsureCommitteeScorerAsync(tenderId, evaluation.TenderBidId);
+            }
+            if (evaluation?.Status == "Submitted")
+            {
+                throw new ProcurementEvaluationCommitteeConflictException(
+                    "EVALUATION_SCORE_SHEET_LOCKED",
+                    "A submitted evaluation is immutable. Use the independently approved controlled-recall path to authorize a new attempt.");
+            }
+            if (evaluation != null)
             {
                 await _evaluationRepository.DeleteAsync(id);
                 await _unitOfWork.SaveChangesAsync();
-
                 _logger.LogInformation("Deleted evaluation {EvaluationId}", id);
             }
         }
@@ -947,6 +1001,7 @@ public class TenderEvaluationService : ITenderEvaluationService
         try
         {
             await EnsureLegacyEvaluationAllowedAsync(tenderId);
+            await EnsureLegacyDecisionReadyAsync(tenderId);
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
 
@@ -1221,11 +1276,226 @@ public class TenderEvaluationService : ITenderEvaluationService
         }
     }
 
-    private async Task EnsureLegacyEvaluationAllowedForBidAsync(Guid bidId)
+    private async Task EnsureCommitteeScorerAsync(Guid tenderId, Guid tenderBidId)
+    {
+        var result = await _evaluationCommittee.EnsureScoreSubjectEligibleAsync(
+            ProcurementEvaluationSourceType.Tender,
+            tenderId,
+            ProcurementEvaluationPhase.Combined,
+            "TenderEvaluation",
+            tenderBidId,
+            $"TDC0208-LEGACY-{Guid.NewGuid():N}",
+            CancellationToken.None);
+        if (!result.Allowed)
+        {
+            var message = string.Join(" ", result.BlockedReasons);
+            if (result.BlockedReasons.Any(reason =>
+                    reason.Contains("not appointed", StringComparison.OrdinalIgnoreCase)))
+                throw new ProcurementEvaluationCommitteeAuthorizationException(message);
+            throw new ProcurementEvaluationCommitteeConflictException(
+                "EVALUATION_SCORER_INELIGIBLE", message);
+        }
+    }
+
+    private async Task LockCommitteeScoreSheetAsync(
+        Guid tenderId,
+        TenderEvaluation evaluation,
+        DateTime submittedAtUtc,
+        string signatureReference,
+        string evidenceReference,
+        string idempotencyKey)
+    {
+        var correlationId = $"TDC0208-LEGACY-{Guid.NewGuid():N}";
+        var eligibility = await _evaluationCommittee.EnsureScoreSubjectEligibleAsync(
+            ProcurementEvaluationSourceType.Tender,
+            tenderId,
+            ProcurementEvaluationPhase.Combined,
+            "TenderEvaluation",
+            evaluation.TenderBidId,
+            correlationId,
+            CancellationToken.None);
+        if (!eligibility.Allowed)
+        {
+            var message = string.Join(" ", eligibility.BlockedReasons);
+            if (eligibility.BlockedReasons.Any(reason =>
+                    reason.Contains("not appointed", StringComparison.OrdinalIgnoreCase)))
+                throw new ProcurementEvaluationCommitteeAuthorizationException(message);
+            throw new ProcurementEvaluationCommitteeConflictException(
+                "EVALUATION_SCORER_INELIGIBLE", message);
+        }
+        var committee = await _evaluationCommittee.GetAsync(
+            ProcurementEvaluationSourceType.Tender,
+            tenderId,
+            CancellationToken.None);
+        var appointment = committee.Members.Single(item => item.Id == eligibility.AppointmentId);
+        var meeting = committee.Meetings.Single(item => item.Id == eligibility.MeetingId);
+        var snapshot = BuildLegacyScoreSnapshot(evaluation, submittedAtUtc);
+
+        await _evaluationCommittee.LockScoreSheetAsync(
+            new LockProcurementEvaluationScoreSheetRequest
+            {
+                SourceType = ProcurementEvaluationSourceType.Tender,
+                SourceId = tenderId,
+                Phase = ProcurementEvaluationPhase.Combined,
+                ScoreSubjectType = "TenderEvaluation",
+                ScoreSubjectId = evaluation.TenderBidId,
+                MeetingId = meeting.Id,
+                AppointmentId = appointment.Id,
+                CommitteeRowVersion = committee.RowVersion,
+                MeetingRowVersion = meeting.RowVersion,
+                AppointmentRowVersion = appointment.RowVersion,
+                ScoreSnapshotJson = snapshot,
+                SignatureReference = signatureReference,
+                EvidenceReference = evidenceReference,
+                IdempotencyKey = idempotencyKey
+            },
+            correlationId,
+            CancellationToken.None);
+    }
+
+    private async Task EnsureLegacyDecisionReadyAsync(Guid tenderId)
+    {
+        var committee = await _evaluationCommittee.GetAsync(
+            ProcurementEvaluationSourceType.Tender,
+            tenderId,
+            CancellationToken.None);
+        if (!committee.CompositionReady || !committee.QuorumMet)
+            throw new ProcurementEvaluationCommitteeConflictException(
+                "EVALUATION_COMMITTEE_NOT_READY",
+                "Committee composition and signed quorum must remain complete before consolidated scoring.");
+        var latest = committee.ScoreSheets
+            .Where(item =>
+                item.Phase == ProcurementEvaluationPhase.Combined &&
+                item.ScoreSubjectType == "TenderEvaluation")
+            .GroupBy(item => new { item.AppointmentId, item.ScoreSubjectId })
+            .Select(group => group
+                .OrderByDescending(item => item.Attempt)
+                .ThenByDescending(item => item.SubmittedAtUtc)
+                .First())
+            .ToList();
+        if (latest.Count == 0 ||
+            latest.Any(item => item.Status != ProcurementEvaluationScoreSheetStatus.Locked))
+            throw new ProcurementEvaluationCommitteeConflictException(
+                "EVALUATION_SCORE_SHEETS_NOT_CURRENT",
+                "Every consolidated score must use a current locked attempt; recalled attempts cannot satisfy readiness.");
+        var currentIds = latest.Select(item => item.Id).ToHashSet();
+        if (committee.Recalls.Any(item =>
+                currentIds.Contains(item.ScoreSheetId) &&
+                item.Status is ProcurementEvaluationScoreRecallStatus.PendingApproval or
+                    ProcurementEvaluationScoreRecallStatus.Approved))
+            throw new ProcurementEvaluationCommitteeConflictException(
+                "EVALUATION_SCORE_RECALL_UNRESOLVED",
+                "Consolidated scoring cannot proceed while the current score sheet has a pending recall or an approved recall without its authorized locked replacement attempt.");
+
+        var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
+        var currentSubmitted = new List<TenderEvaluation>();
+        foreach (var bid in bids)
+        {
+            var evaluations = await _evaluationRepository.GetByBidIdAsync(bid.Id);
+            currentSubmitted.AddRange(evaluations
+                .Where(item => string.Equals(item.Status, "Submitted", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(item => item.TenderEvaluatorId)
+                .Select(group => group
+                    .OrderByDescending(item => item.SubmittedDate ?? item.UpdatedAt ?? item.EvaluationDate)
+                    .ThenByDescending(item => item.CreatedAt)
+                    .First()));
+        }
+        if (currentSubmitted.Count == 0)
+            throw new ProcurementEvaluationCommitteeConflictException(
+                "EVALUATION_SCORE_PROJECTION_INCOMPLETE",
+                "Every current submitted tender evaluation must retain a matching current locked committee score sheet.");
+
+        var expectedByEvaluationId = currentSubmitted.ToDictionary(item => item.Id);
+        var matchedEvaluationIds = new HashSet<Guid>();
+        foreach (var sheet in latest)
+        {
+            var evaluationId = ReadGuid(sheet.ScoreSnapshotJson, "evaluationId");
+            if (!evaluationId.HasValue ||
+                !expectedByEvaluationId.TryGetValue(evaluationId.Value, out var evaluation) ||
+                evaluation.TenderBidId != sheet.ScoreSubjectId)
+                throw new ProcurementEvaluationCommitteeConflictException(
+                    "EVALUATION_SCORE_PROJECTION_MISMATCH",
+                    "A current locked committee score sheet does not identify the exact current submitted tender-evaluation projection.");
+
+            var expectedSnapshot = BuildLegacyScoreSnapshot(
+                evaluation,
+                evaluation.SubmittedDate ?? evaluation.UpdatedAt ?? evaluation.EvaluationDate);
+            if (NormalizeJson(sheet.ScoreSnapshotJson) != NormalizeJson(expectedSnapshot))
+                throw new ProcurementEvaluationCommitteeConflictException(
+                    "EVALUATION_SCORE_PROJECTION_MISMATCH",
+                    "A current locked committee score sheet does not match the exact current submitted tender-evaluation values.");
+            matchedEvaluationIds.Add(evaluation.Id);
+        }
+        if (matchedEvaluationIds.Count != expectedByEvaluationId.Count ||
+            expectedByEvaluationId.Keys.Any(item => !matchedEvaluationIds.Contains(item)))
+            throw new ProcurementEvaluationCommitteeConflictException(
+                "EVALUATION_SCORE_PROJECTION_INCOMPLETE",
+                "Every current submitted tender evaluation for every bid and evaluator must have its matching current locked committee score sheet.");
+    }
+
+    private static string BuildLegacyScoreSnapshot(
+        TenderEvaluation evaluation,
+        DateTime submittedAtUtc) =>
+        JsonSerializer.Serialize(new
+        {
+            schemaVersion = "tdc.legacy-tender-score-sheet.v1",
+            evaluationId = evaluation.Id,
+            evaluation.TenderBidId,
+            evaluation.TenderEvaluatorId,
+            status = "Submitted",
+            submittedAtUtc,
+            evaluatorUserId = evaluation.TenderEvaluator?.UserId ?? Guid.Empty,
+            evaluation.PriceScore,
+            evaluation.QualityScore,
+            evaluation.DeliveryScore,
+            evaluation.ExperienceScore,
+            evaluation.TechnicalScore,
+            evaluation.ComplianceScore,
+            evaluation.TotalScore,
+            evaluation.EvaluationCriteriaJson,
+            evaluation.TechnicalComments,
+            evaluation.CommercialComments,
+            evaluation.OverallComments,
+            evaluation.IsRecommended,
+            evaluation.Recommendation
+        });
+
+    private static Guid? ReadGuid(string json, string propertyName)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.TryGetProperty(propertyName, out var property) &&
+                property.ValueKind == JsonValueKind.String &&
+                property.TryGetGuid(out var value))
+                return value;
+        }
+        catch (JsonException)
+        {
+            // Invalid JSON is rejected by the caller as a projection mismatch.
+        }
+        return null;
+    }
+
+    private static string NormalizeJson(string value)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            return JsonSerializer.Serialize(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return value.Trim();
+        }
+    }
+
+    private async Task<Guid> EnsureLegacyEvaluationAllowedForBidAsync(Guid bidId)
     {
         var bid = await _bidRepository.GetByIdAsync(bidId)
             ?? throw new InvalidOperationException($"Bid with ID {bidId} not found");
         await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
+        return bid.TenderId;
     }
 
     private async Task EnsureLegacyEvaluationAllowedAsync(Guid tenderId)

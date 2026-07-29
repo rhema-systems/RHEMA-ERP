@@ -9,8 +9,11 @@ import {
   FileCheck2,
   Loader2,
   LockKeyhole,
+  MailCheck,
   RefreshCw,
+  Share2,
   ShieldCheck,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +34,9 @@ import {
   type ProcurementRfqControlDto,
   type SaveProcurementRfqEvaluationRequest,
 } from '@/services/rfqService';
+import { procurementAwardReadinessService } from '@/services/procurement-award-readiness.service';
+import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
+import type { ProcurementAwardReadinessDecision } from '@/types/procurement-award-readiness';
 
 const formatDate = (value?: string) =>
   value ? new Date(value).toLocaleString() : '—';
@@ -40,8 +46,10 @@ const formatAmount = (value: number) =>
 export default function ProcurementRfqControlsPage() {
   const params = useParams<{ id: string }>();
   const rfqId = params.id;
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const [control, setControl] = useState<ProcurementRfqControlDto | null>(null);
+  const [awardGate, setAwardGate] =
+    useState<ProcurementAwardReadinessDecision | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [openingEvidence, setOpeningEvidence] = useState('');
@@ -73,6 +81,16 @@ export default function ProcurementRfqControlsPage() {
       setEvaluationReason(next.evaluation?.recommendationReason ?? '');
       setEvaluationEvidence(next.evaluation?.evidenceReference ?? '');
       setEvaluationLines(buildInitialEvaluationLines(next));
+      try {
+        setAwardGate(
+          await procurementAwardReadinessService.latest(
+            'RequestForQuotation',
+            rfqId
+          )
+        );
+      } catch {
+        setAwardGate(null);
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : 'Failed to load RFQ controls'
@@ -88,6 +106,19 @@ export default function ProcurementRfqControlsPage() {
 
   const stage = control ? getRfqControlStage(control) : null;
   const openingBlocker = control ? getRfqOpeningBlocker(control) : null;
+  const evaluatedQuoteIds = new Set(
+    control?.evaluation?.lines.map((line) => line.quoteId) ?? []
+  );
+  const awardGateAllows = Boolean(
+    awardGate?.isReady &&
+      awardGate.isCurrent &&
+      hasAwardReadinessAction(awardGate.allowedActions, 'RecordAward') &&
+      hasPermission('procurement.tender.approve') &&
+      awardGate.recommendation.subjectIds.length > 0 &&
+      awardGate.recommendation.subjectIds.every((id) =>
+        evaluatedQuoteIds.has(id)
+      )
+  );
   const optionGroups = useMemo(
     () => groupEvaluationOptions(control?.evaluationOptions ?? []),
     [control?.evaluationOptions]
@@ -199,6 +230,12 @@ export default function ProcurementRfqControlsPage() {
   };
 
   const handoffAward = () => {
+    if (!awardGateAllows) {
+      toast.error(
+        'A current server-derived Ready decision for the exact RFQ recommendation is required.'
+      );
+      return;
+    }
     const mode = control?.evaluation?.awardMode;
     if (!mode)
       return toast.error(
@@ -261,16 +298,42 @@ export default function ProcurementRfqControlsPage() {
             handoff.
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={() => void load()}
-          disabled={loading || busy !== null}
-        >
-          <RefreshCw
-            className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`}
-          />
-          Refresh
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href={`/procurement/rfqs/${rfqId}/committee-controls`}>
+              <Users className="mr-2 h-4 w-4" />
+              Committee controls
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={`/procurement/rfqs/${rfqId}/award-readiness`}>
+              <ShieldCheck className="mr-2 h-4 w-4" />
+              Award readiness
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={`/procurement/rfqs/${rfqId}/bidder-communications`}>
+              <MailCheck className="mr-2 h-4 w-4" />
+              Bidder communications
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={`/procurement/rfqs/${rfqId}/ghaneps-exchange`}>
+              <Share2 className="mr-2 h-4 w-4" />
+              GHANEPS exchange
+            </Link>
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void load()}
+            disabled={loading || busy !== null}
+          >
+            <RefreshCw
+              className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`}
+            />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -741,17 +804,33 @@ export default function ProcurementRfqControlsPage() {
             ) : null}
             {control.evaluation.status === 'Approved' &&
             control.rfqStatus !== 'Awarded' ? (
-              <Button
-                onClick={() => void handoffAward()}
-                disabled={busy !== null}
-              >
-                {busy === 'award' ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="mr-2 h-4 w-4" />
+              <div className="space-y-3">
+                {!awardGateAllows && (
+                  <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                    Award handoff remains blocked until the immutable
+                    award-readiness decision is current and Ready for the exact
+                    recommended quote set.{' '}
+                    <Link
+                      className="font-medium underline"
+                      href={`/procurement/rfqs/${rfqId}/award-readiness`}
+                    >
+                      Review readiness and remediation
+                    </Link>
+                    .
+                  </p>
                 )}
-                Create controlled LPO / purchase order
-              </Button>
+                <Button
+                  onClick={() => void handoffAward()}
+                  disabled={busy !== null || !awardGateAllows}
+                >
+                  {busy === 'award' ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                  )}
+                  Create controlled LPO / purchase order
+                </Button>
+              </div>
             ) : null}
           </CardContent>
         </Card>

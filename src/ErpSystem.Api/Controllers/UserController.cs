@@ -1,5 +1,6 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -18,19 +19,25 @@ public partial class UserController : ControllerBase
     private readonly IAuditLogService _auditLogService;
     private readonly ICurrentUserService _currentUserService;
     private readonly ISettingsService _settingsService;
+    private readonly IProcurementSupplierApplicantAccessService _supplierApplicantAccess;
+    private readonly IUnitOfWork _unitOfWork;
 
     public UserController(
         IUserService userService,
         ILogger<UserController> logger,
         IAuditLogService auditLogService,
         ICurrentUserService currentUserService,
-        ISettingsService settingsService)
+        ISettingsService settingsService,
+        IProcurementSupplierApplicantAccessService supplierApplicantAccess,
+        IUnitOfWork unitOfWork)
     {
         _userService = userService;
         _logger = logger;
         _auditLogService = auditLogService;
         _currentUserService = currentUserService;
         _settingsService = settingsService;
+        _supplierApplicantAccess = supplierApplicantAccess;
+        _unitOfWork = unitOfWork;
     }
 
     /// <summary>
@@ -570,6 +577,10 @@ public partial class UserController : ControllerBase
             {
                 return NotFound("User not found");
             }
+            if (HasExpiredTemporaryCredential(user, DateTime.UtcNow))
+            {
+                return TemporaryCredentialExpired();
+            }
 
             // Verify current password
             var passwordHasher = new PasswordHasher<ApplicationUser>();
@@ -622,9 +633,53 @@ public partial class UserController : ControllerBase
                 }
             }
 
-            // Hash new password
-            user.PasswordHash = passwordHasher.HashPassword(user, request.NewPassword);
-            await _userService.UpdateUserAsync(user);
+            async Task ReplacePasswordAndActivateAsync(ApplicationUser target)
+            {
+                if (HasExpiredTemporaryCredential(target, DateTime.UtcNow))
+                {
+                    throw new TemporaryCredentialExpiredException();
+                }
+                target.PasswordHash = passwordHasher.HashPassword(
+                    target, request.NewPassword);
+                target.MustChangePassword = false;
+                target.TemporaryPasswordExpiresAtUtc = null;
+                target.PasswordChangedAtUtc = DateTime.UtcNow;
+                await _userService.UpdateUserAsync(target);
+                await _supplierApplicantAccess.CompleteCredentialActivationAsync(
+                    target.Id,
+                    $"supplier-credential-activation-{target.Id:N}",
+                    HttpContext.RequestAborted);
+            }
+
+            await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(
+                    HttpContext.RequestAborted);
+                try
+                {
+                    var transactionalUser =
+                        await _userService.GetUserByIdAsync(currentUserId.Value)
+                        ?? throw new InvalidOperationException(
+                            "User no longer exists.");
+                    await ReplacePasswordAndActivateAsync(transactionalUser);
+                    await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
+                    user = transactionalUser;
+                }
+                catch
+                {
+                    try
+                    {
+                        await _unitOfWork.RollbackAsync(
+                            HttpContext.RequestAborted);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // CommitAsync already rolled back and released the
+                        // transaction after a persistence failure.
+                    }
+                    throw;
+                }
+            }, HttpContext.RequestAborted);
 
             // Log audit trail for password change
             try
@@ -647,11 +702,39 @@ public partial class UserController : ControllerBase
 
             return Ok(new { message = "Password changed successfully" });
         }
+        catch (TemporaryCredentialExpiredException)
+        {
+            return TemporaryCredentialExpired();
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error changing password");
             return StatusCode(500, "An error occurred while changing the password");
         }
+    }
+
+    private static bool HasExpiredTemporaryCredential(
+        ApplicationUser user,
+        DateTime nowUtc) =>
+        user.MustChangePassword &&
+        user.TemporaryPasswordExpiresAtUtc.HasValue &&
+        user.TemporaryPasswordExpiresAtUtc.Value <= nowUtc;
+
+    private ObjectResult TemporaryCredentialExpired()
+    {
+        _logger.LogWarning(
+            "Expired temporary credential rejected for user {UserId}",
+            _currentUserService.UserId);
+        return StatusCode(StatusCodes.Status410Gone, new
+        {
+            code = "TEMPORARY_CREDENTIAL_EXPIRED",
+            message =
+                "The temporary password has expired. Request a new temporary credential."
+        });
+    }
+
+    private sealed class TemporaryCredentialExpiredException : Exception
+    {
     }
 
     /// <summary>

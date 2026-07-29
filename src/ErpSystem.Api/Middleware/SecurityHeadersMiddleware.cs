@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 
 namespace ErpSystem.Api.Middleware;
 
@@ -23,7 +24,50 @@ public class SecurityHeadersMiddleware
         // Add security headers before processing the request
         AddSecurityHeaders(context);
 
+        var protectAuthenticatedResponse =
+            IsAuthenticatedApiRequest(context.Request);
+        if (protectAuthenticatedResponse)
+        {
+            ApplyAuthenticatedResponseCacheHeaders(context.Response);
+            context.Response.OnStarting(() =>
+            {
+                // Reapply after downstream middleware/controllers so an
+                // authenticated response can never become publicly cacheable.
+                ApplyAuthenticatedResponseCacheHeaders(context.Response);
+                return Task.CompletedTask;
+            });
+        }
+
         await _next(context);
+
+        if (protectAuthenticatedResponse && !context.Response.HasStarted)
+            ApplyAuthenticatedResponseCacheHeaders(context.Response);
+    }
+
+    private static bool IsAuthenticatedApiRequest(HttpRequest request) =>
+        request.Path.StartsWithSegments("/api") &&
+        request.Headers.ContainsKey(HeaderNames.Authorization);
+
+    private static void ApplyAuthenticatedResponseCacheHeaders(
+        HttpResponse response)
+    {
+        var headers = response.Headers;
+        headers[HeaderNames.CacheControl] = "private, no-store";
+        headers[HeaderNames.Pragma] = "no-cache";
+
+        var variesByAuthorization = headers[HeaderNames.Vary]
+            .SelectMany(value => value?.Split(
+                ',',
+                StringSplitOptions.TrimEntries |
+                StringSplitOptions.RemoveEmptyEntries) ?? [])
+            .Any(value => string.Equals(
+                value,
+                HeaderNames.Authorization,
+                StringComparison.OrdinalIgnoreCase));
+        if (!variesByAuthorization)
+            headers.AppendCommaSeparatedValues(
+                HeaderNames.Vary,
+                HeaderNames.Authorization);
     }
 
     private void AddSecurityHeaders(HttpContext context)

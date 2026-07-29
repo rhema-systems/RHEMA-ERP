@@ -139,7 +139,6 @@ class FileUploadService {
       'image/png', 
       'image/gif',
       'image/bmp',
-      'image/svg+xml',
       'image/webp',
       'image/x-icon',
       'image/vnd.microsoft.icon'
@@ -154,7 +153,7 @@ class FileUploadService {
 
     // Check file extension
     const allowedExtensions = [
-      '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp', '.ico',
+      '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.ico',
       '.pdf', '.doc', '.docx', '.txt', '.rtf'
     ];
 
@@ -199,7 +198,7 @@ class FileUploadService {
     }
     
     // Should end with image extension
-    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp', '.ico'];
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.ico'];
     const urlLower = url.toLowerCase();
     
     return imageExtensions.some(ext => urlLower.includes(ext));

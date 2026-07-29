@@ -1,9 +1,9 @@
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Models;
+using ErpSystem.Api.Services;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers;
@@ -14,45 +14,34 @@ namespace ErpSystem.Api.Controllers;
 public class FileUploadController : ControllerBase
 {
     private readonly ILogger<FileUploadController> _logger;
-    private readonly FileUploadOptions _fileUploadOptions;
-    private readonly IWebHostEnvironment _environment;
-    private readonly IFileStorageService _storageService;
     private readonly ErpSystem.Data.ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
-    private readonly IFileVirusScanService _virusScanService;
+    private readonly IControlledFileUploadService _controlledFiles;
 
     // Allowed file extensions and MIME types
     private static readonly Dictionary<string, string[]> AllowedFileTypes = new()
     {
-        { "image", new[] { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico" } },
+        { "image", new[] { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico" } },
         { "document", new[] { ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt", ".rtf" } }
     };
 
     private static readonly string[] AllowedMimeTypes = new[]
     {
-        "image/jpeg", "image/png", "image/gif", "image/bmp", "image/svg+xml", "image/webp", "image/x-icon", "image/vnd.microsoft.icon",
+        "image/jpeg", "image/png", "image/gif", "image/bmp", "image/webp", "image/x-icon", "image/vnd.microsoft.icon",
         "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv",
         "text/plain", "application/rtf"
     };
-    private static readonly char[] second = new[] { ' ', '.', ',', ';' };
-
     public FileUploadController(
         ILogger<FileUploadController> logger,
-        IOptions<FileUploadOptions> fileUploadOptions,
-        IWebHostEnvironment environment,
-        IFileStorageService storageService,
         ErpSystem.Data.ApplicationDbContext db,
         ICurrentUserService currentUserService,
-        IFileVirusScanService virusScanService)
+        IControlledFileUploadService controlledFiles)
     {
         _logger = logger;
-        _fileUploadOptions = fileUploadOptions.Value;
-        _environment = environment;
-        _storageService = storageService;
         _db = db;
         _currentUserService = currentUserService;
-        _virusScanService = virusScanService;
+        _controlledFiles = controlledFiles;
     }
 
     /// <summary>
@@ -76,11 +65,6 @@ public class FileUploadController : ControllerBase
                 effectiveTenantId = overrideTenant;
             }
 
-            if (effectiveTenantId == Guid.Empty)
-            {
-                return BadRequest(new { message = "Tenant context is required" });
-            }
-
             if (!Guid.TryParse(_currentUserService.UserId, out var actorUserId) || actorUserId == Guid.Empty)
             {
                 return BadRequest(new { message = "User context is required" });
@@ -91,162 +75,41 @@ public class FileUploadController : ControllerBase
                 return BadRequest(new { message = "No file provided or file is empty" });
             }
 
-            category = NormalizeCategory(category);
-            if (string.IsNullOrWhiteSpace(category))
-            {
-                return BadRequest(new { message = "Category is required" });
-            }
-
-            var policy = await GetEffectivePolicyAsync(effectiveTenantId, category);
-            if (!policy.IsEnabled)
-            {
-                return BadRequest(new { message = "File uploads are disabled for this tenant/category" });
-            }
-
-            // Validate file size
-            var maxFileSizeBytes = policy.MaxFileSizeBytes ?? _fileUploadOptions.MaxFileSizeBytes;
-            if (file.Length > maxFileSizeBytes)
-            {
-                return BadRequest(new { message = $"File size exceeds maximum allowed size of {maxFileSizeBytes / 1024 / 1024}MB" });
-            }
-
-            // Validate file type (extension is the primary guard; MIME type is a best-effort signal)
-            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-            if (!policy.AllowedExtensions.Contains(extension))
-            {
-                return BadRequest(new { message = $"File type '{extension}' is not allowed" });
-            }
-
-            if (!string.IsNullOrWhiteSpace(file.ContentType) && policy.AllowedMimeTypes.Count > 0 && !policy.AllowedMimeTypes.Contains(file.ContentType))
-            {
-                return BadRequest(new { message = $"File MIME type '{file.ContentType}' is not allowed" });
-            }
-
-            // Enforce quotas before uploading (best-effort; accurate by summing recorded uploads)
-            if (policy.MaxTenantTotalBytes.HasValue && policy.MaxTenantTotalBytes.Value > 0)
-            {
-                var used = await _db.FileUploadRecords
-                    .AsNoTracking()
-                    .Where(r => r.TenantId == effectiveTenantId && !r.IsDeleted)
-                    .Select(r => (long?)r.FileSize)
-                    .SumAsync() ?? 0;
-
-                if (used + file.Length > policy.MaxTenantTotalBytes.Value)
-                {
-                    return BadRequest(new { message = "Storage quota exceeded for this tenant" });
-                }
-            }
-
-            if (policy.MaxCategoryTotalBytes.HasValue && policy.MaxCategoryTotalBytes.Value > 0)
-            {
-                var used = await _db.FileUploadRecords
-                    .AsNoTracking()
-                    .Where(r => r.TenantId == effectiveTenantId && !r.IsDeleted && r.Category == category)
-                    .Select(r => (long?)r.FileSize)
-                    .SumAsync() ?? 0;
-
-                if (used + file.Length > policy.MaxCategoryTotalBytes.Value)
-                {
-                    return BadRequest(new { message = "Storage quota exceeded for this category" });
-                }
-            }
-
-            // Virus scan hook (no-op by default)
-            var scanStatus = ErpSystem.Core.Enums.FileVirusScanStatus.Skipped;
-            string? scanMessage = null;
-            DateTime? scannedAtUtc = null;
-            if (policy.RequireVirusScan)
-            {
-                using var scanStream = file.OpenReadStream();
-                var scan = await _virusScanService.ScanAsync(new FileVirusScanRequest
+            var result = await _controlledFiles.UploadAsync(
+                new ControlledFileUploadRequest
                 {
                     TenantId = effectiveTenantId,
+                    ActorUserId = actorUserId,
+                    ActorName = _currentUserService.UserName,
                     Category = category,
                     FileName = file.FileName,
                     ContentType = file.ContentType,
                     FileSize = file.Length,
-                    Content = scanStream
-                });
-
-                scanStatus = scan?.Status ?? ErpSystem.Core.Enums.FileVirusScanStatus.Error;
-                scanMessage = scan?.Message;
-                scannedAtUtc = DateTime.UtcNow;
-
-                if (scanStatus == ErpSystem.Core.Enums.FileVirusScanStatus.Infected)
-                {
-                    return BadRequest(new { message = "Upload rejected (file failed virus scan)" });
-                }
-            }
-
-            // Create storage request
-            var uploadRequest = new FileUploadRequest
-            {
-                FileStream = file.OpenReadStream(),
-                FileName = file.FileName,
-                ContentType = file.ContentType,
-                FileSize = file.Length,
-                Category = category,
-                TenantId = effectiveTenantId.ToString(),
-                OverwriteExisting = false
-            };
-
-            // Upload using storage service
-            var result = await _storageService.UploadFileAsync(uploadRequest);
-
-            if (!result.Success)
-            {
-                return BadRequest(new { message = result.ErrorMessage ?? "Upload failed" });
-            }
-
-            _logger.LogInformation("File uploaded successfully using {StorageProvider}: {FileName} -> {FilePath}",
-                result.StorageProvider, file.FileName, result.FilePath);
-
-            // Record upload for quotas/auditability
-            Guid? fileRecordId = null;
-            try
-            {
-                var record = new ErpSystem.Core.Entities.FileUploadRecord
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = effectiveTenantId,
-                    Category = category,
-                    FilePath = result.FilePath,
-                    StoredFileName = result.FileName,
-                    OriginalFileName = result.OriginalFileName,
-                    ContentType = result.ContentType,
-                    FileSize = result.FileSize,
-                    StorageProvider = result.StorageProvider,
-                    UploadedByUserId = actorUserId,
-                    VirusScanStatus = scanStatus,
-                    ScannedAtUtc = scannedAtUtc,
-                    VirusScanMessage = scanMessage,
-                    CreatedAt = DateTime.UtcNow,
-                    CreatedBy = _currentUserService.UserName,
-                    CreatedById = actorUserId
-                };
-                fileRecordId = record.Id;
-                _db.FileUploadRecords.Add(record);
-                await _db.SaveChangesAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to record uploaded file metadata for {FilePath}", result.FilePath);
-            }
-
-            // Convert to legacy format for backward compatibility
+                    OpenReadStream = file.OpenReadStream
+                },
+                HttpContext.RequestAborted);
+            var record = result.Record;
             return Ok(new FileUploadResult
             {
-                Success = result.Success,
-                FileName = result.FileName,
-                OriginalFileName = result.OriginalFileName,
-                FilePath = result.FilePath,
+                Success = true,
+                FileName = record.StoredFileName,
+                OriginalFileName = record.OriginalFileName,
+                FilePath = record.FilePath,
                 PublicUrl = result.PublicUrl,
-                FileSize = result.FileSize,
-                ContentType = result.ContentType,
-                Category = result.Category,
+                FileSize = record.FileSize,
+                ContentType = record.ContentType,
+                Category = record.Category,
                 TenantId = effectiveTenantId.ToString(),
-                FileId = fileRecordId,
-                UploadedAt = result.UploadedAt
+                FileId = record.Id,
+                UploadedAt = record.CreatedAt
+            });
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new
+            {
+                code = ex.Code,
+                message = ex.Message
             });
         }
         catch (Exception ex)
@@ -355,26 +218,25 @@ public class FileUploadController : ControllerBase
                 return Forbid();
             }
 
-            // Use storage service to delete file
-            var deleted = await _storageService.DeleteFileAsync(filePath);
+            await _controlledFiles.DeleteAsync(
+                tenantId,
+                record.Id,
+                actorUserId,
+                HttpContext.RequestAborted);
 
-            if (!deleted)
-            {
-                return NotFound(new { message = "File not found or could not be deleted" });
-            }
-
-            record.IsDeleted = true;
-            record.DeletedAt = DateTime.UtcNow;
-            record.DeletedBy = _currentUserService.UserName;
-            record.LastModifiedById = actorUserId;
-            record.UpdatedAt = DateTime.UtcNow;
-            record.UpdatedBy = _currentUserService.UserName;
-            await _db.SaveChangesAsync();
-
-            _logger.LogInformation("File deleted successfully using {StorageProvider}: {FilePath}",
-                _storageService.ProviderName, filePath);
+            _logger.LogInformation(
+                "File metadata deleted and durable storage cleanup scheduled: {FilePath}",
+                filePath);
 
             return Ok(new { message = "File deleted successfully", filePath });
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new
+            {
+                code = ex.Code,
+                message = ex.Message
+            });
         }
         catch (Exception ex)
         {
@@ -394,126 +256,6 @@ public class FileUploadController : ControllerBase
         return isExtensionAllowed && isMimeTypeAllowed;
     }
 
-    private string GenerateUniqueFileName(string originalFileName)
-    {
-        var extension = Path.GetExtension(originalFileName);
-        var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(originalFileName);
-        var sanitizedFileName = SanitizeFileName(fileNameWithoutExtension);
-        var uniqueId = Guid.NewGuid().ToString("N")[..8]; // Use first 8 characters of GUID
-        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-
-        return $"{sanitizedFileName}_{timestamp}_{uniqueId}{extension}";
-    }
-
-    private static string SanitizeFileName(string fileName)
-    {
-        // Remove invalid characters and limit length
-        var invalidChars = Path.GetInvalidFileNameChars();
-        var sanitized = new string(fileName.Where(c => !invalidChars.Contains(c)).ToArray());
-        sanitized = sanitized.Replace(" ", "_").ToLowerInvariant();
-
-        // Limit length
-        if (sanitized.Length > 50)
-        {
-            sanitized = sanitized[..50];
-        }
-
-        return string.IsNullOrEmpty(sanitized) ? "file" : sanitized;
-    }
-
-    private static string SanitizeCategory(string category)
-    {
-        // Sanitize category for use in file path
-        var invalidChars = Path.GetInvalidPathChars().Union(second);
-        var sanitized = new string(category.Where(c => !invalidChars.Contains(c)).ToArray());
-        return sanitized.ToLowerInvariant();
-    }
-
-    private sealed class EffectiveFileUploadPolicy
-    {
-        public bool IsEnabled { get; set; } = true;
-        public long? MaxFileSizeBytes { get; set; }
-        public long? MaxTenantTotalBytes { get; set; }
-        public long? MaxCategoryTotalBytes { get; set; }
-        public bool RequireVirusScan { get; set; } = false;
-        public HashSet<string> AllowedExtensions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> AllowedMimeTypes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static string NormalizeCategory(string category)
-    {
-        var c = (category ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(c)) return string.Empty;
-        c = c.Replace('\\', '/');
-        c = c.Replace("..", string.Empty);
-        c = c.Trim('/');
-        return c.ToLowerInvariant();
-    }
-
-    private static HashSet<string> ParseCsvSet(string? csv, bool ensureLeadingDot = false)
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrWhiteSpace(csv)) return set;
-
-        foreach (var raw in csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            var token = raw.Trim();
-            if (string.IsNullOrWhiteSpace(token)) continue;
-            token = token.ToLowerInvariant();
-            if (ensureLeadingDot && !token.StartsWith('.')) token = "." + token;
-            set.Add(token);
-        }
-
-        return set;
-    }
-
-    private static HashSet<string> DefaultAllowedExtensions()
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var exts in AllowedFileTypes.Values)
-        {
-            foreach (var e in exts) set.Add(e);
-        }
-        return set;
-    }
-
-    private static HashSet<string> DefaultAllowedMimeTypes()
-    {
-        return new HashSet<string>(AllowedMimeTypes, StringComparer.OrdinalIgnoreCase);
-    }
-
-    private async Task<EffectiveFileUploadPolicy> GetEffectivePolicyAsync(Guid tenantId, string category)
-    {
-        var items = await _db.FileUploadPolicies
-            .AsNoTracking()
-            .Where(p => p.TenantId == tenantId && !p.IsDeleted && (p.Category == "*" || p.Category == category))
-            .ToListAsync();
-
-        var global = items.FirstOrDefault(p => p.Category == "*");
-        var specific = items.FirstOrDefault(p => p.Category == category);
-
-        // If a specific category policy exists, it wins for IsEnabled.
-        var isEnabled = specific?.IsEnabled ?? global?.IsEnabled ?? true;
-
-        var allowedExt = ParseCsvSet(specific?.AllowedExtensionsCsv, ensureLeadingDot: true);
-        if (allowedExt.Count == 0) allowedExt = ParseCsvSet(global?.AllowedExtensionsCsv, ensureLeadingDot: true);
-        if (allowedExt.Count == 0) allowedExt = DefaultAllowedExtensions();
-
-        var allowedMime = ParseCsvSet(specific?.AllowedMimeTypesCsv, ensureLeadingDot: false);
-        if (allowedMime.Count == 0) allowedMime = ParseCsvSet(global?.AllowedMimeTypesCsv, ensureLeadingDot: false);
-        if (allowedMime.Count == 0) allowedMime = DefaultAllowedMimeTypes();
-
-        return new EffectiveFileUploadPolicy
-        {
-            IsEnabled = isEnabled,
-            MaxFileSizeBytes = specific?.MaxFileSizeBytes ?? global?.MaxFileSizeBytes,
-            MaxTenantTotalBytes = global?.MaxTenantTotalBytes,
-            MaxCategoryTotalBytes = specific?.MaxCategoryTotalBytes ?? global?.MaxCategoryTotalBytes,
-            RequireVirusScan = specific?.RequireVirusScan ?? global?.RequireVirusScan ?? false,
-            AllowedExtensions = allowedExt,
-            AllowedMimeTypes = allowedMime
-        };
-    }
 }
 
 // Configuration options
@@ -526,6 +268,14 @@ public class FileUploadOptions
     public bool EnableImageOptimization { get; set; } = false;
     public int MaxImageWidth { get; set; } = 2048;
     public int MaxImageHeight { get; set; } = 2048;
+    public int StorageCleanupIntervalSeconds { get; set; } = 30;
+    public int StorageCleanupBatchSize { get; set; } = 50;
+    /// <summary>
+    /// Additional normalized upload categories that must obtain a clean scan.
+    /// System categories declared by <see cref="ControlledFileUploadCategories"/>
+    /// are always included and cannot be disabled here.
+    /// </summary>
+    public string? RequiredCleanScanCategoriesCsv { get; set; }
 }
 
 // Response DTOs

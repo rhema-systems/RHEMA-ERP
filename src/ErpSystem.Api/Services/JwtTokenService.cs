@@ -43,8 +43,17 @@ namespace ErpSystem.Api.Services
                 new System.Security.Claims.Claim(ClaimTypes.Email, user.Email ?? ""),
                 new System.Security.Claims.Claim("tenant_id", user.TenantId.ToString()),
                 new System.Security.Claims.Claim("jti", Guid.NewGuid().ToString()),
-                new System.Security.Claims.Claim("auth_provider", user.AuthenticationProvider.ToString())
+                new System.Security.Claims.Claim("auth_provider", user.AuthenticationProvider.ToString()),
+                new System.Security.Claims.Claim(
+                    "password_change_required",
+                    user.MustChangePassword ? "true" : "false")
             };
+            if (user.TemporaryPasswordExpiresAtUtc.HasValue)
+            {
+                claims.Add(new System.Security.Claims.Claim(
+                    "temporary_password_expires_at",
+                    user.TemporaryPasswordExpiresAtUtc.Value.ToUniversalTime().ToString("O")));
+            }
 
             // Add EmployeeId claim if user is linked to an employee
             if (user.EmployeeId.HasValue)
