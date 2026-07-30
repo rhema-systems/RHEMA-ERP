@@ -46,6 +46,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { PurchaseOrderComplianceGate } from '@/components/procurement/PurchaseOrderComplianceGate';
+import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
 import { useAuth } from '@/hooks/use-auth';
 import {
   frameworkCallOffActionState,
@@ -54,6 +56,10 @@ import {
   matchingFrameworkPrice,
 } from '@/lib/procurement-framework-call-off';
 import { procurementFrameworkCallOffService as service } from '@/services/procurement-framework-call-off.service';
+import type {
+  ProcurementPurchaseOrderComplianceDto,
+  ProcurementPurchaseOrderSodReadinessDto,
+} from '@/services/purchasingService';
 import type {
   CreateFrameworkCallOff,
   FrameworkCallOffAgreementOption,
@@ -140,6 +146,10 @@ export default function FrameworkCallOffsPage() {
   const [lifecycleAction, setLifecycleAction] = useState<LifecycleAction>();
   const [comment, setComment] = useState('');
   const [evidenceReference, setEvidenceReference] = useState('');
+  const [complianceReadiness, setComplianceReadiness] =
+    useState<ProcurementPurchaseOrderComplianceDto | null>(null);
+  const [sodReadiness, setSodReadiness] =
+    useState<ProcurementPurchaseOrderSodReadinessDto | null>(null);
 
   const summary = useQuery({
     queryKey: ['framework-call-off-summary'],
@@ -170,6 +180,12 @@ export default function FrameworkCallOffsPage() {
 
   const selected = detail.data;
   const actions = frameworkCallOffActionState(selected);
+  const selectedComplianceReady =
+    complianceReadiness?.purchaseOrderId === selected?.purchaseOrderId &&
+    complianceReadiness?.isCompliant === true;
+  const selectedSodApprovalReady =
+    sodReadiness?.purchaseOrderId === selected?.purchaseOrderId &&
+    sodReadiness?.canApprove === true;
   const selectedAgreement = options.data?.agreements.find(
     (item) => item.agreementId === agreementId
   );
@@ -591,12 +607,20 @@ export default function FrameworkCallOffsPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {actions.canSubmit && canManage && (
-                    <Button onClick={() => setLifecycleAction('submit')}>
+                    <Button
+                      disabled={!selectedComplianceReady}
+                      onClick={() => setLifecycleAction('submit')}
+                    >
                       Submit
                     </Button>
                   )}
                   {actions.canApprove && canApprove && (
-                    <Button onClick={() => setLifecycleAction('approve')}>
+                    <Button
+                      disabled={
+                        !selectedComplianceReady || !selectedSodApprovalReady
+                      }
+                      onClick={() => setLifecycleAction('approve')}
+                    >
                       Approve & commit
                     </Button>
                   )}
@@ -805,6 +829,16 @@ export default function FrameworkCallOffsPage() {
               </div>
             </CardContent>
           </Card>
+          <PurchaseOrderComplianceGate
+            purchaseOrderId={selected.purchaseOrderId}
+            status={selected.purchaseOrderStatus}
+            onReadinessChange={setComplianceReadiness}
+          />
+          <PurchaseOrderSodControl
+            purchaseOrderId={selected.purchaseOrderId}
+            status={selected.purchaseOrderStatus}
+            onReadinessChange={setSodReadiness}
+          />
         </div>
       )}
 

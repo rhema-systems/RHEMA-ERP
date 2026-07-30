@@ -92,6 +92,17 @@ public class UnitOfWork : IUnitOfWork
                 "The transaction lock resource must contain 1 to 255 characters.",
                 nameof(resource));
 
+        // The in-memory provider is used by focused service tests and has no
+        // database connection or application-lock primitive. SQL Server still
+        // takes the transaction-owned sp_getapplock below.
+        if (string.Equals(
+                _context.Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.InMemory",
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
         var transaction =
             _context.Database.CurrentTransaction ?? _transaction
             ?? throw new InvalidOperationException(

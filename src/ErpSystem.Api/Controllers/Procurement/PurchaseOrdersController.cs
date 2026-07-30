@@ -53,6 +53,8 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IWorkflowService _workflowService;
     private readonly ISupplierValidationService _supplierValidation;
     private readonly IProcurementPurchaseOrderSourceService _purchaseOrderSources;
+    private readonly IProcurementPurchaseOrderComplianceService _purchaseOrderCompliance;
+    private readonly IProcurementPurchaseOrderSodService _purchaseOrderSod;
     private readonly ILogger<PurchaseOrdersController> _logger;
 
     private const string SpreadToItemCost = "SpreadToItemCost";
@@ -81,6 +83,8 @@ public class PurchaseOrdersController : ControllerBase
         IWorkflowService workflowService,
         ISupplierValidationService supplierValidation,
         IProcurementPurchaseOrderSourceService purchaseOrderSources,
+        IProcurementPurchaseOrderComplianceService purchaseOrderCompliance,
+        IProcurementPurchaseOrderSodService purchaseOrderSod,
         ILogger<PurchaseOrdersController> logger)
     {
         _purchaseOrderRepository = purchaseOrderRepository;
@@ -102,6 +106,8 @@ public class PurchaseOrdersController : ControllerBase
         _workflowService = workflowService;
         _supplierValidation = supplierValidation;
         _purchaseOrderSources = purchaseOrderSources;
+        _purchaseOrderCompliance = purchaseOrderCompliance;
+        _purchaseOrderSod = purchaseOrderSod;
         _logger = logger;
     }
 
@@ -129,6 +135,91 @@ public class PurchaseOrdersController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 code = "PO_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId
+            });
+        }
+    }
+
+    [HttpGet("{id}/compliance-readiness")]
+    public async Task<ActionResult<ProcurementPurchaseOrderComplianceDto>>
+        GetComplianceReadiness(
+            Guid id,
+            [FromQuery] string action = "Preview")
+    {
+        var correlationId = CorrelationId();
+        try
+        {
+            return Ok(await _purchaseOrderCompliance.GetReadinessAsync(
+                id,
+                action,
+                correlationId,
+                HttpContext.RequestAborted));
+        }
+        catch (ProcurementPurchaseOrderComplianceNotFoundException ex)
+        {
+            return NotFound(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId
+            });
+        }
+        catch (ProcurementPurchaseOrderComplianceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_COMPLIANCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId
+            });
+        }
+        catch (ProcurementAccessAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_COMPLIANCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId
+            });
+        }
+    }
+
+    [HttpGet("{id}/sod-readiness")]
+    public async Task<ActionResult<ProcurementPurchaseOrderSodReadinessDto>>
+        GetSodReadiness(Guid id)
+    {
+        var correlationId = CorrelationId();
+        try
+        {
+            return Ok(await _purchaseOrderSod.GetReadinessAsync(
+                id,
+                correlationId,
+                HttpContext.RequestAborted));
+        }
+        catch (ProcurementPurchaseOrderSodNotFoundException ex)
+        {
+            return NotFound(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId
+            });
+        }
+        catch (ProcurementPurchaseOrderSodAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOD_FORBIDDEN",
+                message = ex.Message,
+                correlationId
+            });
+        }
+        catch (ProcurementAccessAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOD_FORBIDDEN",
                 message = ex.Message,
                 correlationId
             });
@@ -485,9 +576,10 @@ public class PurchaseOrdersController : ControllerBase
                 DeliveryAddress = createDto.DeliveryAddress,
                 DeliveryInstructions = createDto.DeliveryInstructions,
                 ReferenceNumber = createDto.ReferenceNumber,
-                RequestedById = createDto.RequestedById,
+                RequestedById = approvedSource.PurchaseRequisitionRequestedById,
                 OrderType = orderType,
-                TenantId = tenantId
+                TenantId = tenantId,
+                CreatedById = _currentUserService.UserId
             };
             _purchaseOrderSources.Apply(purchaseOrder, approvedSource);
 
@@ -921,11 +1013,34 @@ public class PurchaseOrdersController : ControllerBase
                 !string.Equals(statusDto.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(statusDto.Status, "Rejected", StringComparison.OrdinalIgnoreCase))
             {
-                await _purchaseOrderSources.RevalidateAsync(
-                    purchaseOrder,
-                    $"Status{statusDto.Status}",
-                    CorrelationId(),
-                    HttpContext.RequestAborted);
+                if (string.Equals(statusDto.Status, "Pending Approval",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(statusDto.Status, "Submitted",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    await _purchaseOrderCompliance.EnforceAsync(
+                        purchaseOrder,
+                        "Submit",
+                        CorrelationId(),
+                        HttpContext.RequestAborted);
+                }
+                else if (string.Equals(statusDto.Status, "Approved",
+                             StringComparison.OrdinalIgnoreCase))
+                {
+                    await _purchaseOrderSod.RejectApprovalBypassAsync(
+                        purchaseOrder,
+                        "DirectStatusApprove",
+                        CorrelationId(),
+                        HttpContext.RequestAborted);
+                }
+                else
+                {
+                    await _purchaseOrderSources.RevalidateAsync(
+                        purchaseOrder,
+                        $"Status{statusDto.Status}",
+                        CorrelationId(),
+                        HttpContext.RequestAborted);
+                }
             }
 
             await _purchaseOrderRepository.UpdateStatusAsync(id, statusDto.Status);
@@ -938,6 +1053,44 @@ public class PurchaseOrdersController : ControllerBase
             return UnprocessableEntity(new
             {
                 code = ex.Code,
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementPurchaseOrderComplianceBlockedException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementPurchaseOrderComplianceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_COMPLIANCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementPurchaseOrderSodBlockedException ex)
+        {
+            return Conflict(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementPurchaseOrderSodAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOD_FORBIDDEN",
                 message = ex.Message,
                 correlationId = CorrelationId()
             });
@@ -986,15 +1139,6 @@ public class PurchaseOrdersController : ControllerBase
             {
                 return BadRequest($"Purchase order cannot be approved in current status: {purchaseOrder.Status}");
             }
-            if (approvalDto.Approved)
-            {
-                await _purchaseOrderSources.RevalidateAsync(
-                    purchaseOrder,
-                    "Approve",
-                    CorrelationId(),
-                    HttpContext.RequestAborted);
-            }
-
             var userId = _currentUserService.UserId;
             if (userId == Guid.Empty)
             {
@@ -1005,6 +1149,18 @@ public class PurchaseOrdersController : ControllerBase
             if (!canApprove)
             {
                 return StatusCode(403, "You are not assigned as an approver for the current workflow step");
+            }
+            if (approvalDto.Approved)
+            {
+                await _purchaseOrderSod.EnforceApprovalAsync(
+                    purchaseOrder,
+                    CorrelationId(),
+                    HttpContext.RequestAborted);
+                await _purchaseOrderCompliance.EnforceAsync(
+                    purchaseOrder,
+                    "Approve",
+                    CorrelationId(),
+                    HttpContext.RequestAborted);
             }
 
             var action = approvalDto.Approved ? "approve" : "reject";
@@ -1055,6 +1211,44 @@ public class PurchaseOrdersController : ControllerBase
                 correlationId = CorrelationId()
             });
         }
+        catch (ProcurementPurchaseOrderComplianceBlockedException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementPurchaseOrderComplianceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_COMPLIANCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementPurchaseOrderSodBlockedException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementPurchaseOrderSodAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOD_FORBIDDEN",
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error approving purchase order {PurchaseOrderId}", id);
@@ -1068,6 +1262,8 @@ public class PurchaseOrdersController : ControllerBase
     [HttpPost("{id}/submit")]
     public async Task<IActionResult> SubmitPurchaseOrder(Guid id)
     {
+        var ownsWorkflowTransaction = false;
+        var correlationId = CorrelationId();
         try
         {
             if (!_currentUserService.IsAuthenticated)
@@ -1094,15 +1290,22 @@ public class PurchaseOrdersController : ControllerBase
             {
                 return BadRequest($"Purchase order cannot be submitted in current status: {purchaseOrder.Status}");
             }
-            await _purchaseOrderSources.RevalidateAsync(
+            await _purchaseOrderCompliance.EnforceAsync(
                 purchaseOrder,
                 "Submit",
-                CorrelationId(),
+                correlationId,
                 HttpContext.RequestAborted);
 
             WorkflowIntegrationResult workflowResult;
             try
             {
+                ownsWorkflowTransaction = !_unitOfWork.HasActiveTransaction;
+                if (ownsWorkflowTransaction)
+                {
+                    await _unitOfWork.BeginTransactionAsync(
+                        IsolationLevel.Serializable,
+                        HttpContext.RequestAborted);
+                }
                 workflowResult = await _workflowIntegrationService.SubmitAsync("PurchaseOrder", id);
             }
             catch (InvalidOperationException ex)
@@ -1110,17 +1313,33 @@ public class PurchaseOrdersController : ControllerBase
                 return BadRequest(ex.Message);
             }
 
+            if (ProcurementPurchaseOrderSodRules.IsAutomaticApproval(
+                    workflowResult.Outcome))
+            {
+                if (ownsWorkflowTransaction && _unitOfWork.HasActiveTransaction)
+                {
+                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                    ownsWorkflowTransaction = false;
+                }
+                await _purchaseOrderSod.RejectApprovalBypassAsync(
+                    purchaseOrder,
+                    "WorkflowAutoApprove",
+                    correlationId,
+                    HttpContext.RequestAborted);
+            }
+
             var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseOrder");
             statusAdapter.ApplySubmitOutcome(purchaseOrder, workflowResult.Outcome, _currentUserService.UserId);
 
-            if (!purchaseOrder.RequestedById.HasValue)
-            {
-                purchaseOrder.RequestedById = _currentUserService.UserId;
-            }
             purchaseOrder.UpdatedAt = DateTime.UtcNow;
 
             await _purchaseOrderRepository.UpdatePurchaseOrderAsync(purchaseOrder);
             await _unitOfWork.SaveChangesAsync();
+            if (ownsWorkflowTransaction)
+            {
+                await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
+                ownsWorkflowTransaction = false;
+            }
 
             return NoContent();
         }
@@ -1133,10 +1352,64 @@ public class PurchaseOrdersController : ControllerBase
                 correlationId = CorrelationId()
             });
         }
+        catch (ProcurementPurchaseOrderComplianceBlockedException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementPurchaseOrderComplianceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_COMPLIANCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementPurchaseOrderSodBlockedException ex)
+        {
+            return Conflict(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId
+            });
+        }
+        catch (ProcurementPurchaseOrderSodAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOD_FORBIDDEN",
+                message = ex.Message,
+                correlationId
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error submitting purchase order {PurchaseOrderId}", id);
             return StatusCode(500, "An error occurred while submitting the purchase order");
+        }
+        finally
+        {
+            if (ownsWorkflowTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                try
+                {
+                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(
+                        rollbackException,
+                        "Failed to roll back purchase-order workflow submission");
+                }
+            }
         }
     }
 
@@ -1169,6 +1442,11 @@ public class PurchaseOrdersController : ControllerBase
                 return BadRequest($"Purchase order cannot be received in current status: {purchaseOrder.Status}");
             }
 
+            await _purchaseOrderSod.EnforceReceiptAsync(
+                purchaseOrder,
+                CorrelationId(),
+                HttpContext.RequestAborted);
+
             // Generate receipt number
             var receiptNumber = await _purchaseOrderReceiptRepository.GenerateReceiptNumberAsync();
 
@@ -1183,7 +1461,7 @@ public class PurchaseOrdersController : ControllerBase
                 CarrierName = receiveDto.CarrierName,
                 TrackingNumber = receiveDto.TrackingNumber,
                 Status = receiveDto.RequiresInspection ? "Pending Inspection" : "Received",
-                ReceivedById = receiveDto.ReceivedById,
+                ReceivedById = _currentUserService.UserId,
                 InspectedById = receiveDto.InspectedById,
                 Notes = receiveDto.Notes,
                 RequiresInspection = receiveDto.RequiresInspection,
@@ -1392,6 +1670,25 @@ public class PurchaseOrdersController : ControllerBase
             };
 
             return CreatedAtAction(nameof(GetPurchaseOrder), new { id = purchaseOrder.Id }, receiptDto);
+        }
+        catch (ProcurementPurchaseOrderSodBlockedException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementPurchaseOrderSodAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOD_FORBIDDEN",
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
         }
         catch (Exception ex)
         {

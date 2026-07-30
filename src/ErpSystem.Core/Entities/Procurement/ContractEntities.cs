@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.DocumentManagement;
 
 namespace ErpSystem.Core.Entities.Procurement;
 
@@ -9,6 +10,9 @@ namespace ErpSystem.Core.Entities.Procurement;
 /// </summary>
 public class Contract : TenantEntity
 {
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     [Required]
     [MaxLength(50)]
     public string ContractNumber { get; set; } = string.Empty;
@@ -243,6 +247,12 @@ public class ContractDocument : TenantEntity
     [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
 
+    public Guid? FileUploadRecordId { get; set; }
+
+    public Guid? CentralDocumentRecordId { get; set; }
+
+    public Guid? CentralDocumentVersionId { get; set; }
+
     [MaxLength(50)]
     public string? ContentType { get; set; }
 
@@ -255,4 +265,7 @@ public class ContractDocument : TenantEntity
     // Navigation
     public virtual Contract Contract { get; set; } = null!;
     public virtual ApplicationUser? UploadedBy { get; set; }
+    public virtual FileUploadRecord? FileUploadRecord { get; set; }
+    public virtual CentralDocumentRecord? CentralDocumentRecord { get; set; }
+    public virtual CentralDocumentVersion? CentralDocumentVersion { get; set; }
 }

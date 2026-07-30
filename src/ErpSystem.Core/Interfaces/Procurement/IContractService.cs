@@ -41,8 +41,17 @@ public interface IContractService
     Task<IEnumerable<ContractAmendmentDto>> GetPendingAmendmentsAsync();
 
     // Documents
-    Task<ContractDocumentDto> UploadDocumentAsync(Guid contractId, string documentType, string fileName, string filePath, string? contentType, long? fileSize, string? description);
+    Task<ContractDocumentDto> UploadDocumentAsync(
+        Guid contractId,
+        string documentType,
+        string fileName,
+        string filePath,
+        string? contentType,
+        long? fileSize,
+        string? description,
+        Guid fileUploadRecordId,
+        Guid centralDocumentRecordId,
+        Guid centralDocumentVersionId);
     Task DeleteDocumentAsync(Guid documentId);
     Task<IEnumerable<ContractDocumentDto>> GetDocumentsByContractIdAsync(Guid contractId);
 }
-

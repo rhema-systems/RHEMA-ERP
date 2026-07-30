@@ -548,6 +548,64 @@ export interface ProcurementPurchaseOrderSourceStatusDto {
   frameworkCallOffRoute: string;
 }
 
+export interface ProcurementPurchaseOrderComplianceCheckDto {
+  key: string;
+  label: string;
+  required: boolean;
+  passed: boolean;
+  code: string;
+  message: string;
+  referenceId?: string;
+  reference?: string;
+  integrityHash?: string;
+  details: string[];
+}
+
+export interface ProcurementPurchaseOrderComplianceDto {
+  purchaseOrderId: string;
+  orderNumber: string;
+  status: string;
+  action: string;
+  isCompliant: boolean;
+  code: string;
+  message: string;
+  evaluatedAtUtc: string;
+  decisionKeys: string[];
+  checks: ProcurementPurchaseOrderComplianceCheckDto[];
+  blockedReasons: string[];
+}
+
+export interface ProcurementPurchaseOrderSodCheckDto {
+  key: string;
+  label: string;
+  action: string;
+  controlCode: string;
+  allowed: boolean;
+  code: string;
+  message: string;
+  participantRoles: string[];
+  prohibitedActorUserIds: string[];
+  policySetId?: string;
+  policyCode?: string;
+  policyVersion?: number;
+  ruleId?: string;
+  ruleCode?: string;
+}
+
+export interface ProcurementPurchaseOrderSodReadinessDto {
+  purchaseOrderId: string;
+  orderNumber: string;
+  status: string;
+  currentActorUserId: string;
+  canApprove: boolean;
+  canReceive: boolean;
+  code: string;
+  message: string;
+  evaluatedAtUtc: string;
+  decisionKeys: string[];
+  checks: ProcurementPurchaseOrderSodCheckDto[];
+}
+
 export interface PurchaseOrderSummaryDto {
   id: string;
   orderNumber: string;
@@ -1213,6 +1271,29 @@ export const purchasingService = {
     return response.json();
   },
 
+  async getPurchaseOrderComplianceReadiness(
+    id: string,
+    action = 'Preview'
+  ): Promise<ProcurementPurchaseOrderComplianceDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrders/${id}/compliance-readiness?action=${encodeURIComponent(action)}`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getPurchaseOrderSodReadiness(
+    id: string
+  ): Promise<ProcurementPurchaseOrderSodReadinessDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrders/${id}/sod-readiness`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
   /**
    * Update an existing purchase order (only Draft status)
    */
@@ -1485,7 +1566,7 @@ export const purchasingService = {
       }
     );
 
-    if (!response.ok) throw new Error('Failed to submit purchase order');
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
   },
 
   /**
@@ -1502,7 +1583,7 @@ export const purchasingService = {
     );
 
     if (!response.ok)
-      throw new Error('Failed to approve/reject purchase order');
+      throw new Error(await getFriendlyErrorMessage(response));
   },
 
   /**
@@ -1676,6 +1757,7 @@ export const {
   // Purchase Orders
   getPurchaseOrders,
   getPurchaseOrderById,
+  getPurchaseOrderSodReadiness,
   createPurchaseOrder,
   updatePurchaseOrder,
   updatePurchaseOrderStatus,
