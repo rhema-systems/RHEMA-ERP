@@ -11,6 +11,7 @@ export interface BusinessPartnerRegistrationDto {
   id: string;
   applicationNumber: string;
   partnerType: string; // Supplier, Contractor, Both
+  registrationCategory?: 'Goods' | 'Works' | 'Services';
   status: string; // Draft, Submitted, UnderReview, Approved, Rejected
   companyName: string;
   registrationNumber?: string;
@@ -25,7 +26,8 @@ export interface BusinessPartnerRegistrationDto {
   createdAt: string;
 }
 
-export interface BusinessPartnerRegistrationDetailDto extends BusinessPartnerRegistrationDto {
+export interface BusinessPartnerRegistrationDetailDto
+  extends BusinessPartnerRegistrationDto {
   registrationData?: string; // JSON data containing full registration form
   reviewNotes?: string;
   rejectionReason?: string;
@@ -36,10 +38,18 @@ export interface BusinessPartnerRegistrationDetailDto extends BusinessPartnerReg
 export interface BusinessPartnerRegistrationDocumentDto {
   id: string;
   registrationId: string;
+  fileUploadRecordId?: string;
+  virusScanStatus?: number;
   documentType: string;
   documentName: string;
   filePath: string;
   fileSize: number;
+  mimeType?: string;
+  evidenceRequirementCode?: string;
+  classificationCode?: string;
+  issuedAtUtc?: string;
+  expiresAtUtc?: string;
+  checksumSha256?: string;
   isVerified: boolean;
   isRejected: boolean;
   rejectionReason?: string;
@@ -59,6 +69,7 @@ export interface BusinessPartnerRegistrationStatusHistoryDto {
 
 export interface CreateBusinessPartnerRegistrationDto {
   partnerType: string;
+  registrationCategory?: 'Goods' | 'Works' | 'Services';
   companyName: string;
   registrationNumber?: string;
   email?: string;
@@ -68,6 +79,7 @@ export interface CreateBusinessPartnerRegistrationDto {
 
 export interface UpdateBusinessPartnerRegistrationDto {
   companyName: string;
+  registrationCategory?: 'Goods' | 'Works' | 'Services';
   registrationNumber?: string;
   email?: string;
   phone?: string;
@@ -83,6 +95,7 @@ export interface RegistrationFormData {
   taxNumber?: string;
   vatNumber?: string;
   partnerType: string;
+  registrationCategory?: 'Goods' | 'Works' | 'Services';
 
   // Contact Information
   email: string;
@@ -138,9 +151,10 @@ export interface RegistrationFormData {
 // ============================================================================
 
 const getAuthHeaders = (): HeadersInit => {
-  const token = typeof window !== 'undefined'
-    ? localStorage.getItem('token') || localStorage.getItem('authToken')
-    : null;
+  const token =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('token') || localStorage.getItem('authToken')
+      : null;
 
   return {
     'Content-Type': 'application/json',
@@ -192,7 +206,9 @@ export const businessPartnerRegistrationService = {
   /**
    * Get a registration by application number (public - no auth required)
    */
-  async getByApplicationNumber(applicationNumber: string): Promise<BusinessPartnerRegistrationDto> {
+  async getByApplicationNumber(
+    applicationNumber: string
+  ): Promise<BusinessPartnerRegistrationDto> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/business-partner-registrations/by-application-number/${applicationNumber}`,
       {
@@ -206,7 +222,9 @@ export const businessPartnerRegistrationService = {
   /**
    * Create a new registration (draft)
    */
-  async create(data: CreateBusinessPartnerRegistrationDto): Promise<BusinessPartnerRegistrationDetailDto> {
+  async create(
+    data: CreateBusinessPartnerRegistrationDto
+  ): Promise<BusinessPartnerRegistrationDetailDto> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/business-partner-registrations`,
       {
@@ -221,7 +239,10 @@ export const businessPartnerRegistrationService = {
   /**
    * Update an existing registration (draft only)
    */
-  async update(id: string, data: UpdateBusinessPartnerRegistrationDto): Promise<BusinessPartnerRegistrationDetailDto> {
+  async update(
+    id: string,
+    data: UpdateBusinessPartnerRegistrationDto
+  ): Promise<BusinessPartnerRegistrationDetailDto> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/business-partner-registrations/${id}`,
       {
@@ -270,15 +291,33 @@ export const businessPartnerRegistrationService = {
   /**
    * Upload a document for a registration
    */
-  async uploadDocument(registrationId: string, file: File, documentType: string): Promise<BusinessPartnerRegistrationDocumentDto> {
+  async uploadDocument(
+    registrationId: string,
+    file: File,
+    documentType: string,
+    evidence?: {
+      requirementCode?: string;
+      classificationCode?: string;
+      issueDate?: string;
+      expiryDate?: string;
+    }
+  ): Promise<BusinessPartnerRegistrationDocumentDto> {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('documentType', documentType);
     formData.append('registrationId', registrationId);
+    if (evidence?.requirementCode)
+      formData.append('evidenceRequirementCode', evidence.requirementCode);
+    if (evidence?.classificationCode)
+      formData.append('classificationCode', evidence.classificationCode);
+    if (evidence?.issueDate) formData.append('issueDate', evidence.issueDate);
+    if (evidence?.expiryDate)
+      formData.append('expiryDate', evidence.expiryDate);
 
-    const token = typeof window !== 'undefined'
-      ? localStorage.getItem('token') || localStorage.getItem('authToken')
-      : null;
+    const token =
+      typeof window !== 'undefined'
+        ? localStorage.getItem('token') || localStorage.getItem('authToken')
+        : null;
 
     const response = await fetch(
       `${API_BASE_URL}/procurement/business-partner-registrations/${registrationId}/documents`,
@@ -296,10 +335,14 @@ export const businessPartnerRegistrationService = {
   /**
    * Track document download
    */
-  async trackDocumentDownload(registrationId: string, documentId: string): Promise<void> {
-    const token = typeof window !== 'undefined'
-      ? localStorage.getItem('token') || localStorage.getItem('authToken')
-      : null;
+  async trackDocumentDownload(
+    registrationId: string,
+    documentId: string
+  ): Promise<void> {
+    const token =
+      typeof window !== 'undefined'
+        ? localStorage.getItem('token') || localStorage.getItem('authToken')
+        : null;
 
     try {
       const response = await fetch(
@@ -326,14 +369,20 @@ export const businessPartnerRegistrationService = {
   /**
    * Download a document and track the download
    */
-  async downloadDocument(registrationId: string, documentId: string, documentName: string, filePath: string): Promise<void> {
+  async downloadDocument(
+    registrationId: string,
+    documentId: string,
+    documentName: string,
+    filePath: string
+  ): Promise<void> {
     // Track the download first
     await this.trackDocumentDownload(registrationId, documentId);
 
     // Then download the file
-    const token = typeof window !== 'undefined'
-      ? localStorage.getItem('token') || localStorage.getItem('authToken')
-      : null;
+    const token =
+      typeof window !== 'undefined'
+        ? localStorage.getItem('token') || localStorage.getItem('authToken')
+        : null;
 
     const response = await fetch(filePath, {
       headers: {
@@ -359,9 +408,12 @@ export const businessPartnerRegistrationService = {
   /**
    * Helper: Convert RegistrationFormData to CreateBusinessPartnerRegistrationDto
    */
-  convertFormDataToCreateDto(formData: RegistrationFormData): CreateBusinessPartnerRegistrationDto {
+  convertFormDataToCreateDto(
+    formData: RegistrationFormData
+  ): CreateBusinessPartnerRegistrationDto {
     return {
       partnerType: formData.partnerType,
+      registrationCategory: formData.registrationCategory,
       companyName: formData.companyName,
       registrationNumber: formData.registrationNumber || undefined,
       email: formData.email || undefined,
@@ -373,9 +425,13 @@ export const businessPartnerRegistrationService = {
   /**
    * Helper: Convert RegistrationFormData to UpdateBusinessPartnerRegistrationDto
    */
-  convertFormDataToUpdateDto(formData: RegistrationFormData, completionPercentage: number): UpdateBusinessPartnerRegistrationDto {
+  convertFormDataToUpdateDto(
+    formData: RegistrationFormData,
+    completionPercentage: number
+  ): UpdateBusinessPartnerRegistrationDto {
     return {
       companyName: formData.companyName,
+      registrationCategory: formData.registrationCategory,
       registrationNumber: formData.registrationNumber || undefined,
       email: formData.email || undefined,
       phone: formData.phone || undefined,
@@ -387,42 +443,50 @@ export const businessPartnerRegistrationService = {
   /**
    * Helper: Parse registration data from JSON string
    */
-	parseRegistrationData(registrationData?: string): RegistrationFormData | null {
-	    if (!registrationData) return null;
-	    try {
-	      const topLevel: any = JSON.parse(registrationData);
-	      let raw: any = topLevel;
+  parseRegistrationData(
+    registrationData?: string
+  ): RegistrationFormData | null {
+    if (!registrationData) return null;
+    try {
+      const topLevel: any = JSON.parse(registrationData);
+      let raw: any = topLevel;
 
-	      // Backwards compatibility:
-	      // Older registrations stored the **entire C# DTO** as JSON with a nested
-	      // RegistrationData/registrationData string that contains the real
-	      // RegistrationFormData. Newer ones may store just the form JSON.
-	      if (raw && typeof raw === 'object') {
-	        const nested = raw.RegistrationData ?? raw.registrationData;
-	        if (typeof nested === 'string' && nested.trim().startsWith('{')) {
-	          try {
-	            raw = JSON.parse(nested);
-	          } catch {
-	            // If nested JSON is invalid, fall back to the outer object
-	            raw = topLevel;
-	          }
-	        }
-	      }
+      // Backwards compatibility:
+      // Older registrations stored the **entire C# DTO** as JSON with a nested
+      // RegistrationData/registrationData string that contains the real
+      // RegistrationFormData. Newer ones may store just the form JSON.
+      if (raw && typeof raw === 'object') {
+        const nested = raw.RegistrationData ?? raw.registrationData;
+        if (typeof nested === 'string' && nested.trim().startsWith('{')) {
+          try {
+            raw = JSON.parse(nested);
+          } catch {
+            // If nested JSON is invalid, fall back to the outer object
+            raw = topLevel;
+          }
+        }
+      }
 
-	      // Normalise casing and ensure required fields always exist
-	      const result: RegistrationFormData = {
-	        ...(raw || {}),
-	        companyName: (raw?.companyName ?? raw?.CompanyName ?? '').toString(),
-	        partnerType: (raw?.partnerType ?? raw?.PartnerType ?? 'Supplier').toString(),
-	        email: (raw?.email ?? raw?.Email ?? '').toString(),
-	        phone: (raw?.phone ?? raw?.Phone ?? '').toString(),
-	      };
+      // Normalise casing and ensure required fields always exist
+      const result: RegistrationFormData = {
+        ...(raw || {}),
+        companyName: (raw?.companyName ?? raw?.CompanyName ?? '').toString(),
+        partnerType: (
+          raw?.partnerType ??
+          raw?.PartnerType ??
+          'Supplier'
+        ).toString(),
+        registrationCategory:
+          raw?.registrationCategory ?? raw?.RegistrationCategory ?? undefined,
+        email: (raw?.email ?? raw?.Email ?? '').toString(),
+        phone: (raw?.phone ?? raw?.Phone ?? '').toString(),
+      };
 
-	      return result;
-	    } catch {
-	      return null;
-	    }
-	  },
+      return result;
+    } catch {
+      return null;
+    }
+  },
 
   /**
    * Helper: Calculate completion percentage based on form data
@@ -449,14 +513,20 @@ export const businessPartnerRegistrationService = {
       formData.bankAccountNumber,
     ];
 
-    const requiredFilled = requiredFields.filter(f => f && f.trim() !== '').length;
-    const optionalFilled = optionalFields.filter(f => f && f.trim() !== '').length;
+    const requiredFilled = requiredFields.filter(
+      (f) => f && f.trim() !== ''
+    ).length;
+    const optionalFilled = optionalFields.filter(
+      (f) => f && f.trim() !== ''
+    ).length;
 
     const requiredWeight = 70; // 70% weight for required fields
     const optionalWeight = 30; // 30% weight for optional fields
 
-    const requiredPercentage = (requiredFilled / requiredFields.length) * requiredWeight;
-    const optionalPercentage = (optionalFilled / optionalFields.length) * optionalWeight;
+    const requiredPercentage =
+      (requiredFilled / requiredFields.length) * requiredWeight;
+    const optionalPercentage =
+      (optionalFilled / optionalFields.length) * optionalWeight;
 
     return Math.round(requiredPercentage + optionalPercentage);
   },

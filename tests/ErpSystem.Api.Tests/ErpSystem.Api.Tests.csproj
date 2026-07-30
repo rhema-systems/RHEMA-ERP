@@ -26,12 +26,15 @@
     <ProjectReference Include="..\..\src\ErpSystem.Data\ErpSystem.Data.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
     <Compile Include="Authorization\FinancePermissionAuthorizationHandlerTests.cs" />
+    <Compile Include="Configuration\StartupInitializationPolicyTests.cs" />
     <Compile Include="Authorization\StructuredAuthorizationMiddlewareResultHandlerTests.cs" />
+    <Compile Include="Middleware\SecurityHeadersMiddlewareTests.cs" />
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
+    <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\PaymentMethodControllerTests.cs" />
     <Compile Include="Controllers\Finance\ChequesControllerTests.cs" />
@@ -57,10 +60,31 @@
     <Compile Include="Controllers\Procurement\TenderControlsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ExceptionalSourcingControlsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PrequalificationControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementTenderDocumentRegisterControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementTenderDocumentTemplatesControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementEvaluationCommitteesControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementAwardReadinessControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderAwardsAwardReadinessControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementBidderCommunicationsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementGhanepsExchangesControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierEvidencePacksControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierOnboardingTokensControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierDueDiligenceControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierAvlControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierRiskControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierPerformanceScorecardsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\SupplierValidationControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\SupplierApplicantAccessSecurityTests.cs" />
+    <Compile Include="Controllers\Procurement\SupplierApplicantLifecycleControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderEvaluationsCommitteeGuardControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\TendersCommitteeGuardControllerTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
+    <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
+    <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
+    <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
@@ -102,7 +126,16 @@
     <Compile Include="Services\Finance\FixedAssetDepreciationServiceTests.cs" />
     <Compile Include="Services\Finance\FixedAssetServiceImportTests.cs" />
     <Compile Include="Services\TenantSettingsServiceTests.cs" />
+    <Compile Include="Services\ControlledFileUploadServiceTests.cs" />
+    <Compile Include="Services\ClamAvFileVirusScanServiceTests.cs" />
+    <Compile Include="Services\FileStorageDeploymentConfigurationTests.cs" />
+    <Compile Include="Services\Workflow\WorkflowLegacyDocumentRequirementTests.cs" />
     <Compile Include="Services\WorkflowDefinitionServiceAdapterCloneTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">
+    <Compile Include="$(TdcFocusedTestFile)" />
+    <Compile Include="$(TdcFocusedTestSupportFile)" Condition="'$(TdcFocusedTestSupportFile)' != ''" />
   </ItemGroup>
 
 </Project>

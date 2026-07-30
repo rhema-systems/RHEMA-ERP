@@ -33,6 +33,8 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
     private readonly IProcurementSourcingCaseService _sourcingCaseService;
     private readonly IWorkflowService _workflowService;
     private readonly ISupplierValidationService _supplierValidation;
+    private readonly IProcurementEvaluationCommitteeControlService _evaluationCommittee;
+    private readonly IProcurementAwardReadinessService _awardReadiness;
 
     public ProcurementRfqControlService(
         IUnitOfWork unitOfWork,
@@ -42,7 +44,9 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         IProcurementControlEventService controlEvents,
         IProcurementSourcingCaseService sourcingCaseService,
         IWorkflowService workflowService,
-        ISupplierValidationService supplierValidation)
+        ISupplierValidationService supplierValidation,
+        IProcurementEvaluationCommitteeControlService evaluationCommittee,
+        IProcurementAwardReadinessService awardReadiness)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -52,6 +56,8 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         _sourcingCaseService = sourcingCaseService;
         _workflowService = workflowService;
         _supplierValidation = supplierValidation;
+        _evaluationCommittee = evaluationCommittee;
+        _awardReadiness = awardReadiness;
     }
 
     private IGenericRepository<RequestForQuotation> Rfqs => _unitOfWork.Repository<RequestForQuotation>();
@@ -347,6 +353,8 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         var rfq = await LoadRfqAsync(rfqId, tracked: true, cancellationToken);
         await EnsureCapabilityAsync(EvaluatePermission, rfq.RfqNumber, normalizedCorrelation, cancellationToken);
         await RevalidateRfqAsync(rfq, normalizedCorrelation, cancellationToken);
+        var scorerEligibility = await EnsureCommitteeScorerAsync(
+            rfq.Id, ProcurementEvaluationPhase.Combined, normalizedCorrelation, cancellationToken);
         var rule = await ResolveMethodRuleAsync(rfq, cancellationToken);
         var register = rfq.OpeningRegister ?? throw Conflict("RFQ_OPENING_REQUIRED", "Complete the immutable opening register before evaluation.");
         var onTimeReceipts = rfq.Receipts.Where(item => !item.IsDeleted && item.Disposition == ProcurementRfqReceiptDisposition.OnTimeAccepted).ToList();
@@ -384,6 +392,29 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         }
 
         var evaluation = rfq.Evaluation;
+        if (evaluation is not null && evaluation.Status != ProcurementRfqEvaluationStatus.Draft)
+        {
+            var subjectEligibility = await EnsureCommitteeScoreSubjectAsync(
+                rfq.Id,
+                ProcurementEvaluationPhase.Combined,
+                "ProcurementRfqEvaluation",
+                evaluation.Id,
+                normalizedCorrelation,
+                cancellationToken);
+            if (subjectEligibility.AuthorizedAttempt <= 1 ||
+                evaluation.Status != ProcurementRfqEvaluationStatus.Submitted)
+                throw Conflict("RFQ_EVALUATION_LOCKED", "A submitted evaluation recommendation is immutable without an approved controlled recall.");
+            return await ReplaceRecalledEvaluationAsync(
+                rfq,
+                evaluation,
+                register,
+                rule,
+                mode,
+                request,
+                lines,
+                normalizedCorrelation,
+                cancellationToken);
+        }
         var isNewEvaluation = evaluation is null;
         var now = DateTime.UtcNow;
         if (evaluation is null)
@@ -401,8 +432,6 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         }
         else
         {
-            if (evaluation.Status != ProcurementRfqEvaluationStatus.Draft)
-                throw Conflict("RFQ_EVALUATION_LOCKED", "A submitted evaluation recommendation is immutable.");
             EnsureRowVersion(evaluation.RowVersion, request.RowVersion, "RFQ_EVALUATION_VERSION_CONFLICT");
         }
         evaluation.AwardMode = mode;
@@ -447,6 +476,175 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         return MapEvaluation(evaluation);
     }
 
+    private async Task<ProcurementRfqEvaluationDto> ReplaceRecalledEvaluationAsync(
+        RequestForQuotation rfq,
+        ProcurementRfqEvaluation evaluation,
+        ProcurementRfqOpeningRegister register,
+        ProcurementPolicyMethodRule rule,
+        string mode,
+        SaveProcurementRfqEvaluationRequest request,
+        IReadOnlyCollection<SaveProcurementRfqEvaluationLineRequest> lines,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        EnsureRowVersion(evaluation.RowVersion, request.RowVersion, "RFQ_EVALUATION_VERSION_CONFLICT");
+        var now = DateTime.UtcNow;
+        var intendedLines = lines.Select(input =>
+        {
+            var rfqItem = rfq.Items.Single(item => item.Id == input.RfqItemId);
+            var quote = rfq.Quotes.Single(item => item.Id == input.QuoteId);
+            var quoteItem = quote.Items.Single(item => !item.IsDeleted && item.RfqItemId == rfqItem.Id);
+            return new
+            {
+                input.RfqItemId,
+                input.QuoteId,
+                quote.BusinessPartnerId,
+                quoteItem.UnitPrice,
+                quoteItem.LineTotal,
+                input.TechnicalScore,
+                input.CommercialScore,
+                input.TotalScore,
+                RecommendationReason = NullIfWhiteSpace(input.RecommendationReason)
+            };
+        }).OrderBy(item => rfq.Items.Single(rfqItem => rfqItem.Id == item.RfqItemId).LineNumber).ToList();
+        var oldWorkflowInstanceId = evaluation.WorkflowInstanceId
+            ?? throw Conflict(
+                "RFQ_RECALLED_WORKFLOW_REQUIRED",
+                "The recalled evaluation does not retain the exact workflow instance that must be cancelled.");
+        Guid? newWorkflowInstanceId = null;
+
+        await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var cancelledWorkflow = await _workflowService.CancelWorkflowAsync(
+                    SourceType,
+                    rfq.Id,
+                    $"Controlled evaluation score recall replacement. Evidence: {request.EvidenceReference.Trim()}");
+                if (!cancelledWorkflow.Success ||
+                    cancelledWorkflow.WorkflowInstanceId != oldWorkflowInstanceId)
+                    throw Conflict(
+                        "RFQ_RECALLED_WORKFLOW_CANCEL_FAILED",
+                        cancelledWorkflow.Message ??
+                        "The exact recalled RFQ approval workflow could not be cancelled.");
+
+                var replacementWorkflow = await _workflowService.StartApprovalWorkflowAsync(
+                    SourceType,
+                    rfq.Id,
+                    evaluation.WorkflowDefinitionId
+                    ?? throw Conflict(
+                        "RFQ_RECALLED_WORKFLOW_DEFINITION_REQUIRED",
+                        "The recalled evaluation does not retain its exact approval workflow definition."));
+                if (!replacementWorkflow.Success ||
+                    !replacementWorkflow.WorkflowInstanceId.HasValue ||
+                    replacementWorkflow.WorkflowInstanceId == oldWorkflowInstanceId)
+                    throw Conflict(
+                        "RFQ_RECALLED_WORKFLOW_START_FAILED",
+                        replacementWorkflow.Message ??
+                        "A fresh exact RFQ approval workflow could not be started for the recalled replacement.");
+                newWorkflowInstanceId = replacementWorkflow.WorkflowInstanceId;
+                var replacementActorsJson = JsonSerializer.Serialize(
+                    new[] { _currentUser.UserId },
+                    JsonOptions);
+                var replacementSnapshot = JsonSerializer.Serialize(new
+                {
+                    schemaVersion = "tdc.rfq-evaluation.v1",
+                    evaluation.Id,
+                    evaluation.RfqId,
+                    OpeningRegisterId = register.Id,
+                    Status = ProcurementRfqEvaluationStatus.Submitted,
+                    AwardMode = mode,
+                    RecommendationReason = request.RecommendationReason.Trim(),
+                    EvidenceReference = request.EvidenceReference.Trim(),
+                    evaluation.MethodRuleId,
+                    evaluation.MethodRuleCode,
+                    evaluation.WorkflowDefinitionId,
+                    WorkflowInstanceId = newWorkflowInstanceId,
+                    ApprovalReference = (string?)null,
+                    SubmittedAtUtc = now,
+                    SubmittedByUserId = _currentUser.UserId,
+                    ApprovedAtUtc = (DateTime?)null,
+                    ApprovedByUserId = (Guid?)null,
+                    ApprovalActorsJson = replacementActorsJson,
+                    lines = intendedLines
+                }, JsonOptions);
+
+                await LockCommitteeScoreSheetAsync(
+                    rfq.Id,
+                    ProcurementEvaluationPhase.Combined,
+                    "ProcurementRfqEvaluation",
+                    evaluation.Id,
+                    replacementSnapshot,
+                    request.EvidenceReference.Trim(),
+                    correlationId,
+                    cancellationToken);
+
+                evaluation.AwardMode = mode;
+                evaluation.RecommendationReason = request.RecommendationReason.Trim();
+                evaluation.EvidenceReference = request.EvidenceReference.Trim();
+                var existingByItem = evaluation.Lines
+                    .Where(item => !item.IsDeleted)
+                    .ToDictionary(item => item.RfqItemId);
+                foreach (var intended in intendedLines)
+                {
+                    var line = existingByItem[intended.RfqItemId];
+                    line.QuoteId = intended.QuoteId;
+                    line.BusinessPartnerId = intended.BusinessPartnerId;
+                    line.UnitPrice = intended.UnitPrice;
+                    line.LineTotal = intended.LineTotal;
+                    line.TechnicalScore = intended.TechnicalScore;
+                    line.CommercialScore = intended.CommercialScore;
+                    line.TotalScore = intended.TotalScore;
+                    line.RecommendationReason = intended.RecommendationReason;
+                    line.UpdatedAt = now;
+                    line.LastModifiedById = _currentUser.UserId;
+                }
+                evaluation.Status = ProcurementRfqEvaluationStatus.Submitted;
+                evaluation.SubmittedAtUtc = now;
+                evaluation.SubmittedByUserId = _currentUser.UserId;
+                evaluation.SubmittedByName = ActorName();
+                evaluation.ApprovalReference = null;
+                evaluation.ApprovedAtUtc = null;
+                evaluation.ApprovedByUserId = null;
+                evaluation.ApprovedByName = null;
+                evaluation.ApprovalActorsJson = replacementActorsJson;
+                evaluation.WorkflowInstanceId = newWorkflowInstanceId;
+                evaluation.SnapshotJson = replacementSnapshot;
+                evaluation.IntegrityHash = ComputeHash(replacementSnapshot);
+                evaluation.UpdatedAt = now;
+                evaluation.LastModifiedById = _currentUser.UserId;
+
+                rfq.Status = "PendingApproval";
+                rfq.UpdatedAt = now;
+                rfq.LastModifiedById = _currentUser.UserId;
+                await Evaluations.UpdateAsync(evaluation);
+                await Rfqs.UpdateAsync(rfq);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }, cancellationToken);
+        await RecordAsync(
+            rfq,
+            rule,
+            "EvaluationRecommendationReplacedAfterRecall",
+            ProcurementControlEventResult.Allowed,
+            new { evaluation.Id, request.EvidenceReference, OldWorkflowInstanceId = oldWorkflowInstanceId },
+            new { evaluation.IntegrityHash, NewWorkflowInstanceId = newWorkflowInstanceId },
+            correlationId,
+            cancellationToken,
+            External(
+                $"workflow:{oldWorkflowInstanceId:N}->workflow:{newWorkflowInstanceId:N};evidence:{evaluation.EvidenceReference}",
+                "Recalled RFQ evaluation replacement and fresh approval workflow",
+                "SRC-008"));
+        return MapEvaluation(evaluation);
+    }
+
     public async Task<ProcurementRfqEvaluationDto> SubmitEvaluationAsync(
         Guid rfqId,
         SubmitProcurementRfqEvaluationRequest request,
@@ -460,7 +658,13 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         var rule = await ResolveMethodRuleAsync(rfq, cancellationToken);
         var evaluation = rfq.Evaluation ?? throw Conflict("RFQ_EVALUATION_REQUIRED", "Save an evaluation recommendation before submission.");
         if (evaluation.Status != ProcurementRfqEvaluationStatus.Draft)
-            throw Conflict("RFQ_EVALUATION_NOT_DRAFT", "Only a Draft evaluation can be submitted.");
+        {
+            if (evaluation.Status == ProcurementRfqEvaluationStatus.Submitted &&
+                evaluation.WorkflowInstanceId.HasValue &&
+                await HasCurrentRecalledReplacementAsync(rfq.Id, evaluation.Id, cancellationToken))
+                return MapEvaluation(evaluation);
+            throw Conflict("RFQ_EVALUATION_NOT_DRAFT", "Only a Draft evaluation or an approved recalled replacement can be submitted.");
+        }
         EnsureRowVersion(evaluation.RowVersion, request.RowVersion, "RFQ_EVALUATION_VERSION_CONFLICT");
         if (!evaluation.WorkflowDefinitionId.HasValue || evaluation.WorkflowDefinitionId != rule.WorkflowDefinitionId)
             throw Validation("RFQ_APPROVAL_WORKFLOW_NOT_CONFIGURED", "The evaluation does not retain the exact shared workflow selected by the locked method rule.");
@@ -473,23 +677,72 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
             try
             {
                 var now = DateTime.UtcNow;
+                var workflow = await _workflowService.StartApprovalWorkflowAsync(
+                    SourceType,
+                    rfq.Id,
+                    evaluation.WorkflowDefinitionId.Value);
+                if (!workflow.Success || !workflow.WorkflowInstanceId.HasValue)
+                    throw Conflict("RFQ_WORKFLOW_START_FAILED", workflow.Message ?? "The exact RFQ approval workflow could not be started.");
+
+                var approvalActorsJson = JsonSerializer.Serialize(new[] { _currentUser.UserId }, JsonOptions);
+                var submittedSnapshot = JsonSerializer.Serialize(new
+                {
+                    schemaVersion = "tdc.rfq-evaluation.v1",
+                    evaluation.Id,
+                    evaluation.RfqId,
+                    evaluation.OpeningRegisterId,
+                    Status = ProcurementRfqEvaluationStatus.Submitted,
+                    evaluation.AwardMode,
+                    evaluation.RecommendationReason,
+                    evaluation.EvidenceReference,
+                    evaluation.MethodRuleId,
+                    evaluation.MethodRuleCode,
+                    evaluation.WorkflowDefinitionId,
+                    WorkflowInstanceId = workflow.WorkflowInstanceId,
+                    ApprovalReference = (string?)null,
+                    SubmittedAtUtc = now,
+                    SubmittedByUserId = _currentUser.UserId,
+                    ApprovedAtUtc = (DateTime?)null,
+                    ApprovedByUserId = (Guid?)null,
+                    ApprovalActorsJson = approvalActorsJson,
+                    lines = evaluation.Lines.Where(item => !item.IsDeleted)
+                        .OrderBy(item => rfq.Items.Single(rfqItem => rfqItem.Id == item.RfqItemId).LineNumber)
+                        .Select(item => new
+                        {
+                            item.RfqItemId,
+                            item.QuoteId,
+                            item.BusinessPartnerId,
+                            item.UnitPrice,
+                            item.LineTotal,
+                            item.TechnicalScore,
+                            item.CommercialScore,
+                            item.TotalScore,
+                            item.RecommendationReason
+                        }).ToArray()
+                }, JsonOptions);
+                await LockCommitteeScoreSheetAsync(
+                    rfq.Id,
+                    ProcurementEvaluationPhase.Combined,
+                    "ProcurementRfqEvaluation",
+                    evaluation.Id,
+                    submittedSnapshot,
+                    evaluation.EvidenceReference,
+                    normalizedCorrelation,
+                    cancellationToken);
+
                 evaluation.Status = ProcurementRfqEvaluationStatus.Submitted;
                 evaluation.SubmittedAtUtc = now;
                 evaluation.SubmittedByUserId = _currentUser.UserId;
                 evaluation.SubmittedByName = ActorName();
-                evaluation.ApprovalActorsJson = JsonSerializer.Serialize(new[] { _currentUser.UserId }, JsonOptions);
-                CaptureEvaluationSnapshot(evaluation, rfq);
+                evaluation.ApprovalActorsJson = approvalActorsJson;
+                evaluation.WorkflowInstanceId = workflow.WorkflowInstanceId;
+                evaluation.SnapshotJson = submittedSnapshot;
+                evaluation.IntegrityHash = ComputeHash(submittedSnapshot);
                 rfq.Status = "PendingApproval";
                 rfq.UpdatedAt = now;
                 rfq.LastModifiedById = _currentUser.UserId;
                 await Evaluations.UpdateAsync(evaluation);
                 await Rfqs.UpdateAsync(rfq);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-                var workflow = await _workflowService.StartApprovalWorkflowAsync(SourceType, rfq.Id, evaluation.WorkflowDefinitionId.Value);
-                if (!workflow.Success || !workflow.WorkflowInstanceId.HasValue)
-                    throw Conflict("RFQ_WORKFLOW_START_FAILED", workflow.Message ?? "The exact RFQ approval workflow could not be started.");
-                evaluation.WorkflowInstanceId = workflow.WorkflowInstanceId;
-                await Evaluations.UpdateAsync(evaluation);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await _unitOfWork.CommitAsync(cancellationToken);
             }
@@ -518,6 +771,13 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         await RevalidateRfqAsync(rfq, normalizedCorrelation, cancellationToken);
         var rule = await ResolveMethodRuleAsync(rfq, cancellationToken);
         var evaluation = rfq.Evaluation ?? throw NotFound("RFQ_EVALUATION_NOT_FOUND", "The RFQ evaluation was not found.");
+        await EnsureCommitteeDecisionReadyAsync(
+            rfq.Id,
+            evaluation.Id,
+            ProcurementEvaluationPhase.Combined,
+            evaluation.SnapshotJson,
+            normalizedCorrelation,
+            cancellationToken);
         if (evaluation.Status != ProcurementRfqEvaluationStatus.Submitted || !evaluation.WorkflowInstanceId.HasValue)
             throw Conflict("RFQ_EVALUATION_NOT_PENDING", "Only a submitted evaluation with an active shared workflow can be decided.");
         EnsureRowVersion(evaluation.RowVersion, request.RowVersion, "RFQ_EVALUATION_VERSION_CONFLICT");
@@ -570,7 +830,6 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
             evaluation.Status = ProcurementRfqEvaluationStatus.Rejected;
             rfq.Status = "Rejected";
         }
-        CaptureEvaluationSnapshot(evaluation, rfq);
         evaluation.UpdatedAt = now;
         evaluation.LastModifiedById = _currentUser.UserId;
         rfq.UpdatedAt = now;
@@ -598,10 +857,30 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         await RevalidateRfqAsync(rfq, normalizedCorrelation, cancellationToken);
         var rule = await ResolveMethodRuleAsync(rfq, cancellationToken);
         var evaluation = rfq.Evaluation ?? throw Conflict("RFQ_APPROVED_EVALUATION_REQUIRED", "An approved evaluation is required before PO or contract handoff.");
+        await EnsureCommitteeDecisionReadyAsync(
+            rfq.Id,
+            evaluation.Id,
+            ProcurementEvaluationPhase.Combined,
+            evaluation.SnapshotJson,
+            normalizedCorrelation,
+            cancellationToken);
         if (evaluation.Status != ProcurementRfqEvaluationStatus.Approved || !string.Equals(rfq.Status, "Approved", StringComparison.OrdinalIgnoreCase))
             throw Conflict("RFQ_APPROVED_EVALUATION_REQUIRED", "The RFQ shared workflow must approve the evaluation before award handoff.");
         if (ComputeHash(evaluation.SnapshotJson) != evaluation.IntegrityHash)
             throw Conflict("RFQ_EVALUATION_INTEGRITY_FAILED", "The retained evaluation recommendation failed its integrity check.");
+        await _awardReadiness.EnsureAwardReadyAsync(
+            ProcurementAwardReadinessSourceType.RequestForQuotation,
+            rfq.Id,
+            ProcurementAwardReadinessGateRequestFactory.Create(
+                ProcurementAwardReadinessSourceType.RequestForQuotation,
+                rfq.Id,
+                normalizedCorrelation,
+                evaluation.Lines.Where(item => !item.IsDeleted)
+                    .Select(item => item.QuoteId),
+                evaluation.Lines.Where(item => !item.IsDeleted)
+                    .Select(item => item.BusinessPartnerId)),
+            normalizedCorrelation,
+            cancellationToken);
         var dto = new CreatePurchaseOrdersFromRfqDto { Mode = evaluation.AwardMode };
         if (evaluation.AwardMode == "WinnerTakesAll")
             dto.QuoteId = evaluation.Lines.Where(item => !item.IsDeleted).Select(item => item.QuoteId).Distinct().Single();
@@ -623,6 +902,15 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
     {
         var rfq = await LoadRfqAsync(rfqId, tracked: false, cancellationToken);
         var rule = await ResolveMethodRuleAsync(rfq, cancellationToken);
+        var evaluation = rfq.Evaluation
+            ?? throw Conflict("RFQ_APPROVED_EVALUATION_REQUIRED", "An approved evaluation is required before award handoff.");
+        await EnsureCommitteeDecisionReadyAsync(
+            rfq.Id,
+            evaluation.Id,
+            ProcurementEvaluationPhase.Combined,
+            evaluation.SnapshotJson,
+            NormalizeCorrelation(correlationId),
+            cancellationToken);
         await RecordAsync(rfq, rule, "AwardPurchaseOrdersCreated", ProcurementControlEventResult.Allowed,
             new { EvaluationId = rfq.Evaluation?.Id },
             new { PurchaseOrders = purchaseOrders.Select(item => new { item.PurchaseOrderId, item.OrderNumber, item.BusinessPartnerId, item.TotalAmount }).ToArray() },
@@ -641,10 +929,10 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
             .Include(item => item.Quotes).ThenInclude(item => item.Items).ThenInclude(item => item.RfqItem)
             .Include(item => item.Receipts).ThenInclude(item => item.BusinessPartner)
             .Include(item => item.Receipts).ThenInclude(item => item.Quote).ThenInclude(item => item.Items).ThenInclude(item => item.RfqItem)
-            .Include(item => item.OpeningRegister).ThenInclude(item => item.Participants)
-            .Include(item => item.OpeningRegister).ThenInclude(item => item.Entries).ThenInclude(item => item.BusinessPartner)
-            .Include(item => item.Evaluation).ThenInclude(item => item.Lines).ThenInclude(item => item.RfqItem)
-            .Include(item => item.Evaluation).ThenInclude(item => item.Lines).ThenInclude(item => item.BusinessPartner);
+            .Include(item => item.OpeningRegister).ThenInclude(item => item!.Participants)
+            .Include(item => item.OpeningRegister).ThenInclude(item => item!.Entries).ThenInclude(item => item.BusinessPartner)
+            .Include(item => item.Evaluation).ThenInclude(item => item!.Lines).ThenInclude(item => item.RfqItem)
+            .Include(item => item.Evaluation).ThenInclude(item => item!.Lines).ThenInclude(item => item.BusinessPartner);
         if (!tracked) query = query.AsNoTracking();
         return await query.SingleOrDefaultAsync(cancellationToken)
             ?? throw NotFound("RFQ_NOT_FOUND", "The RFQ was not found in the current tenant.");
@@ -751,6 +1039,249 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         }, cancellationToken);
     }
 
+    private async Task<ProcurementEvaluationScorerEligibilityDto> EnsureCommitteeScorerAsync(
+        Guid rfqId,
+        ProcurementEvaluationPhase phase,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _evaluationCommittee.EnsureScorerEligibleAsync(
+                ProcurementEvaluationSourceType.RequestForQuotation,
+                rfqId,
+                phase,
+                correlationId,
+                cancellationToken);
+            if (!result.Allowed)
+            {
+                var message = string.Join(" ", result.BlockedReasons);
+                if (result.BlockedReasons.Any(reason =>
+                        reason.Contains("not appointed", StringComparison.OrdinalIgnoreCase)))
+                    throw new ProcurementRfqControlAuthorizationException(message);
+                throw Conflict("EVALUATION_SCORER_INELIGIBLE", message);
+            }
+            return result;
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException exception)
+        {
+            throw new ProcurementRfqControlAuthorizationException(exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeNotFoundException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeConflictException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeValidationException exception)
+        {
+            throw Validation(exception.Code, exception.Message);
+        }
+    }
+
+    private async Task<ProcurementEvaluationScorerEligibilityDto> EnsureCommitteeScoreSubjectAsync(
+        Guid rfqId,
+        ProcurementEvaluationPhase phase,
+        string subjectType,
+        Guid subjectId,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _evaluationCommittee.EnsureScoreSubjectEligibleAsync(
+                ProcurementEvaluationSourceType.RequestForQuotation,
+                rfqId,
+                phase,
+                subjectType,
+                subjectId,
+                correlationId,
+                cancellationToken);
+            if (!result.Allowed)
+            {
+                var message = string.Join(" ", result.BlockedReasons);
+                if (result.BlockedReasons.Any(reason =>
+                        reason.Contains("not appointed", StringComparison.OrdinalIgnoreCase)))
+                    throw new ProcurementRfqControlAuthorizationException(message);
+                throw Conflict("EVALUATION_SCORER_INELIGIBLE", message);
+            }
+            return result;
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException exception)
+        {
+            throw new ProcurementRfqControlAuthorizationException(exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeNotFoundException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeConflictException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeValidationException exception)
+        {
+            throw Validation(exception.Code, exception.Message);
+        }
+    }
+
+    private async Task LockCommitteeScoreSheetAsync(
+        Guid rfqId,
+        ProcurementEvaluationPhase phase,
+        string subjectType,
+        Guid subjectId,
+        string scoreSnapshotJson,
+        string evidenceReference,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var eligibility = await EnsureCommitteeScoreSubjectAsync(
+                rfqId, phase, subjectType, subjectId, correlationId, cancellationToken);
+            var committee = await _evaluationCommittee.GetAsync(
+                ProcurementEvaluationSourceType.RequestForQuotation,
+                rfqId,
+                cancellationToken);
+            var appointment = committee.Members.Single(item => item.Id == eligibility.AppointmentId);
+            var meeting = committee.Meetings.Single(item => item.Id == eligibility.MeetingId);
+            var idempotencyKey = $"TDC0208-{ComputeHash(
+                $"{rfqId:N}|{phase}|{subjectId:N}|{_currentUser.UserId:N}|{eligibility.AuthorizedAttempt}")[..32]}";
+
+            await _evaluationCommittee.LockScoreSheetAsync(
+                new LockProcurementEvaluationScoreSheetRequest
+                {
+                    SourceType = ProcurementEvaluationSourceType.RequestForQuotation,
+                    SourceId = rfqId,
+                    Phase = phase,
+                    ScoreSubjectType = subjectType,
+                    ScoreSubjectId = subjectId,
+                    MeetingId = meeting.Id,
+                    AppointmentId = appointment.Id,
+                    CommitteeRowVersion = committee.RowVersion,
+                    MeetingRowVersion = meeting.RowVersion,
+                    AppointmentRowVersion = appointment.RowVersion,
+                    ScoreSnapshotJson = scoreSnapshotJson,
+                    SignatureReference = evidenceReference,
+                    EvidenceReference = evidenceReference,
+                    IdempotencyKey = idempotencyKey
+                },
+                correlationId,
+                cancellationToken);
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException exception)
+        {
+            throw new ProcurementRfqControlAuthorizationException(exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeNotFoundException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeConflictException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeValidationException exception)
+        {
+            throw Validation(exception.Code, exception.Message);
+        }
+    }
+
+    private async Task EnsureCommitteeDecisionReadyAsync(
+        Guid rfqId,
+        Guid evaluationId,
+        ProcurementEvaluationPhase phase,
+        string expectedScoreSnapshotJson,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var committee = await _evaluationCommittee.GetAsync(
+                ProcurementEvaluationSourceType.RequestForQuotation,
+                rfqId,
+                cancellationToken);
+            if (!committee.CompositionReady || !committee.QuorumMet)
+                throw Conflict(
+                    "EVALUATION_COMMITTEE_NOT_READY",
+                    "Committee composition and signed quorum must remain complete before evaluation decision or award handoff.");
+
+            var sheets = committee.ScoreSheets.Where(item =>
+                item.Phase == phase &&
+                item.ScoreSubjectType == "ProcurementRfqEvaluation" &&
+                item.ScoreSubjectId == evaluationId).ToList();
+            var latest = sheets
+                .GroupBy(item => new { item.AppointmentId, item.Phase, item.ScoreSubjectType })
+                .Select(group => group
+                    .OrderByDescending(item => item.Attempt)
+                    .ThenByDescending(item => item.SubmittedAtUtc)
+                    .First())
+                .ToList();
+            if (latest.Count == 0 || latest.Any(item => item.Status != ProcurementEvaluationScoreSheetStatus.Locked))
+                throw Conflict(
+                    "EVALUATION_SCORE_SHEETS_NOT_CURRENT",
+                    "A current locked score-sheet attempt is required; recalled attempts cannot satisfy evaluation readiness.");
+            var expectedSnapshot = NormalizeJson(expectedScoreSnapshotJson);
+            if (latest.Any(item => NormalizeJson(item.ScoreSnapshotJson) != expectedSnapshot))
+                throw Conflict(
+                    "EVALUATION_SCORE_PROJECTION_MISMATCH",
+                    "The current locked RFQ score-sheet snapshot does not match the exact retained evaluation projection.");
+            var currentIds = latest.Select(item => item.Id).ToHashSet();
+            if (committee.Recalls.Any(item =>
+                    currentIds.Contains(item.ScoreSheetId) &&
+                    item.Status is ProcurementEvaluationScoreRecallStatus.PendingApproval or
+                        ProcurementEvaluationScoreRecallStatus.Approved))
+                throw Conflict(
+                    "EVALUATION_SCORE_RECALL_UNRESOLVED",
+                    "Evaluation cannot proceed while the current score-sheet has a pending recall or an approved recall without its authorized locked replacement attempt.");
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException exception)
+        {
+            throw new ProcurementRfqControlAuthorizationException(exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeNotFoundException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeConflictException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementEvaluationCommitteeValidationException exception)
+        {
+            throw Validation(exception.Code, exception.Message);
+        }
+    }
+
+    private async Task<bool> HasCurrentRecalledReplacementAsync(
+        Guid rfqId,
+        Guid evaluationId,
+        CancellationToken cancellationToken)
+    {
+        var committee = await _evaluationCommittee.GetAsync(
+            ProcurementEvaluationSourceType.RequestForQuotation,
+            rfqId,
+            cancellationToken);
+        var latest = committee.ScoreSheets
+            .Where(item =>
+                item.Phase == ProcurementEvaluationPhase.Combined &&
+                item.ScoreSubjectType == "ProcurementRfqEvaluation" &&
+                item.ScoreSubjectId == evaluationId)
+            .OrderByDescending(item => item.Attempt)
+            .ThenByDescending(item => item.SubmittedAtUtc)
+            .FirstOrDefault();
+        return latest is
+        {
+            Attempt: > 1,
+            Status: ProcurementEvaluationScoreSheetStatus.Locked
+        } && !committee.Recalls.Any(item =>
+            item.ScoreSheetId == latest.Id &&
+            item.Status is ProcurementEvaluationScoreRecallStatus.PendingApproval or
+                ProcurementEvaluationScoreRecallStatus.Approved);
+    }
+
     private static void CaptureEvaluationSnapshot(ProcurementRfqEvaluation evaluation, RequestForQuotation rfq)
     {
         var snapshot = new
@@ -778,6 +1309,19 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         };
         evaluation.SnapshotJson = JsonSerializer.Serialize(snapshot, JsonOptions);
         evaluation.IntegrityHash = ComputeHash(evaluation.SnapshotJson);
+    }
+
+    private static string NormalizeJson(string value)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            return JsonSerializer.Serialize(document.RootElement, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return value.Trim();
+        }
     }
 
     private static ProcurementRfqControlDto MapControl(RequestForQuotation rfq, ProcurementPolicyMethodRule rule, int qualifiedInvitationCount)

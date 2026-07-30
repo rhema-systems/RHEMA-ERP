@@ -393,6 +393,11 @@ public class BusinessPartnersController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(
+                id,
+                "BusinessPartner.Suspend",
+                ProcurementMasterDataResourceType.SupplierComplianceStatus);
+            if (protection is not null) return protection;
             await _partnerService.UpdateStatusAsync(id, "Suspended");
             return NoContent();
         }
@@ -415,6 +420,11 @@ public class BusinessPartnersController : ControllerBase
     {
         try
         {
+            var protection = await GuardDirectMutationAsync(
+                id,
+                "BusinessPartner.Activate",
+                ProcurementMasterDataResourceType.SupplierComplianceStatus);
+            if (protection is not null) return protection;
             await _partnerService.UpdateStatusAsync(id, "Active");
             return NoContent();
         }
@@ -599,11 +609,25 @@ public class BusinessPartnersController : ControllerBase
         }
     }
 
-    private async Task<ObjectResult?> GuardDirectMutationAsync(Guid? id, string action)
+    private async Task<ObjectResult?> GuardDirectMutationAsync(
+        Guid? id,
+        string action,
+        params ProcurementMasterDataResourceType[] resourceTypes)
     {
         if (_masterDataChanges is null) return null;
+        var protectedResources = resourceTypes.Length > 0
+            ? resourceTypes
+            : new[]
+            {
+                ProcurementMasterDataResourceType.SupplierProfile,
+                ProcurementMasterDataResourceType.SupplierBankDetails,
+                ProcurementMasterDataResourceType.SupplierTaxDetails,
+                ProcurementMasterDataResourceType.SupplierOwnershipDetails,
+                ProcurementMasterDataResourceType.SupplierCategoryAssignments,
+                ProcurementMasterDataResourceType.SupplierComplianceStatus
+            };
         var decision = await _masterDataChanges.CheckDirectMutationAsync(
-            new[] { ProcurementMasterDataResourceType.SupplierProfile, ProcurementMasterDataResourceType.SupplierBankDetails, ProcurementMasterDataResourceType.SupplierTaxDetails },
+            protectedResources,
             id, action, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
         return decision.Allowed ? null : Conflict(new ProblemDetails
         {

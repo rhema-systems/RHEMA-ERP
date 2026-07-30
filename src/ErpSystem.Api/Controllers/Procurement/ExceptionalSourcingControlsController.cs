@@ -48,7 +48,7 @@ public sealed class ExceptionalSourcingControlsController : ControllerBase
         ExecuteAsync(() => _service.RecordRecommendationAsync(tenderId, request, Correlation(), cancellationToken));
 
     [HttpPost("award")]
-    [Authorize(Roles = "SuperAdmin,TenantAdmin,Manager")]
+    [Authorize]
     public Task<IActionResult> RecordAward(Guid tenderId, RecordProcurementTenderAwardRequest request, CancellationToken cancellationToken) =>
         ExecuteAsync(() => _service.RecordAwardAsync(tenderId, request, Correlation(), cancellationToken));
 
@@ -82,5 +82,26 @@ public sealed class ExceptionalSourcingControlsController : ControllerBase
         { return UnprocessableEntity(new { code = exception.Code, message = exception.Message }); }
         catch (ProcurementExceptionalSourcingAuthorizationException exception)
         { return StatusCode(StatusCodes.Status403Forbidden, new { code = "EXCEPTIONAL_SOURCING_FORBIDDEN", message = exception.Message }); }
+        catch (ProcurementAwardReadinessNotFoundException exception)
+        { return NotFound(ReadinessProblem(404, exception.Code, exception.Message)); }
+        catch (ProcurementAwardReadinessAuthorizationException exception)
+        { return StatusCode(StatusCodes.Status403Forbidden, ReadinessProblem(403, "AWARD_READINESS_ACCESS_FORBIDDEN", exception.Message)); }
+        catch (ProcurementAwardReadinessConflictException exception)
+        { return Conflict(ReadinessProblem(409, exception.Code, exception.Message)); }
+        catch (ProcurementAwardReadinessBlockedException exception)
+        { return UnprocessableEntity(ReadinessProblem(422, exception.Code, exception.Message, exception.Decision)); }
+        catch (ProcurementAwardReadinessValidationException exception)
+        { return UnprocessableEntity(ReadinessProblem(422, exception.Code, exception.Message)); }
     }
+
+    private object ReadinessProblem(int status, string code, string message, object? decision = null) => new
+    {
+        status,
+        title = status == 422 ? "Award is not ready" : "Award-readiness check failed",
+        detail = message,
+        instance = Request.Path.Value,
+        code,
+        correlationId = Correlation(),
+        decision
+    };
 }

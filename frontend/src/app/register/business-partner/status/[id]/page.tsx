@@ -289,10 +289,10 @@ export default function RegistrationStatusPage() {
                     </p>
                     <Button
                       size="sm"
-                      onClick={() => router.push(`/register/business-partner?id=${registrationId}`)}
+                      onClick={() => router.push(`/supplier-application?retainedRegistrationId=${registrationId}`)}
                       className="bg-yellow-600 hover:bg-yellow-700"
                     >
-                      Update Registration
+                      Verify Contact & Update
                     </Button>
                   </div>
                 </div>

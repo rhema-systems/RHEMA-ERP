@@ -709,6 +709,15 @@ public class TendersController : ControllerBase
             await _tenderService.AssignEvaluatorsAsync(id, dto);
             return Ok(new { message = "Evaluators assigned successfully" });
         }
+        catch (ProcurementEvaluationCommitteeConflictException ex)
+        {
+            return Conflict(EvaluationCommitteeProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                EvaluationCommitteeProblem("EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -731,6 +740,15 @@ public class TendersController : ControllerBase
         {
             await _tenderService.RemoveEvaluatorAsync(evaluatorId);
             return NoContent();
+        }
+        catch (ProcurementEvaluationCommitteeConflictException ex)
+        {
+            return Conflict(EvaluationCommitteeProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                EvaluationCommitteeProblem("EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
         }
         catch (InvalidOperationException ex)
         {
@@ -964,6 +982,22 @@ public class TendersController : ControllerBase
     }
 
     #endregion
+
+    private ProblemDetails EvaluationCommitteeProblem(string code, string detail)
+    {
+        var problem = new ProblemDetails
+        {
+            Status = code == "EVALUATION_COMMITTEE_ACCESS_FORBIDDEN" ? 403 : 409,
+            Title = "Evaluation committee control",
+            Detail = detail,
+            Instance = HttpContext?.Request.Path
+        };
+        problem.Extensions["code"] = code;
+        problem.Extensions["correlationId"] = string.IsNullOrWhiteSpace(HttpContext?.TraceIdentifier)
+            ? Guid.NewGuid().ToString("N")
+            : HttpContext.TraceIdentifier;
+        return problem;
+    }
 
     private ProblemDetails SourcingProblem(
         string code,

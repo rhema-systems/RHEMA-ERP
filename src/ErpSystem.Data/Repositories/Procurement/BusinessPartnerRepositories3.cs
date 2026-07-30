@@ -365,6 +365,7 @@ public class BusinessPartnerRegistrationRepository : GenericRepository<BusinessP
             .IgnoreQueryFilters()
             .Where(r => r.Id == id && !r.IsDeleted)
             .Include(r => r.Documents.Where(d => !d.IsDeleted))
+                .ThenInclude(d => d.FileUploadRecord)
             .FirstOrDefaultAsync();
     }
 
@@ -466,6 +467,7 @@ public class BusinessPartnerRegistrationDocumentRepository : GenericRepository<B
     public override async Task<BusinessPartnerRegistrationDocument?> GetByIdAsync(Guid id)
     {
         return await _dbSet
+            .Include(d => d.FileUploadRecord)
             .Where(d => d.Id == id && !d.IsDeleted)
             .FirstOrDefaultAsync();
     }
@@ -493,6 +495,7 @@ public class BusinessPartnerRegistrationDocumentRepository : GenericRepository<B
     public async Task<IEnumerable<BusinessPartnerRegistrationDocument>> GetDocumentsByRegistrationAsync(Guid registrationId)
     {
         return await _dbSet
+            .Include(d => d.FileUploadRecord)
             .Where(d => d.RegistrationId == registrationId && !d.IsDeleted)
             .OrderByDescending(d => d.CreatedAt)
             .ToListAsync();

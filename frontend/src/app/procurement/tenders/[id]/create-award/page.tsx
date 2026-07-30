@@ -18,10 +18,16 @@ import { type TenderDetailDto } from '@/services/tenderService';
 import { format } from 'date-fns';
 import { AwardVerificationDialog } from '@/components/procurement/tenders/AwardVerificationDialog';
 import { awardVerificationService, TenderAwardVerification } from '@/services/awardVerificationService';
+import { procurementAwardReadinessService } from '@/services/procurement-award-readiness.service';
+import type { ProcurementAwardReadinessDecision } from '@/types/procurement-award-readiness';
+import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function CreateAwardPage() {
   const params = useParams();
   const router = useRouter();
+  const { hasPermission } = useAuth();
+  const canApproveAward = hasPermission('procurement.tender.approve');
   const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
@@ -41,6 +47,8 @@ export default function CreateAwardPage() {
   const [showVerificationDialog, setShowVerificationDialog] = useState(false);
   const [verificationComplete, setVerificationComplete] = useState(false);
   const [existingVerification, setExistingVerification] = useState<TenderAwardVerification | null>(null);
+  const [readinessDecision, setReadinessDecision] =
+    useState<ProcurementAwardReadinessDecision | null>(null);
 
   useEffect(() => {
     if (tenderId) {
@@ -79,6 +87,16 @@ export default function CreateAwardPage() {
       } catch {
         // No existing verification, that's fine
       }
+
+      try {
+        const readiness = await procurementAwardReadinessService.latest(
+          'Tender',
+          tenderId
+        );
+        setReadinessDecision(readiness);
+      } catch {
+        setReadinessDecision(null);
+      }
     } catch (error) {
       console.error('Error loading data:', error);
       toast.error('Failed to load tender data');
@@ -111,6 +129,13 @@ export default function CreateAwardPage() {
 
     if (!awardJustification.trim()) {
       toast.error('Please provide award justification');
+      return;
+    }
+
+    if (!awardReadinessAllowsSelectedBid) {
+      toast.error(
+        'A current server-derived Ready decision for the recommended bid is required.'
+      );
       return;
     }
 
@@ -164,6 +189,18 @@ export default function CreateAwardPage() {
       totalBidAmount: selectedBid.totalBidAmount,
     }];
   };
+
+  const awardReadinessAllowsSelectedBid = Boolean(
+    selectedBidId &&
+      readinessDecision?.isReady &&
+      readinessDecision.isCurrent &&
+      hasAwardReadinessAction(
+        readinessDecision.allowedActions,
+        'RecordAward'
+      ) &&
+      canApproveAward &&
+      readinessDecision.recommendation.subjectIds.includes(selectedBidId)
+  );
 
   if (loading) {
     return (
@@ -407,7 +444,49 @@ export default function CreateAwardPage() {
         </CardContent>
       </Card>
 
-      {/* Optional Verification */}
+      <Card
+        className={
+          awardReadinessAllowsSelectedBid
+            ? 'border-green-200 bg-green-50'
+            : 'border-amber-200 bg-amber-50'
+        }
+        data-testid="create-award-readiness-gate"
+      >
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ClipboardCheck className="h-5 w-5" />
+            Server award-readiness gate
+          </CardTitle>
+          <CardDescription>
+            {readinessDecision
+              ? `${readinessDecision.status}${
+                  readinessDecision.isCurrent ? ' · current' : ' · stale'
+                } · decision #${readinessDecision.decisionSequence}`
+              : 'No immutable readiness decision has been retained.'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {readinessDecision?.blockedReasons.length ? (
+            <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900">
+              {readinessDecision.blockedReasons.map((reason, index) => (
+                <li key={`${reason}-${index}`}>{reason}</li>
+              ))}
+            </ul>
+          ) : null}
+          <Button
+            variant="outline"
+            onClick={() =>
+              router.push(
+                `/procurement/tenders/${tenderId}/award-readiness`
+              )
+            }
+          >
+            Review award readiness and history
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Mandatory Verification */}
       {selectedBidId && (
         <Card className={verificationComplete ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'}>
           <CardHeader className="pb-3">
@@ -420,14 +499,14 @@ export default function CreateAwardPage() {
               ) : (
                 <>
                   <ClipboardCheck className="h-5 w-5" />
-                  Background Verification (Optional)
+                  Background Verification Required
                 </>
               )}
             </CardTitle>
             <CardDescription className={verificationComplete ? 'text-green-600' : 'text-blue-600'}>
               {verificationComplete
-                ? 'Background verification has been completed for the selected bidder.'
-                : 'You can optionally verify the selected bidder before creating the award.'}
+                ? 'Background verification has been completed. Re-evaluate server award readiness before award.'
+                : 'Complete the existing bidder verification before the server can allow award.'}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -453,7 +532,13 @@ export default function CreateAwardPage() {
         </Button>
         <Button
           onClick={handleSubmit}
-          disabled={saving || !selectedBidId || !awardedAmount || !awardJustification.trim()}
+          disabled={
+            saving ||
+            !selectedBidId ||
+            !awardedAmount ||
+            !awardJustification.trim() ||
+            !awardReadinessAllowsSelectedBid
+          }
         >
           <Save className="h-4 w-4 mr-2" />
           {saving ? 'Creating Award...' : 'Create Award'}

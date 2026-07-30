@@ -11,7 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { rfqService, type RfqDetailDto } from '@/services/rfqService';
 import { toast } from 'sonner';
-import { ArrowLeft, Loader2, Send, FileText } from 'lucide-react';
+import { ArrowLeft, Loader2, MailCheck, Send, FileText } from 'lucide-react';
 
 export default function SupplierRfqDetailPage() {
   const params = useParams();
@@ -163,6 +163,15 @@ export default function SupplierRfqDetailPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() =>
+              router.push(`/external-portal/rfqs/${rfqId}/award-status`)
+            }
+          >
+            <MailCheck className="h-4 w-4 mr-2" />
+            Award status
+          </Button>
           <Button
             onClick={() => setConfirmSubmitOpen(true)}
             disabled={!canSubmit || submitting}

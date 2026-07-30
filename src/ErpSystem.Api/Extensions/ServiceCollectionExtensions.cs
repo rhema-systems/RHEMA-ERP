@@ -24,6 +24,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -465,6 +466,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.Workflow.IWorkflowApprovalPolicyResolver, ErpSystem.Core.Services.Workflow.WorkflowApprovalPolicyResolver>();
             services.AddScoped<ErpSystem.Core.Services.Workflow.IWorkflowRuntimeGovernanceService, ErpSystem.Data.Services.WorkflowRuntimeGovernanceService>();
             services.AddScoped<ErpSystem.Core.Services.Workflow.IWorkflowSignatureSubmissionStore, ErpSystem.Data.Services.WorkflowSignatureSubmissionStore>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Workflow.IWorkflowEntityTypeCatalogService, ErpSystem.Core.Services.Workflow.WorkflowEntityTypeCatalogService>();
             services.AddHostedService<ErpSystem.Api.Services.Workflow.WorkflowSlaEscalationBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.Workflow.WorkflowIntegrationQueueBackgroundService>();
             services.AddScoped<ErpSystem.Core.Interfaces.IWorkflowStatusAdapterRegistry, ErpSystem.Core.Services.Workflow.WorkflowStatusAdapterRegistry>();
@@ -483,6 +485,41 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Settings services
             services.AddScoped<ISettingsService, SettingsService>();
+            // Estate/DMS integration services: registered centrally so existing modules can call them through explicit handoffs.
+            services.AddScoped<ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentManagementService, ErpSystem.Core.Services.DocumentManagement.CentralDocumentManagementService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentRepositoryFileService, ErpSystem.Api.Services.DocumentManagement.CentralDocumentRepositoryFileService>();
+            services.AddScoped<ErpSystem.Api.Services.DocumentManagement.ICentralDocumentRenditionService, ErpSystem.Api.Services.DocumentManagement.CentralDocumentRenditionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Legal.ILegalProcedureCatalogService, ErpSystem.Core.Services.Legal.LegalProcedureCatalogService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Estate.IFacilitiesProcedureCatalogService, ErpSystem.Core.Services.Estate.FacilitiesProcedureCatalogService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Estate.IPropertyManagementProcedureCatalogService, ErpSystem.Core.Services.Estate.PropertyManagementProcedureCatalogService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Estate.IEstateProcedureCatalogService, ErpSystem.Core.Services.Estate.EstateProcedureCatalogService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Estate.IEstateManagedAssetService, ErpSystem.Core.Services.Estate.EstateManagedAssetService>();
+            services
+                .AddOptions<ErpSystem.Api.Services.Estate.EstateGisNetworkSecurityOptions>()
+                .Configure<IConfiguration>((options, configuration) =>
+                    configuration
+                        .GetSection(ErpSystem.Api.Services.Estate.EstateGisNetworkSecurityOptions.SectionName)
+                        .Bind(options));
+            services.AddSingleton<ErpSystem.Api.Services.Estate.EstateGisNetworkPolicy>();
+            services
+                .AddHttpClient<ErpSystem.Api.Services.Estate.IEstateGisIntegrationService, ErpSystem.Api.Services.Estate.EstateGisIntegrationService>(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(20);
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("RHEMA-ERP-Estate-GIS/1.0");
+                })
+                .ConfigurePrimaryHttpMessageHandler(serviceProvider =>
+                {
+                    var networkPolicy = serviceProvider.GetRequiredService<ErpSystem.Api.Services.Estate.EstateGisNetworkPolicy>();
+                    return new SocketsHttpHandler
+                    {
+                        AllowAutoRedirect = false,
+                        UseProxy = false,
+                        ConnectTimeout = TimeSpan.FromSeconds(10),
+                        ConnectCallback = networkPolicy.ConnectHttpAsync
+                    };
+                });
+            services.AddScoped<ErpSystem.Core.Interfaces.Planning.IPlanningProcedureCatalogService, ErpSystem.Core.Services.Planning.PlanningProcedureCatalogService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procedures.IProcedureCaseService, ErpSystem.Api.Services.ProcedureCaseService>();
 
             // Email template services
             services.AddScoped<IEmailTemplateService, EmailTemplateService>();
@@ -911,6 +948,21 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSourcingCaseService, ErpSystem.Core.Services.Procurement.ProcurementSourcingCaseService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRfqControlService, ErpSystem.Core.Services.Procurement.ProcurementRfqControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementTenderControlService, ErpSystem.Core.Services.Procurement.ProcurementTenderControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementTenderDocumentControlService, ErpSystem.Core.Services.Procurement.ProcurementTenderDocumentControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierEvidencePackService, ErpSystem.Core.Services.Procurement.ProcurementSupplierEvidencePackService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierOnboardingTokenService, ErpSystem.Core.Services.Procurement.ProcurementSupplierOnboardingTokenService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierApplicantAccessService, ErpSystem.Core.Services.Procurement.ProcurementSupplierApplicantAccessService>();
+            services.AddScoped<ErpSystem.Api.Services.IProcurementSupplierApplicantJwtService, ErpSystem.Api.Services.ProcurementSupplierApplicantJwtService>();
+            services.AddTransient<ErpSystem.Api.Middleware.SupplierApplicantAccessMiddleware>();
+            services.AddTransient<ErpSystem.Api.Middleware.TemporaryPasswordChangeMiddleware>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierDueDiligenceService, ErpSystem.Core.Services.Procurement.ProcurementSupplierDueDiligenceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierAvlService, ErpSystem.Core.Services.Procurement.ProcurementSupplierAvlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierRiskService, ErpSystem.Core.Services.Procurement.ProcurementSupplierRiskService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierPerformanceScorecardService, ErpSystem.Core.Services.Procurement.ProcurementSupplierPerformanceScorecardService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementEvaluationCommitteeControlService, ErpSystem.Core.Services.Procurement.ProcurementEvaluationCommitteeControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAwardReadinessService, ErpSystem.Core.Services.Procurement.ProcurementAwardReadinessService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementBidderCommunicationService, ErpSystem.Core.Services.Procurement.ProcurementBidderCommunicationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementGhanepsExchangeService, ErpSystem.Core.Services.Procurement.ProcurementGhanepsExchangeService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementExceptionalSourcingControlService, ErpSystem.Core.Services.Procurement.ProcurementExceptionalSourcingControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPrequalificationService, ErpSystem.Core.Services.Procurement.ProcurementPrequalificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementMasterDataChangeService, ErpSystem.Core.Services.Procurement.ProcurementMasterDataChangeService>();
@@ -982,6 +1034,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Notification dispatcher background service - sends pending notifications on schedule with dead-letter support
             services.AddHostedService<ErpSystem.Api.Services.NotificationDispatcherBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.ProcurementCalendarBackgroundService>();
+            services.AddHostedService<ErpSystem.Api.Services.ProcurementSupplierDueDiligenceBackgroundService>();
+            services.AddHostedService<ErpSystem.Api.Services.ProcurementSupplierAvlBackgroundService>();
 
             // Blacklist expiry background service
             services.AddHostedService<ErpSystem.Core.Services.Procurement.BlacklistExpiryBackgroundService>();
@@ -1037,6 +1091,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
                         ctx.User.IsInRole(Constants.Roles.ExternalUser)))
+                .AddPolicy("SupplierApplicantOnly", policy =>
+                    policy.RequireAssertion(ctx =>
+                        ctx.User?.Identity?.IsAuthenticated == true &&
+                        ctx.User.HasClaim(claim =>
+                            claim.Type == "supplier_applicant_session") &&
+                        ctx.User.HasClaim(
+                            "auth_provider", "ApplicantToken")))
                 .AddPolicy("InternalOnly", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
@@ -1466,8 +1527,43 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Add storage services
             services.AddStorageServices();
 
-            // Phase 2 baseline: virus scan hook (no-op by default; can be replaced with a real provider)
-            services.AddSingleton<IFileVirusScanService, ErpSystem.Api.Services.NoOpFileVirusScanService>();
+            services.AddOptions<ErpSystem.Api.Services.ClamAvVirusScanOptions>()
+                .Bind(configuration.GetSection(
+                    ErpSystem.Api.Services.ClamAvVirusScanOptions.SectionName))
+                .Validate(
+                    options => !string.IsNullOrWhiteSpace(options.Host),
+                    "FileVirusScan:ClamAv:Host is required.")
+                .Validate(
+                    options => options.Port is > 0 and <= 65535,
+                    "FileVirusScan:ClamAv:Port must be between 1 and 65535.")
+                .Validate(
+                    options => options.ConnectTimeoutSeconds is >= 1 and <= 60,
+                    "ClamAV connect timeout must be between 1 and 60 seconds.")
+                .Validate(
+                    options => options.ScanTimeoutSeconds is >= 1 and <= 600,
+                    "ClamAV scan timeout must be between 1 and 600 seconds.")
+                .Validate(
+                    options => options.ChunkSizeBytes is >= 1024 and <= 1024 * 1024,
+                    "ClamAV chunk size must be between 1 KiB and 1 MiB.")
+                .Validate(
+                    options => options.MaximumResponseBytes is >= 1024 and <= 1024 * 1024,
+                    "ClamAV maximum response size must be between 1 KiB and 1 MiB.")
+                .ValidateOnStart();
+
+            // Central malware-scanning boundary. TryAdd keeps a real custom
+            // provider registered by the host from being overwritten.
+            services.TryAddSingleton<IFileVirusScanService,
+                ErpSystem.Api.Services.ClamAvFileVirusScanService>();
+            services.AddHealthChecks()
+                .AddCheck<ErpSystem.Api.Services.FileVirusScanHealthCheck>(
+                    "file-virus-scanner",
+                    failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+                    tags: ["ready", "security"]);
+            services.AddScoped<IControlledFileUploadService,
+                ErpSystem.Api.Services.ControlledFileUploadService>();
+            services.AddScoped<ErpSystem.Api.Services.FileStorageCleanupProcessor>();
+            services.AddHostedService<
+                ErpSystem.Api.Services.FileStorageCleanupBackgroundService>();
 
             // Configure multipart body length limit for file uploads
             services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
@@ -1592,8 +1688,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             return services;
         }
 
-        public static IServiceCollection AddErpSystemRateLimiting(this IServiceCollection services)
+        public static IServiceCollection AddErpSystemRateLimiting(
+            this IServiceCollection services,
+            IHostEnvironment environment)
         {
+            var anonymousAuthPermitLimit = environment.IsDevelopment() ? 120 : 30;
+            var authPolicyPermitLimit = environment.IsDevelopment() ? 120 : 10;
+
             services.AddRateLimiter(rateLimiterOptions =>
             {
                 // Per-caller partition key: authenticated -> user id, anonymous -> client IP.
@@ -1661,7 +1762,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                             partitionKey: key,
                             factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                             {
-                                PermitLimit = isAuth ? 30 : 120,
+                                PermitLimit = isAuth ? anonymousAuthPermitLimit : 120,
                                 Window = TimeSpan.FromMinutes(1),
                                 QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
                                 QueueLimit = 0
@@ -1709,13 +1810,14 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                         }));
 
                 // Stricter rate limiting for authentication endpoints (per caller — mostly by IP since
-                // login is pre-auth, which is the correct key for brute-force protection)
+                // login is pre-auth, which is the correct key for brute-force protection).
+                // PermitLimit is environment-scoped (relaxed in Development) per master.
                 rateLimiterOptions.AddPolicy("AuthPolicy", httpContext =>
                     System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                         partitionKey: CallerKey(httpContext),
                         factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                         {
-                            PermitLimit = 10,
+                            PermitLimit = authPolicyPermitLimit,
                             Window = TimeSpan.FromMinutes(1),
                             QueueLimit = 2
                         }));

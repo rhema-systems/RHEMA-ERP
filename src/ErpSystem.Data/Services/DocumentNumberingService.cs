@@ -67,6 +67,133 @@ public class DocumentNumberingService : IDocumentNumberingService
         });
     }
 
+    public async Task<string> GenerateConfiguredAsync(
+        string module,
+        string documentType,
+        string name,
+        string format,
+        string resetPolicy,
+        Guid? tenantId = null,
+        DateTime? documentDate = null,
+        string? entityType = null,
+        Guid? entityId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var resolvedTenantId = ResolveTenantId(tenantId);
+        var effectiveDate = documentDate ?? DateTime.UtcNow;
+        ValidateConfiguredDefinition(module, documentType, name, format, resetPolicy);
+
+        if (_context.Database.CurrentTransaction != null)
+        {
+            await EnsureConfiguredDefinitionAsync(
+                module, documentType, name, format, resetPolicy,
+                resolvedTenantId, effectiveDate, cancellationToken);
+            return await GenerateCoreAsync(
+                module, documentType, resolvedTenantId, effectiveDate,
+                entityType, entityId, cancellationToken);
+        }
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable, cancellationToken);
+            await EnsureConfiguredDefinitionAsync(
+                module, documentType, name, format, resetPolicy,
+                resolvedTenantId, effectiveDate, cancellationToken);
+            var documentNumber = await GenerateCoreAsync(
+                module, documentType, resolvedTenantId, effectiveDate,
+                entityType, entityId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return documentNumber;
+        });
+    }
+
+    private async Task EnsureConfiguredDefinitionAsync(
+        string module,
+        string documentType,
+        string name,
+        string format,
+        string resetPolicy,
+        Guid tenantId,
+        DateTime effectiveDate,
+        CancellationToken cancellationToken)
+    {
+        var existing = await _context.DocumentSequenceDefinitions
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId &&
+                item.Module == module &&
+                item.DocumentType == documentType &&
+                item.Name == name &&
+                !item.IsDeleted,
+                cancellationToken);
+
+        if (existing is null)
+        {
+            _context.DocumentSequenceDefinitions.Add(new DocumentSequenceDefinition
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Module = module.Trim(),
+                DocumentType = documentType.Trim(),
+                Name = name.Trim(),
+                Format = format.Trim(),
+                StartNumber = 1,
+                NextNumber = 1,
+                MinimumDigits = InferMinimumDigits(format),
+                ResetPolicy = resetPolicy,
+                LastResetPeriodKey = GetPeriodKey(resetPolicy, effectiveDate),
+                IsContinuous = true,
+                AllowManualEntry = false,
+                IsActive = true,
+                IsDefault = true,
+                EffectiveFrom = effectiveDate.Date,
+                Description = "Effective DEC-007 supplier-onboarding receipt sequence.",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUser.Username
+            });
+            await _context.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        if (!existing.IsActive || !existing.IsDefault ||
+            !string.Equals(existing.Format, format.Trim(), StringComparison.Ordinal) ||
+            !string.Equals(existing.ResetPolicy, resetPolicy, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The configured supplier-onboarding receipt sequence no longer matches its immutable DEC-007 snapshot.");
+        }
+    }
+
+    private static void ValidateConfiguredDefinition(
+        string module,
+        string documentType,
+        string name,
+        string format,
+        string resetPolicy)
+    {
+        if (string.IsNullOrWhiteSpace(module) || module.Trim().Length > 50)
+            throw new InvalidOperationException("Configured document-number module is invalid.");
+        if (string.IsNullOrWhiteSpace(documentType) || documentType.Trim().Length > 100)
+            throw new InvalidOperationException("Configured document type is invalid.");
+        if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 150)
+            throw new InvalidOperationException("Configured document-sequence name is invalid.");
+        if (string.IsNullOrWhiteSpace(format) || format.Trim().Length > 100 ||
+            (!format.Contains("{SEQ}", StringComparison.OrdinalIgnoreCase) &&
+             !Regex.IsMatch(format, @"\{#+\}")))
+            throw new InvalidOperationException(
+                "Configured receipt format must be at most 100 characters and contain {SEQ} or a {####} token.");
+        if (resetPolicy is not (DocumentSequenceResetPolicies.Never or
+            DocumentSequenceResetPolicies.Yearly or DocumentSequenceResetPolicies.Monthly))
+            throw new InvalidOperationException("Configured document-sequence reset policy is invalid.");
+    }
+
+    private static int InferMinimumDigits(string format)
+    {
+        var match = Regex.Match(format, @"\{(#+)\}");
+        return match.Success ? match.Groups[1].Value.Length : 5;
+    }
+
     private async Task<string> GenerateCoreAsync(
         string module,
         string documentType,

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Procurement;
@@ -9,6 +10,10 @@ public sealed class ProcurementSodGuardRequest
     [Required, StringLength(100)] public string SourceType { get; set; } = string.Empty;
     [Required, StringLength(200)] public string SourceReference { get; set; } = string.Empty;
     [MinLength(1)] public List<Guid> ProhibitedActorUserIds { get; set; } = new();
+    [JsonIgnore]
+    public List<Guid> IndependentActorUserIds { get; set; } = new();
+    [JsonIgnore]
+    public bool RequireSoleActorConflict { get; set; }
 }
 
 public sealed class ApplyRequiredProcurementSodControlsRequest

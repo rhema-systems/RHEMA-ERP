@@ -57,14 +57,20 @@ services:
       - Redis__InstanceName=ErpSystem_Production_Api1
       - LoadBalancer__NodeId=api-1
       - LoadBalancer__NodeName=API Node 1
+      - FileVirusScan__ClamAv__Host=clamav
+      - FileVirusScan__ClamAv__Port=3310
+      - FileStorage__Local__PrivateBasePath=/app/secure-file-storage
     volumes:
       - erp-api-logs-1:/var/log/erp-api
       - erp-dpkeys:/var/dpkeys
+      - erp-uploads:/app/wwwroot/uploads
+      - erp-secure-files:/app/secure-file-storage
     networks:
       - erp-network
     depends_on:
       - redis
       - sqlserver
+      - clamav
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health/ready"]
@@ -106,14 +112,20 @@ services:
       - Redis__InstanceName=ErpSystem_Production_Api2
       - LoadBalancer__NodeId=api-2
       - LoadBalancer__NodeName=API Node 2
+      - FileVirusScan__ClamAv__Host=clamav
+      - FileVirusScan__ClamAv__Port=3310
+      - FileStorage__Local__PrivateBasePath=/app/secure-file-storage
     volumes:
       - erp-api-logs-2:/var/log/erp-api
       - erp-dpkeys:/var/dpkeys
+      - erp-uploads:/app/wwwroot/uploads
+      - erp-secure-files:/app/secure-file-storage
     networks:
       - erp-network
     depends_on:
       - redis
       - sqlserver
+      - clamav
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health/ready"]
@@ -155,14 +167,20 @@ services:
       - Redis__InstanceName=ErpSystem_Production_Api3
       - LoadBalancer__NodeId=api-3
       - LoadBalancer__NodeName=API Node 3
+      - FileVirusScan__ClamAv__Host=clamav
+      - FileVirusScan__ClamAv__Port=3310
+      - FileStorage__Local__PrivateBasePath=/app/secure-file-storage
     volumes:
       - erp-api-logs-3:/var/log/erp-api
       - erp-dpkeys:/var/dpkeys
+      - erp-uploads:/app/wwwroot/uploads
+      - erp-secure-files:/app/secure-file-storage
     networks:
       - erp-network
     depends_on:
       - redis
       - sqlserver
+      - clamav
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health/ready"]
@@ -205,14 +223,20 @@ services:
       - Redis__InstanceName=ErpSystem_Production_ApiBackup
       - LoadBalancer__NodeId=api-backup
       - LoadBalancer__NodeName=API Backup Node
+      - FileVirusScan__ClamAv__Host=clamav
+      - FileVirusScan__ClamAv__Port=3310
+      - FileStorage__Local__PrivateBasePath=/app/secure-file-storage
     volumes:
       - erp-api-logs-backup:/var/log/erp-api
       - erp-dpkeys:/var/dpkeys
+      - erp-uploads:/app/wwwroot/uploads
+      - erp-secure-files:/app/secure-file-storage
     networks:
       - erp-network
     depends_on:
       - redis
       - sqlserver
+      - clamav
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health/ready"]
@@ -228,6 +252,27 @@ services:
         reservations:
           memory: 128M
           cpus: '0.125'
+
+  # Central malware scanner. Port 3310 is intentionally exposed only on the
+  # private ERP network because clamd TCP has no transport authentication.
+  clamav:
+    image: clamav/clamav:stable
+    container_name: erp-clamav
+    environment:
+      - CLAMAV_NO_MILTERD=true
+    volumes:
+      - erp-clamav-data:/var/lib/clamav
+    networks:
+      - erp-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
 
   # Frontend Instances
   erp-frontend-1:
@@ -544,6 +589,12 @@ volumes:
   erp-api-logs-backup:
     driver: local
   erp-dpkeys:
+    driver: local
+  erp-uploads:
+    driver: local
+  erp-secure-files:
+    driver: local
+  erp-clamav-data:
     driver: local
   erp-prometheus-data:
     driver: local

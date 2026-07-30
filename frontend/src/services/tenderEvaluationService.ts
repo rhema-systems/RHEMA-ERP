@@ -69,6 +69,9 @@ export interface UpdateEvaluationDto {
 
 export interface SubmitEvaluationDto {
   confirmSubmission: boolean;
+  signatureReference: string;
+  evidenceReference: string;
+  idempotencyKey: string;
 }
 
 export interface EvaluationScorecardDto {

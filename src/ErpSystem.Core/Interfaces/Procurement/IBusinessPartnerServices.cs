@@ -187,7 +187,9 @@ public interface IBusinessPartnerRegistrationService
 
     // Document Management
     Task<IEnumerable<BusinessPartnerRegistrationDocumentDto>> GetDocumentsAsync(Guid registrationId);
+    Task<IEnumerable<BusinessPartnerRegistrationDocumentDto>> GetDocumentsForInternalReviewAsync(Guid registrationId, Guid userId);
     Task<BusinessPartnerRegistrationDocumentDto?> GetDocumentByIdAsync(Guid registrationId, Guid documentId);
+    Task<BusinessPartnerRegistrationDocumentDto?> GetDocumentForInternalDownloadAsync(Guid registrationId, Guid documentId, Guid userId);
     Task<BusinessPartnerRegistrationDocumentDto> UploadDocumentAsync(Guid registrationId, CreateBusinessPartnerDocumentDto dto, Guid userId);
     Task DeleteDocumentAsync(Guid registrationId, Guid documentId, Guid userId);
     Task VerifyDocumentAsync(Guid registrationId, Guid documentId, Guid verifiedById);

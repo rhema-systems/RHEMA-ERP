@@ -28,7 +28,9 @@ public interface IFileStorageService
     Task<MultipleFileStorageResult> UploadMultipleFilesAsync(MultipleFileUploadRequest request);
 
     /// <summary>
-    /// Delete a file from storage
+    /// Delete a file from storage. Implementations must be idempotent: return
+    /// true when the object is absent after the operation (including when it
+    /// was already absent), and false only when absence could not be ensured.
     /// </summary>
     Task<bool> DeleteFileAsync(string filePath);
 

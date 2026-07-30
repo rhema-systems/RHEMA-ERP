@@ -26,7 +26,7 @@ import { toast } from 'sonner';
 
 import {
   ArrowRight, ArrowLeft, Check, Plus, X, Settings, Database, Users, 
-  Building, FileText, CheckCircle, User, Play, GitBranch, Bell,
+  Building, FileText, CheckCircle, User, Play, GitBranch, Bell, Landmark,
   Upload, AlertTriangle, Zap, ChevronDown, ChevronRight, ListChecks
 } from 'lucide-react';
 
@@ -47,6 +47,10 @@ interface WorkflowStep {
   checklist?: ChecklistItem[];
   isRequired: boolean;
   timeoutHours?: number;
+  requiresDocument?: boolean;
+  documentName?: string;
+  documentRequirementKey?: string;
+  documentRequirements?: DocumentRequirement[];
 }
 
 interface ChecklistItem {
@@ -56,6 +60,14 @@ interface ChecklistItem {
   isCompleted?: boolean;
 }
 
+interface DocumentRequirement {
+  id: string;
+  documentName: string;
+  documentType?: string;
+  requirementKey?: string;
+  isRequired: boolean;
+}
+
 const moduleOptions = [
   { id: 'maintenance', name: 'Maintenance Management', icon: Settings, description: 'Equipment maintenance and work orders' },
   { id: 'inventory', name: 'Inventory Management', icon: Database, description: 'Stock control and warehouse operations' },
@@ -63,6 +75,9 @@ const moduleOptions = [
   { id: 'finance', name: 'Finance & Accounting', icon: Building, description: 'Financial transactions and accounting' },
   { id: 'procurement', name: 'Procurement', icon: FileText, description: 'Purchase orders and supplier management' },
   { id: 'projects', name: 'Project Management', icon: CheckCircle, description: 'Project planning and execution' },
+  { id: 'planning', name: 'Development Planning', icon: FileText, description: 'Town planning SOPs, land use reviews, and site plan workflows' },
+  { id: 'estate', name: 'Estate Management', icon: Landmark, description: 'Properties, facilities, leases, and land acquisition' },
+  { id: 'legal', name: 'Legal', icon: FileText, description: 'Legal procedures, instruments, court processes, and approvals' },
   { id: 'sales', name: 'Sales & CRM', icon: User, description: 'Customer relationship management' },
   { id: 'quality', name: 'Quality Management', icon: CheckCircle, description: 'Quality control and assurance' },
 ];
@@ -108,6 +123,8 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
   const [timeoutHours, setTimeoutHours] = useState(24);
   const [conditions, setConditions] = useState<string[]>([]);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+  const [requiresDocument, setRequiresDocument] = useState(false);
+  const [documentRequirements, setDocumentRequirements] = useState<DocumentRequirement[]>([]);
 
   const customEntityTypeValue = '__custom__';
   const { items: entityTypeOptions, fallback: entityTypeFallback } = filterEntityTypesByModule(
@@ -197,6 +214,8 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
     setTimeoutHours(24);
     setConditions([]);
     setChecklist([]);
+    setRequiresDocument(false);
+    setDocumentRequirements([]);
   };
 
   const handleAddStep = () => {
@@ -215,6 +234,19 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
     setTimeoutHours(step.timeoutHours || 24);
     setConditions(step.conditions || []);
     setChecklist(step.checklist || []);
+    setRequiresDocument(step.requiresDocument || step.type === 'document');
+    setDocumentRequirements(
+      step.documentRequirements && step.documentRequirements.length > 0
+        ? step.documentRequirements
+        : step.documentName
+          ? [{
+              id: step.documentRequirementKey || crypto.randomUUID(),
+              documentName: step.documentName,
+              requirementKey: step.documentRequirementKey,
+              isRequired: true,
+            }]
+          : []
+    );
     setEditingStep(step);
     setIsStepModalOpen(true);
   };
@@ -231,6 +263,17 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
       timeoutHours,
       conditions: conditions.length > 0 ? conditions : undefined,
       checklist: checklist.length > 0 ? checklist : undefined,
+      requiresDocument: requiresDocument || stepType === 'document',
+      documentRequirements: documentRequirements
+        .filter(item => item.documentName.trim())
+        .map((item, index) => ({
+          ...item,
+          id: item.id || `document-${index + 1}`,
+          documentName: item.documentName.trim(),
+          documentType: item.documentType?.trim() || undefined,
+          requirementKey: item.requirementKey?.trim() || buildRequirementKey(item.documentName, index),
+          isRequired: item.isRequired !== false,
+        })),
     };
 
     if (editingStep) {
@@ -276,6 +319,40 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
     setChecklist(prev => prev.filter((_, i) => i !== index));
   };
 
+  const buildRequirementKey = (value: string, index: number) => {
+    const normalized = (value || `document-${index + 1}`)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+
+    return normalized || `document-${index + 1}`;
+  };
+
+  const addDocumentRequirement = () => {
+    setDocumentRequirements(prev => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        documentName: '',
+        documentType: '',
+        requirementKey: '',
+        isRequired: true,
+      },
+    ]);
+  };
+
+  const updateDocumentRequirement = (
+    index: number,
+    field: keyof DocumentRequirement,
+    value: string | boolean
+  ) => {
+    setDocumentRequirements(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
+  };
+
+  const removeDocumentRequirement = (index: number) => {
+    setDocumentRequirements(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleComplete = () => {
     void (async () => {
       try {
@@ -283,19 +360,76 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
 
         // Create a real workflow definition record so the Designer can load/save against a real ID.
         // Keep it inactive until the workflow is fully designed (approvers, conditions, transitions, etc.).
-        const steps: CreateWorkflowStepDto[] = workflowSteps.map((s, idx) => ({
-          id: s.id,
-          name: s.name,
-          description: s.description,
-          // The wizard is a "starter"; real step behavior is configured in the Designer.
-          // Defaulting to Manual avoids getting stuck on Approval steps without approval config.
-          stepType: WorkflowStepType.Manual,
-          order: idx + 1,
-          isRequired: s.isRequired,
-          requiredRole: s.assigneeType === 'role' ? (s.assignee || undefined) : undefined,
-          estimatedHours: s.timeoutHours ? s.timeoutHours : undefined,
-          configuration: undefined,
-        }));
+        const steps: CreateWorkflowStepDto[] = workflowSteps.map((s, idx) => {
+          const qualityChecks = (s.checklist || [])
+            .filter(item => item.text.trim())
+            .map((item, index) => ({
+              id: item.id || `check-${idx + 1}-${index + 1}`,
+              name: item.text.trim(),
+              description: '',
+              isRequired: item.isRequired !== false,
+              requiresDocument: false,
+            }));
+
+          // Stage document uploads are configured separately from checklist items.
+          const documentRequirements = (s.documentRequirements || [])
+            .filter(item => item.documentName.trim())
+            .map((item, requirementIndex) => ({
+              id: item.id || `document-${idx + 1}-${requirementIndex + 1}`,
+              requirementKey: item.requirementKey?.trim() || buildRequirementKey(item.documentName, requirementIndex),
+              documentName: item.documentName.trim(),
+              documentType: item.documentType?.trim() || undefined,
+              isRequired: item.isRequired !== false,
+            }));
+          const fallbackDocumentName = s.documentName?.trim();
+          const hasStageDocument = Boolean(s.requiresDocument || s.type === 'document' || documentRequirements.length > 0 || fallbackDocumentName);
+          const configuration = hasStageDocument || qualityChecks.length > 0
+            ? {
+                ...(hasStageDocument
+                  ? {
+                      taskConfig: {
+                        taskActionType: s.type === 'document' ? 'document' : 'general',
+                        requiresDocument: Boolean(s.requiresDocument || s.type === 'document'),
+                        documentName: documentRequirements[0]?.documentName || fallbackDocumentName || undefined,
+                        documentRequirementKey: documentRequirements[0]?.requirementKey || s.documentRequirementKey?.trim() || s.id,
+                        documentRequirements: documentRequirements.length > 0
+                          ? documentRequirements
+                          : fallbackDocumentName
+                            ? [{
+                                id: s.documentRequirementKey?.trim() || s.id,
+                                requirementKey: s.documentRequirementKey?.trim() || s.id,
+                                documentName: fallbackDocumentName,
+                                isRequired: true,
+                              }]
+                            : [],
+                        instructions: s.description?.trim() || undefined,
+                      },
+                    }
+                  : {}),
+                ...(qualityChecks.length > 0
+                  ? {
+                      qualityConfig: {
+                        qualityChecks,
+                      },
+                    }
+                  : {}),
+              }
+            : undefined;
+
+          return {
+            id: s.id,
+            name: s.name,
+            description: s.description,
+            // The wizard is a "starter"; real step behavior is configured in the Designer.
+            // Defaulting to Manual avoids getting stuck on Approval steps without approval config.
+            stepType: WorkflowStepType.Manual,
+            order: idx + 1,
+            isRequired: s.isRequired,
+            requiredRole: s.assigneeType === 'role' ? (s.assignee || undefined) : undefined,
+            estimatedHours: s.timeoutHours ? s.timeoutHours : undefined,
+            configuration,
+          };
+        });
 
         const transitions: CreateWorkflowTransitionDto[] = steps.length >= 2
           ? steps.slice(0, steps.length - 1).map((from, i) => ({
@@ -391,12 +525,12 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                   {[1, 2, 3].map((step) => (
                     <div key={step} className="flex items-center">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                        step === currentStep ? 'bg-blue-500 text-white' :
-                        step < currentStep ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600'
+                        step === currentStep ? 'bg-primary text-primary-foreground' :
+                        step < currentStep ? 'bg-emerald-600 text-white' : 'bg-muted text-muted-foreground'
                       }`}>
                         {step < currentStep ? <Check className="h-4 w-4" /> : step}
                       </div>
-                      {step < 3 && <ArrowRight className="h-4 w-4 mx-2 text-gray-400" />}
+                      {step < 3 && <ArrowRight className="h-4 w-4 mx-2 text-muted-foreground" />}
                     </div>
                   ))}
                 </div>
@@ -497,19 +631,21 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                         <Card
                           key={module.id}
                           className={`cursor-pointer transition-colors ${
-                            selectedModule === module.id ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50'
+                            selectedModule === module.id
+                              ? 'border-primary bg-primary/10'
+                              : 'hover:bg-muted/60'
                           }`}
                           onClick={() => setSelectedModule(module.id)}
                         >
                           <CardContent className="p-3">
                             <div className="flex items-start space-x-3">
-                              <IconComponent className="h-5 w-5 text-blue-600 mt-0.5" />
+                              <IconComponent className="h-5 w-5 text-primary mt-0.5" />
                               <div className="flex-1">
                                 <h4 className="font-medium text-sm">{module.name}</h4>
-                                <p className="text-xs text-gray-600 mt-1">{module.description}</p>
+                                <p className="text-xs text-muted-foreground mt-1">{module.description}</p>
                               </div>
                               {selectedModule === module.id && (
-                                <Check className="h-5 w-5 text-blue-600" />
+                                <Check className="h-5 w-5 text-primary" />
                               )}
                             </div>
                           </CardContent>
@@ -533,8 +669,8 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
 
                 <ScrollArea className="h-96">
                   {workflowSteps.length === 0 ? (
-                    <div className="text-center py-12 text-gray-500">
-                      <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                    <div className="text-center py-12 text-muted-foreground">
+                      <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                       <p>No steps added yet</p>
                       <p className="text-sm">Click "Add Step" to create your workflow</p>
                     </div>
@@ -542,13 +678,14 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                     <div className="space-y-4">
                       {workflowSteps.map((step, index) => {
                         const IconComponent = getStepIcon(step.type);
+                        const stageDocumentCount = step.documentRequirements?.filter(item => item.documentName.trim()).length || 0;
                         return (
                           <Card key={step.id}>
                             <CardContent className="p-4">
                               <div className="flex items-start justify-between">
                                 <div className="flex items-start space-x-3 flex-1">
-                                  <div className="bg-blue-100 p-2 rounded">
-                                    <IconComponent className="h-4 w-4 text-blue-600" />
+                                  <div className="bg-primary/10 p-2 rounded">
+                                    <IconComponent className="h-4 w-4 text-primary" />
                                   </div>
                                   <div className="flex-1">
                                     <div className="flex items-center space-x-2 mb-1">
@@ -559,12 +696,20 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                                       {step.isRequired && (
                                         <Badge variant="secondary" className="text-xs">Required</Badge>
                                       )}
+                                      {(step.requiresDocument || step.type === 'document' || stageDocumentCount > 0) && (
+                                        <Badge variant="secondary" className="text-xs">
+                                          {stageDocumentCount > 1 ? `${stageDocumentCount} Documents` : 'Document'}
+                                        </Badge>
+                                      )}
                                     </div>
-                                    <p className="text-sm text-gray-600 mb-2">{step.description}</p>
-                                    <div className="flex items-center space-x-4 text-xs text-gray-500">
+                                    <p className="text-sm text-muted-foreground mb-2">{step.description}</p>
+                                    <div className="flex items-center space-x-4 text-xs text-muted-foreground">
                                       <span>Assignee: {step.assignee}</span>
                                       {step.timeoutHours && (
                                         <span>Timeout: {step.timeoutHours}h</span>
+                                      )}
+                                      {stageDocumentCount > 0 && (
+                                        <span>Documents: {stageDocumentCount}</span>
                                       )}
                                       {step.checklist && step.checklist.length > 0 && (
                                         <span>Checklist: {step.checklist.length} items</span>
@@ -573,7 +718,7 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                                   </div>
                                 </div>
                                 <div className="flex items-center space-x-2">
-                                  <span className="text-sm text-gray-400">#{index + 1}</span>
+                                  <span className="text-sm text-muted-foreground">#{index + 1}</span>
                                   <Button
                                     variant="outline"
                                     size="sm"
@@ -609,19 +754,19 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                     <h4 className="font-medium mb-3">Workflow Information</h4>
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Name:</span>
+                        <span className="text-muted-foreground">Name:</span>
                         <span>{workflowName}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Module:</span>
+                        <span className="text-muted-foreground">Module:</span>
                         <span>{moduleOptions.find(m => m.id === selectedModule)?.name}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Entity Type:</span>
+                        <span className="text-muted-foreground">Entity Type:</span>
                         <span>{entityType}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Total Steps:</span>
+                        <span className="text-muted-foreground">Total Steps:</span>
                         <span>{workflowSteps.length}</span>
                       </div>
                     </div>
@@ -629,7 +774,7 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                   
                   <div>
                     <h4 className="font-medium mb-3">Description</h4>
-                    <p className="text-sm text-gray-600">{workflowDescription}</p>
+                    <p className="text-sm text-muted-foreground">{workflowDescription}</p>
                   </div>
                 </div>
 
@@ -640,10 +785,11 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                   <div className="space-y-3">
                     {workflowSteps.map((step, index) => {
                       const IconComponent = getStepIcon(step.type);
+                      const stageDocumentCount = step.documentRequirements?.filter(item => item.documentName.trim()).length || 0;
                       return (
-                        <div key={step.id} className="flex items-center space-x-3 p-3 bg-gray-50 rounded">
-                          <div className="bg-blue-100 p-1.5 rounded">
-                            <IconComponent className="h-4 w-4 text-blue-600" />
+                        <div key={step.id} className="flex items-center space-x-3 p-3 bg-muted/60 rounded">
+                          <div className="bg-primary/10 p-1.5 rounded">
+                            <IconComponent className="h-4 w-4 text-primary" />
                           </div>
                           <div className="flex-1">
                             <div className="flex items-center space-x-2">
@@ -651,8 +797,18 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                               <Badge variant="outline" className="text-xs">
                                 {step.type}
                               </Badge>
+                              {(step.requiresDocument || step.type === 'document' || stageDocumentCount > 0) && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {stageDocumentCount > 1 ? `${stageDocumentCount} Documents` : 'Document'}
+                                </Badge>
+                              )}
                             </div>
-                            <p className="text-sm text-gray-600">{step.assignee}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {step.assignee}
+                              {stageDocumentCount > 0 && (
+                                <span> - {stageDocumentCount} document upload{stageDocumentCount === 1 ? '' : 's'}</span>
+                              )}
+                            </p>
                           </div>
                         </div>
                       );
@@ -722,7 +878,15 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                   </div>
                   <div>
                     <Label htmlFor="stepType">Step Type</Label>
-                    <Select value={stepType} onValueChange={setStepType}>
+                    <Select
+                      value={stepType}
+                      onValueChange={(value) => {
+                        setStepType(value);
+                        if (value === 'document' && documentRequirements.length === 0) {
+                          addDocumentRequirement();
+                        }
+                      }}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Select step type" />
                       </SelectTrigger>
@@ -796,6 +960,92 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                   </div>
                 </div>
 
+                <Separator />
+                <div className="space-y-3 rounded-md border border-border p-3">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="requiresDocument"
+                      checked={requiresDocument || stepType === 'document'}
+                      onCheckedChange={(checked) => {
+                        const enabled = checked === true;
+                        setRequiresDocument(enabled);
+                        if (enabled && documentRequirements.length === 0) {
+                          addDocumentRequirement();
+                        }
+                      }}
+                      disabled={stepType === 'document'}
+                    />
+                    <Label htmlFor="requiresDocument">Require document upload for this stage</Label>
+                  </div>
+                  {(requiresDocument || stepType === 'document') && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label>Required Documents</Label>
+                        <Button variant="outline" size="sm" onClick={addDocumentRequirement}>
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add Document
+                        </Button>
+                      </div>
+                      {documentRequirements.length === 0 && (
+                        <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                          Add each document that must be uploaded before this stage can be completed.
+                        </div>
+                      )}
+                      <div className="space-y-3">
+                        {documentRequirements.map((item, index) => (
+                          <div key={item.id || index} className="rounded-md border border-border p-3">
+                            <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                              <div>
+                                <Label className="text-xs">Document Name</Label>
+                                <Input
+                                  value={item.documentName}
+                                  onChange={(e) => updateDocumentRequirement(index, 'documentName', e.target.value)}
+                                  placeholder="e.g. Cadastral plan"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs">Document Type</Label>
+                                <Input
+                                  value={item.documentType || ''}
+                                  onChange={(e) => updateDocumentRequirement(index, 'documentType', e.target.value)}
+                                  placeholder="e.g. Survey Plan"
+                                />
+                              </div>
+                              <div className="flex items-end">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => removeDocumentRequirement(index)}
+                                  aria-label="Remove document requirement"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
+                              <div>
+                                <Label className="text-xs">Requirement Key</Label>
+                                <Input
+                                  value={item.requirementKey || ''}
+                                  onChange={(e) => updateDocumentRequirement(index, 'requirementKey', e.target.value)}
+                                  placeholder="Auto-generated if blank"
+                                />
+                              </div>
+                              <div className="flex items-end space-x-2 pb-2">
+                                <Checkbox
+                                  checked={item.isRequired !== false}
+                                  onCheckedChange={(checked) => updateDocumentRequirement(index, 'isRequired', checked as boolean)}
+                                />
+                                <Label className="text-xs">Required</Label>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {(stepType === 'condition' || stepType === 'approval') && (
                   <>
                     <Separator />
@@ -840,26 +1090,31 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
                   </div>
                   <div className="space-y-2">
                     {checklist.map((item, index) => (
-                      <div key={index} className="flex items-center space-x-2">
-                        <Input
-                          value={item.text}
-                          onChange={(e) => updateChecklistItem(index, 'text', e.target.value)}
-                          placeholder="Checklist item"
-                        />
-                        <div className="flex items-center space-x-1">
-                          <Checkbox
-                            checked={item.isRequired}
-                            onCheckedChange={(checked) => updateChecklistItem(index, 'isRequired', checked as boolean)}
+                      <div key={item.id || index} className="rounded-md border border-border p-3">
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={item.text}
+                            onChange={(e) => updateChecklistItem(index, 'text', e.target.value)}
+                            placeholder="Checklist item"
                           />
-                          <Label className="text-xs">Required</Label>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => removeChecklistItem(index)}
+                            aria-label="Remove checklist item"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => removeChecklistItem(index)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              checked={item.isRequired}
+                              onCheckedChange={(checked) => updateChecklistItem(index, 'isRequired', checked as boolean)}
+                            />
+                            <Label className="text-xs">Required</Label>
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>

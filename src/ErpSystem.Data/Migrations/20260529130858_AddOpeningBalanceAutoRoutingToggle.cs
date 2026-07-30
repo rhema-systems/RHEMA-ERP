@@ -246,21 +246,34 @@ namespace ErpSystem.Data.Migrations
                 principalTable: "TaxGroups",
                 principalColumn: "Id");
 
-            migrationBuilder.AddForeignKey(
-                name: "FK_ReturnOrderLines_InvoiceLineItem_InvoiceLineItemId",
-                table: "ReturnOrderLines",
-                column: "InvoiceLineItemId",
-                principalTable: "InvoiceLineItem",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.Restrict);
+            // Long-lived databases can have the baseline recorded while the legacy AR tables
+            // are absent. EnsureCurrentArInvoiceTables creates them later and restores these
+            // deferred relationships, so this historical migration must tolerate that state.
+            migrationBuilder.Sql("""
+                IF OBJECT_ID(N'[dbo].[InvoiceLineItem]', N'U') IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM sys.foreign_keys
+                       WHERE [parent_object_id] = OBJECT_ID(N'[dbo].[ReturnOrderLines]')
+                         AND [name] = N'FK_ReturnOrderLines_InvoiceLineItem_InvoiceLineItemId')
+                BEGIN
+                    ALTER TABLE [dbo].[ReturnOrderLines] WITH CHECK
+                    ADD CONSTRAINT [FK_ReturnOrderLines_InvoiceLineItem_InvoiceLineItemId]
+                        FOREIGN KEY ([InvoiceLineItemId]) REFERENCES [dbo].[InvoiceLineItem] ([Id])
+                        ON DELETE NO ACTION;
+                END
 
-            migrationBuilder.AddForeignKey(
-                name: "FK_ReturnOrders_Invoices_InvoiceId",
-                table: "ReturnOrders",
-                column: "InvoiceId",
-                principalTable: "Invoices",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.Restrict);
+                IF OBJECT_ID(N'[dbo].[Invoices]', N'U') IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM sys.foreign_keys
+                       WHERE [parent_object_id] = OBJECT_ID(N'[dbo].[ReturnOrders]')
+                         AND [name] = N'FK_ReturnOrders_Invoices_InvoiceId')
+                BEGIN
+                    ALTER TABLE [dbo].[ReturnOrders] WITH CHECK
+                    ADD CONSTRAINT [FK_ReturnOrders_Invoices_InvoiceId]
+                        FOREIGN KEY ([InvoiceId]) REFERENCES [dbo].[Invoices] ([Id])
+                        ON DELETE NO ACTION;
+                END
+                """);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_SalesOrderLines_TaxGroups_TaxGroupId",
@@ -296,13 +309,15 @@ namespace ErpSystem.Data.Migrations
                 name: "FK_Quotes_TaxGroups_TaxGroupId",
                 table: "Quotes");
 
-            migrationBuilder.DropForeignKey(
-                name: "FK_ReturnOrderLines_InvoiceLineItem_InvoiceLineItemId",
-                table: "ReturnOrderLines");
+            migrationBuilder.Sql("""
+                IF OBJECT_ID(N'[dbo].[FK_ReturnOrderLines_InvoiceLineItem_InvoiceLineItemId]', N'F') IS NOT NULL
+                    ALTER TABLE [dbo].[ReturnOrderLines]
+                    DROP CONSTRAINT [FK_ReturnOrderLines_InvoiceLineItem_InvoiceLineItemId];
 
-            migrationBuilder.DropForeignKey(
-                name: "FK_ReturnOrders_Invoices_InvoiceId",
-                table: "ReturnOrders");
+                IF OBJECT_ID(N'[dbo].[FK_ReturnOrders_Invoices_InvoiceId]', N'F') IS NOT NULL
+                    ALTER TABLE [dbo].[ReturnOrders]
+                    DROP CONSTRAINT [FK_ReturnOrders_Invoices_InvoiceId];
+                """);
 
             migrationBuilder.DropForeignKey(
                 name: "FK_SalesOrderLines_TaxGroups_TaxGroupId",

@@ -26,6 +26,8 @@ export interface User {
   profilePictureUrl?: string;
   twoFactorEnabled?: boolean;
   authenticationProvider?: 'Local' | 'LDAP';
+  mustChangePassword?: boolean;
+  temporaryPasswordExpiresAtUtc?: string;
   accessibleTenants?: Array<{
     tenantId: string;
     tenantCode: string;

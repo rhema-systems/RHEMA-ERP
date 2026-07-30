@@ -28,10 +28,13 @@ import {
   AlertCircle,
   ExternalLink,
   Send,
-  CheckCircle
+  CheckCircle,
 } from 'lucide-react';
 import { type RegistrationFormData } from '@/services/businessPartnerRegistrationService';
-import { licenseTypeService, type LicenseTypeDto } from '@/services/partnerConfigService';
+import {
+  licenseTypeService,
+  type LicenseTypeDto,
+} from '@/services/partnerConfigService';
 import { settingsService } from '@/services/settings';
 
 interface RegistrationSummaryProps {
@@ -40,11 +43,17 @@ interface RegistrationSummaryProps {
   loading: boolean;
 }
 
-export default function RegistrationSummary({ formData, onSubmit, loading }: RegistrationSummaryProps) {
+export default function RegistrationSummary({
+  formData,
+  onSubmit,
+  loading,
+}: RegistrationSummaryProps) {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [agreedToAccuracy, setAgreedToAccuracy] = useState(false);
   const [licenseTypes, setLicenseTypes] = useState<LicenseTypeDto[]>([]);
-  const [termsOfServiceUrl, setTermsOfServiceUrl] = useState<string | null>(null);
+  const [termsOfServiceUrl, setTermsOfServiceUrl] = useState<string | null>(
+    null
+  );
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const canSubmit = agreedToTerms && agreedToAccuracy && !loading;
@@ -92,10 +101,13 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
   return (
     <div className="space-y-6">
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="font-semibold text-blue-900 mb-2">Review Your Information</h3>
+        <h3 className="font-semibold text-blue-900 mb-2">
+          Review Your Information
+        </h3>
         <p className="text-sm text-blue-800">
-          Please review all the information you've provided before submitting your registration.
-          You can go back to previous steps to make any changes.
+          Please review all the information you've provided before submitting
+          your registration. You can go back to previous steps to make any
+          changes.
         </p>
       </div>
 
@@ -111,11 +123,19 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <div>
               <p className="text-gray-600">Company Name</p>
-              <p className="font-semibold">{formData.companyName || 'Not provided'}</p>
+              <p className="font-semibold">
+                {formData.companyName || 'Not provided'}
+              </p>
             </div>
             <div>
               <p className="text-gray-600">Partner Type</p>
               <Badge variant="outline">{formData.partnerType}</Badge>
+            </div>
+            <div>
+              <p className="text-gray-600">Registration Category</p>
+              <Badge variant="outline">
+                {formData.registrationCategory || 'Not selected'}
+              </Badge>
             </div>
             {formData.tradingName && (
               <div>
@@ -144,7 +164,9 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
             {formData.yearsInBusiness && (
               <div>
                 <p className="text-gray-600">Years in Business</p>
-                <p className="font-semibold">{formData.yearsInBusiness} years</p>
+                <p className="font-semibold">
+                  {formData.yearsInBusiness} years
+                </p>
               </div>
             )}
             {formData.numberOfEmployees && (
@@ -199,10 +221,13 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
                 <p className="text-gray-600">Primary Contact Person</p>
                 <p className="font-semibold">
                   {formData.contactPersonName}
-                  {formData.contactPersonTitle && ` - ${formData.contactPersonTitle}`}
+                  {formData.contactPersonTitle &&
+                    ` - ${formData.contactPersonTitle}`}
                 </p>
                 {formData.contactPersonEmail && (
-                  <p className="text-sm text-gray-600">{formData.contactPersonEmail}</p>
+                  <p className="text-sm text-gray-600">
+                    {formData.contactPersonEmail}
+                  </p>
                 )}
               </div>
             )}
@@ -245,11 +270,16 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
           <CardContent>
             <div className="space-y-3">
               {formData.licenses.map((license, index) => (
-                <div key={index} className="border-l-4 border-green-500 pl-4 py-2">
+                <div
+                  key={index}
+                  className="border-l-4 border-green-500 pl-4 py-2"
+                >
                   <div className="flex items-start gap-2">
                     <Award className="w-5 h-5 text-green-600 mt-0.5" />
                     <div className="flex-1">
-                      <p className="font-semibold text-sm">{getLicenseTypeName(license.licenseTypeId)}</p>
+                      <p className="font-semibold text-sm">
+                        {getLicenseTypeName(license.licenseTypeId)}
+                      </p>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 text-sm text-gray-600">
                         <div>
                           <span className="font-medium">License #:</span>{' '}
@@ -262,11 +292,18 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
                         {license.expiryDate && (
                           <div>
                             <span className="font-medium">Expires:</span>{' '}
-                            {format(new Date(license.expiryDate), 'MMM dd, yyyy')}
+                            {format(
+                              new Date(license.expiryDate),
+                              'MMM dd, yyyy'
+                            )}
                           </div>
                         )}
-                        <div className={license.expiryDate ? '' : 'md:col-span-2'}>
-                          <span className="font-medium">Issuing Authority:</span>{' '}
+                        <div
+                          className={license.expiryDate ? '' : 'md:col-span-2'}
+                        >
+                          <span className="font-medium">
+                            Issuing Authority:
+                          </span>{' '}
                           {license.issuingAuthority}
                         </div>
                       </div>
@@ -286,9 +323,14 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
             <Checkbox
               id="terms"
               checked={agreedToTerms}
-              onCheckedChange={(checked) => setAgreedToTerms(checked as boolean)}
+              onCheckedChange={(checked) =>
+                setAgreedToTerms(checked as boolean)
+              }
             />
-            <Label htmlFor="terms" className="text-sm cursor-pointer leading-relaxed">
+            <Label
+              htmlFor="terms"
+              className="text-sm cursor-pointer leading-relaxed"
+            >
               I agree to the{' '}
               {termsOfServiceUrl ? (
                 <a
@@ -304,7 +346,9 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
               ) : (
                 <span className="font-medium">terms and conditions</span>
               )}{' '}
-              of the business partner registration process. I understand that my application will be reviewed and I will be notified of the outcome.
+              of the business partner registration process. I understand that my
+              application will be reviewed and I will be notified of the
+              outcome.
             </Label>
           </div>
 
@@ -312,12 +356,18 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
             <Checkbox
               id="accuracy"
               checked={agreedToAccuracy}
-              onCheckedChange={(checked) => setAgreedToAccuracy(checked as boolean)}
+              onCheckedChange={(checked) =>
+                setAgreedToAccuracy(checked as boolean)
+              }
             />
-            <Label htmlFor="accuracy" className="text-sm cursor-pointer leading-relaxed">
-              I certify that all information provided in this registration is accurate and complete
-              to the best of my knowledge. I understand that providing false information may result
-              in rejection or termination of business partnership.
+            <Label
+              htmlFor="accuracy"
+              className="text-sm cursor-pointer leading-relaxed"
+            >
+              I certify that all information provided in this registration is
+              accurate and complete to the best of my knowledge. I understand
+              that providing false information may result in rejection or
+              termination of business partnership.
             </Label>
           </div>
         </CardContent>
@@ -330,7 +380,8 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
           <div>
             <h3 className="font-semibold text-yellow-900">Action Required</h3>
             <p className="text-sm text-yellow-800">
-              Please review and accept both declarations above to submit your registration.
+              Please review and accept both declarations above to submit your
+              registration.
             </p>
           </div>
         </div>
@@ -360,13 +411,15 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
             <AlertDialogDescription asChild>
               <div className="space-y-4 text-left pt-2">
                 <p className="text-base text-gray-700">
-                  You are about to submit your business partner registration for review.
-                  Please confirm that:
+                  You are about to submit your business partner registration for
+                  review. Please confirm that:
                 </p>
                 <ul className="space-y-2 text-sm text-gray-600">
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
-                    <span>All information provided is accurate and complete</span>
+                    <span>
+                      All information provided is accurate and complete
+                    </span>
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
@@ -374,7 +427,9 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
-                    <span>You have reviewed and accepted the terms and conditions</span>
+                    <span>
+                      You have reviewed and accepted the terms and conditions
+                    </span>
                   </li>
                 </ul>
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-4">
@@ -382,8 +437,9 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
                     <strong>What happens next?</strong>
                   </p>
                   <p className="text-sm text-blue-800 mt-1">
-                    Once submitted, your application will be reviewed by our team.
-                    You will be notified of the outcome via email and in-app notifications.
+                    Once submitted, your application will be reviewed by our
+                    team. You will be notified of the outcome via email and
+                    in-app notifications.
                   </p>
                 </div>
               </div>
@@ -414,4 +470,3 @@ export default function RegistrationSummary({ formData, onSubmit, loading }: Reg
     </div>
   );
 }
-

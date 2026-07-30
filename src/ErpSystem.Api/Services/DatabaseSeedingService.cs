@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ErpSystem.Api.Configuration;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
@@ -42,6 +43,7 @@ namespace ErpSystem.Web.Services
         private readonly IWebHostEnvironment _environment;
         private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
         private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
+        private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
 
         private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinanceApprovalStages =
             new List<WorkflowApprovalStageSeed>
@@ -81,7 +83,8 @@ namespace ErpSystem.Web.Services
             ILogger<DatabaseSeedingService> logger,
             IWebHostEnvironment environment,
             ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
-            ProcurementAccessControlSeeder? procurementAccessControlSeeder = null)
+            ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
+            IConfiguration? configuration = null)
         {
             _context = context;
             _userManager = userManager;
@@ -90,6 +93,9 @@ namespace ErpSystem.Web.Services
             _environment = environment;
             _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
             _procurementAccessControlSeeder = procurementAccessControlSeeder;
+            _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
+                StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
+                false) ?? false;
         }
 
         public Task SeedAsync() => SeedCoreAsync(applyMigrations: true);
@@ -176,7 +182,9 @@ namespace ErpSystem.Web.Services
                 }
 
                 // Ensure development test users exist without changing passwords for existing accounts.
-                if (_environment.IsDevelopment())
+                if (StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(
+                    _environment.EnvironmentName,
+                    _allowDevelopmentDataSeedingOutsideDevelopment))
                 {
                     _logger.LogInformation("Ensuring development test users exist...");
                     await SeedTestUsersAsync();
@@ -6175,6 +6183,8 @@ namespace ErpSystem.Web.Services
             await CreateTestUserAsync("external", "external@default.com", "External123!",
                 "External", "User", defaultTenant.Id, Constants.Roles.ExternalUser, AuthenticationProvider.Local);
 
+            await SeedLandAcquisitionTestUsersAsync(defaultTenant);
+
             await CreateTestUserAsync("finance.clerk", "finance.clerk@default.com", "Finance123!",
                 "Ama", "Mensah", defaultTenant.Id, "Finance Clerk", AuthenticationProvider.Local);
 
@@ -6200,6 +6210,141 @@ namespace ErpSystem.Web.Services
                 "Kojo", "Nkrumah", defaultTenant.Id, "Budget Officer", AuthenticationProvider.Local);
 
             _logger.LogInformation("Test users seeding completed");
+        }
+
+        private async Task SeedLandAcquisitionTestUsersAsync(Tenant tenant)
+        {
+            const string password = "Acquire123!";
+            var accounts = new[]
+            {
+                new { Department = "Estate Management", Code = "LA-EST", Username = "estate.officer1", First = "Ama", Last = "Estate", Role = "Estate Officer", Number = "LA-EST-001" },
+                new { Department = "Estate Management", Code = "LA-EST", Username = "estate.officer2", First = "Kojo", Last = "Estate", Role = "Estate Officer", Number = "LA-EST-002" },
+                new { Department = "Estate Management", Code = "LA-EST", Username = "estate.manager", First = "Akosua", Last = "Manager", Role = "Estate Manager", Number = "LA-EST-003" },
+                new { Department = "Estate Management", Code = "LA-EST", Username = "acquisition.committee", First = "Kwame", Last = "Committee", Role = "Acquisition Committee", Number = "LA-EST-004" },
+
+                new { Department = "Survey and Demarcation", Code = "LA-SUR", Username = "survey.officer1", First = "Yaw", Last = "Survey", Role = "Survey Officer", Number = "LA-SUR-001" },
+                new { Department = "Survey and Demarcation", Code = "LA-SUR", Username = "survey.officer2", First = "Esi", Last = "Survey", Role = "Survey Officer", Number = "LA-SUR-002" },
+                new { Department = "Survey and Demarcation", Code = "LA-SUR", Username = "senior.surveyor1", First = "Kofi", Last = "Surveyor", Role = "Senior Surveyor", Number = "LA-SUR-003" },
+                new { Department = "Survey and Demarcation", Code = "LA-SUR", Username = "senior.surveyor2", First = "Adwoa", Last = "Surveyor", Role = "Senior Surveyor", Number = "LA-SUR-004" },
+
+                new { Department = "Legal", Code = "LA-LEG", Username = "legal.officer1", First = "Nana", Last = "Legal", Role = "Legal Officer", Number = "LA-LEG-001" },
+                new { Department = "Legal", Code = "LA-LEG", Username = "legal.officer2", First = "Abena", Last = "Legal", Role = "Legal Officer", Number = "LA-LEG-002" },
+                new { Department = "Legal", Code = "LA-LEG", Username = "legal.manager1", First = "Fiifi", Last = "Legal", Role = "Legal Manager", Number = "LA-LEG-003" },
+                new { Department = "Legal", Code = "LA-LEG", Username = "legal.manager2", First = "Mansa", Last = "Legal", Role = "Legal Manager", Number = "LA-LEG-004" },
+
+                new { Department = "Finance and Assets", Code = "LA-FIN", Username = "finance.officer", First = "Daniel", Last = "Finance", Role = "Finance Officer", Number = "LA-FIN-001" },
+                new { Department = "Finance and Assets", Code = "LA-FIN", Username = "acquisition.finance.manager", First = "Grace", Last = "Finance", Role = "Finance Manager", Number = "LA-FIN-002" },
+                new { Department = "Finance and Assets", Code = "LA-FIN", Username = "accounts.payable", First = "Samuel", Last = "Accounts", Role = "Accounts Payable", Number = "LA-FIN-003" },
+                new { Department = "Finance and Assets", Code = "LA-FIN", Username = "fixed.asset", First = "Linda", Last = "Assets", Role = "Fixed Asset Officer", Number = "LA-FIN-004" },
+
+                new { Department = "Land Registry and Liaison", Code = "LA-REG", Username = "lands.liaison1", First = "Joseph", Last = "Liaison", Role = "Lands Commission Liaison", Number = "LA-REG-001" },
+                new { Department = "Land Registry and Liaison", Code = "LA-REG", Username = "lands.liaison2", First = "Mary", Last = "Liaison", Role = "Lands Commission Liaison", Number = "LA-REG-002" },
+                new { Department = "Land Registry and Liaison", Code = "LA-REG", Username = "land.registry1", First = "Peter", Last = "Registry", Role = "Land Registry Officer", Number = "LA-REG-003" },
+                new { Department = "Land Registry and Liaison", Code = "LA-REG", Username = "land.registry2", First = "Ruth", Last = "Registry", Role = "Land Registry Officer", Number = "LA-REG-004" },
+
+                new { Department = "Executive Approvals", Code = "LA-EXE", Username = "executive.approver1", First = "Michael", Last = "Executive", Role = "Executive Approver", Number = "LA-EXE-001" },
+                new { Department = "Executive Approvals", Code = "LA-EXE", Username = "executive.approver2", First = "Sarah", Last = "Executive", Role = "Executive Approver", Number = "LA-EXE-002" },
+                new { Department = "Executive Approvals", Code = "LA-EXE", Username = "executive.approver3", First = "Richard", Last = "Executive", Role = "Executive Approver", Number = "LA-EXE-003" },
+                new { Department = "Executive Approvals", Code = "LA-EXE", Username = "executive.approver4", First = "Patricia", Last = "Executive", Role = "Executive Approver", Number = "LA-EXE-004" }
+            };
+
+            // [HR-MODULE-PORT] Positions require OrganizationUnitId + OrganizationLevelId (DepartmentId
+            // anchoring was removed). Resolve a default org unit/level for the tenant once so the position
+            // inserts below satisfy their FKs. Departments are still created — Employee.DepartmentId keeps them.
+            var (orgUnitId, orgLevelId) = await ErpSystem.Data.Seeders.SeederOrgDefaults.EnsureDefaultUnitAsync(_context, tenant.Id);
+
+            foreach (var account in accounts)
+            {
+                var department = await _context.Departments.FirstOrDefaultAsync(item =>
+                    item.TenantId == tenant.Id && item.Code == account.Code && !item.IsDeleted);
+                if (department == null)
+                {
+                    department = new Department
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        Name = account.Department,
+                        Code = account.Code,
+                        Description = "Land acquisition workflow test department",
+                        IsActive = true,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    };
+                    _context.Departments.Add(department);
+                    await _context.SaveChangesAsync();
+                }
+
+                var normalizedRoleCode = new string(account.Role
+                    .Where(char.IsLetterOrDigit)
+                    .Select(char.ToUpperInvariant)
+                    .ToArray());
+                var positionCode = $"{account.Code}-{normalizedRoleCode[..Math.Min(normalizedRoleCode.Length, 12)]}";
+                var position = await _context.EmployeePositions.FirstOrDefaultAsync(item =>
+                    item.TenantId == tenant.Id && item.Code == positionCode && !item.IsDeleted);
+                if (position == null)
+                {
+                    position = new EmployeePosition
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        OrganizationUnitId = orgUnitId,
+                        OrganizationLevelId = orgLevelId,
+                        Title = account.Role,
+                        Code = positionCode,
+                        Description = "Land acquisition workflow test position",
+                        ExpectedHeadcount = 4,
+                        IsActive = true,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    };
+                    _context.EmployeePositions.Add(position);
+                    await _context.SaveChangesAsync();
+                }
+
+                var email = $"{account.Username}@acquisition.test";
+                var employee = await _context.Employees.FirstOrDefaultAsync(item =>
+                    item.TenantId == tenant.Id && item.EmployeeNumber == account.Number && !item.IsDeleted);
+                if (employee == null)
+                {
+                    employee = new Employee
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenant.Id,
+                        EmployeeNumber = account.Number,
+                        FirstName = account.First,
+                        LastName = account.Last,
+                        EmailAddress = email,
+                        DepartmentId = department.Id,
+                        PositionId = position.Id,
+                        DateEmployed = DateOnly.FromDateTime(DateTime.UtcNow),
+                        StaffStatus = StaffStatus.Active,
+                        IsFullTime = true,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    };
+                    _context.Employees.Add(employee);
+                    await _context.SaveChangesAsync();
+                }
+
+                await CreateTestUserAsync(
+                    account.Username,
+                    email,
+                    password,
+                    account.First,
+                    account.Last,
+                    tenant.Id,
+                    account.Role,
+                    AuthenticationProvider.Local);
+
+                var user = await _userManager.FindByNameAsync(account.Username);
+                if (user != null && user.EmployeeId != employee.Id)
+                {
+                    user.EmployeeId = employee.Id;
+                    user.UpdatedAt = DateTime.UtcNow;
+                    user.UpdatedBy = "System";
+                    await _userManager.UpdateAsync(user);
+                }
+            }
         }
         
         public async Task SeedMaintenanceE2ETestDataAsync()
@@ -6363,7 +6508,21 @@ namespace ErpSystem.Web.Services
                 new { Name = "Sales User", Description = "User with access to sales module" },
                 new { Name = "Inventory User", Description = "User with access to inventory module" },
                 new { Name = "Procurement User", Description = "User with access to procurement module" },
-                new { Name = "Marketing User", Description = "User with access to marketing module" }
+                new { Name = "Marketing User", Description = "User with access to marketing module" },
+                new { Name = "Estate Officer", Description = "Captures and submits land identification records" },
+                new { Name = "Estate Manager", Description = "Reviews land suitability assessments" },
+                new { Name = "Survey Officer", Description = "Captures cadastral survey and demarcation records" },
+                new { Name = "Senior Surveyor", Description = "Verifies cadastral surveys" },
+                new { Name = "Legal Officer", Description = "Handles ownership classification and instrument execution" },
+                new { Name = "Legal Manager", Description = "Approves ownership verification and statutory consent" },
+                new { Name = "Acquisition Committee", Description = "Handles land agreement negotiations" },
+                new { Name = "Executive Approver", Description = "Approves negotiated land agreements" },
+                new { Name = "Lands Commission Liaison", Description = "Submits statutory consent applications" },
+                new { Name = "Finance Officer", Description = "Captures stamp duty assessments" },
+                new { Name = "Finance Manager", Description = "Approves stamp duty assessments" },
+                new { Name = "Accounts Payable", Description = "Records stamp duty payments" },
+                new { Name = "Land Registry Officer", Description = "Records Lands Commission registrations" },
+                new { Name = "Fixed Asset Officer", Description = "Creates acquired land assets" }
             };
 
             foreach (var roleInfo in roles)
@@ -6952,6 +7111,11 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalEntries.Create",
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write"
+                },
+                ["Accounts Payable"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.AP.Payments.Process"
                 },
                 ["Accounts Receivable Officer"] = new[]
                 {

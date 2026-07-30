@@ -3243,6 +3243,12 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
     actWithBusyKey(`unit-release:${unitId}`, () => projectService.releaseProjectUnit(unitId), 'Project unit released for market');
   const withdrawProjectUnitRelease = (unitId: string) =>
     actWithBusyKey(`unit-withdraw-release:${unitId}`, () => projectService.withdrawProjectUnitRelease(unitId), 'Project unit withdrawn from market');
+  const publishProjectUnitToEstate = (unitId: string) =>
+    actWithBusyKey(
+      `unit-publish-estate:${unitId}`,
+      () => projectService.publishProjectUnitToEstate(unitId),
+      'Project unit published to Estate property and facilities management.',
+    );
   const createSalesAgreementFromProjectUnit = (unitId: string) =>
     actWithBusyKey(
       `unit-sales-agreement:${unitId}`,
@@ -3776,6 +3782,7 @@ export default function ProjectWorkspacePage({ initialTab = 'overview' }: { init
             onCancelUnitEdit={resetUnitEditor}
             onReleaseUnit={releaseProjectUnit}
             onWithdrawUnitRelease={withdrawProjectUnitRelease}
+            onPublishUnitToEstate={publishProjectUnitToEstate}
             onCreateSalesAgreement={createSalesAgreementFromProjectUnit}
             onCreateLeaseAgreement={createLeaseAgreementFromProjectUnit}
             onCreateSalesOrder={createSalesOrderFromProjectUnit}

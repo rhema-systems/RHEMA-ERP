@@ -175,7 +175,17 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
         var now = DateTime.UtcNow;
         var coverage = await GetCoverageAsync(now, cancellationToken);
         var control = coverage.Controls.Single(item => item.Code == definition.Code);
-        var isIdentityConflict = request.ProhibitedActorUserIds.Contains(_currentUser.UserId);
+        var isProhibitedActor =
+            request.ProhibitedActorUserIds.Contains(_currentUser.UserId);
+        var hasQualifyingIndependentActor =
+            request.IndependentActorUserIds.Any(item =>
+                item != Guid.Empty &&
+                item != _currentUser.UserId &&
+                !request.ProhibitedActorUserIds.Contains(item));
+        var isIdentityConflict =
+            isProhibitedActor &&
+            (!request.RequireSoleActorConflict ||
+             !hasQualifyingIndependentActor);
 
         ProcurementSodGuardDecisionDto decision;
         if (!control.IsConfigured || !control.IsEffective || !control.IsHardStop)
@@ -187,6 +197,14 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
         else if (isIdentityConflict)
         {
             decision = Decision(false, "SOD_CONFLICT", definition.Explanation,
+                definition, request, coverage, control, correlationId, now);
+        }
+        else if (isProhibitedActor &&
+                 request.RequireSoleActorConflict &&
+                 hasQualifyingIndependentActor)
+        {
+            decision = Decision(true, "SOD_ALLOWED",
+                $"The current actor participated as {definition.InitiatorRole}, but the exact approval lineage contains a distinct non-conflicting actor.",
                 definition, request, coverage, control, correlationId, now);
         }
         else
@@ -217,7 +235,15 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
                 SourceType = decision.SourceType,
                 SourceReference = decision.SourceReference,
                 Reason = decision.Message,
-                InputValues = new { request.ProhibitedActorUserIds, decision.ActorUserId, decision.ActorRoles },
+                InputValues = new
+                {
+                    request.ProhibitedActorUserIds,
+                    request.IndependentActorUserIds,
+                    request.RequireSoleActorConflict,
+                    hasQualifyingIndependentActor,
+                    decision.ActorUserId,
+                    decision.ActorRoles
+                },
                 ResultValues = new { decision.Allowed, decision.Code, decision.PolicySetId, decision.PolicyCode, decision.WasAudited },
                 CorrelationId = decision.CorrelationId,
                 OccurredAtUtc = decision.EvaluatedAtUtc

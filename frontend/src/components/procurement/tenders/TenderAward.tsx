@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,6 +17,10 @@ import * as tenderAwardService from '@/services/tenderAwardService';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { AwardVerificationDialog } from './AwardVerificationDialog';
 import { TenderAwardVerification, awardVerificationService } from '@/services/awardVerificationService';
+import { procurementAwardReadinessService } from '@/services/procurement-award-readiness.service';
+import type { ProcurementAwardReadinessDecision } from '@/types/procurement-award-readiness';
+import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
+import { useAuth } from '@/hooks/use-auth';
 
 interface TenderAwardProps {
   tenderId: string;
@@ -25,6 +30,8 @@ interface TenderAwardProps {
 }
 
 export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreated }: TenderAwardProps) {
+  const { hasPermission } = useAuth();
+  const canApproveAward = hasPermission('procurement.tender.approve');
   const [loading, setLoading] = useState(true);
   const [recommendation, setRecommendation] = useState<tenderAwardService.AwardRecommendationDto | null>(null);
   const [existingAward, setExistingAward] = useState<tenderAwardService.TenderAwardDto | null>(null);
@@ -38,6 +45,8 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
   const [selectedBidsForVerification, setSelectedBidsForVerification] = useState<string[]>([]);
   const [showVerificationDialog, setShowVerificationDialog] = useState(false);
   const [existingVerification, setExistingVerification] = useState<TenderAwardVerification | null>(null);
+  const [readinessDecision, setReadinessDecision] =
+    useState<ProcurementAwardReadinessDecision | null>(null);
 
   useEffect(() => {
     loadAwardData();
@@ -65,6 +74,16 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
         // Check for existing verification
         const verification = await awardVerificationService.getVerificationByTender(tenderId);
         setExistingVerification(verification);
+
+        try {
+          const readiness = await procurementAwardReadinessService.latest(
+            'Tender',
+            tenderId
+          );
+          setReadinessDecision(readiness);
+        } catch {
+          setReadinessDecision(null);
+        }
       }
     } catch (error: any) {
       console.error('Error loading award data:', error);
@@ -82,6 +101,13 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
 
     if (!awardAmount || parseFloat(awardAmount) <= 0) {
       toast.error('Please enter a valid award amount');
+      return;
+    }
+
+    if (!readinessAllowsBid(selectedBidId)) {
+      toast.error(
+        'A current server-derived Ready decision for this recommended bid is required.'
+      );
       return;
     }
 
@@ -110,6 +136,12 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
   };
 
   const handleSelectBid = (bidId: string, amount: number) => {
+    if (!readinessAllowsBid(bidId)) {
+      toast.error(
+        'This bid cannot be awarded until the award-readiness gate is current and Ready.'
+      );
+      return;
+    }
     setSelectedBidId(bidId);
     setAwardAmount(amount.toString());
     setShowAwardDialog(true);
@@ -136,7 +168,9 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
 
   // Handle verification complete
   const handleVerificationComplete = (verification: TenderAwardVerification) => {
-    toast.success('Verification completed! You can now proceed with awarding.');
+    toast.success(
+      'Verification completed. Re-evaluate server award readiness before awarding.'
+    );
     // Optionally reload data to reflect verification status
     setExistingVerification(verification);
     loadAwardData();
@@ -170,6 +204,19 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
         totalBidAmount: bid.totalBidAmount,
       }));
   };
+
+  const readinessAllowsBid = (bidId: string) =>
+    Boolean(
+      bidId &&
+        readinessDecision?.isReady &&
+        readinessDecision.isCurrent &&
+        hasAwardReadinessAction(
+          readinessDecision.allowedActions,
+          'RecordAward'
+        ) &&
+        canApproveAward &&
+        readinessDecision.recommendation.subjectIds.includes(bidId)
+    );
 
   if (loading) {
     return (
@@ -323,6 +370,49 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
   return (
     <>
       <div className="space-y-6">
+        <Card
+          className={
+            readinessDecision?.isReady && readinessDecision.isCurrent
+              ? 'border-emerald-300 bg-emerald-50/50'
+              : 'border-amber-300 bg-amber-50/50'
+          }
+          data-testid="tender-award-readiness-gate"
+        >
+          <CardHeader>
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <ClipboardCheck className="h-5 w-5" />
+                  Server award-readiness gate
+                </CardTitle>
+                <CardDescription>
+                  {readinessDecision
+                    ? `${readinessDecision.status}${
+                        readinessDecision.isCurrent ? ' · current' : ' · stale'
+                      } · decision #${readinessDecision.decisionSequence}`
+                    : 'No immutable readiness decision has been retained.'}
+                </CardDescription>
+              </div>
+              <Button asChild variant="outline">
+                <Link
+                  href={`/procurement/tenders/${tenderId}/award-readiness`}
+                >
+                  Review award readiness
+                </Link>
+              </Button>
+            </div>
+          </CardHeader>
+          {readinessDecision?.blockedReasons.length ? (
+            <CardContent>
+              <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900">
+                {readinessDecision.blockedReasons.map((reason, index) => (
+                  <li key={`${reason}-${index}`}>{reason}</li>
+                ))}
+              </ul>
+            </CardContent>
+          ) : null}
+        </Card>
+
         {/* Recommendation Summary */}
         <Card>
           <CardHeader>
@@ -454,6 +544,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
                           size="sm"
                           onClick={() => handleSelectBid(bid.bidId, bid.totalBidAmount)}
                           variant={bid.bidId === recommendation.recommendedBidId ? 'default' : 'outline'}
+                          disabled={!readinessAllowsBid(bid.bidId)}
                         >
                           <Award className="h-4 w-4 mr-2" />
                           Award
@@ -475,7 +566,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
         description="Confirm the tender award details"
         onConfirm={handleCreateAward}
         confirmText={submitting ? 'Awarding...' : 'Confirm Award'}
-        confirmDisabled={submitting}
+        confirmDisabled={submitting || !readinessAllowsBid(selectedBidId)}
         maxWidth="600px"
       >
         <div className="space-y-4">

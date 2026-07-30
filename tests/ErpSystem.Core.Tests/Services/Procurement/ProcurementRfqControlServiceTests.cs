@@ -197,6 +197,205 @@ public sealed class ProcurementRfqControlServiceTests
         var handoff = await fixture.Service.GetApprovedAwardAsync(fixture.Rfq.Id, "trace-award");
         handoff.Mode.Should().Be("WinnerTakesAll");
         handoff.QuoteId.Should().Be(fixture.Quotes[0].Id);
+        fixture.AwardReadiness.Verify(service => service.EnsureAwardReadyAsync(
+            ProcurementAwardReadinessSourceType.RequestForQuotation,
+            fixture.Rfq.Id,
+            It.Is<EvaluateProcurementAwardReadinessRequest>(request =>
+                request.IdempotencyKey.StartsWith("award-gate:0:") &&
+                request.ExpectedRecommendedSubjectIds.SequenceEqual(
+                    new[] { fixture.Quotes[0].Id }) &&
+                request.ExpectedBusinessPartnerIds.SequenceEqual(
+                    new[] { fixture.Suppliers[0].Id }) &&
+                request.ExpectedSourceIntegrityHash == null),
+            "trace-award",
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AwardHandoffCannotProceedWhenReusableReadinessGateBlocks()
+    {
+        await using var fixture = new Fixture();
+        await fixture.OpenAsync();
+        await fixture.Service.SaveEvaluationAsync(
+            fixture.Rfq.Id, fixture.ValidEvaluationRequest(), "blocked-save");
+        var evaluation = await fixture.Context.ProcurementRfqEvaluations.SingleAsync();
+        evaluation.RowVersion = [1, 2, 3, 4];
+        await fixture.Context.SaveChangesAsync();
+        var submitted = await fixture.Service.SubmitEvaluationAsync(
+            fixture.Rfq.Id,
+            new SubmitProcurementRfqEvaluationRequest
+            {
+                RowVersion = Convert.ToBase64String(evaluation.RowVersion)
+            },
+            "blocked-submit");
+        fixture.Workflow.Setup(service => service.ProcessApprovalStepAsync(
+                "RequestForQuotation",
+                fixture.Rfq.Id,
+                fixture.UserId,
+                "approve",
+                It.IsAny<string?>()))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.Completed
+            });
+        await fixture.Service.DecideEvaluationAsync(
+            fixture.Rfq.Id,
+            new DecideProcurementRfqEvaluationRequest
+            {
+                Action = "Approve",
+                ApprovalReference = "APP-BLOCKED",
+                RowVersion = submitted.RowVersion
+            },
+            "blocked-approve");
+        var blocked = new ProcurementAwardReadinessDto
+        {
+            Status = ProcurementAwardReadinessDecisionStatus.Blocked,
+            BlockedReasons = ["Bidder verification is incomplete."]
+        };
+        fixture.AwardReadiness.Setup(service => service.EnsureAwardReadyAsync(
+                ProcurementAwardReadinessSourceType.RequestForQuotation,
+                fixture.Rfq.Id,
+                It.IsAny<EvaluateProcurementAwardReadinessRequest>(),
+                "blocked-award",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementAwardReadinessBlockedException(
+                "AWARD_READINESS_BLOCKED", "Award is not ready.", blocked));
+
+        await fixture.Service.Invoking(service => service.GetApprovedAwardAsync(
+                fixture.Rfq.Id, "blocked-award"))
+            .Should().ThrowAsync<ProcurementAwardReadinessBlockedException>()
+            .Where(exception => exception.Decision == blocked);
+        fixture.ControlEvents.Verify(service => service.RecordAsync(
+            It.Is<ProcurementControlEventWriteRequest>(request =>
+                request.Action == "ApprovedAwardHandoffAllowed"),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("No active evaluation committee control exists.", false)]
+    [InlineData("The current actor is not appointed to this committee.", true)]
+    public async Task EvaluationFailsClosedForMissingCommitteeOrNonmember(
+        string blockedReason,
+        bool authorizationFailure)
+    {
+        await using var fixture = new Fixture();
+        await fixture.OpenAsync();
+        fixture.EvaluationCommittee.Setup(service => service.EnsureScorerEligibleAsync(
+                ProcurementEvaluationSourceType.RequestForQuotation, fixture.Rfq.Id,
+                ProcurementEvaluationPhase.Combined, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementEvaluationScorerEligibilityDto
+            {
+                Allowed = false,
+                BlockedReasons = [blockedReason]
+            });
+
+        var action = () => fixture.Service.SaveEvaluationAsync(
+            fixture.Rfq.Id, fixture.ValidEvaluationRequest(), "blocked-scorer");
+
+        if (authorizationFailure)
+            await action.Should().ThrowAsync<ProcurementRfqControlAuthorizationException>();
+        else
+            await action.Should().ThrowAsync<ProcurementRfqControlConflictException>()
+                .Where(exception => exception.Code == "EVALUATION_SCORER_INELIGIBLE");
+        (await fixture.Context.ProcurementRfqEvaluations.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ApprovedRecallCreatesLockedAttemptBeforeReplacingSubmittedProjection()
+    {
+        await using var fixture = new Fixture();
+        await fixture.OpenAsync();
+        await fixture.Service.SaveEvaluationAsync(
+            fixture.Rfq.Id, fixture.ValidEvaluationRequest(), "initial-save");
+        var draft = await fixture.Context.ProcurementRfqEvaluations.SingleAsync();
+        draft.RowVersion = [1, 2, 3, 4];
+        await fixture.Context.SaveChangesAsync();
+        var submitted = await fixture.Service.SubmitEvaluationAsync(
+            fixture.Rfq.Id,
+            new SubmitProcurementRfqEvaluationRequest
+            {
+                RowVersion = Convert.ToBase64String(draft.RowVersion)
+            },
+            "initial-submit");
+        fixture.EvaluationCommittee.Setup(service => service.EnsureScoreSubjectEligibleAsync(
+                ProcurementEvaluationSourceType.RequestForQuotation, fixture.Rfq.Id,
+                ProcurementEvaluationPhase.Combined, "ProcurementRfqEvaluation", submitted.Id,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(fixture.EligibleScorer(authorizedAttempt: 2));
+        var replacementWorkflowInstanceId = Guid.NewGuid();
+        fixture.Workflow.Setup(service => service.CancelWorkflowAsync(
+                "RequestForQuotation", fixture.Rfq.Id, It.IsAny<string>()))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.Cancelled,
+                WorkflowInstanceId = fixture.WorkflowInstanceId
+            });
+        fixture.Workflow.Setup(service => service.StartApprovalWorkflowAsync(
+                "RequestForQuotation", fixture.Rfq.Id, fixture.WorkflowDefinitionId))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = replacementWorkflowInstanceId
+            });
+        var replacement = fixture.ValidEvaluationRequest();
+        replacement.RowVersion = submitted.RowVersion;
+        replacement.RecommendationReason = "Corrected after independently approved recall.";
+
+        var replaced = await fixture.Service.SaveEvaluationAsync(
+            fixture.Rfq.Id, replacement, "replacement-save");
+
+        replaced.Status.Should().Be(ProcurementRfqEvaluationStatus.Submitted);
+        replaced.RecommendationReason.Should().Contain("approved recall");
+        replaced.WorkflowInstanceId.Should().Be(replacementWorkflowInstanceId);
+        replaced.WorkflowInstanceId.Should().NotBe(fixture.WorkflowInstanceId);
+        fixture.Workflow.Verify(service => service.CancelWorkflowAsync(
+            "RequestForQuotation", fixture.Rfq.Id, It.IsAny<string>()), Times.Once);
+        fixture.EvaluationCommittee.Verify(service => service.LockScoreSheetAsync(
+            It.Is<LockProcurementEvaluationScoreSheetRequest>(request =>
+                request.ScoreSubjectId == submitted.Id &&
+                request.ScoreSnapshotJson.Contains("approved recall")),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(true, false, "EVALUATION_SCORE_RECALL_UNRESOLVED")]
+    [InlineData(false, true, "EVALUATION_SCORE_PROJECTION_MISMATCH")]
+    public async Task DecisionRejectsUnresolvedApprovedRecallOrProjectionMismatch(
+        bool approvedRecall,
+        bool tamperSnapshot,
+        string expectedCode)
+    {
+        await using var fixture = new Fixture();
+        await fixture.OpenAsync();
+        await fixture.Service.SaveEvaluationAsync(
+            fixture.Rfq.Id, fixture.ValidEvaluationRequest(), "initial-save");
+        var draft = await fixture.Context.ProcurementRfqEvaluations.SingleAsync();
+        draft.RowVersion = [1, 2, 3, 4];
+        await fixture.Context.SaveChangesAsync();
+        var submitted = await fixture.Service.SubmitEvaluationAsync(
+            fixture.Rfq.Id,
+            new SubmitProcurementRfqEvaluationRequest
+            {
+                RowVersion = Convert.ToBase64String(draft.RowVersion)
+            },
+            "initial-submit");
+        fixture.IncludeApprovedRecall = approvedRecall;
+        fixture.TamperCommitteeSnapshot = tamperSnapshot;
+
+        await fixture.Service.Invoking(service => service.DecideEvaluationAsync(
+                fixture.Rfq.Id,
+                new DecideProcurementRfqEvaluationRequest
+                {
+                    Action = "Approve",
+                    ApprovalReference = "APP-001",
+                    RowVersion = submitted.RowVersion
+                },
+                "decision"))
+            .Should().ThrowAsync<ProcurementRfqControlConflictException>()
+            .Where(exception => exception.Code == expectedCode);
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -327,10 +526,52 @@ public sealed class ProcurementRfqControlServiceTests
                 });
             Workflow.Setup(service => service.CanUserApproveAsync("RequestForQuotation", Rfq.Id, UserId))
                 .ReturnsAsync(true);
+            EvaluationCommittee.Setup(service => service.EnsureScorerEligibleAsync(
+                    ProcurementEvaluationSourceType.RequestForQuotation, Rfq.Id,
+                    ProcurementEvaluationPhase.Combined, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(EligibleScorer());
+            EvaluationCommittee.Setup(service => service.EnsureScoreSubjectEligibleAsync(
+                    ProcurementEvaluationSourceType.RequestForQuotation, Rfq.Id,
+                    ProcurementEvaluationPhase.Combined, It.IsAny<string>(), It.IsAny<Guid>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(EligibleScorer());
+            EvaluationCommittee.Setup(service => service.GetAsync(
+                    ProcurementEvaluationSourceType.RequestForQuotation, Rfq.Id,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => CommitteeDetail());
+            EvaluationCommittee.Setup(service => service.LockScoreSheetAsync(
+                    It.IsAny<LockProcurementEvaluationScoreSheetRequest>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((LockProcurementEvaluationScoreSheetRequest request, string _, CancellationToken _) =>
+                    new ProcurementEvaluationScoreSheetDto
+                    {
+                        Id = Guid.NewGuid(), MeetingId = request.MeetingId,
+                        AppointmentId = request.AppointmentId, Phase = request.Phase,
+                        ScoreSubjectType = request.ScoreSubjectType, ScoreSubjectId = request.ScoreSubjectId,
+                        Attempt = 1, Status = ProcurementEvaluationScoreSheetStatus.Locked
+                    });
             AllowSod();
+            AwardReadiness.Setup(service => service.EnsureAwardReadyAsync(
+                    It.IsAny<ProcurementAwardReadinessSourceType>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<EvaluateProcurementAwardReadinessRequest>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((ProcurementAwardReadinessSourceType sourceType, Guid sourceId,
+                    EvaluateProcurementAwardReadinessRequest _, string correlationId, CancellationToken _) =>
+                    new ProcurementAwardReadinessDto
+                    {
+                        Id = Guid.NewGuid(),
+                        SourceType = sourceType,
+                        SourceId = sourceId,
+                        CorrelationId = correlationId,
+                        Status = ProcurementAwardReadinessDecisionStatus.Ready,
+                        IsCurrent = true
+                    });
             Service = new ProcurementRfqControlService(
                 _unitOfWork, _currentUser.Object, _accessControl.Object, SodGuard.Object,
-                ControlEvents.Object, SourcingCases.Object, Workflow.Object, SupplierValidation.Object);
+                ControlEvents.Object, SourcingCases.Object, Workflow.Object, SupplierValidation.Object,
+                EvaluationCommittee.Object, AwardReadiness.Object);
         }
 
         public Guid TenantId { get; }
@@ -351,6 +592,86 @@ public sealed class ProcurementRfqControlServiceTests
         public Mock<IProcurementControlEventService> ControlEvents { get; } = new();
         public Mock<IProcurementSodGuardService> SodGuard { get; } = new();
         public Mock<IWorkflowService> Workflow { get; } = new();
+        public Mock<IProcurementEvaluationCommitteeControlService> EvaluationCommittee { get; } = new();
+        public Mock<IProcurementAwardReadinessService> AwardReadiness { get; } = new();
+        public bool IncludeApprovedRecall { get; set; }
+        public bool TamperCommitteeSnapshot { get; set; }
+        private Guid CommitteeId { get; } = Guid.NewGuid();
+        private Guid AppointmentId { get; } = Guid.NewGuid();
+        private Guid MeetingId { get; } = Guid.NewGuid();
+        private Guid CommitteeScoreSheetId { get; } = Guid.NewGuid();
+
+        public ProcurementEvaluationScorerEligibilityDto EligibleScorer(int authorizedAttempt = 1) => new()
+        {
+            Allowed = true,
+            SourceType = ProcurementEvaluationSourceType.RequestForQuotation,
+            SourceId = Rfq.Id,
+            Phase = ProcurementEvaluationPhase.Combined,
+            ActorUserId = UserId,
+            CommitteeControlId = CommitteeId,
+            AppointmentId = AppointmentId,
+            MeetingId = MeetingId,
+            AuthorizedAttempt = authorizedAttempt
+        };
+
+        private ProcurementEvaluationCommitteeDto CommitteeDetail()
+        {
+            var evaluation = Context.ProcurementRfqEvaluations.Local
+                .FirstOrDefault(item => !item.IsDeleted);
+            return new ProcurementEvaluationCommitteeDto
+            {
+            Id = CommitteeId,
+            SourceType = ProcurementEvaluationSourceType.RequestForQuotation,
+            SourceId = Rfq.Id,
+            Status = ProcurementEvaluationCommitteeControlStatus.Active,
+            CompositionReady = true,
+            QuorumMet = true,
+            RowVersion = "AQ==",
+            Members =
+            [
+                new ProcurementEvaluationAppointmentDto
+                {
+                    Id = AppointmentId, UserId = UserId, EligibleToScore = true,
+                    RowVersion = "AQ=="
+                }
+            ],
+            Meetings =
+            [
+                new ProcurementEvaluationMeetingDto
+                {
+                    Id = MeetingId, Phase = ProcurementEvaluationPhase.Combined,
+                    Status = ProcurementEvaluationMeetingStatus.QuorumConfirmed,
+                    QuorumMet = true, RowVersion = "AQ=="
+                }
+            ],
+            ScoreSheets =
+            [
+                new ProcurementEvaluationScoreSheetDto
+                {
+                    Id = CommitteeScoreSheetId, AppointmentId = AppointmentId, MeetingId = MeetingId,
+                    Phase = ProcurementEvaluationPhase.Combined,
+                    ScoreSubjectType = "ProcurementRfqEvaluation",
+                    ScoreSubjectId = evaluation?.Id ?? Guid.Empty,
+                    ScoreSnapshotJson = TamperCommitteeSnapshot
+                        ? """{"tampered":true}"""
+                        : evaluation?.SnapshotJson ?? "{}",
+                    Attempt = 1, Status = ProcurementEvaluationScoreSheetStatus.Locked,
+                    SubmittedAtUtc = DateTime.UtcNow
+                }
+            ],
+            Recalls = IncludeApprovedRecall
+                ?
+                [
+                    new ProcurementEvaluationScoreRecallDto
+                    {
+                        Id = Guid.NewGuid(),
+                        ScoreSheetId = CommitteeScoreSheetId,
+                        Status = ProcurementEvaluationScoreRecallStatus.Approved
+                    }
+                ]
+                : []
+            };
+        }
 
         public void AllowSod() => SodGuard.Setup(service => service.EnforceAsync(
                 It.IsAny<ProcurementSodGuardRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))

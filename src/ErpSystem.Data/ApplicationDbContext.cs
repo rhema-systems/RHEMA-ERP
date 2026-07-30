@@ -1,13 +1,16 @@
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Numbering;
 using ErpSystem.Core.Entities.Pricing;
+using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
@@ -219,6 +222,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     // File upload governance (per-tenant, per-category)
     public DbSet<FileUploadPolicy> FileUploadPolicies { get; set; }
     public DbSet<FileUploadRecord> FileUploadRecords { get; set; }
+
+    // Central Document Management entities
+    public DbSet<CentralDocumentRecord> CentralDocumentRecords { get; set; }
+    public DbSet<CentralDocumentVersion> CentralDocumentVersions { get; set; }
+    public DbSet<CentralDocumentMetadataTemplate> CentralDocumentMetadataTemplates { get; set; }
+    public DbSet<CentralDocumentMetadataValue> CentralDocumentMetadataValues { get; set; }
+    public DbSet<CentralDocumentGenerationTemplate> CentralDocumentGenerationTemplates { get; set; }
+    public DbSet<CentralDocumentAnnotationReview> CentralDocumentAnnotationReviews { get; set; }
+    public DbSet<CentralDocumentAccessRule> CentralDocumentAccessRules { get; set; }
+    public DbSet<CentralDocumentRetentionPolicy> CentralDocumentRetentionPolicies { get; set; }
 
     // Logging entities
     public DbSet<AuditLog> AuditLogs { get; set; }
@@ -610,6 +623,39 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<ProcurementTenderControl> ProcurementTenderControls { get; set; }
     public DbSet<ProcurementTenderDocumentIssue> ProcurementTenderDocumentIssues { get; set; }
     public DbSet<ProcurementTenderSubmissionReceipt> ProcurementTenderSubmissionReceipts { get; set; }
+    public DbSet<ProcurementTenderDocumentTemplateVersion> ProcurementTenderDocumentTemplateVersions { get; set; }
+    public DbSet<ProcurementSupplierEvidencePackVersion> ProcurementSupplierEvidencePackVersions { get; set; }
+    public DbSet<ProcurementSupplierEvidenceRequirement> ProcurementSupplierEvidenceRequirements { get; set; }
+    public DbSet<ProcurementSupplierRegistrationEvidencePackBinding> ProcurementSupplierRegistrationEvidencePackBindings { get; set; }
+    public DbSet<ProcurementSupplierOnboardingToken> ProcurementSupplierOnboardingTokens { get; set; }
+    public DbSet<ProcurementSupplierOnboardingPayment> ProcurementSupplierOnboardingPayments { get; set; }
+    public DbSet<ProcurementSupplierOnboardingExemption> ProcurementSupplierOnboardingExemptions { get; set; }
+    public DbSet<ProcurementSupplierApplicantAccess> ProcurementSupplierApplicantAccesses { get; set; }
+    public DbSet<ProcurementSupplierApplicantSession> ProcurementSupplierApplicantSessions { get; set; }
+    public DbSet<ProcurementSupplierDueDiligenceReview> ProcurementSupplierDueDiligenceReviews { get; set; }
+    public DbSet<ProcurementSupplierDueDiligenceCheck> ProcurementSupplierDueDiligenceChecks { get; set; }
+    public DbSet<ProcurementSupplierDueDiligenceEvidenceLink> ProcurementSupplierDueDiligenceEvidenceLinks { get; set; }
+    public DbSet<ProcurementSupplierAvlRegister> ProcurementSupplierAvlRegisters { get; set; }
+    public DbSet<ProcurementSupplierAvlEntry> ProcurementSupplierAvlEntries { get; set; }
+    public DbSet<ProcurementSupplierAvlEntryStatusHistory> ProcurementSupplierAvlEntryStatusHistories { get; set; }
+    public DbSet<ProcurementSupplierAvlPublicationSnapshot> ProcurementSupplierAvlPublicationSnapshots { get; set; }
+    public DbSet<ProcurementSupplierRiskAssessment> ProcurementSupplierRiskAssessments { get; set; }
+    public DbSet<ProcurementSupplierRiskAlert> ProcurementSupplierRiskAlerts { get; set; }
+    public DbSet<ProcurementSupplierPerformanceScorecard> ProcurementSupplierPerformanceScorecards { get; set; }
+    public DbSet<ProcurementTenderDocumentTemplateMethod> ProcurementTenderDocumentTemplateMethods { get; set; }
+    public DbSet<ProcurementTenderDocumentRegister> ProcurementTenderDocumentRegisters { get; set; }
+    public DbSet<ProcurementTenderDocumentIssuance> ProcurementTenderDocumentIssuances { get; set; }
+    public DbSet<ProcurementTenderDocumentChange> ProcurementTenderDocumentChanges { get; set; }
+    public DbSet<ProcurementTenderDocumentChangeRecipient> ProcurementTenderDocumentChangeRecipients { get; set; }
+    public DbSet<ProcurementTenderDocumentAcknowledgement> ProcurementTenderDocumentAcknowledgements { get; set; }
+    public DbSet<ProcurementEvaluationCommitteeControl> ProcurementEvaluationCommitteeControls { get; set; }
+    public DbSet<ProcurementEvaluationCommitteeRoleRequirement> ProcurementEvaluationCommitteeRoleRequirements { get; set; }
+    public DbSet<ProcurementEvaluationCommitteeAppointment> ProcurementEvaluationCommitteeAppointments { get; set; }
+    public DbSet<ProcurementEvaluationConflictDeclaration> ProcurementEvaluationConflictDeclarations { get; set; }
+    public DbSet<ProcurementEvaluationMeeting> ProcurementEvaluationMeetings { get; set; }
+    public DbSet<ProcurementEvaluationAttendanceRecord> ProcurementEvaluationAttendanceRecords { get; set; }
+    public DbSet<ProcurementEvaluationScoreSheet> ProcurementEvaluationScoreSheets { get; set; }
+    public DbSet<ProcurementEvaluationScoreRecall> ProcurementEvaluationScoreRecalls { get; set; }
     public DbSet<ProcurementExceptionalSourcingControl> ProcurementExceptionalSourcingControls { get; set; }
     public DbSet<ProcurementPrequalificationExercise> ProcurementPrequalificationExercises { get; set; }
     public DbSet<ProcurementPrequalificationCriterion> ProcurementPrequalificationCriteria { get; set; }
@@ -651,6 +697,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<TenderAwardVerificationBidder> TenderAwardVerificationBidders { get; set; }
     public DbSet<TenderAwardVerificationItemResult> TenderAwardVerificationItemResults { get; set; }
     public DbSet<TenderAwardVerificationItemDocument> TenderAwardVerificationItemDocuments { get; set; }
+    public DbSet<ProcurementAwardReadinessDecision> ProcurementAwardReadinessDecisions { get; set; }
+    public DbSet<ProcurementBidderCommunicationRegister> ProcurementBidderCommunicationRegisters { get; set; }
+    public DbSet<ProcurementBidderCommunicationRecipient> ProcurementBidderCommunicationRecipients { get; set; }
+    public DbSet<ProcurementBidderCommunicationLetterVersion> ProcurementBidderCommunicationLetterVersions { get; set; }
+    public DbSet<ProcurementBidderCommunicationDispatch> ProcurementBidderCommunicationDispatches { get; set; }
+    public DbSet<ProcurementBidderCommunicationDelivery> ProcurementBidderCommunicationDeliveries { get; set; }
+    public DbSet<ProcurementBidderCommunicationAcknowledgement> ProcurementBidderCommunicationAcknowledgements { get; set; }
+    public DbSet<ProcurementBidderAppeal> ProcurementBidderAppeals { get; set; }
+    public DbSet<ProcurementBidderAppealDecision> ProcurementBidderAppealDecisions { get; set; }
+    public DbSet<ProcurementTenderSecurityInstrument> ProcurementTenderSecurityInstruments { get; set; }
+    public DbSet<ProcurementTenderSecurityAction> ProcurementTenderSecurityActions { get; set; }
+    public DbSet<ProcurementGhanepsExchangeEvent> ProcurementGhanepsExchangeEvents { get; set; }
+    public DbSet<ProcurementGhanepsExchangePayload> ProcurementGhanepsExchangePayloads { get; set; }
+    public DbSet<ProcurementGhanepsExchangeAttempt> ProcurementGhanepsExchangeAttempts { get; set; }
+    public DbSet<ProcurementGhanepsExchangeAcknowledgement> ProcurementGhanepsExchangeAcknowledgements { get; set; }
+    public DbSet<ProcurementGhanepsExchangeReconciliation> ProcurementGhanepsExchangeReconciliations { get; set; }
 
     // Performance Bonds
     public DbSet<PerformanceBondRequest> PerformanceBondRequests { get; set; }
@@ -793,6 +855,34 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EhcInboundMessagingChannel> EhcInboundMessagingChannels { get; set; }
     public DbSet<EhcInboundMessagingMessage> EhcInboundMessagingMessages { get; set; }
 
+    // Estate/DMS integration: Estate acquisition, property assets, and procedure cases are modeled here for shared workflow/DMS links.
+    public DbSet<LandAcquisition> LandAcquisitions { get; set; }
+    public DbSet<LandAcquisitionDocument> LandAcquisitionDocuments { get; set; }
+    public DbSet<LandPhysicalAssessment> LandPhysicalAssessments { get; set; }
+    public DbSet<CadastralSurvey> CadastralSurveys { get; set; }
+    public DbSet<OwnershipHistory> OwnershipHistories { get; set; }
+    public DbSet<NegotiationOffer> NegotiationOffers { get; set; }
+    public DbSet<LandAgreement> LandAgreements { get; set; }
+    public DbSet<LandInstrument> LandInstruments { get; set; }
+    public DbSet<StatutoryConsent> StatutoryConsents { get; set; }
+    public DbSet<StampDutyAssessment> StampDutyAssessments { get; set; }
+    public DbSet<StampDutyPayment> StampDutyPayments { get; set; }
+    public DbSet<LandRegistration> LandRegistrations { get; set; }
+    public DbSet<LandAsset> LandAssets { get; set; }
+    public DbSet<EstateManagedAsset> EstateManagedAssets { get; set; }
+    public DbSet<EstateLandDemarcation> EstateLandDemarcations { get; set; }
+    public DbSet<EstateManagedAssetDocument> EstateManagedAssetDocuments { get; set; }
+    public DbSet<EstateGisConfiguration> EstateGisConfigurations { get; set; }
+    public DbSet<LandAcquisitionNote> LandAcquisitionNotes { get; set; }
+    public DbSet<LandAcquisitionChecklistResponse> LandAcquisitionChecklistResponses { get; set; }
+
+    // Shared procedure case workspaces
+    public DbSet<ProcedureCase> ProcedureCases { get; set; }
+    public DbSet<ProcedureCaseField> ProcedureCaseFields { get; set; }
+    public DbSet<ProcedureCaseChecklistItem> ProcedureCaseChecklistItems { get; set; }
+    public DbSet<ProcedureCaseDocument> ProcedureCaseDocuments { get; set; }
+    public DbSet<ProcedureCaseActivity> ProcedureCaseActivities { get; set; }
+
     // Workflow Engine entities
     public DbSet<WorkflowDefinition> WorkflowDefinitions { get; set; }
     public DbSet<WorkflowStep> WorkflowSteps { get; set; }
@@ -905,6 +995,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<WorkflowSignatureEvidence>().HasIndex(item => item.ApprovalId).IsUnique();
         builder.Entity<WorkflowIntegrationExecution>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
         builder.Entity<WorkflowOfflineAction>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+        ConfigureCentralDocumentManagementEntities(builder);
+        ConfigureLandAcquisitionEntities(builder);
+        ConfigureProcedureCaseEntities(builder);
         // Preserve the workflow-delegation indexes introduced by the prior manual migration.
         builder.Entity<WorkflowDelegation>().HasIndex(item => item.WorkflowDefinitionId);
         builder.Entity<WorkflowDelegation>().HasIndex(item => item.WorkflowStepId);
@@ -960,6 +1053,39 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ProcurementTenderControlConfiguration());
         builder.ApplyConfiguration(new ProcurementTenderDocumentIssueConfiguration());
         builder.ApplyConfiguration(new ProcurementTenderSubmissionReceiptConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentTemplateVersionConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentTemplateMethodConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentRegisterConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentIssuanceConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentChangeConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentChangeRecipientConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderDocumentAcknowledgementConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierEvidencePackVersionConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierEvidenceRequirementConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierRegistrationEvidencePackBindingConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierOnboardingTokenConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierOnboardingPaymentConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierOnboardingExemptionConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierApplicantAccessConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierApplicantSessionConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceReviewConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceCheckConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceEvidenceLinkConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlRegisterConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlEntryConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlEntryStatusHistoryConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierAvlPublicationSnapshotConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierRiskAssessmentConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierRiskAlertConfiguration());
+        builder.ApplyConfiguration(new ProcurementSupplierPerformanceScorecardConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationCommitteeControlConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationCommitteeRoleRequirementConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationCommitteeAppointmentConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationConflictDeclarationConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationMeetingConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationAttendanceRecordConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationScoreSheetConfiguration());
+        builder.ApplyConfiguration(new ProcurementEvaluationScoreRecallConfiguration());
         builder.ApplyConfiguration(new ProcurementExceptionalSourcingControlConfiguration());
         builder.ApplyConfiguration(new ProcurementPrequalificationExerciseConfiguration());
         builder.ApplyConfiguration(new ProcurementPrequalificationCriterionConfiguration());
@@ -987,6 +1113,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new NotificationTopicConfiguration());
         builder.ApplyConfiguration(new NotificationTopicRecipientConfiguration());
 
+        // â”€â”€â”€ CRM Entity FK Configurations (prevent cascade cycles) â”€â”€â”€
         // Finance unit-accounting/statistical ledger configurations.
         builder.ApplyConfiguration(new UnitTypeConfiguration());
         builder.ApplyConfiguration(new UnitAccountConfiguration());
@@ -1448,7 +1575,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // ─── Return Order / Credit Note / Refund FK Configurations ───
+        // â”€â”€â”€ Return Order / Credit Note / Refund FK Configurations â”€â”€â”€
 
         builder.Entity<ReturnOrder>(entity =>
         {
@@ -1578,7 +1705,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // ─── Collections & Debt Management FK Configurations ───
+        // â”€â”€â”€ Collections & Debt Management FK Configurations â”€â”€â”€
 
         builder.Entity<CollectionActivity>(entity =>
         {
@@ -1633,7 +1760,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // ─── Accounts Payable FK Configurations ───
+        // â”€â”€â”€ Accounts Payable FK Configurations â”€â”€â”€
 
         builder.Entity<VendorInvoice>(entity =>
         {
@@ -2029,7 +2156,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // ─── General Ledger FK Configurations ───
+        // â”€â”€â”€ General Ledger FK Configurations â”€â”€â”€
 
         builder.Entity<FiscalYear>(entity =>
         {
@@ -2567,6 +2694,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // Configure FixedAssetCategory â†’ Account relationships (prevent cascade cycles with multiple FKs)
         builder.Entity<FixedAsset>(entity =>
         {
             entity.HasIndex(e => new { e.TenantId, e.AssetCode }).IsUnique();
@@ -2905,6 +3033,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // Configure CashTransaction â†’ BankAccount relationships (disambiguate two FKs)
         // Configure CashTransaction → BankAccount relationships (disambiguate two FKs)
         builder.Entity<BankAccount>(entity =>
         {
@@ -2971,7 +3100,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(ct => ct.ToBankAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // 1:1 with Cheque — Cheque is the dependent (has CashTransactionId FK)
+            // 1:1 with Cheque â€” Cheque is the dependent (has CashTransactionId FK)
             entity.HasOne(ct => ct.Cheque)
                 .WithOne(c => c.CashTransaction)
                 .HasForeignKey<Cheque>(c => c.CashTransactionId)
@@ -2989,7 +3118,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // Configure ReconciliationMatch → BankStatementLine 1:1 (ReconciliationMatch is dependent)
+        // Configure ReconciliationMatch â†’ BankStatementLine 1:1 (ReconciliationMatch is dependent)
         builder.Entity<ReconciliationMatch>(entity =>
         {
             entity.HasIndex(e => e.TenantId);
@@ -3008,6 +3137,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new TenderAwardVerificationBidderConfiguration());
         builder.ApplyConfiguration(new TenderAwardVerificationItemResultConfiguration());
         builder.ApplyConfiguration(new TenderAwardVerificationItemDocumentConfiguration());
+        builder.ApplyConfiguration(new ProcurementAwardReadinessDecisionConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationRegisterConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationRecipientConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationLetterVersionConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationDispatchConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationDeliveryConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderCommunicationAcknowledgementConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderAppealConfiguration());
+        builder.ApplyConfiguration(new ProcurementBidderAppealDecisionConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderSecurityInstrumentConfiguration());
+        builder.ApplyConfiguration(new ProcurementTenderSecurityActionConfiguration());
+        builder.ApplyConfiguration(new ProcurementGhanepsExchangeEventConfiguration());
+        builder.ApplyConfiguration(new ProcurementGhanepsExchangePayloadConfiguration());
+        builder.ApplyConfiguration(new ProcurementGhanepsExchangeAttemptConfiguration());
+        builder.ApplyConfiguration(new ProcurementGhanepsExchangeAcknowledgementConfiguration());
+        builder.ApplyConfiguration(new ProcurementGhanepsExchangeReconciliationConfiguration());
 
         // Contract Management configurations
         builder.ApplyConfiguration(new ContractConfiguration());
@@ -3342,10 +3487,19 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<FileUploadRecord>(entity =>
         {
+            entity.ToTable("FileUploadRecords", table =>
+                table.HasTrigger(
+                    "TR_FileUploadRecords_RegistrationEvidenceDeleteGuard"));
             entity.HasIndex(x => new { x.TenantId, x.Category });
             entity.HasIndex(x => new { x.TenantId, x.CreatedAt });
             entity.HasIndex(x => new { x.TenantId, x.FilePath }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.UploadedByUserId });
+            entity.HasIndex(x => new
+            {
+                x.IsDeleted,
+                x.StorageDeletedAtUtc,
+                x.StorageDeleteNextAttemptAtUtc
+            });
         });
 
         // Configure SecurityAlert entity
@@ -5536,6 +5690,19 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure BusinessPartner entity
         builder.Entity<BusinessPartner>(entity =>
         {
+            entity.ToTable("BusinessPartners", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_BusinessPartners_BeneficialOwnershipJson",
+                    "[BeneficialOwnershipJson] IS NULL OR ISJSON([BeneficialOwnershipJson]) = 1");
+                table.HasCheckConstraint(
+                    "CK_BusinessPartners_CompliancePeriod",
+                    "[ComplianceReviewDateUtc] IS NULL OR [ComplianceValidUntilUtc] IS NULL OR [ComplianceValidUntilUtc] >= [ComplianceReviewDateUtc]");
+                table.HasCheckConstraint(
+                    "CK_BusinessPartners_BlacklistEvidence",
+                    "[IsBlacklisted] = 0 OR (NULLIF(LTRIM(RTRIM([BlacklistReason])), '') IS NOT NULL AND [BlacklistDate] IS NOT NULL)");
+            });
+
             entity.HasIndex(bp => bp.PartnerCode).IsUnique();
             entity.HasIndex(bp => bp.PartnerName);
             entity.HasIndex(bp => bp.PartnerType);
@@ -5724,7 +5891,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure BusinessPartnerRegistrationDocument entity
         builder.Entity<BusinessPartnerRegistrationDocument>(entity =>
         {
+            entity.ToTable("BusinessPartnerRegistrationDocuments", table =>
+                table.HasTrigger("TR_BusinessPartnerRegistrationDocuments_ControlledFileGuard"));
             entity.HasIndex(bprd => bprd.RegistrationId);
+            entity.HasIndex(bprd => new { bprd.TenantId, bprd.FileUploadRecordId });
+            entity.HasIndex(bprd => new { bprd.TenantId, bprd.CentralDocumentRecordId });
+            entity.HasIndex(bprd => new { bprd.TenantId, bprd.CentralDocumentVersionId });
             entity.HasIndex(bprd => bprd.DocumentType);
             entity.HasIndex(bprd => bprd.IsVerified);
 
@@ -5732,6 +5904,21 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany(r => r.Documents)
                 .HasForeignKey(bprd => bprd.RegistrationId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(bprd => bprd.FileUploadRecord)
+                .WithMany()
+                .HasForeignKey(bprd => bprd.FileUploadRecordId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<CentralDocumentRecord>()
+                .WithMany()
+                .HasForeignKey(bprd => bprd.CentralDocumentRecordId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<CentralDocumentVersion>()
+                .WithMany()
+                .HasForeignKey(bprd => bprd.CentralDocumentVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(bprd => bprd.VerifiedBy)
                 .WithMany()
@@ -6679,6 +6866,319 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         }
 
         builder.Entity<RolePermission>().HasData(rolePermissions.ToArray());
+    }
+
+    private static void ConfigureCentralDocumentManagementEntities(ModelBuilder builder)
+    {
+        builder.Entity<CentralDocumentRecord>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.DocumentReference }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.SourceModule, item.SourceRecordReference });
+            entity.HasMany(item => item.Versions)
+                .WithOne(item => item.DocumentRecord)
+                .HasForeignKey(item => item.DocumentRecordId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.AnnotationReviews)
+                .WithOne(item => item.DocumentRecord)
+                .HasForeignKey(item => item.DocumentRecordId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.MetadataValues)
+                .WithOne(item => item.DocumentRecord)
+                .HasForeignKey(item => item.DocumentRecordId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<CentralDocumentVersion>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.DocumentRecordId, item.VersionNumber }).IsUnique();
+        });
+
+        builder.Entity<CentralDocumentMetadataTemplate>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.TemplateCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.Module, item.DocumentType });
+        });
+
+        builder.Entity<CentralDocumentMetadataValue>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.DocumentRecordId, item.FieldKey }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.TemplateCode, item.FieldKey });
+        });
+
+        builder.Entity<CentralDocumentGenerationTemplate>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.TemplateCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.Module, item.DocumentType });
+        });
+
+        builder.Entity<CentralDocumentAnnotationReview>(entity =>
+        {
+            entity.HasOne(item => item.DocumentVersion)
+                .WithMany()
+                .HasForeignKey(item => item.DocumentVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(item => new { item.TenantId, item.DocumentRecordId, item.Status });
+        });
+
+        builder.Entity<CentralDocumentAccessRule>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.AccessProfile, item.Module, item.RoleName });
+        });
+
+        builder.Entity<CentralDocumentRetentionPolicy>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.PolicyCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.Module, item.DocumentType });
+        });
+    }
+
+    private static void ConfigureLandAcquisitionEntities(ModelBuilder builder)
+    {
+        builder.Entity<LandAcquisition>(entity =>
+        {
+            entity.ToTable("LandAcquisitions");
+            entity.HasIndex(item => new { item.TenantId, item.ProjectReference }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.StageOrder, item.Status });
+            entity.Property(item => item.EstimatedSize).HasPrecision(18, 4);
+            entity.Property(item => item.Status).HasConversion<string>().HasMaxLength(60);
+            entity.Property(item => item.CurrentStage).HasConversion<string>().HasMaxLength(80);
+            entity.Property(item => item.OwnershipType).HasConversion<string>().HasMaxLength(80);
+
+            entity.HasMany(item => item.Documents)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.Notes)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.ChecklistResponses)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.CadastralSurveys)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.OwnershipHistories)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.NegotiationOffers)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.Registrations)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.LandAssets)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.PhysicalAssessment)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<LandPhysicalAssessment>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.Agreement)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<LandAgreement>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.LandInstrument)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<LandInstrument>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.StatutoryConsent)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<StatutoryConsent>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.StampDutyAssessment)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<StampDutyAssessment>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(item => item.StampDutyPayment)
+                .WithOne(item => item.LandAcquisition)
+                .HasForeignKey<StampDutyPayment>(item => item.LandAcquisitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<LandAcquisitionDocument>(entity =>
+        {
+            entity.ToTable("LandAcquisitionDocuments");
+            entity.Property(item => item.Procedure).HasConversion<string>().HasMaxLength(80);
+        });
+
+        builder.Entity<LandPhysicalAssessment>().ToTable("LandPhysicalAssessments");
+        builder.Entity<CadastralSurvey>().ToTable("CadastralSurveys");
+
+        builder.Entity<OwnershipHistory>(entity =>
+        {
+            entity.ToTable("OwnershipHistories");
+            entity.Property(item => item.OwnershipType).HasConversion<string>().HasMaxLength(80);
+            entity.Property(item => item.AcquisitionMethod).HasConversion<string>().HasMaxLength(80);
+        });
+
+        builder.Entity<NegotiationOffer>(entity =>
+        {
+            entity.ToTable("NegotiationOffers");
+            entity.Property(item => item.OpeningOffer).HasPrecision(18, 2);
+            entity.Property(item => item.CounterOffer).HasPrecision(18, 2);
+            entity.Property(item => item.NegotiatedValue).HasPrecision(18, 2);
+        });
+
+        builder.Entity<LandAgreement>().ToTable("LandAgreements");
+        builder.Entity<LandInstrument>().ToTable("LandInstruments");
+        builder.Entity<StatutoryConsent>().ToTable("StatutoryConsents");
+
+        builder.Entity<StampDutyAssessment>(entity =>
+        {
+            entity.ToTable("StampDutyAssessments");
+            entity.Property(item => item.AssessedValue).HasPrecision(18, 2);
+            entity.Property(item => item.DutyAmount).HasPrecision(18, 2);
+        });
+
+        builder.Entity<StampDutyPayment>(entity =>
+        {
+            entity.ToTable("StampDutyPayments");
+            entity.Property(item => item.AmountPaid).HasPrecision(18, 2);
+            entity.HasIndex(item => new { item.TenantId, item.AccountsPayableInvoiceId });
+            entity.HasIndex(item => new { item.TenantId, item.AccountsPayablePaymentId });
+        });
+
+        builder.Entity<LandRegistration>().ToTable("LandRegistrations");
+
+        builder.Entity<LandAsset>(entity =>
+        {
+            entity.ToTable("LandAssets");
+            entity.Property(item => item.CapitalizationValue).HasPrecision(18, 2);
+        });
+
+        builder.Entity<EstateManagedAsset>(entity =>
+        {
+            entity.ToTable("EstateManagedAssets");
+            entity.HasIndex(item => new { item.TenantId, item.AssetCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AssetType, item.Status });
+            entity.HasIndex(item => new { item.TenantId, item.ProjectUnitId });
+            entity.HasIndex(item => new { item.TenantId, item.LandAcquisitionId });
+            entity.HasIndex(item => new { item.TenantId, item.IsPublishedToExternalPortal, item.ExternalListingStatus });
+            entity.Property(item => item.AssetType).HasConversion<string>().HasMaxLength(40);
+            entity.Property(item => item.Status).HasConversion<string>().HasMaxLength(40);
+            entity.Property(item => item.SourceType).HasConversion<string>().HasMaxLength(40);
+            entity.Property(item => item.GisProvider).HasDefaultValue("GeoServer");
+            entity.Property(item => item.GisSyncStatus).HasDefaultValue("NotLinked");
+            entity.Property(item => item.AreaSquareMeters).HasPrecision(18, 4);
+            entity.Property(item => item.AreaValue).HasPrecision(18, 4);
+            entity.Property(item => item.ValuationAmount).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalListingPrice).HasPrecision(18, 2);
+            entity.HasMany(item => item.Documents)
+                .WithOne(item => item.EstateManagedAsset)
+                .HasForeignKey(item => item.EstateManagedAssetId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.Demarcations)
+                .WithOne(item => item.EstateManagedAsset)
+                .HasForeignKey(item => item.EstateManagedAssetId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EstateLandDemarcation>(entity =>
+        {
+            entity.ToTable("EstateLandDemarcations");
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.DemarcationNumber })
+                .IsUnique();
+            entity.Property(item => item.AreaSquareFeet).HasPrecision(18, 4);
+        });
+
+        builder.Entity<EstateGisConfiguration>(entity =>
+        {
+            entity.ToTable("EstateGisConfigurations");
+            entity.HasIndex(item => item.TenantId).IsUnique();
+        });
+
+        builder.Entity<EstateManagedAssetDocument>(entity =>
+        {
+            entity.ToTable("EstateManagedAssetDocuments");
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId });
+            entity.HasIndex(item => new { item.TenantId, item.CentralDocumentRecordId });
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.IsListingImage });
+        });
+
+        builder.Entity<LandAcquisitionNote>(entity =>
+        {
+            entity.ToTable("LandAcquisitionNotes");
+            entity.Property(item => item.Stage).HasConversion<string>().HasMaxLength(80);
+        });
+
+        builder.Entity<LandAcquisitionChecklistResponse>(entity =>
+        {
+            entity.ToTable("LandAcquisitionChecklistResponses");
+            entity.Property(item => item.Procedure).HasConversion<string>().HasMaxLength(80);
+        });
+    }
+
+    private static void ConfigureProcedureCaseEntities(ModelBuilder builder)
+    {
+        builder.Entity<ProcedureCase>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.Module, item.EntityType, item.Status });
+            entity.HasIndex(item => new { item.TenantId, item.ReferenceNumber });
+            entity.HasIndex(item => new { item.TenantId, item.CurrentAssignedRole });
+            entity.HasIndex(item => item.WorkflowDefinitionId);
+            entity.HasIndex(item => item.WorkflowInstanceId);
+            entity.HasIndex(item => item.WorkflowStepId);
+
+            entity.HasMany(item => item.Fields)
+                .WithOne(item => item.ProcedureCase)
+                .HasForeignKey(item => item.ProcedureCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.ChecklistItems)
+                .WithOne(item => item.ProcedureCase)
+                .HasForeignKey(item => item.ProcedureCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.Documents)
+                .WithOne(item => item.ProcedureCase)
+                .HasForeignKey(item => item.ProcedureCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(item => item.Activities)
+                .WithOne(item => item.ProcedureCase)
+                .HasForeignKey(item => item.ProcedureCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ProcedureCaseField>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.ProcedureCaseId, item.Key }).IsUnique();
+        });
+
+        builder.Entity<ProcedureCaseChecklistItem>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.ProcedureCaseId, item.StageIndex });
+        });
+
+        builder.Entity<ProcedureCaseDocument>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.ProcedureCaseId, item.IsMandatory });
+        });
+
+        builder.Entity<ProcedureCaseActivity>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.ProcedureCaseId, item.PerformedAt });
+        });
     }
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
@@ -8914,7 +9414,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             }
         );
 
-        // ── Global: default all FKs to Restrict to prevent cascade-cycle errors on SQL Server ──
+        // â”€â”€ Global: default all FKs to Restrict to prevent cascade-cycle errors on SQL Server â”€â”€
         foreach (var relationship in builder.Model.GetEntityTypes()
             .SelectMany(e => e.GetForeignKeys()))
         {
@@ -8950,6 +9450,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.Property(item => item.DecisionKey).IsUnicode(false).IsFixedLength();
             entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasAlternateKey(item => new { item.TenantId, item.ProfileId, item.Id });
             entity.HasIndex(item => new { item.TenantId, item.ProfileId, item.DecisionKey }).IsUnique();
             entity.HasIndex(item => new { item.TenantId, item.DecisionKey, item.Status });
             entity.ToTable(table =>

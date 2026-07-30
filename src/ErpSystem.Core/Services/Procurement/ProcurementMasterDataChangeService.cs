@@ -21,11 +21,15 @@ namespace ErpSystem.Core.Services.Procurement;
 public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataChangeService
 {
     private const string EventType = "MasterDataChange";
+    private static readonly string[] DecisionKeys = Enumerable.Range(1, 14)
+        .Select(number => $"DEC-{number:000}")
+        .ToArray();
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IWorkflowInstanceService _workflowInstances;
+    private readonly INotificationTopicPublisher _notificationTopics;
     private readonly ILogger<ProcurementMasterDataChangeService> _logger;
 
     public ProcurementMasterDataChangeService(
@@ -33,12 +37,14 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         ICurrentUserProvider currentUser,
         IProcurementControlEventService controlEvents,
         IWorkflowInstanceService workflowInstances,
+        INotificationTopicPublisher notificationTopics,
         ILogger<ProcurementMasterDataChangeService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _controlEvents = controlEvents;
         _workflowInstances = workflowInstances;
+        _notificationTopics = notificationTopics;
         _logger = logger;
     }
 
@@ -327,7 +333,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         var target = await LoadTargetAsync(request.ResourceType, request.TargetId, null, false, cancellationToken);
         var beforeJson = Snapshot(target.Entity, request.ResourceType, target.Kind);
         var normalizedPatch = NormalizeAndValidatePatch(target.Entity, request.ResourceType, target.Kind, request.ProposedChangesJson);
-        await ValidateTargetRelationsAsync(target.Entity, target.Kind, cancellationToken);
+        await ValidateTargetRelationsAsync(target.Entity, target.Kind, request.ResourceType, cancellationToken);
         var now = DateTime.UtcNow;
         ProcurementMasterDataChangeRequest entity;
         object? before = null;
@@ -659,13 +665,16 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
             var target = await LoadTargetAsync(entity.ResourceType, entity.TargetId, entity.TargetKind, true, cancellationToken);
             var currentBefore = Snapshot(target.Entity, entity.ResourceType, entity.TargetKind);
             NormalizeAndValidatePatch(target.Entity, entity.ResourceType, entity.TargetKind, entity.ProposedChangesJson);
-            await ValidateTargetRelationsAsync(target.Entity, target.Kind, cancellationToken);
+            await ValidateTargetRelationsAsync(target.Entity, target.Kind, entity.ResourceType, cancellationToken);
+            if (target.Entity is BusinessPartner partner &&
+                entity.ResourceType == ProcurementMasterDataResourceType.SupplierCategoryAssignments)
+                SynchronizeSupplierCategories(partner);
             target.Entity.UpdatedAt = now;
             target.Entity.UpdatedBy = _currentUser.Username;
             target.Entity.LastModifiedById = _currentUser.UserId;
             if (target.IsNewTenantSingleton)
                 await _unitOfWork.Repository<ProcurementSettings>().AddAsync((ProcurementSettings)target.Entity);
-            else
+            else if (entity.ResourceType != ProcurementMasterDataResourceType.SupplierCategoryAssignments)
                 await UpdateTargetAsync(target, cancellationToken);
             var afterJson = Snapshot(target.Entity, entity.ResourceType, entity.TargetKind);
             entity.AppliedAfterJson = afterJson;
@@ -841,7 +850,10 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
                 return new RevalidationResult(false, entity.RevalidationMessage);
             }
             NormalizeAndValidatePatch(target.Entity, entity.ResourceType, entity.TargetKind, entity.ProposedChangesJson);
-            await ValidateTargetRelationsAsync(target.Entity, target.Kind, cancellationToken);
+            await ValidateTargetRelationsAsync(target.Entity, target.Kind, entity.ResourceType, cancellationToken);
+            if (target.Entity is BusinessPartner partner &&
+                entity.ResourceType == ProcurementMasterDataResourceType.SupplierCategoryAssignments)
+                SynchronizeSupplierCategories(partner);
             var eligibility = ValidateEligibility(target);
             entity.RevalidationPassed = eligibility.Passed;
             entity.RevalidationMessage = eligibility.Message;
@@ -974,6 +986,12 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
                 await LoadBusinessPartnerAsync(targetId, requiredKind, tracked, cancellationToken),
             ProcurementMasterDataResourceType.SupplierTaxDetails =>
                 await LoadBusinessPartnerOrSupplierAsync(targetId, requiredKind, tracked, cancellationToken),
+            ProcurementMasterDataResourceType.SupplierOwnershipDetails =>
+                await LoadBusinessPartnerAsync(targetId, requiredKind, tracked, cancellationToken),
+            ProcurementMasterDataResourceType.SupplierCategoryAssignments =>
+                await LoadBusinessPartnerAsync(targetId, requiredKind, tracked, cancellationToken),
+            ProcurementMasterDataResourceType.SupplierComplianceStatus =>
+                await LoadBusinessPartnerAsync(targetId, requiredKind, tracked, cancellationToken),
             ProcurementMasterDataResourceType.InventoryItem =>
                 await LoadEntityAsync<InventoryItem>(targetId, ProcurementMasterDataTargetKind.InventoryItem, requiredKind, tracked,
                     item => $"{item.ItemCode} - {item.Name}", cancellationToken),
@@ -1004,7 +1022,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
     {
         if (requiredKind is null or ProcurementMasterDataTargetKind.BusinessPartner)
         {
-            var partner = await FindTenantEntityAsync<BusinessPartner>(id, tracked, cancellationToken);
+            var partner = await FindBusinessPartnerAsync(id, tracked, cancellationToken);
             if (partner is not null)
                 return new LoadedTarget(partner, ProcurementMasterDataTargetKind.BusinessPartner, $"{partner.PartnerCode} - {partner.PartnerName}", false);
         }
@@ -1024,9 +1042,24 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         CancellationToken cancellationToken)
     {
         if (requiredKind.HasValue && requiredKind != ProcurementMasterDataTargetKind.BusinessPartner) return null;
-        var partner = await FindTenantEntityAsync<BusinessPartner>(id, tracked, cancellationToken);
+        var partner = await FindBusinessPartnerAsync(id, tracked, cancellationToken);
         return partner is null ? null : new LoadedTarget(partner, ProcurementMasterDataTargetKind.BusinessPartner,
             $"{partner.PartnerCode} - {partner.PartnerName}", false);
+    }
+
+    private async Task<BusinessPartner?> FindBusinessPartnerAsync(
+        Guid id,
+        bool tracked,
+        CancellationToken cancellationToken)
+    {
+        IQueryable<BusinessPartner> query = _unitOfWork.Repository<BusinessPartner>()
+            .GetQueryable(item => item.Id == id && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Include(item => item.Categories);
+        if (!tracked) query = query.AsNoTracking();
+        var partner = await query.SingleOrDefaultAsync(cancellationToken);
+        if (partner is not null)
+            partner.CategoryIds = partner.Categories.Select(item => item.CategoryId).Distinct().Order().ToList();
+        return partner;
     }
 
     private async Task<LoadedTarget?> LoadEntityAsync<T>(
@@ -1131,6 +1164,10 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
                     else
                     {
                         value = JsonSerializer.Deserialize(item.Value.GetRawText(), property.PropertyType, JsonOptions);
+                        if (resourceType == ProcurementMasterDataResourceType.SupplierOwnershipDetails &&
+                            string.Equals(property.Name, nameof(BusinessPartner.BeneficialOwnershipJson), StringComparison.Ordinal) &&
+                            value is string ownershipJson)
+                            value = NormalizeBeneficialOwnershipJson(ownershipJson);
                     }
                 }
                 catch (Exception exception) when (exception is JsonException or NotSupportedException)
@@ -1163,10 +1200,41 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         return JsonSerializer.Serialize(values, JsonOptions);
     }
 
-    private async Task ValidateTargetRelationsAsync(BaseEntity entity, ProcurementMasterDataTargetKind kind, CancellationToken cancellationToken)
+    private async Task ValidateTargetRelationsAsync(
+        BaseEntity entity,
+        ProcurementMasterDataTargetKind kind,
+        ProcurementMasterDataResourceType resourceType,
+        CancellationToken cancellationToken)
     {
         switch (entity)
         {
+            case BusinessPartner partner:
+                if (partner.ParentId == partner.Id)
+                    throw new ProcurementMasterDataChangeValidationException("SUPPLIER_PARENT_SELF", "A supplier cannot be its own parent.");
+                if (partner.ParentId.HasValue && !await ExistsTenantAsync<BusinessPartner>(partner.ParentId.Value, cancellationToken))
+                    throw new ProcurementMasterDataChangeValidationException("SUPPLIER_PARENT_NOT_FOUND", "ParentId must identify a current-tenant business partner.");
+                if (resourceType == ProcurementMasterDataResourceType.SupplierCategoryAssignments)
+                {
+                    partner.CategoryIds = partner.CategoryIds.Distinct().Order().ToList();
+                    if (partner.CategoryIds.Count == 0)
+                        throw new ProcurementMasterDataChangeValidationException("SUPPLIER_CATEGORY_REQUIRED", "At least one supplier category is required.");
+                    var validCategories = await _unitOfWork.Repository<PartnerCategory>()
+                        .GetQueryable(item => partner.CategoryIds.Contains(item.Id) &&
+                            item.TenantId == _currentUser.TenantId && !item.IsDeleted && item.IsActive)
+                        .CountAsync(cancellationToken);
+                    if (validCategories != partner.CategoryIds.Count)
+                        throw new ProcurementMasterDataChangeValidationException("SUPPLIER_CATEGORY_INVALID", "Every CategoryIds value must identify an active current-tenant partner category.");
+                }
+                if (resourceType == ProcurementMasterDataResourceType.SupplierOwnershipDetails)
+                {
+                    partner.BeneficialOwnershipJson = NormalizeBeneficialOwnershipJson(partner.BeneficialOwnershipJson);
+                    if (partner.OwnershipVerifiedAtUtc.HasValue &&
+                        EnsureUtc(partner.OwnershipVerifiedAtUtc.Value) > DateTime.UtcNow.AddMinutes(1))
+                        throw new ProcurementMasterDataChangeValidationException("OWNERSHIP_VERIFIED_DATE_INVALID", "OwnershipVerifiedAtUtc cannot be in the future.");
+                }
+                if (resourceType == ProcurementMasterDataResourceType.SupplierComplianceStatus)
+                    ValidateSupplierCompliance(partner);
+                break;
             case InventoryItem item:
                 if (!await ExistsTenantAsync<InventoryCategory>(item.CategoryId, cancellationToken))
                     throw new ProcurementMasterDataChangeValidationException("CATEGORY_NOT_FOUND", "Inventory item CategoryId must identify a current-tenant category.");
@@ -1231,9 +1299,123 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         }
     }
 
+    private static void SynchronizeSupplierCategories(BusinessPartner partner)
+    {
+        var desired = partner.CategoryIds.Distinct().Order().ToList();
+        partner.Categories.Clear();
+        for (var index = 0; index < desired.Count; index++)
+        {
+            partner.Categories.Add(new BusinessPartnerCategory
+            {
+                BusinessPartnerId = partner.Id,
+                CategoryId = desired[index],
+                IsPrimary = index == 0
+            });
+        }
+    }
+
     private Task<bool> ExistsTenantAsync<T>(Guid id, CancellationToken cancellationToken) where T : TenantEntity =>
         _unitOfWork.Repository<T>().GetQueryable(item => item.Id == id && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .AnyAsync(cancellationToken);
+
+    private static string NormalizeBeneficialOwnershipJson(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ProcurementMasterDataChangeValidationException(
+                "OWNERSHIP_REQUIRED",
+                "BeneficialOwnershipJson must contain at least one beneficial owner.");
+
+        JsonDocument document;
+        try { document = JsonDocument.Parse(value); }
+        catch (JsonException exception)
+        {
+            throw new ProcurementMasterDataChangeValidationException("OWNERSHIP_JSON_INVALID", exception.Message);
+        }
+
+        using (document)
+        {
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+                throw new ProcurementMasterDataChangeValidationException("OWNERSHIP_ARRAY_REQUIRED", "BeneficialOwnershipJson must be a JSON array.");
+            var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "name", "ownershipPercent", "nationality", "registrationNumber", "politicallyExposed"
+            };
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                if (element.ValueKind != JsonValueKind.Object ||
+                    element.EnumerateObject().Any(property => !allowed.Contains(property.Name)))
+                    throw new ProcurementMasterDataChangeValidationException(
+                        "OWNERSHIP_FIELD_INVALID",
+                        "Each beneficial owner may contain only name, ownershipPercent, nationality, registrationNumber, and politicallyExposed.");
+            }
+        }
+
+        List<BeneficialOwnerInput> owners;
+        try
+        {
+            owners = JsonSerializer.Deserialize<List<BeneficialOwnerInput>>(value, JsonOptions) ?? new();
+        }
+        catch (JsonException exception)
+        {
+            throw new ProcurementMasterDataChangeValidationException("OWNERSHIP_JSON_INVALID", exception.Message);
+        }
+
+        if (owners.Count == 0 || owners.Any(item => string.IsNullOrWhiteSpace(item.Name)))
+            throw new ProcurementMasterDataChangeValidationException("OWNERSHIP_NAME_REQUIRED", "Every beneficial owner requires a name.");
+        if (owners.Any(item => item.OwnershipPercent <= 0m || item.OwnershipPercent > 100m))
+            throw new ProcurementMasterDataChangeValidationException("OWNERSHIP_PERCENT_INVALID", "Every ownershipPercent must be greater than zero and no more than 100.");
+        if (owners.GroupBy(item => item.Name.Trim(), StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+            throw new ProcurementMasterDataChangeValidationException("OWNERSHIP_DUPLICATE", "Beneficial-owner names must be unique.");
+        if (Math.Abs(owners.Sum(item => item.OwnershipPercent) - 100m) > 0.01m)
+            throw new ProcurementMasterDataChangeValidationException("OWNERSHIP_TOTAL_INVALID", "Beneficial ownership percentages must total 100.");
+
+        var normalized = owners
+            .Select(item => new BeneficialOwnerInput
+            {
+                Name = item.Name.Trim(),
+                OwnershipPercent = decimal.Round(item.OwnershipPercent, 2),
+                Nationality = TruncateNullable(item.Nationality, 100),
+                RegistrationNumber = TruncateNullable(item.RegistrationNumber, 100),
+                PoliticallyExposed = item.PoliticallyExposed
+            })
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return JsonSerializer.Serialize(normalized, JsonOptions);
+    }
+
+    private static void ValidateSupplierCompliance(BusinessPartner partner)
+    {
+        var registrationStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Pending", "PendingApproval", "UnderReview", "Approved", "Rejected", "Suspended", "Blacklisted", "Active", "Inactive"
+        };
+        var approvalStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Pending", "Approved", "Rejected"
+        };
+        var complianceStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "PendingReview", "Compliant", "Conditional", "NonCompliant", "Suspended"
+        };
+        var riskLevels = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Low", "Medium", "High", "Critical"
+        };
+
+        if (string.IsNullOrWhiteSpace(partner.RegistrationStatus) || !registrationStatuses.Contains(partner.RegistrationStatus))
+            throw new ProcurementMasterDataChangeValidationException("REGISTRATION_STATUS_INVALID", "RegistrationStatus is not an allowed controlled supplier status.");
+        if (!string.IsNullOrWhiteSpace(partner.ApprovalStatus) && !approvalStatuses.Contains(partner.ApprovalStatus))
+            throw new ProcurementMasterDataChangeValidationException("APPROVAL_STATUS_INVALID", "ApprovalStatus is not an allowed controlled supplier approval status.");
+        if (!string.IsNullOrWhiteSpace(partner.ComplianceStatus) && !complianceStatuses.Contains(partner.ComplianceStatus))
+            throw new ProcurementMasterDataChangeValidationException("COMPLIANCE_STATUS_INVALID", "ComplianceStatus must be PendingReview, Compliant, Conditional, NonCompliant, or Suspended.");
+        if (!string.IsNullOrWhiteSpace(partner.RiskLevel) && !riskLevels.Contains(partner.RiskLevel))
+            throw new ProcurementMasterDataChangeValidationException("RISK_LEVEL_INVALID", "RiskLevel must be Low, Medium, High, or Critical.");
+        if (partner.IsBlacklisted && (string.IsNullOrWhiteSpace(partner.BlacklistReason) || !partner.BlacklistDate.HasValue))
+            throw new ProcurementMasterDataChangeValidationException("BLACKLIST_EVIDENCE_REQUIRED", "Blacklisted suppliers require BlacklistReason and BlacklistDate.");
+        if (partner.ComplianceReviewDateUtc.HasValue && partner.ComplianceValidUntilUtc.HasValue &&
+            EnsureUtc(partner.ComplianceValidUntilUtc.Value) < EnsureUtc(partner.ComplianceReviewDateUtc.Value))
+            throw new ProcurementMasterDataChangeValidationException("COMPLIANCE_PERIOD_INVALID", "ComplianceValidUntilUtc cannot precede ComplianceReviewDateUtc.");
+    }
 
     private async Task RecordEventAsync(
         string action,
@@ -1265,7 +1447,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
             RuleCode = ProcurementMasterDataResourceRegistry.Get(policy.ResourceType).Code,
             RuleId = policy.Id,
             RuleVersion = policy.Version.ToString(),
-            DecisionKeys = new List<string>(),
+            DecisionKeys = DecisionKeys.ToList(),
             SourceType = sourceId == policy.Id ? "ProcurementMasterDataControlPolicy" : "ProcurementMasterDataChangeRequest",
             SourceId = sourceId,
             SourceReference = Truncate(sourceReference, 500),
@@ -1277,6 +1459,61 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
             OccurredAtUtc = DateTime.UtcNow,
             Evidence = evidenceReferences
         }, cancellationToken);
+
+        if (action is "Submitted" or "Approved" or "Rejected" or "Applied" or "Cancelled" or
+            "SubmissionRevalidationFailed" or "ApprovalRevalidationFailed" or "ApplicationRevalidationFailed")
+            await PublishNotificationAsync(action, result, policy, sourceId, sourceReference, reason, cancellationToken);
+    }
+
+    private async Task PublishNotificationAsync(
+        string action,
+        ProcurementControlEventResult result,
+        ProcurementMasterDataControlPolicy policy,
+        Guid? sourceId,
+        string sourceReference,
+        string? reason,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var supplierResource = policy.ResourceType is
+                ProcurementMasterDataResourceType.SupplierProfile or
+                ProcurementMasterDataResourceType.SupplierBankDetails or
+                ProcurementMasterDataResourceType.SupplierTaxDetails or
+                ProcurementMasterDataResourceType.SupplierOwnershipDetails or
+                ProcurementMasterDataResourceType.SupplierCategoryAssignments or
+                ProcurementMasterDataResourceType.SupplierComplianceStatus;
+            var topicScope = supplierResource ? "supplier-master-change" : "master-data-change";
+            await _notificationTopics.PublishAsync(new NotificationTopicEvent
+            {
+                TenantId = policy.TenantId,
+                TopicKey = $"procurement.{topicScope}.{action.ToLowerInvariant()}",
+                NotificationType = supplierResource
+                    ? "ProcurementSupplierMasterChangeControl"
+                    : "ProcurementMasterDataChangeControl",
+                EntityType = sourceId == policy.Id
+                    ? "ProcurementMasterDataControlPolicy"
+                    : "ProcurementMasterDataChangeRequest",
+                EntityId = sourceId,
+                TriggeredByUserId = _currentUser.UserId,
+                Data = new Dictionary<string, object>
+                {
+                    ["sourceReference"] = sourceReference,
+                    ["resourceType"] = policy.ResourceType.ToString(),
+                    ["policyId"] = policy.Id,
+                    ["policyVersion"] = policy.Version,
+                    ["action"] = action,
+                    ["result"] = result.ToString(),
+                    ["reason"] = reason ?? string.Empty
+                }
+            }, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception,
+                "Failed to publish master-data change notification for {SourceId}/{Action}",
+                sourceId, action);
+        }
     }
 
     private static ProcurementMasterDataPolicyDto MapPolicy(ProcurementMasterDataControlPolicy item)
@@ -1578,4 +1815,12 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
 
     private sealed record LoadedTarget(BaseEntity Entity, ProcurementMasterDataTargetKind Kind, string Reference, bool IsNewTenantSingleton);
     private sealed record RevalidationResult(bool Passed, string Message);
+    private sealed class BeneficialOwnerInput
+    {
+        public string Name { get; set; } = string.Empty;
+        public decimal OwnershipPercent { get; set; }
+        public string? Nationality { get; set; }
+        public string? RegistrationNumber { get; set; }
+        public bool PoliticallyExposed { get; set; }
+    }
 }

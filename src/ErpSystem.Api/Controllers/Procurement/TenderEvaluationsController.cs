@@ -127,6 +127,22 @@ public class TenderEvaluationsController : ControllerBase
             var evaluation = await _evaluationService.CreateEvaluationAsync(dto);
             return CreatedAtAction(nameof(GetEvaluation), new { id = evaluation.Id }, evaluation);
         }
+        catch (ProcurementEvaluationCommitteeNotFoundException ex)
+        {
+            return NotFound(CommitteeProblem(404, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeConflictException ex)
+        {
+            return Conflict(CommitteeProblem(409, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeValidationException ex)
+        {
+            return UnprocessableEntity(CommitteeProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException ex)
+        {
+            return StatusCode(403, CommitteeProblem(403, "EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -149,6 +165,22 @@ public class TenderEvaluationsController : ControllerBase
         {
             var evaluation = await _evaluationService.UpdateEvaluationAsync(id, dto);
             return Ok(evaluation);
+        }
+        catch (ProcurementEvaluationCommitteeNotFoundException ex)
+        {
+            return NotFound(CommitteeProblem(404, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeConflictException ex)
+        {
+            return Conflict(CommitteeProblem(409, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeValidationException ex)
+        {
+            return UnprocessableEntity(CommitteeProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException ex)
+        {
+            return StatusCode(403, CommitteeProblem(403, "EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
         }
         catch (InvalidOperationException ex)
         {
@@ -173,6 +205,22 @@ public class TenderEvaluationsController : ControllerBase
             var evaluation = await _evaluationService.SubmitEvaluationAsync(id, dto);
             return Ok(evaluation);
         }
+        catch (ProcurementEvaluationCommitteeNotFoundException ex)
+        {
+            return NotFound(CommitteeProblem(404, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeConflictException ex)
+        {
+            return Conflict(CommitteeProblem(409, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeValidationException ex)
+        {
+            return UnprocessableEntity(CommitteeProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException ex)
+        {
+            return StatusCode(403, CommitteeProblem(403, "EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -195,6 +243,22 @@ public class TenderEvaluationsController : ControllerBase
         {
             await _evaluationService.DeleteEvaluationAsync(id);
             return NoContent();
+        }
+        catch (ProcurementEvaluationCommitteeNotFoundException ex)
+        {
+            return NotFound(CommitteeProblem(404, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeConflictException ex)
+        {
+            return Conflict(CommitteeProblem(409, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeValidationException ex)
+        {
+            return UnprocessableEntity(CommitteeProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException ex)
+        {
+            return StatusCode(403, CommitteeProblem(403, "EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
         }
         catch (InvalidOperationException ex)
         {
@@ -281,6 +345,18 @@ public class TenderEvaluationsController : ControllerBase
             var result = await _evaluationService.CalculateQCBSScoresAsync(tenderId);
             return Ok(result);
         }
+        catch (ProcurementEvaluationCommitteeConflictException ex)
+        {
+            return Conflict(CommitteeProblem(409, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeValidationException ex)
+        {
+            return UnprocessableEntity(CommitteeProblem(422, ex.Code, ex.Message));
+        }
+        catch (ProcurementEvaluationCommitteeAuthorizationException ex)
+        {
+            return StatusCode(403, CommitteeProblem(403, "EVALUATION_COMMITTEE_ACCESS_FORBIDDEN", ex.Message));
+        }
         catch (InvalidOperationException ex)
         {
             _logger.LogWarning(ex, "Invalid operation calculating QCBS scores for tender {TenderId}", tenderId);
@@ -321,4 +397,17 @@ public class TenderEvaluationsController : ControllerBase
             return StatusCode(500, "An error occurred while retrieving QCBS evaluation results");
         }
     }
+
+    private ProblemDetails CommitteeProblem(int status, string code, string detail) => new()
+    {
+        Status = status,
+        Title = "Evaluation committee control",
+        Detail = detail,
+        Instance = HttpContext.Request.Path,
+        Extensions =
+        {
+            ["code"] = code,
+            ["correlationId"] = HttpContext.TraceIdentifier
+        }
+    };
 }

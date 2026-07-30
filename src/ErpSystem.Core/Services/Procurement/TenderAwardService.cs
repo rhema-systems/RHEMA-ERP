@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.Extensions.Logging;
@@ -24,6 +25,7 @@ public class TenderAwardService : ITenderAwardService
     private readonly ILogger<TenderAwardService> _logger;
     private readonly IProcurementTenderControlService _tenderControlService;
     private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
+    private readonly IProcurementAwardReadinessService _awardReadiness;
 
     public TenderAwardService(
         ITenderAwardRepository awardRepository,
@@ -40,6 +42,7 @@ public class TenderAwardService : ITenderAwardService
         ICurrentUserProvider currentUserProvider,
         IProcurementTenderControlService tenderControlService,
         IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
+        IProcurementAwardReadinessService awardReadiness,
         ILogger<TenderAwardService> logger)
     {
         _awardRepository = awardRepository;
@@ -56,6 +59,7 @@ public class TenderAwardService : ITenderAwardService
         _currentUserProvider = currentUserProvider;
         _tenderControlService = tenderControlService;
         _exceptionalSourcingControlService = exceptionalSourcingControlService;
+        _awardReadiness = awardReadiness;
         _logger = logger;
     }
 
@@ -223,16 +227,26 @@ public class TenderAwardService : ITenderAwardService
         }
     }
 
-    public async Task<TenderAwardDto> CreateAwardAsync(Guid tenderId, CreateAwardDto dto)
+    public async Task<TenderAwardDto> CreateAwardAsync(
+        Guid tenderId,
+        CreateAwardDto dto,
+        string? correlationId = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
+            var correlation = string.IsNullOrWhiteSpace(correlationId)
+                ? Guid.NewGuid().ToString("N")
+                : correlationId.Trim();
             await EnsureLegacyAwardAllowedAsync(tenderId);
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
 
             var bid = await _bidRepository.GetByIdAsync(dto.TenderBidId)
                 ?? throw new InvalidOperationException($"Bid with ID {dto.TenderBidId} not found");
+            if (bid.TenderId != tenderId)
+                throw new InvalidOperationException(
+                    "The selected bid does not belong to the tender being awarded.");
 
             // Check if award already exists for this tender
             var existingAward = await _awardRepository.GetByTenderIdAsync(tenderId);
@@ -240,6 +254,17 @@ public class TenderAwardService : ITenderAwardService
             {
                 throw new InvalidOperationException($"Award already exists for tender {tender.TenderNumber}");
             }
+            await _awardReadiness.EnsureAwardReadyAsync(
+                ProcurementAwardReadinessSourceType.Tender,
+                tenderId,
+                ProcurementAwardReadinessGateRequestFactory.Create(
+                    ProcurementAwardReadinessSourceType.Tender,
+                    tenderId,
+                    correlation,
+                    [bid.Id],
+                    [bid.BusinessPartnerId]),
+                correlation,
+                cancellationToken);
 
             // Award is created with the bid amount as both original and awarded amount
             // Negotiation happens AFTER award creation and will update these values
@@ -292,7 +317,7 @@ public class TenderAwardService : ITenderAwardService
                 await _bidRepository.UpdateAsync(rejectedBid);
             }
 
-            await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Created award {AwardId} for tender {TenderId}. Rejected {RejectedCount} other bids.",
                 award.Id, tenderId, rejectedBids.Count);

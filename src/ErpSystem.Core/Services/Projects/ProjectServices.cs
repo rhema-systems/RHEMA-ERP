@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.Entities;
@@ -15,6 +16,7 @@ using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
+using ErpSystem.Core.Interfaces.Estate;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Projects;
@@ -51,6 +53,7 @@ public partial class ProjectService : IProjectService
     private readonly IWorkOrderService _workOrderService;
     private readonly ISalesAgreementService _salesAgreementService;
     private readonly ISalesOrderService _salesOrderService;
+    private readonly IEstateManagedAssetService _estateManagedAssetService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ITenantSettingsService _tenantSettingsService;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -74,6 +77,7 @@ public partial class ProjectService : IProjectService
         IWorkOrderService workOrderService,
         ISalesAgreementService salesAgreementService,
         ISalesOrderService salesOrderService,
+        IEstateManagedAssetService estateManagedAssetService,
         IUnitOfWork unitOfWork,
         ITenantSettingsService tenantSettingsService,
         ICurrentUserProvider currentUserProvider,
@@ -96,6 +100,7 @@ public partial class ProjectService : IProjectService
         _workOrderService = workOrderService;
         _salesAgreementService = salesAgreementService;
         _salesOrderService = salesOrderService;
+        _estateManagedAssetService = estateManagedAssetService;
         _unitOfWork = unitOfWork;
         _tenantSettingsService = tenantSettingsService;
         _currentUserProvider = currentUserProvider;
@@ -317,6 +322,10 @@ public partial class ProjectService : IProjectService
 
         var slackMonths = NormalizeSlackMonths(dto.SlackMonths);
         EnsureChronologicalDateRange(dto.StartDate, dto.TargetEndDate, "project schedule");
+        if (dto.DevelopmentProfile != null)
+        {
+            dto.DevelopmentProfile.LandReference = await ResolveReadyProjectLandReferenceAsync(dto.DevelopmentProfile.LandReference);
+        }
 
         var project = new Project
         {
@@ -403,6 +412,9 @@ public partial class ProjectService : IProjectService
         await ValidatePortfolioProgramAsync(dto.PortfolioId, dto.ProgramId);
         var slackMonths = NormalizeSlackMonths(dto.SlackMonths);
         EnsureChronologicalDateRange(dto.StartDate, dto.TargetEndDate, "project schedule");
+        // Estate integration: update-time land validation is handled inside the development profile upsert
+        // so unchanged legacy references do not block unrelated Project Management edits.
+
         project.Title = dto.Title.Trim();
         project.Summary = dto.Summary;
         project.BusinessCase = dto.BusinessCase;

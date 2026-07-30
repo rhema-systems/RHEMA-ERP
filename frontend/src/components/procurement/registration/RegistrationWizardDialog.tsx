@@ -2,8 +2,19 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -17,7 +28,7 @@ import {
   ArrowRight,
   Save,
   AlertCircle,
-  X
+  X,
 } from 'lucide-react';
 import {
   businessPartnerRegistrationService,
@@ -35,11 +46,26 @@ import LicenseInformation from './LicenseInformation';
 import RegistrationSummary from './RegistrationSummary';
 
 const STEPS = [
-  { id: 1, name: 'Company Information', icon: Building2, component: 'CompanyInformation' },
-  { id: 2, name: 'Contact Information', icon: Contact, component: 'ContactInformation' },
+  {
+    id: 1,
+    name: 'Company Information',
+    icon: Building2,
+    component: 'CompanyInformation',
+  },
+  {
+    id: 2,
+    name: 'Contact Information',
+    icon: Contact,
+    component: 'ContactInformation',
+  },
   { id: 3, name: 'Documents', icon: FileText, component: 'DocumentUpload' },
   { id: 4, name: 'Licenses', icon: Award, component: 'LicenseInformation' },
-  { id: 5, name: 'Review & Submit', icon: CheckCircle2, component: 'RegistrationSummary' },
+  {
+    id: 5,
+    name: 'Review & Submit',
+    icon: CheckCircle2,
+    component: 'RegistrationSummary',
+  },
 ];
 
 interface RegistrationWizardDialogProps {
@@ -47,7 +73,10 @@ interface RegistrationWizardDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export default function RegistrationWizardDialog({ open, onOpenChange }: RegistrationWizardDialogProps) {
+export default function RegistrationWizardDialog({
+  open,
+  onOpenChange,
+}: RegistrationWizardDialogProps) {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -57,6 +86,7 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
   const [formData, setFormData] = useState<RegistrationFormData>({
     companyName: '',
     partnerType: 'Supplier',
+    registrationCategory: 'Goods',
     email: '',
     phone: '',
   });
@@ -66,15 +96,19 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
     const errors: string[] = [];
     if (!formData.companyName?.trim()) errors.push('Company Name is required');
     if (!formData.partnerType) errors.push('Partner Type is required');
+    if (!formData.registrationCategory)
+      errors.push('Registration Category is required');
     return errors;
   };
 
   const validateStep2 = (formData: RegistrationFormData): string[] => {
     const errors: string[] = [];
     if (!formData.email?.trim()) errors.push('Email is required');
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errors.push('Invalid email format');
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email))
+      errors.push('Invalid email format');
     if (!formData.phone?.trim()) errors.push('Phone number is required');
-    if (!formData.physicalAddress?.trim()) errors.push('Physical address is required');
+    if (!formData.physicalAddress?.trim())
+      errors.push('Physical address is required');
     if (!formData.city?.trim()) errors.push('City is required');
     if (!formData.country?.trim()) errors.push('Country is required');
     return errors;
@@ -100,14 +134,15 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
     return errors.length === 0;
   };
 
-  const buildRegistrationDraftPayload = (): CreateBusinessPartnerRegistrationDto => ({
-    partnerType: formData.partnerType,
-    companyName: formData.companyName,
-    registrationNumber: formData.registrationNumber,
-    email: formData.email,
-    phone: formData.phone,
-    registrationData: JSON.stringify(formData),
-  });
+  const buildRegistrationDraftPayload =
+    (): CreateBusinessPartnerRegistrationDto => ({
+      partnerType: formData.partnerType,
+      companyName: formData.companyName,
+      registrationNumber: formData.registrationNumber,
+      email: formData.email,
+      phone: formData.phone,
+      registrationData: JSON.stringify(formData),
+    });
 
   const handleSaveDraft = async () => {
     try {
@@ -119,12 +154,20 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
           email: formData.email,
           phone: formData.phone,
           registrationData: JSON.stringify(formData),
-          completionPercentage: businessPartnerRegistrationService.calculateCompletionPercentage(formData),
+          completionPercentage:
+            businessPartnerRegistrationService.calculateCompletionPercentage(
+              formData
+            ),
         };
-        await businessPartnerRegistrationService.update(registrationId, updatePayload);
+        await businessPartnerRegistrationService.update(
+          registrationId,
+          updatePayload
+        );
         toast.success('Draft saved successfully');
       } else {
-        const created = await businessPartnerRegistrationService.create(buildRegistrationDraftPayload());
+        const created = await businessPartnerRegistrationService.create(
+          buildRegistrationDraftPayload()
+        );
         setRegistrationId(created.id);
         toast.success('Draft created successfully');
       }
@@ -172,23 +215,51 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
   };
 
   const updateFormData = (data: Partial<RegistrationFormData>) => {
-    setFormData(prev => ({ ...prev, ...data }));
+    setFormData((prev) => ({ ...prev, ...data }));
   };
 
-  const completionPercentage = businessPartnerRegistrationService.calculateCompletionPercentage(formData);
+  const completionPercentage =
+    businessPartnerRegistrationService.calculateCompletionPercentage(formData);
 
   const renderStepContent = () => {
     switch (currentStep) {
       case 1:
-        return <CompanyInformation formData={formData} updateFormData={updateFormData} />;
+        return (
+          <CompanyInformation
+            formData={formData}
+            updateFormData={updateFormData}
+          />
+        );
       case 2:
-        return <ContactInformation formData={formData} updateFormData={updateFormData} />;
+        return (
+          <ContactInformation
+            formData={formData}
+            updateFormData={updateFormData}
+          />
+        );
       case 3:
-        return <DocumentUpload formData={formData} updateFormData={updateFormData} registrationId={registrationId} />;
+        return (
+          <DocumentUpload
+            formData={formData}
+            updateFormData={updateFormData}
+            registrationId={registrationId}
+          />
+        );
       case 4:
-        return <LicenseInformation formData={formData} updateFormData={updateFormData} />;
+        return (
+          <LicenseInformation
+            formData={formData}
+            updateFormData={updateFormData}
+          />
+        );
       case 5:
-        return <RegistrationSummary formData={formData} onSubmit={handleSubmit} loading={loading} />;
+        return (
+          <RegistrationSummary
+            formData={formData}
+            onSubmit={handleSubmit}
+            loading={loading}
+          />
+        );
       default:
         return null;
     }
@@ -199,9 +270,12 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto p-0">
         <div className="sticky top-0 bg-white z-10 border-b px-6 py-4">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold">Business Partner Registration</DialogTitle>
+            <DialogTitle className="text-2xl font-bold">
+              Business Partner Registration
+            </DialogTitle>
             <p className="text-sm text-gray-600 mt-1">
-              Complete the registration process to become an approved business partner
+              Complete the registration process to become an approved business
+              partner
             </p>
           </DialogHeader>
         </div>
@@ -212,7 +286,9 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
             <Alert variant="destructive" className="mb-6">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                <div className="font-semibold mb-1">Please fix the following errors:</div>
+                <div className="font-semibold mb-1">
+                  Please fix the following errors:
+                </div>
                 <ul className="list-disc list-inside space-y-1">
                   {validationErrors.map((error, index) => (
                     <li key={index}>{error}</li>
@@ -253,15 +329,19 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
                     const isCompleted = currentStep > step.id;
 
                     return (
-                      <div key={step.id} className="flex flex-col items-center" style={{ flex: '1' }}>
+                      <div
+                        key={step.id}
+                        className="flex flex-col items-center"
+                        style={{ flex: '1' }}
+                      >
                         {/* Circle with Number/Icon */}
                         <div
                           className={`relative z-10 w-12 h-12 rounded-full flex items-center justify-center font-semibold text-lg transition-all duration-300 ${
                             isActive
                               ? 'bg-blue-500 text-white shadow-lg scale-110'
                               : isCompleted
-                              ? 'bg-blue-500 text-white'
-                              : 'bg-white text-gray-400 border-2 border-gray-300'
+                                ? 'bg-blue-500 text-white'
+                                : 'bg-white text-gray-400 border-2 border-gray-300'
                           }`}
                         >
                           {isCompleted ? (
@@ -278,8 +358,8 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
                               isActive
                                 ? 'text-blue-600'
                                 : isCompleted
-                                ? 'text-blue-500'
-                                : 'text-gray-500'
+                                  ? 'text-blue-500'
+                                  : 'text-gray-500'
                             }`}
                           >
                             {step.name}
@@ -299,8 +379,12 @@ export default function RegistrationWizardDialog({ open, onOpenChange }: Registr
               {/* Progress Percentage */}
               <div className="mt-6 pt-4 border-t border-gray-200">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-600">Overall Progress</span>
-                  <span className="text-sm font-semibold text-blue-600">{completionPercentage}% Complete</span>
+                  <span className="text-sm font-medium text-gray-600">
+                    Overall Progress
+                  </span>
+                  <span className="text-sm font-semibold text-blue-600">
+                    {completionPercentage}% Complete
+                  </span>
                 </div>
                 <Progress value={completionPercentage} className="h-2 mt-2" />
               </div>

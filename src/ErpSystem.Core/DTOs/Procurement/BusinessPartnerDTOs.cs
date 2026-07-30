@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Validation;
 
 namespace ErpSystem.Core.DTOs.Procurement;
@@ -33,6 +35,7 @@ public class BusinessPartnerDto
     public decimal? PerformanceRating { get; set; }
     public string? RiskLevel { get; set; }
     public bool IsPreferred { get; set; }
+    public bool IsActive { get; set; }
     public bool IsBlacklisted { get; set; }
     public string? Currency { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -114,6 +117,10 @@ public class BusinessPartnerDetailDto : BusinessPartnerDto
     public string? BlacklistReason { get; set; }
     public DateTime? BlacklistDate { get; set; }
     public DateTime? BlacklistExpiryDate { get; set; }
+    public string? ComplianceStatus { get; set; }
+    public DateTime? ComplianceReviewDateUtc { get; set; }
+    public DateTime? ComplianceValidUntilUtc { get; set; }
+    public string? ComplianceNotes { get; set; }
 
     // Contractor-Specific Fields
     public string? ContractorLicenseNumber { get; set; }
@@ -642,6 +649,15 @@ public class BusinessPartnerDocumentDto
 public class CreateBusinessPartnerDocumentDto
 {
     [Required]
+    public Guid? FileUploadRecordId { get; set; }
+
+    [Required]
+    public Guid? CentralDocumentRecordId { get; set; }
+
+    [Required]
+    public Guid? CentralDocumentVersionId { get; set; }
+
+    [Required]
     [MaxLength(100)]
     public string DocumentType { get; set; } = string.Empty;
 
@@ -665,6 +681,15 @@ public class CreateBusinessPartnerDocumentDto
 
     public DateTime? IssueDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
+
+    [MaxLength(50)]
+    public string? EvidenceRequirementCode { get; set; }
+
+    [MaxLength(100)]
+    public string? ClassificationCode { get; set; }
+
+    [MaxLength(64)]
+    public string? ChecksumSha256 { get; set; }
 }
 
 // ============================================================================
@@ -722,8 +747,10 @@ public class CreateBusinessPartnerFinancialDto
 public class BusinessPartnerRegistrationDto
 {
     public Guid Id { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public string ApplicationNumber { get; set; } = string.Empty;
     public string PartnerType { get; set; } = "Supplier";
+    public ProcurementSupplierRegistrationCategory? RegistrationCategory { get; set; }
     public string Status { get; set; } = "Draft";
     public string CompanyName { get; set; } = string.Empty;
     public string? RegistrationNumber { get; set; }
@@ -774,6 +801,7 @@ public class BusinessPartnerRegistrationDetailDto : BusinessPartnerRegistrationD
 
     public List<BusinessPartnerRegistrationDocumentDto> Documents { get; set; } = new();
     public List<BusinessPartnerRegistrationStatusHistoryDto> StatusHistory { get; set; } = new();
+    public ProcurementSupplierEvidenceReadinessDto? EvidenceReadiness { get; set; }
 }
 
 public class CreateBusinessPartnerRegistrationDto
@@ -781,6 +809,8 @@ public class CreateBusinessPartnerRegistrationDto
     [Required]
     [MaxLength(20)]
     public string PartnerType { get; set; } = "Supplier";
+
+    public ProcurementSupplierRegistrationCategory? RegistrationCategory { get; set; }
 
     [Required]
     [MaxLength(200)]
@@ -855,6 +885,8 @@ public class UpdateBusinessPartnerRegistrationDto
     [MaxLength(200)]
     public string CompanyName { get; set; } = string.Empty;
 
+    public ProcurementSupplierRegistrationCategory? RegistrationCategory { get; set; }
+
     [MaxLength(100)]
     public string? RegistrationNumber { get; set; }
 
@@ -899,12 +931,23 @@ public class BusinessPartnerRegistrationDocumentDto
 {
     public Guid Id { get; set; }
     public Guid RegistrationId { get; set; }
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
+    public FileVirusScanStatus? VirusScanStatus { get; set; }
     public string DocumentType { get; set; } = string.Empty;
     public string DocumentName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
     public string? DocumentPath { get; set; } // Alias for FilePath
+    [JsonIgnore]
+    public string? InternalStoragePath { get; set; }
     public long FileSize { get; set; }
     public string? MimeType { get; set; }
+    public string? EvidenceRequirementCode { get; set; }
+    public string? ClassificationCode { get; set; }
+    public DateTime? IssuedAtUtc { get; set; }
+    public DateTime? ExpiresAtUtc { get; set; }
+    public string? ChecksumSha256 { get; set; }
     public bool IsVerified { get; set; }
     public bool IsRejected { get; set; }
     public string? RejectionReason { get; set; }

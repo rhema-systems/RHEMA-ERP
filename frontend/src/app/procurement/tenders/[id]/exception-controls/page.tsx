@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, CheckCircle2, FileCheck2, Loader2, RefreshCw, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileCheck2, Loader2, MailCheck, RefreshCw, Share2, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import NegotiationInviteDialog from '@/components/procurement/awards/NegotiationInviteDialog';
 import { Badge } from '@/components/ui/badge';
@@ -21,19 +21,26 @@ import {
 } from '@/lib/procurement-exceptional-sourcing-control';
 import { getNegotiationByTenderAndBid } from '@/services/negotiationService';
 import { procurementExceptionalSourcingControlService as service } from '@/services/procurement-exceptional-sourcing-control.service';
+import { procurementAwardReadinessService } from '@/services/procurement-award-readiness.service';
+import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
+import { useAuth } from '@/hooks/use-auth';
 import {
   ProcurementExceptionalSourcingControlStatus as Status,
   type PrepareExceptionalSourcingRequest,
   type ProcurementExceptionalSourcingControl,
   type ProcurementExceptionalSourcingReadiness,
 } from '@/types/procurement-exceptional-sourcing-control';
+import type { ProcurementAwardReadinessDecision } from '@/types/procurement-award-readiness';
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '—';
 
 export default function ExceptionalSourcingControlsPage() {
   const { id: tenderId } = useParams<{ id: string }>();
+  const { hasPermission } = useAuth();
   const [control, setControl] = useState<ProcurementExceptionalSourcingControl | null>(null);
   const [readiness, setReadiness] = useState<ProcurementExceptionalSourcingReadiness | null>(null);
+  const [awardGate, setAwardGate] =
+    useState<ProcurementAwardReadinessDecision | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -69,13 +76,21 @@ export default function ExceptionalSourcingControlsPage() {
     if (!tenderId) return;
     setLoading(true);
     setLoadError('');
-    const [controlResult, readinessResult] = await Promise.allSettled([
-      service.get(tenderId), service.readiness(tenderId),
+    const [controlResult, readinessResult, awardGateResult] = await Promise.allSettled([
+      service.get(tenderId),
+      service.readiness(tenderId),
+      procurementAwardReadinessService.latest(
+        'ExceptionalSourcing',
+        tenderId
+      ),
     ]);
     const nextControl = controlResult.status === 'fulfilled' ? controlResult.value : null;
     const nextReadiness = readinessResult.status === 'fulfilled' ? readinessResult.value : null;
     setControl(nextControl);
     setReadiness(nextReadiness);
+    setAwardGate(
+      awardGateResult.status === 'fulfilled' ? awardGateResult.value : null
+    );
     if (nextControl) {
       setBoardReference(nextControl.boardApprovalReference ?? '');
       setMdReference(nextControl.managingDirectorApprovalReference ?? '');
@@ -99,6 +114,14 @@ export default function ExceptionalSourcingControlsPage() {
   useEffect(() => { void load(); }, [load]);
   const actions = useMemo(() => control ? getExceptionalSourcingActions(control) : null, [control]);
   const selectedBid = control?.bids.find((item) => item.bidId === selectedBidId);
+  const awardGateAllows = Boolean(
+    awardGate?.isReady &&
+      awardGate.isCurrent &&
+      hasAwardReadinessAction(awardGate.allowedActions, 'RecordAward') &&
+      hasPermission('procurement.tender.approve') &&
+      control?.recommendedBidId &&
+      awardGate.recommendation.subjectIds.includes(control.recommendedBidId)
+  );
 
   const run = async (key: string, action: () => Promise<unknown>, success: string) => {
     try {
@@ -147,9 +170,27 @@ export default function ExceptionalSourcingControlsPage() {
           <h1 className="text-2xl font-semibold">{exceptionalMethodLabel(control?.method ?? readiness?.method ?? -1)} controls</h1>
           <p className="text-sm text-muted-foreground">{control?.tenderNumber ?? readiness?.tenderNumber} · {control?.tenderTitle ?? readiness?.tenderTitle}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {control && <Badge variant={control.status === Status.Rejected ? 'destructive' : 'secondary'}>{exceptionalSourcingStatusLabel[control.status]}</Badge>}
           {!control && <Badge variant="outline">Preparation required</Badge>}
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/procurement/tenders/${tenderId}/award-readiness?sourceType=ExceptionalSourcing`}>
+              <ShieldAlert className="mr-2 h-4 w-4" />
+              Award readiness
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/procurement/tenders/${tenderId}/bidder-communications?sourceType=ExceptionalSourcing`}>
+              <MailCheck className="mr-2 h-4 w-4" />
+              Bidder communications
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/procurement/tenders/${tenderId}/ghaneps-exchange?sourceType=ExceptionalSourcing`}>
+              <Share2 className="mr-2 h-4 w-4" />
+              GHANEPS exchange
+            </Link>
+          </Button>
           <Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
         </div>
       </div>
@@ -224,7 +265,8 @@ export default function ExceptionalSourcingControlsPage() {
 
           {actions.canRecommend && <ActionCard title="Record negotiated recommendation"><BidSelect control={control} value={selectedBidId} onChange={setSelectedBidId} /><Field label="Recommendation reason"><Textarea value={recommendationReason} onChange={(event) => setRecommendationReason(event.target.value)} /></Field><Field label="Signed recommendation evidence"><Input value={recommendationEvidence} onChange={(event) => setRecommendationEvidence(event.target.value)} /></Field><Button onClick={() => void run('recommend', () => service.recommendation(tenderId, { bidId: selectedBidId, reason: recommendationReason, evidenceReference: recommendationEvidence, rowVersion: control.rowVersion }), 'Recommendation recorded')} disabled={busy !== null || !selectedBidId}>Record recommendation</Button></ActionCard>}
 
-          {actions.canAward && <ActionCard title="Record controlled award"><Field label="Award reference"><Input value={awardReference} onChange={(event) => setAwardReference(event.target.value)} /></Field><Field label="Award evidence"><Input value={awardEvidence} onChange={(event) => setAwardEvidence(event.target.value)} /></Field><Button onClick={() => void run('award', () => service.award(tenderId, { bidId: control.recommendedBidId, awardReference, evidenceReference: awardEvidence, rowVersion: control.rowVersion }), 'Award recorded')} disabled={busy !== null}>Record award</Button></ActionCard>}
+          {actions.canAward && !awardGateAllows && <ActionCard title="Award-readiness gate"><p className="text-sm text-muted-foreground">A current server-derived Ready decision for the exact negotiated recommendation is required before the controlled award action is available.</p><Button asChild variant="outline"><Link href={`/procurement/tenders/${tenderId}/award-readiness?sourceType=ExceptionalSourcing`}>Review blocked reasons and re-evaluate</Link></Button></ActionCard>}
+          {actions.canAward && awardGateAllows && <ActionCard title="Record controlled award"><Field label="Award reference"><Input value={awardReference} onChange={(event) => setAwardReference(event.target.value)} /></Field><Field label="Award evidence"><Input value={awardEvidence} onChange={(event) => setAwardEvidence(event.target.value)} /></Field><Button onClick={() => void run('award', () => service.award(tenderId, { bidId: control.recommendedBidId, awardReference, evidenceReference: awardEvidence, rowVersion: control.rowVersion }), 'Award recorded')} disabled={busy !== null}>Record award</Button></ActionCard>}
 
           {actions.canContract && <ActionCard title="Link executed contract"><Field label="Contract reference"><Input value={contractReference} onChange={(event) => setContractReference(event.target.value)} /></Field><Field label="Executed contract evidence"><Input value={contractEvidence} onChange={(event) => setContractEvidence(event.target.value)} /></Field><Button onClick={() => void run('contract', () => service.contract(tenderId, { contractReference, evidenceReference: contractEvidence, rowVersion: control.rowVersion }), 'Contract linked')} disabled={busy !== null}>Record contract</Button></ActionCard>}
 

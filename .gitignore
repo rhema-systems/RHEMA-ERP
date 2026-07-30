@@ -80,6 +80,7 @@ jspm_packages/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.codex-doc-work/
 lerna-debug.log*
 
 # Runtime data
@@ -87,6 +88,7 @@ pids
 *.pid
 *.seed
 *.pid.lock
+src/ErpSystem.Api/secure-file-storage/
 
 # Coverage directory used by tools like istanbul
 coverage/
@@ -156,6 +158,10 @@ public
 frontend/public/*
 !frontend/public/icon-192.png
 !frontend/public/icon-512.png
+!frontend/public/images/
+!frontend/public/images/estate/
+!frontend/public/images/estate/listing-apartment-fallback.png
+!frontend/public/images/estate/listing-land-fallback.png
 !frontend/public/login.svg
 !frontend/public/manifest.json
 !frontend/public/sw.js

@@ -31,6 +31,8 @@ public sealed class ProcurementTenderControlServiceTests
         published.MethodRuleCode.Should().Be(fixture.Rule.RuleCode);
         published.AuthorityRouteReference.Should().Be(fixture.Route.RouteReference);
         published.Status.Should().Be(ProcurementTenderControlStatus.Advertised);
+        published.TenderDocumentReference.Should().Be("TDC-CONTROLLED/v4");
+        Guid.TryParse(published.TenderDocumentVersion, out _).Should().BeTrue();
         published.IntegrityHash.Should().HaveLength(64);
         fixture.SourcingCases.Verify(service => service.RevalidateSourceEntryAsync(
             fixture.Requisition.Id, fixture.ReleaseId, fixture.Case.Id, method,
@@ -40,6 +42,18 @@ public sealed class ProcurementTenderControlServiceTests
             It.Is<ProcurementControlEventWriteRequest>(request =>
                 request.Action == "TenderAdvertised" && request.DecisionKeys.Count == 14),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task PublicationRejectsFeeThatContradictsExactControlledRegister()
+    {
+        await using var fixture = new Fixture();
+
+        var action = () => fixture.PublishAsync(documentFee: 0m, controlledFee: 25m);
+
+        await action.Should().ThrowAsync<ProcurementTenderControlValidationException>()
+            .Where(exception => exception.Code == "TENDER_DOCUMENT_FEE_MISMATCH");
+        (await fixture.Context.ProcurementTenderControls.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -190,6 +204,18 @@ public sealed class ProcurementTenderControlServiceTests
         accepted.BidderAcceptanceReference.Should().Be("ACC-001");
         accepted.Milestones.Should().HaveCount(14);
         accepted.Milestones.Should().OnlyContain(item => item.CompletedAtUtc.HasValue);
+        fixture.AwardReadiness.Verify(service => service.EnsureAwardReadyAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id,
+            It.Is<EvaluateProcurementAwardReadinessRequest>(request =>
+                request.IdempotencyKey.StartsWith("award-gate:1:") &&
+                request.ExpectedRecommendedSubjectIds.SequenceEqual(
+                    new[] { fixture.Bids[0].Id }) &&
+                request.ExpectedBusinessPartnerIds.SequenceEqual(
+                    new[] { fixture.Bids[0].BusinessPartnerId }) &&
+                request.ExpectedSourceIntegrityHash == null),
+            "record-award",
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -230,6 +256,104 @@ public sealed class ProcurementTenderControlServiceTests
         await fixture.Service.Invoking(service => service.GetAsync(fixture.Tender.Id))
             .Should().ThrowAsync<ProcurementTenderControlNotFoundException>()
             .Where(exception => exception.Code == "TENDER_CONTROL_NOT_FOUND");
+    }
+
+    [Theory]
+    [InlineData("No active evaluation committee control exists.", false)]
+    [InlineData("The current actor is not appointed to this committee.", true)]
+    public async Task StatutoryEvaluationFailsClosedForMissingCommitteeOrNonmember(
+        string blockedReason,
+        bool authorizationFailure)
+    {
+        await using var fixture = new Fixture();
+        await fixture.OpenAsync();
+        fixture.EvaluationCommittee.Setup(service => service.EnsureScoreSubjectEligibleAsync(
+                ProcurementEvaluationSourceType.Tender, fixture.Tender.Id,
+                ProcurementEvaluationPhase.Technical, "ProcurementTenderControl", fixture.Tender.Id,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementEvaluationScorerEligibilityDto
+            {
+                Allowed = false,
+                BlockedReasons = [blockedReason]
+            });
+        var control = await fixture.Context.ProcurementTenderControls.SingleAsync();
+        control.RowVersion = [1, 2, 3, 4];
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.SaveTechnicalEvaluationAsync(
+            fixture.Tender.Id,
+            fixture.TechnicalRequest(Convert.ToBase64String(control.RowVersion)),
+            "blocked-scorer");
+
+        if (authorizationFailure)
+            await action.Should().ThrowAsync<ProcurementTenderControlAuthorizationException>();
+        else
+            await action.Should().ThrowAsync<ProcurementTenderControlConflictException>()
+                .Where(exception => exception.Code == "EVALUATION_SCORER_INELIGIBLE");
+        (await fixture.Context.ProcurementTenderControls.SingleAsync()).Status
+            .Should().Be(ProcurementTenderControlStatus.Opened);
+    }
+
+    [Fact]
+    public async Task ApprovedRecallReplacesExactProjectionButTechnicalRecallClosesAfterFinancialProgression()
+    {
+        await using var fixture = new Fixture();
+        await fixture.OpenAsync();
+        var control = await fixture.Context.ProcurementTenderControls.SingleAsync();
+        control.RowVersion = [1, 2, 3, 4];
+        await fixture.Context.SaveChangesAsync();
+        var first = await fixture.Service.SaveTechnicalEvaluationAsync(
+            fixture.Tender.Id,
+            fixture.TechnicalRequest(Convert.ToBase64String(control.RowVersion)),
+            "technical-attempt-1");
+        fixture.EvaluationCommittee.Setup(service => service.EnsureScoreSubjectEligibleAsync(
+                ProcurementEvaluationSourceType.Tender, fixture.Tender.Id,
+                ProcurementEvaluationPhase.Technical, "ProcurementTenderControl", fixture.Tender.Id,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(fixture.EligibleScorer(
+                ProcurementEvaluationPhase.Technical, authorizedAttempt: 2));
+
+        var replaced = await fixture.Service.SaveTechnicalEvaluationAsync(
+            fixture.Tender.Id,
+            fixture.TechnicalRequest(first.RowVersion),
+            "technical-attempt-2");
+        replaced.Status.Should().Be(ProcurementTenderControlStatus.TechnicalEvaluated);
+
+        var technicalUserId = fixture.CurrentUserId;
+        fixture.CurrentUserId = Guid.NewGuid();
+        var financial = await fixture.Service.SaveFinancialEvaluationAsync(
+            fixture.Tender.Id,
+            fixture.FinancialRequest(replaced.RowVersion),
+            "financial-attempt-1");
+        fixture.CurrentUserId = technicalUserId;
+
+        await fixture.Service.Invoking(service => service.SaveTechnicalEvaluationAsync(
+                fixture.Tender.Id,
+                fixture.TechnicalRequest(financial.RowVersion),
+                "late-technical-recall"))
+            .Should().ThrowAsync<ProcurementTenderControlConflictException>()
+            .Where(exception => exception.Code == "TENDER_TECHNICAL_RECALL_WINDOW_CLOSED");
+    }
+
+    [Theory]
+    [InlineData(true, false, "EVALUATION_SCORE_RECALL_UNRESOLVED")]
+    [InlineData(false, true, "EVALUATION_SCORE_PROJECTION_MISMATCH")]
+    public async Task ApprovalRejectsUnresolvedApprovedRecallOrProjectionMismatch(
+        bool approvedRecall,
+        bool tamperSnapshot,
+        string expectedCode)
+    {
+        await using var fixture = new Fixture();
+        var financial = await fixture.EvaluateAsync();
+        fixture.IncludeApprovedFinancialRecall = approvedRecall;
+        fixture.TamperFinancialCommitteeSnapshot = tamperSnapshot;
+
+        await fixture.Service.Invoking(service => service.SubmitApprovalAsync(
+                fixture.Tender.Id,
+                new SubmitProcurementTenderApprovalRequest { RowVersion = financial.RowVersion },
+                "blocked-approval"))
+            .Should().ThrowAsync<ProcurementTenderControlConflictException>()
+            .Where(exception => exception.Code == expectedCode);
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -408,10 +532,66 @@ public sealed class ProcurementTenderControlServiceTests
                         Allowed = !request.ProhibitedActorUserIds.Contains(CurrentUserId),
                         Message = "Actors must be separated."
                     });
+            TenderDocuments.Setup(service => service.IssueTenderCompatibilityAsync(
+                    It.IsAny<Guid>(), It.IsAny<IssueProcurementTenderDocumentRequest>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid _, IssueProcurementTenderDocumentRequest request, string _, CancellationToken _) =>
+                    new ProcurementTenderDocumentIssuanceDto
+                    {
+                        Id = Guid.NewGuid(),
+                        BusinessPartnerId = request.BusinessPartnerId,
+                        RecipientName = request.RecipientName,
+                        AmountPaid = request.AmountPaid,
+                        PaymentReference = request.PaymentReference,
+                        ReceiptNumber = request.IssueReceiptNumber,
+                        IssuedAtUtc = DateTime.UtcNow,
+                        IssuedByUserId = CurrentUserId,
+                        EvidenceReference = request.EvidenceReference,
+                        IntegrityHash = new string('a', 64)
+                    });
+            EvaluationCommittee.Setup(service => service.EnsureScoreSubjectEligibleAsync(
+                    ProcurementEvaluationSourceType.Tender, Tender.Id,
+                    It.IsAny<ProcurementEvaluationPhase>(), "ProcurementTenderControl", Tender.Id,
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((ProcurementEvaluationSourceType _, Guid _, ProcurementEvaluationPhase phase,
+                    string _, Guid _, string _, CancellationToken _) => EligibleScorer(phase));
+            EvaluationCommittee.Setup(service => service.GetAsync(
+                    ProcurementEvaluationSourceType.Tender, Tender.Id,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => CommitteeDetail());
+            EvaluationCommittee.Setup(service => service.LockScoreSheetAsync(
+                    It.IsAny<LockProcurementEvaluationScoreSheetRequest>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((LockProcurementEvaluationScoreSheetRequest request, string _, CancellationToken _) =>
+                    new ProcurementEvaluationScoreSheetDto
+                    {
+                        Id = Guid.NewGuid(), MeetingId = request.MeetingId,
+                        AppointmentId = request.AppointmentId, Phase = request.Phase,
+                        ScoreSubjectType = request.ScoreSubjectType, ScoreSubjectId = request.ScoreSubjectId,
+                        Attempt = 1, Status = ProcurementEvaluationScoreSheetStatus.Locked
+                    });
+            AwardReadiness.Setup(service => service.EnsureAwardReadyAsync(
+                    It.IsAny<ProcurementAwardReadinessSourceType>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<EvaluateProcurementAwardReadinessRequest>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((ProcurementAwardReadinessSourceType sourceType, Guid sourceId,
+                    EvaluateProcurementAwardReadinessRequest _, string correlationId, CancellationToken _) =>
+                    new ProcurementAwardReadinessDto
+                    {
+                        Id = Guid.NewGuid(),
+                        SourceType = sourceType,
+                        SourceId = sourceId,
+                        CorrelationId = correlationId,
+                        Status = ProcurementAwardReadinessDecisionStatus.Ready,
+                        IsCurrent = true
+                    });
             Service = new ProcurementTenderControlService(
                 _unitOfWork, _currentUser.Object, AccessControl.Object, SodGuard.Object,
                 ControlEvents.Object, SourcingCases.Object, Workflow.Object,
-                SupplierValidation.Object);
+                SupplierValidation.Object, TenderDocuments.Object, EvaluationCommittee.Object,
+                AwardReadiness.Object);
         }
 
         public Guid CurrentTenantId { get; set; }
@@ -434,10 +614,146 @@ public sealed class ProcurementTenderControlServiceTests
         public Mock<IProcurementSourcingCaseService> SourcingCases { get; } = new();
         public Mock<IWorkflowService> Workflow { get; } = new();
         public Mock<ISupplierValidationService> SupplierValidation { get; } = new();
+        public Mock<IProcurementTenderDocumentControlService> TenderDocuments { get; } = new();
+        public Mock<IProcurementEvaluationCommitteeControlService> EvaluationCommittee { get; } = new();
+        public Mock<IProcurementAwardReadinessService> AwardReadiness { get; } = new();
+        public bool IncludeApprovedFinancialRecall { get; set; }
+        public bool TamperFinancialCommitteeSnapshot { get; set; }
+        private Guid CommitteeId { get; } = Guid.NewGuid();
+        private Guid AppointmentId { get; } = Guid.NewGuid();
+        private Guid TechnicalMeetingId { get; } = Guid.NewGuid();
+        private Guid FinancialMeetingId { get; } = Guid.NewGuid();
+        private Guid TechnicalScoreSheetId { get; } = Guid.NewGuid();
+        private Guid FinancialScoreSheetId { get; } = Guid.NewGuid();
 
-        public async Task<ProcurementTenderControlDto> PublishAsync(decimal documentFee = 0m)
+        public ProcurementEvaluationScorerEligibilityDto EligibleScorer(
+            ProcurementEvaluationPhase phase,
+            int authorizedAttempt = 1) => new()
+        {
+            Allowed = true,
+            SourceType = ProcurementEvaluationSourceType.Tender,
+            SourceId = Tender.Id,
+            Phase = phase,
+            ActorUserId = CurrentUserId,
+            CommitteeControlId = CommitteeId,
+            AppointmentId = AppointmentId,
+            MeetingId = phase == ProcurementEvaluationPhase.Technical
+                ? TechnicalMeetingId : FinancialMeetingId,
+            AuthorizedAttempt = authorizedAttempt
+        };
+
+        private ProcurementEvaluationCommitteeDto CommitteeDetail()
+        {
+            var control = Context.ProcurementTenderControls.Local
+                .FirstOrDefault(item => !item.IsDeleted);
+            return new ProcurementEvaluationCommitteeDto
+            {
+            Id = CommitteeId,
+            SourceType = ProcurementEvaluationSourceType.Tender,
+            SourceId = Tender.Id,
+            Status = ProcurementEvaluationCommitteeControlStatus.Active,
+            CompositionReady = true,
+            QuorumMet = true,
+            RowVersion = "AQ==",
+            Members =
+            [
+                new ProcurementEvaluationAppointmentDto
+                {
+                    Id = AppointmentId, UserId = CurrentUserId, EligibleToScore = true,
+                    RowVersion = "AQ=="
+                }
+            ],
+            Meetings =
+            [
+                new ProcurementEvaluationMeetingDto
+                {
+                    Id = TechnicalMeetingId, Phase = ProcurementEvaluationPhase.Technical,
+                    Status = ProcurementEvaluationMeetingStatus.QuorumConfirmed,
+                    QuorumMet = true, RowVersion = "AQ=="
+                },
+                new ProcurementEvaluationMeetingDto
+                {
+                    Id = FinancialMeetingId, Phase = ProcurementEvaluationPhase.Financial,
+                    Status = ProcurementEvaluationMeetingStatus.QuorumConfirmed,
+                    QuorumMet = true, RowVersion = "AQ=="
+                }
+            ],
+            ScoreSheets =
+            [
+                ScoreSheet(
+                    ProcurementEvaluationPhase.Technical,
+                    TechnicalMeetingId,
+                    TechnicalScoreSheetId,
+                    control?.TechnicalEvaluationSnapshotJson ?? "{}"),
+                ScoreSheet(
+                    ProcurementEvaluationPhase.Financial,
+                    FinancialMeetingId,
+                    FinancialScoreSheetId,
+                    TamperFinancialCommitteeSnapshot
+                        ? """{"tampered":true}"""
+                        : control?.FinancialEvaluationSnapshotJson ?? "{}")
+            ],
+            Recalls = IncludeApprovedFinancialRecall
+                ?
+                [
+                    new ProcurementEvaluationScoreRecallDto
+                    {
+                        Id = Guid.NewGuid(),
+                        ScoreSheetId = FinancialScoreSheetId,
+                        Status = ProcurementEvaluationScoreRecallStatus.Approved
+                    }
+                ]
+                : []
+            };
+        }
+
+        private ProcurementEvaluationScoreSheetDto ScoreSheet(
+            ProcurementEvaluationPhase phase,
+            Guid meetingId,
+            Guid scoreSheetId,
+            string scoreSnapshotJson) => new()
+        {
+            Id = scoreSheetId, AppointmentId = AppointmentId, MeetingId = meetingId,
+            Phase = phase, ScoreSubjectType = "ProcurementTenderControl",
+            ScoreSubjectId = Tender.Id, Attempt = 1,
+            Status = ProcurementEvaluationScoreSheetStatus.Locked,
+            ScoreSnapshotJson = scoreSnapshotJson,
+            SubmittedAtUtc = DateTime.UtcNow
+        };
+
+        public async Task<ProcurementTenderControlDto> PublishAsync(
+            decimal documentFee = 0m,
+            decimal? controlledFee = null)
         {
             var deadline = DateTime.UtcNow.AddHours(2);
+            var templateVersionId = Guid.NewGuid();
+            TenderDocuments.Setup(service => service.EnsurePublicationReadyAsync(
+                    ProcurementTenderDocumentSourceType.Tender, Tender.Id, It.IsAny<DateTime>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementTenderDocumentEffectiveStateDto
+                {
+                    RegisterId = Guid.NewGuid(),
+                    SourceType = ProcurementTenderDocumentSourceType.Tender,
+                    SourceId = Tender.Id,
+                    EffectiveTemplateVersionId = templateVersionId,
+                    EffectiveTemplateReference = "TDC-CONTROLLED/v4",
+                    EffectiveSubmissionDeadlineUtc = deadline,
+                    EffectiveBidValidityUntilUtc = deadline.AddDays(30),
+                    Ready = true
+                });
+            TenderDocuments.Setup(service => service.GetRegisterAsync(
+                    ProcurementTenderDocumentSourceType.Tender, Tender.Id,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementTenderDocumentRegisterDto
+                {
+                    SourceType = ProcurementTenderDocumentSourceType.Tender,
+                    SourceId = Tender.Id,
+                    FeeMode = (controlledFee ?? documentFee) > 0
+                        ? ProcurementTenderDocumentFeeMode.Paid
+                        : ProcurementTenderDocumentFeeMode.Free,
+                    FeeAmount = controlledFee ?? documentFee,
+                    CurrencyCode = "GHS"
+                });
             var published = await Service.PublishAsync(Tender.Id, new PublishProcurementTenderRequest
             {
                 AdvertisementReference = "ADVERT-001",
