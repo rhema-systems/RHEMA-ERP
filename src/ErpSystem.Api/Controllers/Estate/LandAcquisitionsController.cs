@@ -968,7 +968,12 @@ public class LandAcquisitionsController : ControllerBase
                     IsCurrentOwner = item.IsCurrentOwner
                 })
                 .ToList(),
-            BoundaryVerified = true,
+            BoundaryVerified = survey is
+            {
+                CadastralMatch: true,
+                OverlapCleared: true,
+                BoundaryConfirmed: true
+            },
             IsReadyForProjectManagement = false,
             Notes = "Land asset published from land acquisition into Estate Land Bank for demarcation and project-readiness review."
         });

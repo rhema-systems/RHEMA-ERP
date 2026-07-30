@@ -306,6 +306,25 @@ export default function EstateLandManagementPage() {
         ? record.asset.boundaryVerified
         : acquisitionBoundaryVerified(record.acquisition)
   ).length;
+  const selectedAsset = selected?.type === 'asset' ? selected.asset : null;
+  const saleListingDisabledReason = !selectedAsset
+    ? undefined
+    : selectedAsset.status !== EstateManagedAssetStatus.LandBank
+      ? 'Land already assigned to a project cannot be listed for sale.'
+      : !selectedAsset.boundaryVerified
+        ? 'Verify the main cadastral boundary first.'
+        : selectedAsset.demarcationCount === 0
+          ? 'Add at least one demarcation first.'
+          : selectedAsset.verifiedDemarcationCount !==
+              selectedAsset.demarcationCount
+            ? 'Verify every demarcation first.'
+            : undefined;
+  const saleListingLabel =
+    selectedAsset?.isPublishedToExternalPortal &&
+    (selectedAsset.externalListingType === 'Sale' ||
+      selectedAsset.externalListingType === 'SaleAndRent')
+      ? 'View Sale Listing'
+      : 'List Land for Sale';
 
   const markAssetProjectReady = async (asset: EstateManagedAsset) => {
     const key = `asset:${asset.id}`;
@@ -649,42 +668,25 @@ export default function EstateLandManagementPage() {
                       ? 'Manage Demarcations'
                       : 'Add Demarcation'}
                   </Button>
-                  <Button
-                    asChild
-                    variant="outline"
-                    disabled={
-                      selected.asset.status !==
-                        EstateManagedAssetStatus.LandBank ||
-                      !selected.asset.boundaryVerified ||
-                      selected.asset.demarcationCount === 0 ||
-                      selected.asset.verifiedDemarcationCount !==
-                        selected.asset.demarcationCount
-                    }
-                    title={
-                      selected.asset.status !==
-                      EstateManagedAssetStatus.LandBank
-                        ? 'Land already assigned to a project cannot be listed for sale.'
-                        : !selected.asset.boundaryVerified
-                          ? 'Verify the main cadastral boundary first.'
-                          : selected.asset.demarcationCount === 0
-                            ? 'Add at least one demarcation first.'
-                            : selected.asset.verifiedDemarcationCount !==
-                                selected.asset.demarcationCount
-                              ? 'Verify every demarcation first.'
-                              : undefined
-                    }
-                  >
-                    <Link
-                      href={`/estate/property-management/listings?assetId=${encodeURIComponent(selected.asset.id)}&listingType=Sale`}
+                  {saleListingDisabledReason ? (
+                    <Button
+                      variant="outline"
+                      disabled
+                      title={saleListingDisabledReason}
                     >
                       <Globe2 className="mr-2 h-4 w-4" />
-                      {selected.asset.isPublishedToExternalPortal &&
-                      (selected.asset.externalListingType === 'Sale' ||
-                        selected.asset.externalListingType === 'SaleAndRent')
-                        ? 'View Sale Listing'
-                        : 'List Land for Sale'}
-                    </Link>
-                  </Button>
+                      {saleListingLabel}
+                    </Button>
+                  ) : (
+                    <Button asChild variant="outline">
+                      <Link
+                        href={`/estate/property-management/listings?assetId=${encodeURIComponent(selected.asset.id)}&listingType=Sale`}
+                      >
+                        <Globe2 className="mr-2 h-4 w-4" />
+                        {saleListingLabel}
+                      </Link>
+                    </Button>
+                  )}
                   {selected.asset.isReadyForProjectManagement ? (
                     <Button asChild variant="outline">
                       <Link href="/development/projects">

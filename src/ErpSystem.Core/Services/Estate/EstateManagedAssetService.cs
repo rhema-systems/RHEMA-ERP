@@ -150,7 +150,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.GisProvider = string.IsNullOrWhiteSpace(asset.GisProvider) ? "GeoServer" : asset.GisProvider;
         var boundaryCoordinates = TrimOrNull(handoff.BoundaryCoordinates);
         asset.BoundaryCoordinates = boundaryCoordinates;
-        asset.BoundaryVerified = asset.BoundaryVerified || boundaryCoordinates != null;
+        asset.BoundaryVerified =
+            handoff.BoundaryVerified && boundaryCoordinates != null;
         asset.SurveyPlanNumber = TrimOrNull(handoff.SurveyPlanNumber);
         asset.MapSheetNumber = TrimOrNull(handoff.MapSheetNumber);
         asset.CadastreDescription = TrimOrNull(handoff.CadastreDescription);
@@ -417,8 +418,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
         return demarcations.Select(item =>
         {
-            var dto = MapDemarcationToDto(item);
-            dto.LandReference = EstateLandDemarcationReference.Build(asset.AssetCode, item.DemarcationNumber);
+            var dto = MapDemarcationToDto(item, asset.AssetCode);
             dto.IsAssignedToProject = IsDemarcationAssignedToProject(
                 asset,
                 demarcations,
@@ -609,7 +609,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         await repository.AddAsync(demarcation);
         await ResetProjectReadinessAsync(asset);
         await _unitOfWork.SaveChangesAsync();
-        return MapDemarcationToDto(demarcation);
+        return MapDemarcationToDto(demarcation, asset.AssetCode);
     }
 
     public Task<EstateLandDemarcationDto> UpdateLandDemarcationAsync(
@@ -675,7 +675,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         await repository.UpdateAsync(demarcation);
         await ResetProjectReadinessAsync(asset);
         await _unitOfWork.SaveChangesAsync();
-        return MapDemarcationToDto(demarcation);
+        return MapDemarcationToDto(demarcation, asset.AssetCode);
     }
 
     public async Task DeleteLandDemarcationAsync(Guid assetId, Guid demarcationId)
@@ -1376,10 +1376,15 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         public bool BoundaryVerified { get; init; }
     }
 
-    private static EstateLandDemarcationDto MapDemarcationToDto(EstateLandDemarcation demarcation) => new()
+    private static EstateLandDemarcationDto MapDemarcationToDto(
+        EstateLandDemarcation demarcation,
+        string assetCode) => new()
     {
         Id = demarcation.Id,
         EstateManagedAssetId = demarcation.EstateManagedAssetId,
+        LandReference = EstateLandDemarcationReference.Build(
+            assetCode,
+            demarcation.DemarcationNumber),
         DemarcationNumber = demarcation.DemarcationNumber,
         Description = demarcation.Description,
         BeaconCount = demarcation.BeaconCount,

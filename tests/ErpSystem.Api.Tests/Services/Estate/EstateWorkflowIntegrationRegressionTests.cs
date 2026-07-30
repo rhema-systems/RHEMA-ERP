@@ -257,6 +257,94 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
+    public void AcquisitionPublication_PreservesTheSurveyVerificationOutcome()
+    {
+        var service = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var publication = Slice(
+            service,
+            "private async Task<EstateManagedAssetDto> PublishLandAcquisitionCoreAsync",
+            "private async Task EnsureAcquisitionCanBeRepublishedAsync");
+        var controller = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "LandAcquisitionsController.cs");
+        var handoff = Slice(
+            controller,
+            "var managedAsset = await _managedAssetService.PublishLandAcquisitionAsync",
+            "// Keep acquisition evidence available");
+
+        publication.Should().Contain("handoff.BoundaryVerified");
+        publication.Should().Contain("boundaryCoordinates != null");
+        publication.Should().NotContain(
+            "asset.BoundaryVerified || boundaryCoordinates != null");
+        handoff.Should().Contain("CadastralMatch: true");
+        handoff.Should().Contain("OverlapCleared: true");
+        handoff.Should().Contain("BoundaryConfirmed: true");
+        handoff.Should().NotContain("BoundaryVerified = true");
+    }
+
+    [Fact]
+    public void DemarcationMutations_ReturnCanonicalLandReferences()
+    {
+        var service = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var createMethod = Slice(
+            service,
+            "private async Task<EstateLandDemarcationDto> CreateLandDemarcationCoreAsync",
+            "public Task<EstateLandDemarcationDto> UpdateLandDemarcationAsync");
+        var updateMethod = Slice(
+            service,
+            "private async Task<EstateLandDemarcationDto> UpdateLandDemarcationCoreAsync",
+            "public async Task DeleteLandDemarcationAsync");
+        var mapper = Slice(
+            service,
+            "private static EstateLandDemarcationDto MapDemarcationToDto",
+            "private static EstateManagedAssetDto MapToDto");
+
+        createMethod.Should().Contain(
+            "MapDemarcationToDto(demarcation, asset.AssetCode)");
+        updateMethod.Should().Contain(
+            "MapDemarcationToDto(demarcation, asset.AssetCode)");
+        mapper.Should().Contain(
+            "LandReference = EstateLandDemarcationReference.Build(");
+    }
+
+    [Fact]
+    public void DisabledSaleListingAction_DoesNotRenderANavigableLink()
+    {
+        var page = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "land-management",
+            "page.tsx");
+        var listingAction = Slice(
+            page,
+            "{saleListingDisabledReason ? (",
+            "{selected.asset.isReadyForProjectManagement ? (");
+
+        listingAction.Should().Contain("<Button");
+        listingAction.Should().Contain("disabled");
+        listingAction.Should().Contain("<Button asChild variant=\"outline\">");
+        listingAction.IndexOf("disabled", StringComparison.Ordinal)
+            .Should().BeLessThan(
+                listingAction.IndexOf("<Link", StringComparison.Ordinal));
+        listingAction.Should().NotContain("asChild\n                    variant=\"outline\"\n                    disabled");
+    }
+
+    [Fact]
     public void LegacyWholeParcelAssignments_CannotBeInvalidatedBySubdivision()
     {
         var source = ReadSource(
