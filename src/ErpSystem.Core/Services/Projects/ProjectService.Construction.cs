@@ -56,9 +56,16 @@ public partial class ProjectService
             }
             catch
             {
-                if (transactionStarted)
+                try
                 {
-                    await _unitOfWork.RollbackAsync();
+                    if (transactionStarted && _unitOfWork.HasActiveTransaction)
+                    {
+                        await _unitOfWork.RollbackAsync();
+                    }
+                }
+                finally
+                {
+                    _unitOfWork.ClearTrackedChanges();
                 }
 
                 throw;

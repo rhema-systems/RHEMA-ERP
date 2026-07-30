@@ -220,6 +220,92 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         editTab.Should().NotContain("<Label>Land Reference</Label><Input");
     }
 
+    [Fact]
+    public void AcquisitionRepublishing_CannotInvalidateOrResetAssignedLand()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var publication = Slice(
+            source,
+            "public async Task<EstateManagedAssetDto> PublishLandAcquisitionAsync",
+            "public async Task<EstateManagedAssetDto> PublishProjectUnitAsync");
+        var assignmentGuard = Slice(
+            source,
+            "private async Task EnsureAcquisitionCanBeRepublishedAsync",
+            "public async Task<EstateManagedAssetDto> PublishProjectUnitAsync");
+
+        publication.Should().Contain("ExecuteSerializableMutationAsync(");
+        publication.Should().Contain("await EnsureAcquisitionCanBeRepublishedAsync(existing);");
+        publication.Should().Contain("if (isNew || string.IsNullOrWhiteSpace(asset.AssetCode))");
+        publication.IndexOf("await EnsureAcquisitionCanBeRepublishedAsync(existing);", StringComparison.Ordinal)
+            .Should().BeLessThan(
+                publication.IndexOf(
+                    "asset.Status = EstateManagedAssetStatus.LandBank;",
+                    StringComparison.Ordinal));
+        assignmentGuard.Should().Contain("asset.ProjectId.HasValue");
+        assignmentGuard.Should().Contain("IsDemarcationAssignedToProject(");
+        assignmentGuard.Should().Contain(
+            "Land with a demarcation assigned to a project cannot be published to the land bank again.");
+    }
+
+    [Fact]
+    public void SerializableLandClaimRetries_ClearTrackedStateAfterRollback()
+    {
+        var projectService = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Projects",
+            "ProjectServices.cs");
+        var constructionService = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Projects",
+            "ProjectService.Construction.cs");
+        var estateService = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var createWrapper = Slice(
+            projectService,
+            "public async Task<ProjectDetailDto> CreateProjectAsync",
+            "private async Task<ProjectDetailDto> CreateProjectCoreAsync");
+        var updateWrapper = Slice(
+            projectService,
+            "public async Task<ProjectDetailDto> UpdateProjectAsync",
+            "private async Task<ProjectDetailDto> UpdateProjectCoreAsync");
+        var profileWrapper = Slice(
+            constructionService,
+            "public async Task<ProjectDevelopmentProfileDto> UpsertDevelopmentProfileAsync",
+            "public async Task<IEnumerable<ProjectPhaseDto>> GetProjectPhasesAsync");
+        var estateWrapper = Slice(
+            estateService,
+            "private async Task<T> ExecuteSerializableMutationAsync",
+            "private static bool IsDemarcationAssignedToProject");
+
+        foreach (var wrapper in new[]
+                 {
+                     createWrapper,
+                     updateWrapper,
+                     profileWrapper,
+                     estateWrapper
+                 })
+        {
+            wrapper.Should().Contain("_unitOfWork.HasActiveTransaction");
+            wrapper.Should().Contain("_unitOfWork.ClearTrackedChanges();");
+            wrapper.IndexOf("_unitOfWork.RollbackAsync()", StringComparison.Ordinal)
+                .Should().BeLessThan(
+                    wrapper.IndexOf("_unitOfWork.ClearTrackedChanges();", StringComparison.Ordinal));
+        }
+    }
+
     private static string ReadSource(params string[] path)
         => File.ReadAllText(Path.Combine([FindRepositoryRoot(), .. path]));
 

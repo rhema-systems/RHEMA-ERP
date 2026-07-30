@@ -95,6 +95,11 @@ public class EstateManagedAssetService : IEstateManagedAssetService
     }
 
     public async Task<EstateManagedAssetDto> PublishLandAcquisitionAsync(LandAcquisitionEstateHandoffDto handoff)
+        => await ExecuteSerializableMutationAsync(
+            () => PublishLandAcquisitionCoreAsync(handoff));
+
+    private async Task<EstateManagedAssetDto> PublishLandAcquisitionCoreAsync(
+        LandAcquisitionEstateHandoffDto handoff)
     {
         if (handoff.LandAcquisitionId == Guid.Empty)
         {
@@ -111,6 +116,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             item.TenantId == _currentUserProvider.TenantId
             && !item.IsDeleted
             && item.LandAcquisitionId == handoff.LandAcquisitionId);
+        if (existing != null)
+        {
+            await EnsureAcquisitionCanBeRepublishedAsync(existing);
+        }
 
         var now = DateTime.UtcNow;
         var isNew = existing == null;
@@ -124,7 +133,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         };
 
         var assetCode = FirstNonBlank(handoff.AssetCode, handoff.AssetNumber, handoff.ParcelIdentifier, handoff.ProjectReference);
-        asset.AssetCode = assetCode;
+        // Demarcation references are derived from the managed-asset code. Once published,
+        // keep that code immutable so persisted project references cannot be invalidated by
+        // a later edit to the acquisition-stage code.
+        if (isNew || string.IsNullOrWhiteSpace(asset.AssetCode))
+        {
+            asset.AssetCode = assetCode;
+        }
         asset.Name = FirstNonBlank(handoff.Name, handoff.ParcelIdentifier, $"{handoff.ProjectReference} demarcated land");
         asset.Description = FirstNonBlank(handoff.Description, BuildLandAcquisitionDescription(handoff));
         asset.Location = TrimOrNull(handoff.Location);
@@ -175,6 +190,37 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
         await _unitOfWork.SaveChangesAsync();
         return MapToDto(asset);
+    }
+
+    private async Task EnsureAcquisitionCanBeRepublishedAsync(EstateManagedAsset asset)
+    {
+        if (asset.ProjectId.HasValue)
+        {
+            throw new InvalidOperationException(
+                "Land assigned to a project cannot be published to the land bank again. Reassign the project land first.");
+        }
+
+        var demarcations = await _unitOfWork.Repository<EstateLandDemarcation>()
+            .GetQueryable(item =>
+                item.EstateManagedAssetId == asset.Id
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted)
+            .ToListAsync();
+        if (demarcations.Count == 0)
+        {
+            return;
+        }
+
+        var assignedLandReferences = await GetAssignedProjectLandReferencesAsync();
+        if (demarcations.Any(item => IsDemarcationAssignedToProject(
+                asset,
+                demarcations,
+                item,
+                assignedLandReferences)))
+        {
+            throw new InvalidOperationException(
+                "Land with a demarcation assigned to a project cannot be published to the land bank again. Reassign the project land first.");
+        }
     }
 
     public async Task<EstateManagedAssetDto> PublishProjectUnitAsync(ProjectUnitEstateHandoffDto handoff)
@@ -1205,9 +1251,16 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             }
             catch
             {
-                if (transactionStarted)
+                try
                 {
-                    await _unitOfWork.RollbackAsync();
+                    if (transactionStarted && _unitOfWork.HasActiveTransaction)
+                    {
+                        await _unitOfWork.RollbackAsync();
+                    }
+                }
+                finally
+                {
+                    _unitOfWork.ClearTrackedChanges();
                 }
 
                 throw;
