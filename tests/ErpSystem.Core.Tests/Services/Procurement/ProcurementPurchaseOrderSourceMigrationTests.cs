@@ -38,6 +38,10 @@ public sealed class ProcurementPurchaseOrderSourceMigrationTests
         correctiveSql.Should().Contain(
             "awardLine.BusinessPartnerId = i.BusinessPartnerId");
         correctiveSql.Should().Contain(
+            "N'CREATE OR ALTER '");
+        correctiveSql.Should().Contain(
+            "CHARINDEX(N'TRIGGER', UPPER(@definition))");
+        correctiveSql.Should().Contain(
             "EXEC sys.sp_executesql @definition");
         correctiveSql.Should().Contain("THROW 51216");
         correctiveSql.Should().NotContain("DISABLE TRIGGER");

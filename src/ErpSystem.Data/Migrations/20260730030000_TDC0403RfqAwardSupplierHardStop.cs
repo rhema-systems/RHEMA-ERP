@@ -37,6 +37,17 @@ public partial class TDC0403RfqAwardSupplierHardStop : Migration
                               AND awardLine.BusinessPartnerId = i.BusinessPartnerId
                               AND awardLine.IsDeleted = 0)))';
                 SET @definition = REPLACE(@definition, @needle, @replacement);
+
+                DECLARE @triggerKeywordPosition int =
+                    CHARINDEX(N'TRIGGER', UPPER(@definition));
+                IF @triggerKeywordPosition = 0
+                    THROW 51216, 'The approved-source trigger declaration could not be altered safely.', 1;
+                SET @definition =
+                    STUFF(
+                        @definition,
+                        1,
+                        @triggerKeywordPosition - 1,
+                        N'CREATE OR ALTER ');
                 EXEC sys.sp_executesql @definition;
             END
             """);
