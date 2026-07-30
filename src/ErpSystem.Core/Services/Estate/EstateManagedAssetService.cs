@@ -539,6 +539,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
     }
 
     public async Task<EstateManagedAssetDto> MarkReadyForProjectManagementAsync(Guid assetId)
+        => await ExecuteSerializableMutationAsync(
+            () => MarkReadyForProjectManagementCoreAsync(assetId));
+
+    private async Task<EstateManagedAssetDto> MarkReadyForProjectManagementCoreAsync(Guid assetId)
     {
         var repository = _unitOfWork.Repository<EstateManagedAsset>();
         var asset = await repository.FirstOrDefaultAsync(item => item.Id == assetId &&

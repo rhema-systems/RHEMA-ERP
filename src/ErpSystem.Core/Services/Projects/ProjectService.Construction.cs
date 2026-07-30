@@ -407,17 +407,17 @@ public partial class ProjectService
         return selection;
     }
 
-    private async Task<(int VerifiedCount, bool HasUnusedPortion)> GetProjectLandAvailabilityAsync(Guid assetId)
+    private async Task<(int ActiveCount, bool HasUnusedPortion, bool AllPortionsVerified)> GetProjectLandAvailabilityAsync(
+        Guid assetId)
     {
         var demarcations = (await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
                 item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted
-                && item.EstateManagedAssetId == assetId
-                && item.BoundaryVerified))
+                && item.EstateManagedAssetId == assetId))
             .ToList();
         if (demarcations.Count == 0)
         {
-            return (0, false);
+            return (0, false, false);
         }
 
         var asset = await _unitOfWork.Repository<EstateManagedAsset>().FirstOrDefaultAsync(item =>
@@ -426,7 +426,7 @@ public partial class ProjectService
             && !item.IsDeleted);
         if (asset == null)
         {
-            return (0, false);
+            return (0, false, false);
         }
 
         var assignedLandReferences = (await _unitOfWork.Repository<ProjectDevelopmentProfile>().FindAsync(item =>
@@ -443,7 +443,10 @@ public partial class ProjectService
             !assignedLandReferences.Contains(
                 EstateLandDemarcationReference.Build(asset.AssetCode, item.DemarcationNumber))
             && !hasLegacyWholeParcelAssignment);
-        return (demarcations.Count, hasUnusedPortion);
+        return (
+            demarcations.Count,
+            hasUnusedPortion,
+            demarcations.All(item => item.BoundaryVerified));
     }
 
     private async Task<ReadyProjectLandSelection?> FindProjectLandSelectionAsync(string? landReference)
@@ -515,7 +518,9 @@ public partial class ProjectService
             if (availability.HasUnusedPortion)
             {
                 asset.Status = EstateManagedAssetStatus.LandBank;
-                asset.IsReadyForProjectManagement = !asset.IsPublishedToExternalPortal;
+                asset.IsReadyForProjectManagement = asset.IsReadyForProjectManagement
+                    && availability.AllPortionsVerified
+                    && !asset.IsPublishedToExternalPortal;
                 if (asset.ProjectId == project.Id)
                 {
                     asset.ProjectId = null;
@@ -526,7 +531,8 @@ public partial class ProjectService
             {
                 asset.Status = EstateManagedAssetStatus.UnderDevelopment;
                 asset.IsReadyForProjectManagement = false;
-                if (availability.VerifiedCount == 1
+                if (availability.ActiveCount == 1
+                    && availability.AllPortionsVerified
                     && currentSelection?.Asset.Id == asset.Id)
                 {
                     asset.ProjectId = project.Id;

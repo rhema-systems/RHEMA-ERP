@@ -107,6 +107,57 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "Withdraw the active external land listing before changing its demarcations.");
     }
 
+    [Fact]
+    public void ReadinessApproval_SharesTheSerializableDemarcationMutationBoundary()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var publicMethod = Slice(
+            source,
+            "public async Task<EstateManagedAssetDto> MarkReadyForProjectManagementAsync",
+            "private async Task<EstateManagedAssetDto> MarkReadyForProjectManagementCoreAsync");
+        var coreMethod = Slice(
+            source,
+            "private async Task<EstateManagedAssetDto> MarkReadyForProjectManagementCoreAsync",
+            "public Task<EstateManagedAssetDto> UpdateExternalListingAsync");
+
+        publicMethod.Should().Contain("ExecuteSerializableMutationAsync(");
+        publicMethod.Should().Contain("MarkReadyForProjectManagementCoreAsync(assetId)");
+        coreMethod.Should().Contain("demarcations.Any(item => !item.BoundaryVerified)");
+        coreMethod.Should().Contain("asset.IsReadyForProjectManagement = true;");
+    }
+
+    [Fact]
+    public void ProjectLandSynchronization_CannotRestoreReadinessAfterADemarcationReset()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Projects",
+            "ProjectService.Construction.cs");
+        var availabilityMethod = Slice(
+            source,
+            "private async Task<(int ActiveCount, bool HasUnusedPortion, bool AllPortionsVerified)> GetProjectLandAvailabilityAsync",
+            "private async Task<ReadyProjectLandSelection?> FindProjectLandSelectionAsync");
+        var synchronizationMethod = Slice(
+            source,
+            "private async Task SynchronizeProjectLandAssetsAsync",
+            "private sealed record ReadyProjectLandSelection");
+
+        availabilityMethod.Should().NotContain("&& item.BoundaryVerified");
+        availabilityMethod.Should().Contain("demarcations.All(item => item.BoundaryVerified)");
+        synchronizationMethod.Should().Contain(
+            "asset.IsReadyForProjectManagement = asset.IsReadyForProjectManagement");
+        synchronizationMethod.Should().Contain("&& availability.AllPortionsVerified");
+        synchronizationMethod.Should().NotContain(
+            "asset.IsReadyForProjectManagement = !asset.IsPublishedToExternalPortal;");
+    }
+
     private static string ReadSource(params string[] path)
         => File.ReadAllText(Path.Combine([FindRepositoryRoot(), .. path]));
 
