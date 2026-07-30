@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
+using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Models;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -18,17 +19,20 @@ namespace ErpSystem.Api.Controllers.Estate;
 public sealed class EstateManagedAssetsController : ControllerBase
 {
     private readonly IEstateManagedAssetService _managedAssetService;
+    private readonly IProjectService _projectService;
     private readonly IFileStorageService _fileStorageService;
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
 
     public EstateManagedAssetsController(
         IEstateManagedAssetService managedAssetService,
+        IProjectService projectService,
         IFileStorageService fileStorageService,
         ApplicationDbContext db,
         ICurrentUserService currentUserService)
     {
         _managedAssetService = managedAssetService;
+        _projectService = projectService;
         _fileStorageService = fileStorageService;
         _db = db;
         _currentUserService = currentUserService;
@@ -118,11 +122,31 @@ public sealed class EstateManagedAssetsController : ControllerBase
 
     [HttpGet("project-ready-demarcations")]
     public async Task<IActionResult> GetProjectReadyLandDemarcations([FromQuery] Guid? projectId = null)
-        => Ok(new
+    {
+        if (projectId.HasValue)
+        {
+            try
+            {
+                // Reuse Project Management's tenant, membership, and role-aware view authorization
+                // before exposing the selected parcel for a specific project.
+                await _projectService.GetDevelopmentProfileAsync(projectId.Value);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { success = false, message = ex.Message });
+            }
+        }
+
+        return Ok(new
         {
             success = true,
             data = await _managedAssetService.GetProjectReadyLandDemarcationsAsync(projectId)
         });
+    }
 
     [HttpPost("{id:guid}/demarcations")]
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer,Survey Officer")]

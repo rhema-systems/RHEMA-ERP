@@ -339,6 +339,84 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
+    public void CanonicalLandReferenceMigration_ExcludesTheCurrentProjectFromOccupancy()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Projects",
+            "ProjectService.Construction.cs");
+        var resolution = Slice(
+            source,
+            "private async Task<string?> ResolveDevelopmentProfileLandReferenceAsync",
+            "private async Task<(int ActiveCount, bool HasUnusedPortion, bool AllPortionsVerified)> GetProjectLandAvailabilityAsync");
+
+        resolution.Should().Contain("Guid projectId");
+        resolution.Should().Contain("excludedProjectId");
+        resolution.Should().Contain(
+            "!excludedProjectId.HasValue || item.ProjectId != excludedProjectId.Value");
+        resolution.Should().Contain("ResolveReadyProjectLandReferenceAsync(");
+        resolution.Should().Contain("projectId);");
+    }
+
+    [Fact]
+    public void ProjectReadyLandEndpoint_AuthorizesProjectSpecificSelections()
+    {
+        var controller = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "EstateManagedAssetsController.cs");
+        var endpoint = Slice(
+            controller,
+            "public async Task<IActionResult> GetProjectReadyLandDemarcations",
+            "[HttpPost(\"{id:guid}/demarcations\")]");
+
+        endpoint.Should().Contain(
+            "await _projectService.GetDevelopmentProfileAsync(projectId.Value);");
+        endpoint.Should().Contain("catch (UnauthorizedAccessException)");
+        endpoint.IndexOf(
+                "_projectService.GetDevelopmentProfileAsync",
+                StringComparison.Ordinal)
+            .Should().BeLessThan(
+                endpoint.IndexOf(
+                    "_managedAssetService.GetProjectReadyLandDemarcationsAsync",
+                    StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DemarcationDialogAndReadinessAction_PreserveFrontendGuards()
+    {
+        var dialog = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "land-management",
+            "DemarcateLandDialog.tsx");
+        var page = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "land-management",
+            "page.tsx");
+
+        dialog.Should().Contain("const handleOpenChange = (next: boolean)");
+        dialog.Should().Contain(
+            "pendingDemarcations.length > 0 || hasDraftValues");
+        dialog.Should().Contain(
+            "Discard all unsaved demarcation drafts and close this dialog?");
+        dialog.Should().Contain(
+            "<Dialog open={open} onOpenChange={handleOpenChange}>");
+        page.Should().Contain("selected.asset.isPublishedToExternalPortal ||");
+        page.Should().Contain(
+            "Withdraw the active external land listing before marking this land ready for a project.");
+    }
+
+    [Fact]
     public void SerializableLandClaimRetries_ClearTrackedStateAfterRollback()
     {
         var projectService = ReadSource(

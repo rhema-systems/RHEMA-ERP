@@ -697,6 +697,7 @@ export default function EstateLandManagementPage() {
                       variant="outline"
                       disabled={
                         !canMarkProjectReady ||
+                        selected.asset.isPublishedToExternalPortal ||
                         !selected.asset.boundaryVerified ||
                         selected.asset.demarcationCount === 0 ||
                         selected.asset.verifiedDemarcationCount !==
@@ -707,14 +708,16 @@ export default function EstateLandManagementPage() {
                       title={
                         !canMarkProjectReady
                           ? 'Requires the Mark Land Project Ready permission assigned in Administration.'
-                          : !selected.asset.boundaryVerified
-                          ? 'Verify the main cadastral boundary first.'
-                          : selected.asset.demarcationCount === 0
-                            ? 'Add at least one demarcation first.'
-                            : selected.asset.verifiedDemarcationCount !==
-                                selected.asset.demarcationCount
-                              ? 'Verify every demarcation first.'
-                              : undefined
+                          : selected.asset.isPublishedToExternalPortal
+                            ? 'Withdraw the active external land listing before marking this land ready for a project.'
+                            : !selected.asset.boundaryVerified
+                              ? 'Verify the main cadastral boundary first.'
+                              : selected.asset.demarcationCount === 0
+                                ? 'Add at least one demarcation first.'
+                                : selected.asset.verifiedDemarcationCount !==
+                                    selected.asset.demarcationCount
+                                  ? 'Verify every demarcation first.'
+                                  : undefined
                       }
                     >
                       {markingReadyKey === `asset:${selected.asset.id}` ? (

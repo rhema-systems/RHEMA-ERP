@@ -495,11 +495,23 @@ export default function DemarcateLandDialog({
     }
   };
 
+  const handleOpenChange = (next: boolean) => {
+    if (saving || deletingId) return;
+    if (
+      !next &&
+      (pendingDemarcations.length > 0 || hasDraftValues) &&
+      !window.confirm(
+        'Discard all unsaved demarcation drafts and close this dialog?'
+      )
+    ) {
+      return;
+    }
+
+    onOpenChange(next);
+  };
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => !saving && !deletingId && onOpenChange(next)}
-    >
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Demarcations - {asset?.assetCode}</DialogTitle>
@@ -869,7 +881,7 @@ export default function DemarcateLandDialog({
           ) : null}
           <Button
             variant="outline"
-            onClick={() => onOpenChange(false)}
+            onClick={() => handleOpenChange(false)}
             disabled={saving}
           >
             Close

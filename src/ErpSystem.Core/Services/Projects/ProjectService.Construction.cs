@@ -278,7 +278,10 @@ public partial class ProjectService
         var repository = _unitOfWork.Repository<ProjectDevelopmentProfile>();
         var profile = await repository.FirstOrDefaultAsync(x => x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId);
         var previousLandReference = profile?.LandReference;
-        dto.LandReference = await ResolveDevelopmentProfileLandReferenceAsync(profile?.LandReference, dto.LandReference);
+        dto.LandReference = await ResolveDevelopmentProfileLandReferenceAsync(
+            project.Id,
+            profile?.LandReference,
+            dto.LandReference);
         if (profile == null)
         {
             profile = new ProjectDevelopmentProfile
@@ -309,7 +312,10 @@ public partial class ProjectService
         return profile;
     }
 
-    private async Task<string?> ResolveDevelopmentProfileLandReferenceAsync(string? currentLandReference, string? requestedLandReference)
+    private async Task<string?> ResolveDevelopmentProfileLandReferenceAsync(
+        Guid projectId,
+        string? currentLandReference,
+        string? requestedLandReference)
     {
         var normalizedCurrent = TrimOrNull(currentLandReference);
         var normalizedRequested = TrimOrNull(requestedLandReference);
@@ -325,10 +331,14 @@ public partial class ProjectService
         }
 
         // Estate integration: only newly selected or changed land references must resolve to ready Estate land-bank assets.
-        return await ResolveReadyProjectLandReferenceAsync(normalizedRequested);
+        return await ResolveReadyProjectLandReferenceAsync(
+            normalizedRequested,
+            projectId);
     }
 
-    private async Task<string?> ResolveReadyProjectLandReferenceAsync(string? landReference)
+    private async Task<string?> ResolveReadyProjectLandReferenceAsync(
+        string? landReference,
+        Guid? excludedProjectId = null)
     {
         var normalizedReference = TrimOrNull(landReference);
         if (normalizedReference == null)
@@ -336,11 +346,15 @@ public partial class ProjectService
             return null;
         }
 
-        var selection = await RequireReadyProjectLandDemarcationAsync(normalizedReference);
+        var selection = await RequireReadyProjectLandDemarcationAsync(
+            normalizedReference,
+            excludedProjectId);
         return selection.LandReference;
     }
 
-    private async Task<ReadyProjectLandSelection> RequireReadyProjectLandDemarcationAsync(string landReference)
+    private async Task<ReadyProjectLandSelection> RequireReadyProjectLandDemarcationAsync(
+        string landReference,
+        Guid? excludedProjectId = null)
     {
         var readyLandAssets = await _unitOfWork.Repository<EstateManagedAsset>().FindAsync(asset =>
             asset.TenantId == _currentUserProvider.TenantId
@@ -360,7 +374,8 @@ public partial class ProjectService
         var assignedLandReferences = (await _unitOfWork.Repository<ProjectDevelopmentProfile>().FindAsync(item =>
                 item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted
-                && item.LandReference != null))
+                && item.LandReference != null
+                && (!excludedProjectId.HasValue || item.ProjectId != excludedProjectId.Value)))
             .Select(item => item.LandReference!.Trim())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
