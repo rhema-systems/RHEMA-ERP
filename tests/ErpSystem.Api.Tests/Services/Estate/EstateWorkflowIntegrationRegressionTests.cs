@@ -209,7 +209,8 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         controller.Should().Contain("[HttpGet(\"project-ready-demarcations\")]");
         batchMethod.Should().Contain("item.ProjectId != projectId.Value");
         batchMethod.Should().Contain("IsCurrentProjectSelection = isCurrentSelection");
-        batchMethod.Should().Contain("!asset.IsPublishedToExternalPortal");
+        batchMethod.Should().Contain(
+            "!item.EstateManagedAsset.IsPublishedToExternalPortal");
         clientService.Should().Contain(
             "'/estate/managed-assets/project-ready-demarcations'");
         selector.Should().Contain("getProjectReadyLandDemarcations(");
@@ -250,6 +251,91 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         assignmentGuard.Should().Contain("IsDemarcationAssignedToProject(");
         assignmentGuard.Should().Contain(
             "Land with a demarcation assigned to a project cannot be published to the land bank again.");
+        assignmentGuard.Should().Contain("asset.IsPublishedToExternalPortal");
+        assignmentGuard.Should().Contain(
+            "Withdraw the active external land listing before publishing the acquisition to the land bank again.");
+    }
+
+    [Fact]
+    public void LegacyWholeParcelAssignments_CannotBeInvalidatedBySubdivision()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var createMethod = Slice(
+            source,
+            "private async Task<EstateLandDemarcationDto> CreateLandDemarcationCoreAsync",
+            "public Task<EstateLandDemarcationDto> UpdateLandDemarcationAsync");
+        var assignmentHelpers = Slice(
+            source,
+            "private static bool IsDemarcationAssignedToProject",
+            "private static EstateLandDemarcationDto MapDemarcationToDto");
+
+        createMethod.Should().Contain("existingBoundaries.Count > 0");
+        createMethod.Should().Contain(
+            "HasLegacyWholeParcelAssignment(asset, assignedLandReferences)");
+        createMethod.Should().Contain(
+            "Land assigned to a project by its whole-parcel reference cannot be subdivided.");
+        assignmentHelpers.Should().Contain(
+            "HasLegacyWholeParcelAssignment(asset, assignedLandReferences)");
+    }
+
+    [Fact]
+    public void ReadyLandSelectorQuery_FiltersAndProjectsBeforeMaterialization()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var batchMethod = Slice(
+            source,
+            "public async Task<IReadOnlyList<ProjectReadyLandDemarcationDto>> GetProjectReadyLandDemarcationsAsync",
+            "public Task<EstateLandDemarcationDto> CreateLandDemarcationAsync");
+        var candidateQuery = Slice(
+            batchMethod,
+            "var candidates =",
+            "var candidatesByAsset");
+
+        batchMethod.Should().Contain(
+            "item.EstateManagedAsset.IsReadyForProjectManagement");
+        batchMethod.Should().Contain("normalizedCurrentReference != null");
+        candidateQuery.Should().Contain(".Select(item => new ReadyLandCandidate");
+        candidateQuery.IndexOf(".Select(item => new ReadyLandCandidate", StringComparison.Ordinal)
+            .Should().BeLessThan(
+                candidateQuery.IndexOf(".ToListAsync()", StringComparison.Ordinal));
+        candidateQuery.Should().NotContain(".Select(item => item.BoundaryCoordinates)");
+    }
+
+    [Fact]
+    public void DemarcationEditors_ConfirmBeforeReplacingUnsavedDrafts()
+    {
+        var dialog = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "land-management",
+            "DemarcateLandDialog.tsx");
+        var selector = ReadSource(
+            "frontend",
+            "src",
+            "components",
+            "projects",
+            "ReadyLandPortionSelect.tsx");
+
+        dialog.Should().Contain("confirmEditorReplacement");
+        dialog.Should().Contain(
+            "confirmEditorReplacement('edit this saved demarcation')");
+        dialog.Should().Contain(
+            "confirmEditorReplacement('edit this pending demarcation')");
+        dialog.Should().Contain("onClick={beginNewDemarcation}");
+        selector.Should().Contain("portion.isCurrentProjectSelection");
+        selector.Should().Contain("onValueChange(normalizedValue)");
     }
 
     [Fact]

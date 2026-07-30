@@ -194,6 +194,12 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
     private async Task EnsureAcquisitionCanBeRepublishedAsync(EstateManagedAsset asset)
     {
+        if (asset.IsPublishedToExternalPortal)
+        {
+            throw new InvalidOperationException(
+                "Withdraw the active external land listing before publishing the acquisition to the land bank again.");
+        }
+
         if (asset.ProjectId.HasValue)
         {
             throw new InvalidOperationException(
@@ -443,56 +449,83 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             .ToListAsync();
         var assignedLandReferences = assignedLandReferenceValues
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var normalizedCurrentReference = string.IsNullOrWhiteSpace(currentLandReference)
+            ? null
+            : currentLandReference.Trim();
+        var currentReferenceIsAssetId = Guid.TryParse(
+            normalizedCurrentReference,
+            out var currentAssetId);
+        var currentReferenceIsDemarcation =
+            EstateLandDemarcationReference.TryParse(
+                normalizedCurrentReference,
+                out var currentAssetCode,
+                out var currentDemarcationNumber);
 
-        var assets = await _unitOfWork.Repository<EstateManagedAsset>()
+        // Keep the database query narrow: only ready assets and the current project's
+        // selected asset are candidates, and only selector fields are projected.
+        var candidates = await _unitOfWork.Repository<EstateLandDemarcation>()
             .GetQueryable(item =>
                 item.TenantId == tenantId
                 && !item.IsDeleted
-                && item.AssetType == EstateManagedAssetType.Land)
+                && item.EstateManagedAsset.TenantId == tenantId
+                && !item.EstateManagedAsset.IsDeleted
+                && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                && ((item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
+                        && item.EstateManagedAsset.IsReadyForProjectManagement
+                        && !item.EstateManagedAsset.IsPublishedToExternalPortal)
+                    || (normalizedCurrentReference != null
+                        && ((currentReferenceIsAssetId
+                                && item.EstateManagedAssetId == currentAssetId)
+                            || item.EstateManagedAsset.AssetCode == normalizedCurrentReference
+                            || item.EstateManagedAsset.ProjectCode == normalizedCurrentReference
+                            || item.EstateManagedAsset.Name == normalizedCurrentReference
+                            || (currentReferenceIsDemarcation
+                                && item.EstateManagedAsset.AssetCode == currentAssetCode
+                                && item.DemarcationNumber == currentDemarcationNumber)))))
+            .Select(item => new ReadyLandCandidate
+            {
+                AssetId = item.EstateManagedAssetId,
+                AssetCode = item.EstateManagedAsset.AssetCode,
+                AssetName = item.EstateManagedAsset.Name,
+                AssetLocation = item.EstateManagedAsset.Location,
+                AssetProjectCode = item.EstateManagedAsset.ProjectCode,
+                AssetStatus = item.EstateManagedAsset.Status,
+                AssetIsReadyForProjectManagement =
+                    item.EstateManagedAsset.IsReadyForProjectManagement,
+                AssetIsPublishedToExternalPortal =
+                    item.EstateManagedAsset.IsPublishedToExternalPortal,
+                DemarcationId = item.Id,
+                DemarcationNumber = item.DemarcationNumber,
+                Description = item.Description,
+                AreaSquareFeet = item.AreaSquareFeet,
+                BoundaryVerified = item.BoundaryVerified
+            })
             .AsNoTracking()
             .ToListAsync();
-        if (assets.Count == 0)
-        {
-            return [];
-        }
-
-        var assetIds = assets.Select(item => item.Id).ToList();
-        var demarcations = await _unitOfWork.Repository<EstateLandDemarcation>()
-            .GetQueryable(item =>
-                item.TenantId == tenantId
-                && !item.IsDeleted
-                && assetIds.Contains(item.EstateManagedAssetId))
-            .AsNoTracking()
-            .ToListAsync();
-        var demarcationsByAsset = demarcations
-            .GroupBy(item => item.EstateManagedAssetId)
-            .ToDictionary(group => group.Key, group => (IReadOnlyCollection<EstateLandDemarcation>)group.ToList());
+        var candidatesByAsset = candidates
+            .GroupBy(item => item.AssetId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyCollection<ReadyLandCandidate>)group.ToList());
         var currentReferenceSet = string.IsNullOrWhiteSpace(currentLandReference)
             ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>([currentLandReference.Trim()], StringComparer.OrdinalIgnoreCase);
         var result = new List<ProjectReadyLandDemarcationDto>();
 
-        foreach (var asset in assets)
+        foreach (var assetCandidates in candidatesByAsset.Values)
         {
-            if (!demarcationsByAsset.TryGetValue(asset.Id, out var assetDemarcations))
+            foreach (var candidate in assetCandidates.Where(item => item.BoundaryVerified))
             {
-                continue;
-            }
-
-            foreach (var demarcation in assetDemarcations.Where(item => item.BoundaryVerified))
-            {
-                var isCurrentSelection = IsDemarcationAssignedToProject(
-                    asset,
-                    assetDemarcations,
-                    demarcation,
+                var isCurrentSelection = IsReadyLandCandidateAssignedToProject(
+                    assetCandidates,
+                    candidate,
                     currentReferenceSet);
-                var isAvailable = asset.Status == EstateManagedAssetStatus.LandBank
-                    && asset.IsReadyForProjectManagement
-                    && !asset.IsPublishedToExternalPortal
-                    && !IsDemarcationAssignedToProject(
-                        asset,
-                        assetDemarcations,
-                        demarcation,
+                var isAvailable = candidate.AssetStatus == EstateManagedAssetStatus.LandBank
+                    && candidate.AssetIsReadyForProjectManagement
+                    && !candidate.AssetIsPublishedToExternalPortal
+                    && !IsReadyLandCandidateAssignedToProject(
+                        assetCandidates,
+                        candidate,
                         assignedLandReferences);
                 if (!isCurrentSelection && !isAvailable)
                 {
@@ -501,17 +534,17 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
                 result.Add(new ProjectReadyLandDemarcationDto
                 {
-                    AssetId = asset.Id,
-                    AssetCode = asset.AssetCode,
-                    AssetName = asset.Name,
-                    AssetLocation = asset.Location,
-                    DemarcationId = demarcation.Id,
+                    AssetId = candidate.AssetId,
+                    AssetCode = candidate.AssetCode,
+                    AssetName = candidate.AssetName,
+                    AssetLocation = candidate.AssetLocation,
+                    DemarcationId = candidate.DemarcationId,
                     LandReference = EstateLandDemarcationReference.Build(
-                        asset.AssetCode,
-                        demarcation.DemarcationNumber),
-                    DemarcationNumber = demarcation.DemarcationNumber,
-                    Description = demarcation.Description,
-                    AreaSquareFeet = demarcation.AreaSquareFeet,
+                        candidate.AssetCode,
+                        candidate.DemarcationNumber),
+                    DemarcationNumber = candidate.DemarcationNumber,
+                    Description = candidate.Description,
+                    AreaSquareFeet = candidate.AreaSquareFeet,
                     IsCurrentProjectSelection = isCurrentSelection
                 });
             }
@@ -543,6 +576,15 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 && !item.IsDeleted)
             .Select(item => item.BoundaryCoordinates)
             .ToListAsync();
+        if (existingBoundaries.Count > 0)
+        {
+            var assignedLandReferences = await GetAssignedProjectLandReferencesAsync();
+            if (HasLegacyWholeParcelAssignment(asset, assignedLandReferences))
+            {
+                throw new InvalidOperationException(
+                    "Land assigned to a project by its whole-parcel reference cannot be subdivided. Reassign the project to the existing demarcation first.");
+            }
+        }
         EnsureDoesNotOverlap(request.BoundaryCoordinates, existingBoundaries);
         var lastDemarcationNumber = await repository
             .GetQueryable(item => item.EstateManagedAssetId == assetId
@@ -1283,9 +1325,55 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         }
 
         return demarcations.Count == 1
-            && new[] { asset.AssetCode, asset.ProjectCode, asset.Name, asset.Id.ToString() }
-                .Any(reference => !string.IsNullOrWhiteSpace(reference)
-                    && assignedLandReferences.Contains(reference.Trim()));
+            && HasLegacyWholeParcelAssignment(asset, assignedLandReferences);
+    }
+
+    private static bool HasLegacyWholeParcelAssignment(
+        EstateManagedAsset asset,
+        ISet<string> assignedLandReferences)
+        => new[] { asset.AssetCode, asset.ProjectCode, asset.Name, asset.Id.ToString() }
+            .Any(reference => !string.IsNullOrWhiteSpace(reference)
+                && assignedLandReferences.Contains(reference.Trim()));
+
+    private static bool IsReadyLandCandidateAssignedToProject(
+        IReadOnlyCollection<ReadyLandCandidate> assetCandidates,
+        ReadyLandCandidate candidate,
+        ISet<string> assignedLandReferences)
+    {
+        var landReference = EstateLandDemarcationReference.Build(
+            candidate.AssetCode,
+            candidate.DemarcationNumber);
+        if (assignedLandReferences.Contains(landReference))
+        {
+            return true;
+        }
+
+        return assetCandidates.Count == 1
+            && new[]
+            {
+                candidate.AssetCode,
+                candidate.AssetProjectCode,
+                candidate.AssetName,
+                candidate.AssetId.ToString()
+            }.Any(reference => !string.IsNullOrWhiteSpace(reference)
+                && assignedLandReferences.Contains(reference.Trim()));
+    }
+
+    private sealed class ReadyLandCandidate
+    {
+        public Guid AssetId { get; init; }
+        public string AssetCode { get; init; } = string.Empty;
+        public string AssetName { get; init; } = string.Empty;
+        public string? AssetLocation { get; init; }
+        public string? AssetProjectCode { get; init; }
+        public EstateManagedAssetStatus AssetStatus { get; init; }
+        public bool AssetIsReadyForProjectManagement { get; init; }
+        public bool AssetIsPublishedToExternalPortal { get; init; }
+        public Guid DemarcationId { get; init; }
+        public int DemarcationNumber { get; init; }
+        public string Description { get; init; } = string.Empty;
+        public decimal AreaSquareFeet { get; init; }
+        public bool BoundaryVerified { get; init; }
     }
 
     private static EstateLandDemarcationDto MapDemarcationToDto(EstateLandDemarcation demarcation) => new()

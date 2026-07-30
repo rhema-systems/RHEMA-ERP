@@ -214,18 +214,29 @@ export default function DemarcateLandDialog({
         !item.beacon.trim() || !item.northing.trim() || !item.easting.trim()
     ) ||
     !boundaryCoordinates;
-  const hasDraftValues =
+  const hasEditorValues =
     Boolean(description.trim()) ||
-    beacons.some((item) =>
-      [
-        item.beacon,
-        item.northing,
-        item.easting,
-        item.bearing,
-        item.distance,
-      ].some((value) => value.trim())
+    beacons.some(
+      (item, index) =>
+        item.beacon.trim() !== `Beacon ${index + 1}` ||
+        Boolean(item.northing.trim()) ||
+        Boolean(item.easting.trim()) ||
+        Boolean(item.bearing.trim()) ||
+        Boolean(item.distance.trim())
     ) ||
     boundaryVerified;
+  const originalDemarcation = editingId
+    ? demarcations.find((item) => item.id === editingId)
+    : undefined;
+  const hasDraftValues = originalDemarcation
+    ? description.trim() !== originalDemarcation.description.trim() ||
+      boundaryCoordinates !== originalDemarcation.boundaryCoordinates.trim() ||
+      boundaryVerified !== originalDemarcation.boundaryVerified
+    : hasEditorValues;
+
+  const confirmEditorReplacement = (action: string) =>
+    !hasDraftValues ||
+    window.confirm(`Discard the unsaved demarcation changes and ${action}?`);
 
   const mapDemarcations = React.useMemo(
     () => [
@@ -264,6 +275,7 @@ export default function DemarcateLandDialog({
 
   const editDemarcation = (demarcation: EstateLandDemarcation) => {
     if (rejectLockedDemarcationChange()) return;
+    if (editingId === demarcation.id) return;
 
     if (demarcation.isAssignedToProject) {
       toast.error(
@@ -271,6 +283,7 @@ export default function DemarcateLandDialog({
       );
       return;
     }
+    if (!confirmEditorReplacement('edit this saved demarcation')) return;
 
     setEditingId(demarcation.id);
     setDescription(demarcation.description);
@@ -305,6 +318,8 @@ export default function DemarcateLandDialog({
   };
 
   const editPendingDemarcation = (item: PendingDemarcation) => {
+    if (!confirmEditorReplacement('edit this pending demarcation')) return;
+
     setPendingDemarcations((current) =>
       current.filter((pending) => pending.id !== item.id)
     );
@@ -322,6 +337,7 @@ export default function DemarcateLandDialog({
 
   const useWholeParcel = () => {
     if (rejectLockedDemarcationChange()) return;
+    if (!confirmEditorReplacement('use the whole parcel')) return;
 
     if (!asset?.boundaryVerified || !asset.boundaryCoordinates?.trim()) {
       toast.error(
@@ -350,6 +366,13 @@ export default function DemarcateLandDialog({
     toast.success(
       'The complete parent boundary is ready to save as one parcel.'
     );
+  };
+
+  const beginNewDemarcation = () => {
+    if (!confirmEditorReplacement('start a new demarcation')) {
+      return;
+    }
+    resetEditor();
   };
 
   const save = async () => {
@@ -543,7 +566,7 @@ export default function DemarcateLandDialog({
                 size="sm"
                 variant="outline"
                 disabled={demarcationsLocked}
-                onClick={resetEditor}
+                onClick={beginNewDemarcation}
               >
                 <Plus className="mr-2 h-4 w-4" />
                 New Demarcation

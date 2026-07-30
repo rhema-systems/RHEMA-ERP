@@ -22,9 +22,7 @@ type ReadyLandPortionSelectProps = {
   label?: string;
 };
 
-const formatReadyLandPortionLabel = (
-  portion: ProjectReadyLandDemarcation
-) => {
+const formatReadyLandPortionLabel = (portion: ProjectReadyLandDemarcation) => {
   const isWholeParcel =
     portion.description.trim().toLowerCase() === 'whole parcel';
   const portionName = isWholeParcel
@@ -39,11 +37,7 @@ const formatReadyLandPortionLabel = (
       : `${portion.areaSquareFeet.toLocaleString(undefined, {
           maximumFractionDigits: 0,
         })} sq ft`;
-  const parent = [
-    portion.assetCode,
-    portion.assetName,
-    portion.assetLocation,
-  ]
+  const parent = [portion.assetCode, portion.assetName, portion.assetLocation]
     .filter(Boolean)
     .join(' - ');
   return `${portionName} - ${area} (${parent})${
@@ -98,6 +92,24 @@ export function ReadyLandPortionSelect({
     };
   }, [projectId]);
 
+  const matchingPortion = value
+    ? portions.find(
+        (portion) => portion.landReference.toLowerCase() === value.toLowerCase()
+      )
+    : undefined;
+  const currentPortion = portions.find(
+    (portion) => portion.isCurrentProjectSelection
+  );
+  const normalizedValue =
+    matchingPortion?.landReference ??
+    (value ? currentPortion?.landReference : undefined);
+
+  useEffect(() => {
+    if (value && normalizedValue && normalizedValue !== value) {
+      onValueChange(normalizedValue);
+    }
+  }, [normalizedValue, onValueChange, value]);
+
   return (
     <div className="grid gap-2">
       <Label>
@@ -105,7 +117,7 @@ export function ReadyLandPortionSelect({
         {required ? <span className="text-destructive"> *</span> : null}
       </Label>
       <Select
-        value={value || 'none'}
+        value={normalizedValue || value || 'none'}
         onValueChange={(nextValue) =>
           onValueChange(nextValue === 'none' ? undefined : nextValue)
         }
@@ -113,7 +125,9 @@ export function ReadyLandPortionSelect({
       >
         <SelectTrigger>
           <SelectValue
-            placeholder={loading ? 'Loading ready land...' : 'Select ready land'}
+            placeholder={
+              loading ? 'Loading ready land...' : 'Select ready land'
+            }
           />
         </SelectTrigger>
         <SelectContent>
