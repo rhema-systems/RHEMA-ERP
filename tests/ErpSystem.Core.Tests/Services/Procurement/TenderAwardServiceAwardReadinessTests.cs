@@ -99,6 +99,7 @@ public sealed class TenderAwardServiceAwardReadinessTests
             tenderControl.Object,
             exceptionalControl.Object,
             readiness.Object,
+            new Mock<IProcurementPurchaseOrderSourceService>().Object,
             new Mock<ILogger<TenderAwardService>>().Object);
 
         var action = () => service.CreateAwardAsync(
@@ -184,6 +185,7 @@ public sealed class TenderAwardServiceAwardReadinessTests
             tenderControl.Object,
             exceptionalControl.Object,
             readiness.Object,
+            new Mock<IProcurementPurchaseOrderSourceService>().Object,
             new Mock<ILogger<TenderAwardService>>().Object);
 
         var action = () => service.CreateAwardAsync(

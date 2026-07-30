@@ -175,6 +175,8 @@ public class PurchaseOrderSummaryDto
     public decimal TotalAmount { get; set; }
     public int ItemCount { get; set; }
     public string? RequestedByName { get; set; }
+    public ProcurementPurchaseOrderSourceType? ProcurementSourceType { get; set; }
+    public string? ProcurementSourceReference { get; set; }
     /// <summary>
     /// Runtime workflow info (populated when status is workflow-driven)
     /// </summary>
@@ -213,6 +215,16 @@ public class PurchaseOrderDetailDto : PurchaseOrderSummaryDto
     public string? SupplierPhone { get; set; }
     public string? SupplierEmail { get; set; }
     public string? SupplierAddress { get; set; }
+
+    // Immutable approved source lineage
+    public Guid? ProcurementSourceId { get; set; }
+    public Guid? SourceRequisitionId { get; set; }
+    public string? SourceRequisitionNumber { get; set; }
+    public Guid? SourcingReleaseId { get; set; }
+    public Guid? SourcingCaseId { get; set; }
+    public Guid? AwardReadinessDecisionId { get; set; }
+    public string? SourceIntegrityHash { get; set; }
+    public DateTime? SourceValidatedAtUtc { get; set; }
 
     // Tender/Contract Integration
     public Guid? TenderAwardId { get; set; }
@@ -271,6 +283,12 @@ public class PurchaseOrderItemDto
 /// </summary>
 public class CreatePurchaseOrderDto
 {
+    [Required]
+    public ProcurementPurchaseOrderSourceType? SourceType { get; set; }
+
+    [Required]
+    public Guid? SourceId { get; set; }
+
     [Required]
     public Guid SupplierId { get; set; }
 

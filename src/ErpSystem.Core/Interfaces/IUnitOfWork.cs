@@ -43,6 +43,16 @@ public interface IUnitOfWork : IDisposable
     Task BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Acquires an exclusive transaction-scoped logical lock. The lock is
+    /// released automatically when the current database transaction commits or
+    /// rolls back and is used to serialize aggregate reservations that span
+    /// multiple rows.
+    /// </summary>
+    Task AcquireTransactionLockAsync(
+        string resource,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Commit the current transaction
     /// </summary>
     Task CommitAsync(CancellationToken cancellationToken = default);

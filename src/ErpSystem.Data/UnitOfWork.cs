@@ -80,6 +80,50 @@ public class UnitOfWork : IUnitOfWork
         _ownsTransaction = true;
     }
 
+    public async Task AcquireTransactionLockAsync(
+        string resource,
+        CancellationToken cancellationToken = default)
+    {
+        if (!HasActiveTransaction)
+            throw new InvalidOperationException(
+                "A database transaction is required before acquiring a transaction lock.");
+        if (string.IsNullOrWhiteSpace(resource) || resource.Trim().Length > 255)
+            throw new ArgumentException(
+                "The transaction lock resource must contain 1 to 255 characters.",
+                nameof(resource));
+
+        var transaction =
+            _context.Database.CurrentTransaction ?? _transaction
+            ?? throw new InvalidOperationException(
+                "The active database transaction could not be resolved.");
+        var connection = _context.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction.GetDbTransaction();
+        command.CommandText =
+            """
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock
+                @Resource = @resource,
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction',
+                @LockTimeout = 15000;
+            SELECT @result;
+            """;
+        var resourceParameter = command.CreateParameter();
+        resourceParameter.ParameterName = "@resource";
+        resourceParameter.DbType = DbType.String;
+        resourceParameter.Size = 255;
+        resourceParameter.Value = resource.Trim();
+        command.Parameters.Add(resourceParameter);
+        var result = Convert.ToInt32(
+            await command.ExecuteScalarAsync(cancellationToken));
+        if (result < 0)
+        {
+            throw new TimeoutException(
+                $"Could not acquire transaction lock '{resource.Trim()}' (result {result}).");
+        }
+    }
+
     public async Task CommitAsync(CancellationToken cancellationToken = default)
     {
         if (_transaction == null)
