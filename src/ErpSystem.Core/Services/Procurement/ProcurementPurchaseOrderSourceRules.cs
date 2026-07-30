@@ -30,6 +30,13 @@ public static class ProcurementPurchaseOrderSourceRules
             or ProcurementPurchaseOrderSourceType.TenderAward
             or ProcurementPurchaseOrderSourceType.ApprovedException;
 
+    public static bool IsContractBoundToAward(
+        Guid contractTenderAwardId,
+        Guid requestedTenderAwardId) =>
+        contractTenderAwardId != Guid.Empty &&
+        requestedTenderAwardId != Guid.Empty &&
+        contractTenderAwardId == requestedTenderAwardId;
+
     public static Guid ResolveAwardReadinessSourceId(
         ProcurementPurchaseOrderSourceType sourceType,
         Guid sourceId,

@@ -150,7 +150,9 @@ public sealed class ProcurementFrameworkAgreementService :
         request.Page = Math.Max(1, request.Page);
         request.PageSize = Math.Clamp(request.PageSize, 1, 200);
         var now = DateTime.UtcNow;
-        var query = AgreementQuery().AsNoTracking();
+        var query = Agreements.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .AsNoTracking();
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
             var search = request.Search.Trim();
@@ -167,15 +169,38 @@ public sealed class ProcurementFrameworkAgreementService :
             query = query.Where(item => item.Status == request.Status.Value);
         if (request.SourceType.HasValue)
             query = query.Where(item => item.SourceType == request.SourceType.Value);
-        var rows = await query.OrderByDescending(item => item.CreatedAt)
-            .ThenByDescending(item => item.Version)
-            .ToListAsync(cancellationToken);
         if (request.EffectiveOnly == true)
-            rows = rows.Where(item => ProcurementFrameworkAgreementRules.IsEffective(item, now))
-                .ToList();
-        var total = rows.Count;
-        var pageRows = rows.Skip((request.Page - 1) * request.PageSize)
+        {
+            query = query.Where(item =>
+                item.Status == ProcurementFrameworkAgreementStatus.Published &&
+                item.EffectiveFromUtc <= now &&
+                (item.EffectiveToUtc > now ||
+                 item.Extensions.Any(extension =>
+                     !extension.IsDeleted &&
+                     extension.Status ==
+                     ProcurementFrameworkExtensionStatus.Approved &&
+                     extension.ProposedEndUtc > now)));
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+        var pageIds = await query
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.Version)
+            .Select(item => item.Id)
+            .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
+            .ToListAsync(cancellationToken);
+        var pageOrder = pageIds
+            .Select((id, index) => new { id, index })
+            .ToDictionary(item => item.id, item => item.index);
+        var pageRows = pageIds.Count == 0
+            ? []
+            : (await AgreementQuery()
+                .AsNoTracking()
+                .Where(item => pageIds.Contains(item.Id))
+                .AsSplitQuery()
+                .ToListAsync(cancellationToken))
+            .OrderBy(item => pageOrder[item.Id])
             .ToList();
         var familySummaries = await ResolveFamilySummariesAsync(
             pageRows,

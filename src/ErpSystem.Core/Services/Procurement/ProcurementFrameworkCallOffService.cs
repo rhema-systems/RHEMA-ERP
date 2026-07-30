@@ -721,7 +721,10 @@ public sealed class ProcurementFrameworkCallOffService :
                 throw Authorization(
                     "The current actor is not assigned to the active purchase-order workflow step.");
 
-            ProcurementFrameworkAgreement? agreement = null;
+            // LoadAsync includes the retained agreement graph. Rejection skips
+            // commercial revalidation by design, but its control event still
+            // needs the immutable agreement rule id/hash.
+            ProcurementFrameworkAgreement agreement = callOff.Agreement;
             if (ProcurementFrameworkCallOffCommercialRules
                     .RequiresCommercialRevalidationOnDecision(request.Approved))
             {

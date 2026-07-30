@@ -455,6 +455,22 @@ public class TenderAwardService : ITenderAwardService
 
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
+            if (dto.ContractId.HasValue)
+            {
+                var contract = await _unitOfWork.Repository<Contract>()
+                    .GetByIdAsync(dto.ContractId.Value)
+                    ?? throw new InvalidOperationException(
+                        $"Contract with ID {dto.ContractId.Value} not found");
+                if (contract.TenantId != _currentUserProvider.TenantId ||
+                    contract.IsDeleted ||
+                    !ProcurementPurchaseOrderSourceRules.IsContractBoundToAward(
+                        contract.TenderAwardId,
+                        award.Id))
+                {
+                    throw new InvalidOperationException(
+                        "The selected contract is not derived from the requested tender award.");
+                }
+            }
             var sourceCorrelationId = Guid.NewGuid().ToString("N");
             var sourceType = dto.ContractId.HasValue
                 ? ProcurementPurchaseOrderSourceType.Contract

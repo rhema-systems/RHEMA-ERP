@@ -124,6 +124,55 @@ public sealed class ProcurementPurchaseOrderSourceMigrationTests
         correctiveSql.Should().NotContain("DISABLE TRIGGER");
     }
 
+    [Fact]
+    public void CommercialHardStopEnforcesCompleteRfqAwardTerms()
+    {
+        var sql = Sql(new TDC0403CommercialCapacityHardStops());
+
+        sql.Should().Contain(
+            "TR_PurchaseOrders_ApprovedCommercialCapacity");
+        sql.Should().Contain(
+            "TR_PurchaseOrderItems_ApprovedCommercialCapacity");
+        sql.Should().Contain(
+            "RequestForQuotationAwardLines");
+        sql.Should().Contain(
+            "RequestForQuotationItems");
+        sql.Should().Contain(
+            "UPPER(LTRIM(RTRIM(ISNULL(i.Currency, ''))))");
+        sql.Should().Contain(
+            "ROUND(i.TotalAmount, 2)");
+        sql.Should().Contain(
+            "FULL OUTER JOIN #AffectedRfqActual");
+        sql.Should().Contain("THROW 51222");
+        sql.Should().Contain("THROW 51223");
+        sql.Should().Contain("THROW 51227");
+    }
+
+    [Fact]
+    public void CommercialHardStopSerializesAndEnforcesContractCapacity()
+    {
+        var sql = Sql(new TDC0403CommercialCapacityHardStops());
+
+        sql.Should().Contain(
+            "Contracts contract WITH (UPDLOCK, HOLDLOCK)");
+        sql.Should().Contain(
+            "existing.Status NOT IN");
+        sql.Should().Contain(
+            "SUM(existing.TotalAmount)");
+        sql.Should().Contain(
+            "TenderBidItems bidItem");
+        sql.Should().Contain(
+            "TenderNegotiationItems negotiationItem");
+        sql.Should().Contain(
+            "actual.Quantity > approved.Quantity");
+        sql.Should().Contain(
+            "actual.LineTotal > approved.LineTotal");
+        sql.Should().Contain("THROW 51224");
+        sql.Should().Contain("THROW 51225");
+        sql.Should().Contain("THROW 51228");
+        sql.Should().NotContain("DISABLE TRIGGER");
+    }
+
     private static string Sql(Migration migration)
     {
         var builder = new MigrationBuilder(

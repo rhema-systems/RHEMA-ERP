@@ -126,6 +126,25 @@ public sealed class ProcurementPurchaseOrderSourceRulesTests
         result.IsValid.Should().BeTrue();
     }
 
+    [Fact]
+    public void ContractMustBelongToTheRequestedTenderAward()
+    {
+        var requestedAwardId = Guid.NewGuid();
+
+        ProcurementPurchaseOrderSourceRules.IsContractBoundToAward(
+                requestedAwardId,
+                requestedAwardId)
+            .Should().BeTrue();
+        ProcurementPurchaseOrderSourceRules.IsContractBoundToAward(
+                Guid.NewGuid(),
+                requestedAwardId)
+            .Should().BeFalse();
+        ProcurementPurchaseOrderSourceRules.IsContractBoundToAward(
+                Guid.Empty,
+                requestedAwardId)
+            .Should().BeFalse();
+    }
+
     [Theory]
     [InlineData(5, 25, "PO_SOURCE_LINE_QUANTITY_MISMATCH")]
     [InlineData(4, 30, "PO_SOURCE_LINE_PRICE_MISMATCH")]
