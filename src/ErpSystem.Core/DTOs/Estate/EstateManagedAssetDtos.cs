@@ -167,6 +167,20 @@ public class EstateLandDemarcationDto
     public string? CreatedBy { get; set; }
 }
 
+public class ProjectReadyLandDemarcationDto
+{
+    public Guid AssetId { get; set; }
+    public string AssetCode { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string? AssetLocation { get; set; }
+    public Guid DemarcationId { get; set; }
+    public string LandReference { get; set; } = string.Empty;
+    public int DemarcationNumber { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public decimal AreaSquareFeet { get; set; }
+    public bool IsCurrentProjectSelection { get; set; }
+}
+
 public class SaveEstateLandDemarcationDto
 {
     public string Description { get; set; } = string.Empty;

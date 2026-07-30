@@ -376,6 +376,107 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         }).ToList();
     }
 
+    public async Task<IReadOnlyList<ProjectReadyLandDemarcationDto>> GetProjectReadyLandDemarcationsAsync(
+        Guid? projectId = null)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        var profilesQuery = _unitOfWork.Repository<ProjectDevelopmentProfile>()
+            .GetQueryable(item =>
+                item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.LandReference != null);
+        var currentLandReference = projectId.HasValue
+            ? await profilesQuery
+                .Where(item => item.ProjectId == projectId.Value)
+                .Select(item => item.LandReference)
+                .FirstOrDefaultAsync()
+            : null;
+        var assignedLandReferenceValues = await profilesQuery
+            .Where(item => !projectId.HasValue || item.ProjectId != projectId.Value)
+            .Select(item => item.LandReference!.Trim())
+            .ToListAsync();
+        var assignedLandReferences = assignedLandReferenceValues
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var assets = await _unitOfWork.Repository<EstateManagedAsset>()
+            .GetQueryable(item =>
+                item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.AssetType == EstateManagedAssetType.Land)
+            .AsNoTracking()
+            .ToListAsync();
+        if (assets.Count == 0)
+        {
+            return [];
+        }
+
+        var assetIds = assets.Select(item => item.Id).ToList();
+        var demarcations = await _unitOfWork.Repository<EstateLandDemarcation>()
+            .GetQueryable(item =>
+                item.TenantId == tenantId
+                && !item.IsDeleted
+                && assetIds.Contains(item.EstateManagedAssetId))
+            .AsNoTracking()
+            .ToListAsync();
+        var demarcationsByAsset = demarcations
+            .GroupBy(item => item.EstateManagedAssetId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyCollection<EstateLandDemarcation>)group.ToList());
+        var currentReferenceSet = string.IsNullOrWhiteSpace(currentLandReference)
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>([currentLandReference.Trim()], StringComparer.OrdinalIgnoreCase);
+        var result = new List<ProjectReadyLandDemarcationDto>();
+
+        foreach (var asset in assets)
+        {
+            if (!demarcationsByAsset.TryGetValue(asset.Id, out var assetDemarcations))
+            {
+                continue;
+            }
+
+            foreach (var demarcation in assetDemarcations.Where(item => item.BoundaryVerified))
+            {
+                var isCurrentSelection = IsDemarcationAssignedToProject(
+                    asset,
+                    assetDemarcations,
+                    demarcation,
+                    currentReferenceSet);
+                var isAvailable = asset.Status == EstateManagedAssetStatus.LandBank
+                    && asset.IsReadyForProjectManagement
+                    && !asset.IsPublishedToExternalPortal
+                    && !IsDemarcationAssignedToProject(
+                        asset,
+                        assetDemarcations,
+                        demarcation,
+                        assignedLandReferences);
+                if (!isCurrentSelection && !isAvailable)
+                {
+                    continue;
+                }
+
+                result.Add(new ProjectReadyLandDemarcationDto
+                {
+                    AssetId = asset.Id,
+                    AssetCode = asset.AssetCode,
+                    AssetName = asset.Name,
+                    AssetLocation = asset.Location,
+                    DemarcationId = demarcation.Id,
+                    LandReference = EstateLandDemarcationReference.Build(
+                        asset.AssetCode,
+                        demarcation.DemarcationNumber),
+                    DemarcationNumber = demarcation.DemarcationNumber,
+                    Description = demarcation.Description,
+                    AreaSquareFeet = demarcation.AreaSquareFeet,
+                    IsCurrentProjectSelection = isCurrentSelection
+                });
+            }
+        }
+
+        return result
+            .OrderBy(item => item.AssetCode)
+            .ThenBy(item => item.DemarcationNumber)
+            .ToList();
+    }
+
     public Task<EstateLandDemarcationDto> CreateLandDemarcationAsync(
         Guid assetId,
         SaveEstateLandDemarcationDto request)

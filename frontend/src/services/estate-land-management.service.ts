@@ -138,6 +138,19 @@ export interface EstateLandDemarcation {
   createdBy?: string;
 }
 
+export interface ProjectReadyLandDemarcation {
+  assetId: string;
+  assetCode: string;
+  assetName: string;
+  assetLocation?: string;
+  demarcationId: string;
+  landReference: string;
+  demarcationNumber: number;
+  description: string;
+  areaSquareFeet: number;
+  isCurrentProjectSelection: boolean;
+}
+
 export interface SaveEstateLandDemarcation {
   description: string;
   beaconCount: number;
@@ -380,6 +393,17 @@ export class EstateLandManagementService {
     const response = await apiService.get<
       ApiListResponse<EstateLandDemarcation>
     >(`/estate/managed-assets/${assetId}/demarcations`);
+    return response.data || [];
+  }
+
+  async getProjectReadyLandDemarcations(
+    projectId?: string
+  ): Promise<ProjectReadyLandDemarcation[]> {
+    const response = await apiService.get<
+      ApiListResponse<ProjectReadyLandDemarcation>
+    >('/estate/managed-assets/project-ready-demarcations', {
+      projectId: projectId || undefined,
+    });
     return response.data || [];
   }
 

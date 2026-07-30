@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { ReadyLandPortionSelect } from '@/components/projects/ReadyLandPortionSelect';
 import {
   buildProjectCurrencyOptions,
   DEFAULT_PROJECT_CURRENCY,
@@ -31,13 +32,6 @@ import {
   ProjectTypeDto,
   projectService,
 } from '@/services/projectService';
-import {
-  estateLandManagementService,
-  EstateManagedAssetStatus,
-  EstateManagedAssetType,
-  type EstateManagedAsset,
-  type EstateLandDemarcation,
-} from '@/services/estate-land-management.service';
 import { userService } from '@/services/user';
 import type { User } from '@/types';
 import { ArrowLeft, Save } from 'lucide-react';
@@ -74,24 +68,6 @@ const formatBusinessPartnerLabel = (partner: BusinessPartnerDto) =>
 
 const formatContractLabel = (contract: ContractDto) =>
   `${contract.contractNumber} - ${contract.contractTitle}`;
-
-interface ReadyLandPortion {
-  asset: EstateManagedAsset;
-  demarcation: EstateLandDemarcation;
-}
-
-const formatReadyLandPortionLabel = ({ asset, demarcation }: ReadyLandPortion) => {
-  const isWholeParcel = demarcation.description.trim().toLowerCase() === 'whole parcel';
-  const portionName = isWholeParcel
-    ? 'Whole Parcel'
-    : `Portion ${demarcation.demarcationNumber}: ${demarcation.description}`;
-  const acres = demarcation.areaSquareFeet / 43560;
-  const area = acres >= 0.01
-    ? `${acres.toLocaleString(undefined, { maximumFractionDigits: 2 })} acres`
-    : `${demarcation.areaSquareFeet.toLocaleString(undefined, { maximumFractionDigits: 0 })} sq ft`;
-  const parent = [asset.assetCode, asset.name, asset.location].filter(Boolean).join(' - ');
-  return `${portionName} — ${area} (${parent})`;
-};
 
 const resolveCatalogOptions = (entries: ProjectCatalogEntryDto[], fallbackValues: string[], currentValue?: string) => {
   const configured = entries
@@ -218,7 +194,6 @@ export default function NewProjectPage() {
   const [financeBaseCurrency, setFinanceBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const [businessPartners, setBusinessPartners] = useState<BusinessPartnerDto[]>([]);
   const [contracts, setContracts] = useState<ContractDto[]>([]);
-  const [readyLandPortions, setReadyLandPortions] = useState<ReadyLandPortion[]>([]);
   const [methodologyCatalog, setMethodologyCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [fundingSourceCatalog, setFundingSourceCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [form, setForm] = useState<CreateProjectDto>(initialForm);
@@ -337,32 +312,6 @@ export default function NewProjectPage() {
     };
 
     loadSetup();
-  }, []);
-
-  useEffect(() => {
-    const loadReadyLand = async () => {
-      try {
-        const assets = await estateLandManagementService.getManagedAssets({
-          assetType: EstateManagedAssetType.Land,
-          status: EstateManagedAssetStatus.LandBank,
-          take: 500,
-        });
-        const readyAssets = assets.filter((asset) => asset.isReadyForProjectManagement);
-        const portions = await Promise.all(
-          readyAssets.map(async (asset) => {
-            const demarcations = await estateLandManagementService.getLandDemarcations(asset.id);
-            return demarcations
-              .filter((demarcation) => demarcation.boundaryVerified && !demarcation.isAssignedToProject)
-              .map((demarcation) => ({ asset, demarcation }));
-          })
-        );
-        setReadyLandPortions(portions.flat());
-      } catch (error: any) {
-        toast.error(error.message || 'Failed to load project-ready land');
-      }
-    };
-
-    void loadReadyLand();
   }, []);
 
   useEffect(() => {
@@ -766,28 +715,13 @@ export default function NewProjectPage() {
             <Label htmlFor="site-address">Site Address</Label>
             <Textarea id="site-address" rows={2} value={form.developmentProfile?.siteAddress || ''} onChange={(e) => updateDevelopmentProfile({ siteAddress: e.target.value || undefined })} />
           </div>
-          <div className="grid gap-2">
-            <Label>{labelWithRequired('Demarcated Land', requiredFields.has('DevelopmentProfile.LandReference'))}</Label>
-            <Select
-              value={form.developmentProfile?.landReference || 'none'}
-              onValueChange={(value) => updateDevelopmentProfile({ landReference: value === 'none' ? undefined : value })}
-            >
-              <SelectTrigger><SelectValue placeholder="Select ready land" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No land selected</SelectItem>
-                {readyLandPortions.map((portion) => (
-                  <SelectItem key={portion.demarcation.id} value={portion.demarcation.landReference}>
-                    {formatReadyLandPortionLabel(portion)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {readyLandPortions.length === 0 ? (
-              <div className="text-xs text-muted-foreground">
-                No verified, unused demarcated land is ready for project management yet.
-              </div>
-            ) : null}
-          </div>
+          <ReadyLandPortionSelect
+            value={form.developmentProfile?.landReference}
+            onValueChange={(landReference) =>
+              updateDevelopmentProfile({ landReference })
+            }
+            required={requiredFields.has('DevelopmentProfile.LandReference')}
+          />
           <div className="grid gap-2">
             <Label htmlFor="funding-arrangement">Funding Arrangement</Label>
             <Input id="funding-arrangement" value={form.developmentProfile?.fundingArrangement || ''} onChange={(e) => updateDevelopmentProfile({ fundingArrangement: e.target.value || undefined })} />

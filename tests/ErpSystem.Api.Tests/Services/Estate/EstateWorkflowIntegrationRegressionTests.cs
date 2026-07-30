@@ -158,6 +158,68 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "asset.IsReadyForProjectManagement = !asset.IsPublishedToExternalPortal;");
     }
 
+    [Fact]
+    public void ProjectLandSelectors_UseOneBatchEndpointForCreateAndEdit()
+    {
+        var controller = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "EstateManagedAssetsController.cs");
+        var managedAssetService = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var batchMethod = Slice(
+            managedAssetService,
+            "public async Task<IReadOnlyList<ProjectReadyLandDemarcationDto>> GetProjectReadyLandDemarcationsAsync",
+            "public Task<EstateLandDemarcationDto> CreateLandDemarcationAsync");
+        var clientService = ReadSource(
+            "frontend",
+            "src",
+            "services",
+            "estate-land-management.service.ts");
+        var selector = ReadSource(
+            "frontend",
+            "src",
+            "components",
+            "projects",
+            "ReadyLandPortionSelect.tsx");
+        var createPage = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "development",
+            "projects",
+            "new",
+            "page.tsx");
+        var editTab = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "development",
+            "projects",
+            "[id]",
+            "components",
+            "ProjectOverviewTab.tsx");
+
+        controller.Should().Contain("[HttpGet(\"project-ready-demarcations\")]");
+        batchMethod.Should().Contain("item.ProjectId != projectId.Value");
+        batchMethod.Should().Contain("IsCurrentProjectSelection = isCurrentSelection");
+        batchMethod.Should().Contain("!asset.IsPublishedToExternalPortal");
+        clientService.Should().Contain(
+            "'/estate/managed-assets/project-ready-demarcations'");
+        selector.Should().Contain("getProjectReadyLandDemarcations(");
+        createPage.Should().Contain("<ReadyLandPortionSelect");
+        createPage.Should().NotContain("getLandDemarcations(asset.id)");
+        editTab.Should().Contain("projectId={project.id}");
+        editTab.Should().Contain("<ReadyLandPortionSelect");
+        editTab.Should().NotContain("<Label>Land Reference</Label><Input");
+    }
+
     private static string ReadSource(params string[] path)
         => File.ReadAllText(Path.Combine([FindRepositoryRoot(), .. path]));
 

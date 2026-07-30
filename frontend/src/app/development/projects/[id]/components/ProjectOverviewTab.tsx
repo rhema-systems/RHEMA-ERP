@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowRecordPanel } from '@/components/workflow/WorkflowRecordTab';
+import { ReadyLandPortionSelect } from '@/components/projects/ReadyLandPortionSelect';
 import {
   type AddProjectMemberDto,
   type CreateProjectBillingScheduleDto,
@@ -551,7 +552,13 @@ export function ProjectOverviewTab({
           <div className="grid gap-2 md:col-span-2"><Label>Summary</Label><Textarea rows={3} value={overview.summary || ''} onChange={(event) => setOverview((current) => ({ ...current, summary: event.target.value }))} /></div>
           <div className="grid gap-2 md:col-span-2"><Label>Objectives</Label><Textarea rows={3} value={overview.objectives || ''} onChange={(event) => setOverview((current) => ({ ...current, objectives: event.target.value }))} /></div>
           <div className="grid gap-2 md:col-span-2"><Label>Site Address</Label><Textarea rows={2} value={overview.developmentProfile?.siteAddress || ''} onChange={(event) => updateDevelopmentProfile({ siteAddress: event.target.value || undefined })} /></div>
-          <div className="grid gap-2"><Label>Land Reference</Label><Input value={overview.developmentProfile?.landReference || ''} onChange={(event) => updateDevelopmentProfile({ landReference: event.target.value || undefined })} /></div>
+          <ReadyLandPortionSelect
+            projectId={project.id}
+            value={overview.developmentProfile?.landReference}
+            onValueChange={(landReference) =>
+              updateDevelopmentProfile({ landReference })
+            }
+          />
           <div className="grid gap-2"><Label>Funding Arrangement</Label><Input value={overview.developmentProfile?.fundingArrangement || ''} onChange={(event) => updateDevelopmentProfile({ fundingArrangement: event.target.value || undefined })} /></div>
           <div className="grid gap-2 md:col-span-2"><Label>Consultant Team</Label><Textarea rows={2} value={overview.developmentProfile?.consultantTeam || ''} onChange={(event) => updateDevelopmentProfile({ consultantTeam: event.target.value || undefined })} /></div>
           <div className="grid gap-2 md:col-span-2"><Label>Construction Notes</Label><Textarea rows={3} value={overview.developmentProfile?.notes || ''} onChange={(event) => updateDevelopmentProfile({ notes: event.target.value || undefined })} /></div>

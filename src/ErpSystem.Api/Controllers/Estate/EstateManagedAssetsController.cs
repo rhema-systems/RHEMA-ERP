@@ -116,6 +116,14 @@ public sealed class EstateManagedAssetsController : ControllerBase
         }
     }
 
+    [HttpGet("project-ready-demarcations")]
+    public async Task<IActionResult> GetProjectReadyLandDemarcations([FromQuery] Guid? projectId = null)
+        => Ok(new
+        {
+            success = true,
+            data = await _managedAssetService.GetProjectReadyLandDemarcationsAsync(projectId)
+        });
+
     [HttpPost("{id:guid}/demarcations")]
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer,Survey Officer")]
     public async Task<IActionResult> CreateLandDemarcation(Guid id, [FromBody] SaveEstateLandDemarcationDto request)
