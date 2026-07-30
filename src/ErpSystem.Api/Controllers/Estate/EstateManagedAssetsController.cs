@@ -64,7 +64,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer")]
     public async Task<IActionResult> CreateManualLand([FromBody] CreateManualExistingLandDto request)
     {
-        if (request.IsReadyForProjectManagement && !CanMarkReadyForProjectManagement())
+        if (request.IsReadyForProjectManagement && !await CanMarkReadyForProjectManagementAsync())
         {
             return Forbid();
         }
@@ -81,10 +81,9 @@ public sealed class EstateManagedAssetsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/ready-for-project-management")]
-    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Manager,Land Registry Officer,Land Project Readiness Officer")]
     public async Task<IActionResult> MarkReadyForProjectManagement(Guid id)
     {
-        if (!CanMarkReadyForProjectManagement())
+        if (!await CanMarkReadyForProjectManagementAsync())
         {
             return Forbid();
         }
@@ -413,15 +412,28 @@ public sealed class EstateManagedAssetsController : ControllerBase
     private Guid? GetUserId()
         => Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : null;
 
-    private bool CanMarkReadyForProjectManagement()
-        => _currentUserService.IsInRole("admin")
-            || _currentUserService.IsInRole("Admin")
-            || _currentUserService.IsInRole("SystemAdmin")
-            || _currentUserService.IsInRole("SuperAdmin")
-            || _currentUserService.IsInRole("TenantAdmin")
-            || _currentUserService.IsInRole("Estate Manager")
-            || _currentUserService.IsInRole("Land Registry Officer")
-            || _currentUserService.IsInRole("Land Project Readiness Officer");
+    private async Task<bool> CanMarkReadyForProjectManagementAsync()
+    {
+        if (_currentUserService.IsInRole("SuperAdmin") ||
+            _currentUserService.IsInRole("TenantAdmin"))
+        {
+            return true;
+        }
+
+        var userId = GetUserId();
+        if (!userId.HasValue)
+        {
+            return false;
+        }
+
+        return await _db.UserRoles
+            .AsNoTracking()
+            .Where(userRole => userRole.UserId == userId.Value)
+            .SelectMany(userRole => userRole.Role.RolePermissions)
+            .AnyAsync(rolePermission =>
+                rolePermission.Permission.Name == "estate.land.project-readiness"
+                || rolePermission.Permission.Name == "*");
+    }
 
     private async Task<string> NextDocumentReferenceAsync(Guid tenantId, CancellationToken cancellationToken)
     {

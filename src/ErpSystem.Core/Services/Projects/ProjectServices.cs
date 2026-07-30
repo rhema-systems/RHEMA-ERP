@@ -5,6 +5,7 @@ using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Assets;
@@ -322,9 +323,19 @@ public partial class ProjectService : IProjectService
 
         var slackMonths = NormalizeSlackMonths(dto.SlackMonths);
         EnsureChronologicalDateRange(dto.StartDate, dto.TargetEndDate, "project schedule");
+        EstateManagedAsset? selectedLandAsset = null;
         if (dto.DevelopmentProfile != null)
         {
-            dto.DevelopmentProfile.LandReference = await ResolveReadyProjectLandReferenceAsync(dto.DevelopmentProfile.LandReference);
+            var requestedLandReference = TrimOrNull(dto.DevelopmentProfile.LandReference);
+            if (requestedLandReference != null)
+            {
+                selectedLandAsset = await RequireReadyProjectLandAssetAsync(requestedLandReference);
+                dto.DevelopmentProfile.LandReference = GetProjectLandReference(selectedLandAsset);
+            }
+            else
+            {
+                dto.DevelopmentProfile.LandReference = null;
+            }
         }
 
         var project = new Project
@@ -381,6 +392,18 @@ public partial class ProjectService : IProjectService
         else if (dto.DevelopmentProfile != null)
         {
             await UpsertProjectConstructionFoundationAsync(project, dto.DevelopmentProfile);
+        }
+
+        if (selectedLandAsset != null)
+        {
+            selectedLandAsset.ProjectId = project.Id;
+            selectedLandAsset.ProjectTitle = project.Title;
+            selectedLandAsset.Status = EstateManagedAssetStatus.UnderDevelopment;
+            selectedLandAsset.IsReadyForProjectManagement = false;
+            selectedLandAsset.UpdatedAt = DateTime.UtcNow;
+            selectedLandAsset.UpdatedBy = _currentUserProvider.Username;
+            selectedLandAsset.LastModifiedById = _currentUserProvider.UserId;
+            await _unitOfWork.Repository<EstateManagedAsset>().UpdateAsync(selectedLandAsset);
         }
 
         await SaveInitiationSnapshotAsync(project, "Created", "Initial project creation");

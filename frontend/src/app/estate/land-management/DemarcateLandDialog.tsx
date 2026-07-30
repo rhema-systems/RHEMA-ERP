@@ -249,7 +249,6 @@ export default function DemarcateLandDialog({
   );
 
   const editDemarcation = (demarcation: EstateLandDemarcation) => {
-    setPendingDemarcations([]);
     setEditingId(demarcation.id);
     setDescription(demarcation.description);
     setBeacons(parseBoundary(demarcation.boundaryCoordinates));
@@ -349,32 +348,45 @@ export default function DemarcateLandDialog({
       return;
     }
 
+    let savedCount = 0;
     try {
       setSaving(true);
       if (editingId) {
         await estateLandManagementService.updateLandDemarcation(
           asset.id,
           editingId,
-          currentPayload
+          currentPayload!
         );
         toast.success('Demarcation updated.');
       } else {
-        const payloads = [
-          ...pendingDemarcations.map(
-            ({ id: _id, ...pendingPayload }) => pendingPayload
-          ),
-          ...(currentPayload ? [currentPayload] : []),
+        const drafts: Array<{
+          pendingId?: string;
+          payload: SaveEstateLandDemarcation;
+        }> = [
+          ...pendingDemarcations.map(({ id, ...payload }) => ({
+            pendingId: id,
+            payload,
+          })),
+          ...(currentPayload ? [{ payload: currentPayload }] : []),
         ];
-        for (const payload of payloads) {
+        for (const draft of drafts) {
           await estateLandManagementService.createLandDemarcation(
             asset.id,
-            payload
+            draft.payload
           );
+          savedCount += 1;
+          if (draft.pendingId) {
+            setPendingDemarcations((current) =>
+              current.filter((pending) => pending.id !== draft.pendingId)
+            );
+          } else {
+            resetEditor();
+          }
         }
         toast.success(
-          payloads.length === 1
+          drafts.length === 1
             ? 'Demarcation added within the main cadastral boundary.'
-            : `${payloads.length} demarcations added within the main cadastral boundary.`
+            : `${drafts.length} demarcations added within the main cadastral boundary.`
         );
         setPendingDemarcations([]);
       }
@@ -382,8 +394,13 @@ export default function DemarcateLandDialog({
       await loadDemarcations();
       await onSaved();
     } catch (error) {
+      await loadDemarcations();
+      const message =
+        error instanceof Error ? error.message : 'Unable to save demarcation.';
       toast.error(
-        error instanceof Error ? error.message : 'Unable to save demarcation.'
+        savedCount > 0
+          ? `${savedCount} demarcation${savedCount === 1 ? '' : 's'} saved. Remaining drafts were preserved. ${message}`
+          : message
       );
     } finally {
       setSaving(false);

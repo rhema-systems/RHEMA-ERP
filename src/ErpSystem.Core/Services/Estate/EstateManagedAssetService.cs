@@ -545,6 +545,31 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             throw new InvalidOperationException("Select Sale, Rent, or Sale and Rent before publishing to the external portal.");
         }
 
+        if (request.IsPublishedToExternalPortal && asset.AssetType == EstateManagedAssetType.Land)
+        {
+            if (asset.Status != EstateManagedAssetStatus.LandBank || asset.ProjectId.HasValue)
+            {
+                throw new InvalidOperationException("Land assigned to a development project cannot be published for sale.");
+            }
+            if (!asset.BoundaryVerified)
+            {
+                throw new InvalidOperationException("Verify the main cadastral boundary before publishing land for sale.");
+            }
+
+            var demarcations = await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
+                item.EstateManagedAssetId == assetId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted);
+            if (!demarcations.Any() || demarcations.Any(item => !item.BoundaryVerified))
+            {
+                throw new InvalidOperationException("Add and verify every land demarcation before publishing land for sale.");
+            }
+
+            // Sale and project handoff are exclusive choices. Withdrawing the listing allows
+            // Estate to mark the parcel project-ready again after review.
+            asset.IsReadyForProjectManagement = false;
+        }
+
         asset.IsPublishedToExternalPortal = request.IsPublishedToExternalPortal;
         asset.ExternalListingType = listingType;
         asset.ExternalListingStatus = request.IsPublishedToExternalPortal ? NormalizeListingStatus(request.ExternalListingStatus) : "Draft";

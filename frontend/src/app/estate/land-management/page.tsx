@@ -34,6 +34,7 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   estateLandManagementService,
   EstateManagedAssetSourceType,
+  EstateManagedAssetStatus,
   type EstateLandDemarcation,
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
@@ -58,17 +59,6 @@ const GIS_LINK_ROLES = [
   'Land Registry Officer',
   'Survey Officer',
 ];
-const PROJECT_READINESS_ROLES = [
-  'admin',
-  'Admin',
-  'SystemAdmin',
-  'SuperAdmin',
-  'TenantAdmin',
-  'Estate Manager',
-  'Land Registry Officer',
-  'Land Project Readiness Officer',
-];
-
 type LandManagementRecord =
   | { key: string; type: 'asset'; asset: EstateManagedAsset }
   | { key: string; type: 'acquisition'; acquisition: LandAcquisitionItem };
@@ -171,9 +161,11 @@ function DetailRow({
 }
 
 export default function EstateLandManagementPage() {
-  const { hasAnyRole } = useAuth();
+  const { hasAnyRole, hasPermission } = useAuth();
   const canLinkGis = hasAnyRole(GIS_LINK_ROLES);
-  const canMarkProjectReady = hasAnyRole(PROJECT_READINESS_ROLES);
+  const canMarkProjectReady = hasPermission(
+    'estate.land.project-readiness'
+  );
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [acquisitions, setAcquisitions] = React.useState<LandAcquisitionItem[]>(
     []
@@ -657,6 +649,42 @@ export default function EstateLandManagementPage() {
                       ? 'Manage Demarcations'
                       : 'Add Demarcation'}
                   </Button>
+                  <Button
+                    asChild
+                    variant="outline"
+                    disabled={
+                      selected.asset.status !==
+                        EstateManagedAssetStatus.LandBank ||
+                      !selected.asset.boundaryVerified ||
+                      selected.asset.demarcationCount === 0 ||
+                      selected.asset.verifiedDemarcationCount !==
+                        selected.asset.demarcationCount
+                    }
+                    title={
+                      selected.asset.status !==
+                      EstateManagedAssetStatus.LandBank
+                        ? 'Land already assigned to a project cannot be listed for sale.'
+                        : !selected.asset.boundaryVerified
+                          ? 'Verify the main cadastral boundary first.'
+                          : selected.asset.demarcationCount === 0
+                            ? 'Add at least one demarcation first.'
+                            : selected.asset.verifiedDemarcationCount !==
+                                selected.asset.demarcationCount
+                              ? 'Verify every demarcation first.'
+                              : undefined
+                    }
+                  >
+                    <Link
+                      href={`/estate/property-management/listings?assetId=${encodeURIComponent(selected.asset.id)}&listingType=Sale`}
+                    >
+                      <Globe2 className="mr-2 h-4 w-4" />
+                      {selected.asset.isPublishedToExternalPortal &&
+                      (selected.asset.externalListingType === 'Sale' ||
+                        selected.asset.externalListingType === 'SaleAndRent')
+                        ? 'View Sale Listing'
+                        : 'List Land for Sale'}
+                    </Link>
+                  </Button>
                   {selected.asset.isReadyForProjectManagement ? (
                     <Button asChild variant="outline">
                       <Link href="/development/projects">
@@ -678,7 +706,7 @@ export default function EstateLandManagementPage() {
                       onClick={() => void markAssetProjectReady(selected.asset)}
                       title={
                         !canMarkProjectReady
-                          ? 'Requires Estate Manager, Land Registry Officer, or Land Project Readiness Officer.'
+                          ? 'Requires the Mark Land Project Ready permission assigned in Administration.'
                           : !selected.asset.boundaryVerified
                           ? 'Verify the main cadastral boundary first.'
                           : selected.asset.demarcationCount === 0

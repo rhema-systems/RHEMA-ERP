@@ -288,7 +288,7 @@ export default function NewProjectPage() {
   useEffect(() => {
     const loadSetup = async () => {
       try {
-        const [loadedTypes, loadedPriorities, loadedTemplates, loadedPortfolios, settings, loadedMethodologies, loadedFundingSources, loadedUsers, loadedPartners, loadedContracts, loadedReadyLandAssets, currencyContext] = await Promise.all([
+        const [loadedTypes, loadedPriorities, loadedTemplates, loadedPortfolios, settings, loadedMethodologies, loadedFundingSources, loadedUsers, loadedPartners, loadedContracts, currencyContext] = await Promise.all([
           projectService.getProjectTypes(),
           projectService.getProjectPriorities(),
           projectService.getProjectTemplates(),
@@ -299,14 +299,6 @@ export default function NewProjectPage() {
           userService.searchUsers('').catch(() => []),
           businessPartnerService.getAllPartnersForDropdown().catch(() => businessPartnerService.getActivePartners().catch(() => [])),
           contractService.getActiveContracts().catch(() => []),
-          estateLandManagementService
-            .getManagedAssets({
-              assetType: EstateManagedAssetType.Land,
-              status: EstateManagedAssetStatus.LandBank,
-              take: 500,
-            })
-            .then((assets) => assets.filter((asset) => asset.isReadyForProjectManagement))
-            .catch(() => []),
           loadProjectCurrencyContext(),
         ]);
         setTypes(loadedTypes);
@@ -321,7 +313,6 @@ export default function NewProjectPage() {
         setFinanceBaseCurrency(currencyContext.baseCurrency);
         setBusinessPartners(loadedPartners);
         setContracts(loadedContracts);
-        setReadyLandAssets(loadedReadyLandAssets);
         setForm((prev) => ({
           ...prev,
           projectTypeId: settings.defaultProjectTypeId,
@@ -338,6 +329,25 @@ export default function NewProjectPage() {
     };
 
     loadSetup();
+  }, []);
+
+  useEffect(() => {
+    const loadReadyLand = async () => {
+      try {
+        const assets = await estateLandManagementService.getManagedAssets({
+          assetType: EstateManagedAssetType.Land,
+          status: EstateManagedAssetStatus.LandBank,
+          take: 500,
+        });
+        setReadyLandAssets(
+          assets.filter((asset) => asset.isReadyForProjectManagement)
+        );
+      } catch (error: any) {
+        toast.error(error.message || 'Failed to load project-ready land');
+      }
+    };
+
+    void loadReadyLand();
   }, []);
 
   useEffect(() => {

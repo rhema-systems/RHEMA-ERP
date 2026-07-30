@@ -302,6 +302,12 @@ public partial class ProjectService
             return null;
         }
 
+        var matchedAsset = await RequireReadyProjectLandAssetAsync(normalizedReference);
+        return GetProjectLandReference(matchedAsset);
+    }
+
+    private async Task<EstateManagedAsset> RequireReadyProjectLandAssetAsync(string landReference)
+    {
         var readyLandAssets = await _unitOfWork.Repository<EstateManagedAsset>().FindAsync(asset =>
             asset.TenantId == _currentUserProvider.TenantId
             && !asset.IsDeleted
@@ -310,18 +316,21 @@ public partial class ProjectService
             && asset.IsReadyForProjectManagement);
 
         var matchedAsset = readyLandAssets.FirstOrDefault(asset =>
-            MatchesLandReference(asset.AssetCode, normalizedReference)
-            || MatchesLandReference(asset.ProjectCode, normalizedReference)
-            || MatchesLandReference(asset.Name, normalizedReference)
-            || MatchesLandReference(asset.Id.ToString(), normalizedReference));
+            MatchesLandReference(asset.AssetCode, landReference)
+            || MatchesLandReference(asset.ProjectCode, landReference)
+            || MatchesLandReference(asset.Name, landReference)
+            || MatchesLandReference(asset.Id.ToString(), landReference));
 
         if (matchedAsset == null)
         {
             throw new InvalidOperationException("Project land reference must be a finished demarcated land asset marked ready for project management.");
         }
 
-        return TrimOrNull(matchedAsset.ProjectCode) ?? matchedAsset.AssetCode.Trim();
+        return matchedAsset;
     }
+
+    private static string GetProjectLandReference(EstateManagedAsset asset)
+        => TrimOrNull(asset.ProjectCode) ?? asset.AssetCode.Trim();
 
     private static bool MatchesLandReference(string? candidate, string reference)
         => !string.IsNullOrWhiteSpace(candidate)

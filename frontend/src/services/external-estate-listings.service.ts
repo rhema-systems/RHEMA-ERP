@@ -44,6 +44,7 @@ export interface CreateExternalListingRequest {
   requestType?: string;
   applicantName?: string;
   contact?: string;
+  offerAmount?: number;
   message?: string;
 }
 

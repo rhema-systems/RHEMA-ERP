@@ -6507,7 +6507,6 @@ namespace ErpSystem.Web.Services
                 new { Name = "Estate Manager", Description = "Reviews land suitability assessments" },
                 new { Name = "Survey Officer", Description = "Captures cadastral survey and demarcation records" },
                 new { Name = "Senior Surveyor", Description = "Verifies cadastral surveys" },
-                new { Name = "Land Project Readiness Officer", Description = "Reviews verified land demarcations and marks land ready for project management handoff" },
                 new { Name = "Legal Officer", Description = "Handles ownership classification and instrument execution" },
                 new { Name = "Legal Manager", Description = "Approves ownership verification and statutory consent" },
                 new { Name = "Acquisition Committee", Description = "Handles land agreement negotiations" },
@@ -7040,18 +7039,6 @@ namespace ErpSystem.Web.Services
                     "enquiry.external.access",
                     "support.internal.access",
                     "support.external.access"
-                },
-                ["Land Project Readiness Officer"] = new[]
-                {
-                    "estate.land.project-readiness"
-                },
-                ["Estate Manager"] = new[]
-                {
-                    "estate.land.project-readiness"
-                },
-                ["Land Registry Officer"] = new[]
-                {
-                    "estate.land.project-readiness"
                 },
                 ["Finance User"] = new[]
                 {
