@@ -350,21 +350,6 @@ public partial class ProjectService : IProjectService
 
         var slackMonths = NormalizeSlackMonths(dto.SlackMonths);
         EnsureChronologicalDateRange(dto.StartDate, dto.TargetEndDate, "project schedule");
-        ReadyProjectLandSelection? selectedLandSelection = null;
-        if (dto.DevelopmentProfile != null)
-        {
-            var requestedLandReference = TrimOrNull(dto.DevelopmentProfile.LandReference);
-            if (requestedLandReference != null)
-            {
-                selectedLandSelection = await RequireReadyProjectLandDemarcationAsync(requestedLandReference);
-                dto.DevelopmentProfile.LandReference = selectedLandSelection.LandReference;
-            }
-            else
-            {
-                dto.DevelopmentProfile.LandReference = null;
-            }
-        }
-
         var project = new Project
         {
             TenantId = _currentUserProvider.TenantId,
@@ -421,14 +406,6 @@ public partial class ProjectService : IProjectService
             await UpsertProjectConstructionFoundationAsync(project, dto.DevelopmentProfile);
         }
 
-        if (selectedLandSelection != null)
-        {
-            await SynchronizeProjectLandAssetsAsync(
-                project,
-                null,
-                selectedLandSelection.LandReference);
-        }
-
         await SaveInitiationSnapshotAsync(project, "Created", "Initial project creation");
         await _unitOfWork.SaveChangesAsync();
         await PublishActivityAsync(project, "Created");
@@ -465,13 +442,6 @@ public partial class ProjectService : IProjectService
     private async Task<ProjectDetailDto> UpdateProjectCoreAsync(Guid id, UpdateProjectDto dto)
     {
         var project = await GetProjectForOperationAsync(id, ProjectAccessOperation.UpdateOverview);
-        var previousLandReference = (await _unitOfWork.Repository<ProjectDevelopmentProfile>()
-                .FirstOrDefaultAsync(profile =>
-                    profile.ProjectId == project.Id
-                    && profile.TenantId == _currentUserProvider.TenantId
-                    && !profile.IsDeleted))
-            ?.LandReference;
-
         if (string.Equals(project.Status, ProjectStatuses.Closed, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(project.Status, ProjectStatuses.Archived, StringComparison.OrdinalIgnoreCase))
         {
@@ -541,10 +511,6 @@ public partial class ProjectService : IProjectService
         if (dto.DevelopmentProfile != null)
         {
             await UpsertProjectConstructionFoundationAsync(project, dto.DevelopmentProfile);
-            await SynchronizeProjectLandAssetsAsync(
-                project,
-                previousLandReference,
-                dto.DevelopmentProfile.LandReference);
         }
 
         await PublishActivityAsync(project, "Updated");

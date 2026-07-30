@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.DTOs.Projects;
@@ -34,15 +35,35 @@ public partial class ProjectService
 
     public async Task<ProjectDevelopmentProfileDto> UpsertDevelopmentProfileAsync(Guid projectId, UpsertProjectDevelopmentProfileDto dto)
     {
-        var project = await RequireProjectAsync(projectId, ProjectAccessOperation.UpdateOverview);
-        var profile = await UpsertDevelopmentProfileEntityAsync(project, dto);
-
-        if (!await HasProjectPhasesAsync(projectId))
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
-            await SeedDefaultConstructionPhasesAsync(projectId);
-        }
+            var transactionStarted = false;
+            try
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+                transactionStarted = true;
+                var project = await RequireProjectAsync(projectId, ProjectAccessOperation.UpdateOverview);
+                var profile = await UpsertDevelopmentProfileEntityAsync(project, dto);
 
-        return MapToDto(profile);
+                if (!await HasProjectPhasesAsync(projectId))
+                {
+                    await SeedDefaultConstructionPhasesAsync(projectId);
+                }
+
+                await _unitOfWork.CommitAsync();
+                transactionStarted = false;
+                return MapToDto(profile);
+            }
+            catch
+            {
+                if (transactionStarted)
+                {
+                    await _unitOfWork.RollbackAsync();
+                }
+
+                throw;
+            }
+        });
     }
 
     public async Task<IEnumerable<ProjectPhaseDto>> GetProjectPhasesAsync(Guid projectId)
@@ -249,6 +270,7 @@ public partial class ProjectService
     {
         var repository = _unitOfWork.Repository<ProjectDevelopmentProfile>();
         var profile = await repository.FirstOrDefaultAsync(x => x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId);
+        var previousLandReference = profile?.LandReference;
         dto.LandReference = await ResolveDevelopmentProfileLandReferenceAsync(profile?.LandReference, dto.LandReference);
         if (profile == null)
         {
@@ -272,6 +294,10 @@ public partial class ProjectService
         }
 
         await _unitOfWork.SaveChangesAsync();
+        await SynchronizeProjectLandAssetsAsync(
+            project,
+            previousLandReference,
+            profile.LandReference);
         project.DevelopmentProfile = profile;
         return profile;
     }

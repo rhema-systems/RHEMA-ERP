@@ -360,22 +360,17 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 && !item.IsDeleted)
             .OrderBy(item => item.DemarcationNumber)
             .ToListAsync();
-        var assignedLandReferences = (await _unitOfWork.Repository<ProjectDevelopmentProfile>()
-                .FindAsync(item => item.TenantId == _currentUserProvider.TenantId
-                    && !item.IsDeleted
-                    && item.LandReference != null))
-            .Select(item => item.LandReference!.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var assignedLandReferences = await GetAssignedProjectLandReferencesAsync();
 
         return demarcations.Select(item =>
         {
             var dto = MapDemarcationToDto(item);
             dto.LandReference = EstateLandDemarcationReference.Build(asset.AssetCode, item.DemarcationNumber);
-            dto.IsAssignedToProject = assignedLandReferences.Contains(dto.LandReference)
-                || (demarcations.Count == 1
-                    && new[] { asset.AssetCode, asset.ProjectCode, asset.Name, asset.Id.ToString() }
-                        .Any(reference => !string.IsNullOrWhiteSpace(reference)
-                            && assignedLandReferences.Contains(reference.Trim())));
+            dto.IsAssignedToProject = IsDemarcationAssignedToProject(
+                asset,
+                demarcations,
+                item,
+                assignedLandReferences);
             return dto;
         }).ToList();
     }
@@ -439,7 +434,14 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         });
     }
 
-    public async Task<EstateLandDemarcationDto> UpdateLandDemarcationAsync(
+    public Task<EstateLandDemarcationDto> UpdateLandDemarcationAsync(
+        Guid assetId,
+        Guid demarcationId,
+        SaveEstateLandDemarcationDto request)
+        => ExecuteSerializableMutationAsync(
+            () => UpdateLandDemarcationCoreAsync(assetId, demarcationId, request));
+
+    private async Task<EstateLandDemarcationDto> UpdateLandDemarcationCoreAsync(
         Guid assetId,
         Guid demarcationId,
         SaveEstateLandDemarcationDto request)
@@ -455,6 +457,22 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         if (demarcation == null)
         {
             throw new InvalidOperationException("Land demarcation was not found.");
+        }
+
+        var activeDemarcations = (await repository.FindAsync(item =>
+                item.EstateManagedAssetId == assetId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted))
+            .ToList();
+        var assignedLandReferences = await GetAssignedProjectLandReferencesAsync();
+        if (IsDemarcationAssignedToProject(
+                asset,
+                activeDemarcations,
+                demarcation,
+                assignedLandReferences))
+        {
+            throw new InvalidOperationException(
+                "Land demarcations assigned to a project cannot be edited. Reassign the project land first.");
         }
 
         var otherBoundaries = await repository
@@ -483,6 +501,15 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
     public async Task DeleteLandDemarcationAsync(Guid assetId, Guid demarcationId)
     {
+        await ExecuteSerializableMutationAsync(async () =>
+        {
+            await DeleteLandDemarcationCoreAsync(assetId, demarcationId);
+            return true;
+        });
+    }
+
+    private async Task DeleteLandDemarcationCoreAsync(Guid assetId, Guid demarcationId)
+    {
         var asset = await RequireLandAssetAsync(assetId);
         var repository = _unitOfWork.Repository<EstateLandDemarcation>();
         var demarcation = await repository.FirstOrDefaultAsync(item =>
@@ -493,6 +520,22 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         if (demarcation == null)
         {
             throw new InvalidOperationException("Land demarcation was not found.");
+        }
+
+        var activeDemarcations = (await repository.FindAsync(item =>
+                item.EstateManagedAssetId == assetId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted))
+            .ToList();
+        var assignedLandReferences = await GetAssignedProjectLandReferencesAsync();
+        if (IsDemarcationAssignedToProject(
+                asset,
+                activeDemarcations,
+                demarcation,
+                assignedLandReferences))
+        {
+            throw new InvalidOperationException(
+                "Land demarcations assigned to a project cannot be deleted. Reassign the project land first.");
         }
 
         demarcation.IsDeleted = true;
@@ -552,7 +595,15 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         return MapToDto(asset);
     }
 
-    public async Task<EstateManagedAssetDto> UpdateExternalListingAsync(Guid assetId, UpdateEstateManagedAssetListingDto request)
+    public Task<EstateManagedAssetDto> UpdateExternalListingAsync(
+        Guid assetId,
+        UpdateEstateManagedAssetListingDto request)
+        => ExecuteSerializableMutationAsync(
+            () => UpdateExternalListingCoreAsync(assetId, request));
+
+    private async Task<EstateManagedAssetDto> UpdateExternalListingCoreAsync(
+        Guid assetId,
+        UpdateEstateManagedAssetListingDto request)
     {
         var repository = _unitOfWork.Repository<EstateManagedAsset>();
         var asset = await repository.FirstOrDefaultAsync(item => item.Id == assetId &&
@@ -576,13 +627,24 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 throw new InvalidOperationException("Verify the main cadastral boundary before publishing land for sale.");
             }
 
-            var demarcations = await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
-                item.EstateManagedAssetId == assetId
-                && item.TenantId == _currentUserProvider.TenantId
-                && !item.IsDeleted);
+            var demarcations = (await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
+                    item.EstateManagedAssetId == assetId
+                    && item.TenantId == _currentUserProvider.TenantId
+                    && !item.IsDeleted))
+                .ToList();
             if (!demarcations.Any() || demarcations.Any(item => !item.BoundaryVerified))
             {
                 throw new InvalidOperationException("Add and verify every land demarcation before publishing land for sale.");
+            }
+            var assignedLandReferences = await GetAssignedProjectLandReferencesAsync();
+            if (demarcations.Any(item => IsDemarcationAssignedToProject(
+                    asset,
+                    demarcations,
+                    item,
+                    assignedLandReferences)))
+            {
+                throw new InvalidOperationException(
+                    "Land with a demarcated portion assigned to a development project cannot be published for sale.");
             }
 
             // Sale and project handoff are exclusive choices. Withdrawing the listing allows
@@ -1059,6 +1121,60 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.UpdatedBy = _currentUserProvider.Username;
         asset.LastModifiedById = _currentUserProvider.UserId;
         await _unitOfWork.Repository<EstateManagedAsset>().UpdateAsync(asset);
+    }
+
+    private async Task<HashSet<string>> GetAssignedProjectLandReferencesAsync()
+        => (await _unitOfWork.Repository<ProjectDevelopmentProfile>()
+                .FindAsync(item => item.TenantId == _currentUserProvider.TenantId
+                    && !item.IsDeleted
+                    && item.LandReference != null))
+            .Select(item => item.LandReference!.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private async Task<T> ExecuteSerializableMutationAsync<T>(Func<Task<T>> action)
+    {
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            var transactionStarted = false;
+            try
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+                transactionStarted = true;
+                var result = await action();
+                await _unitOfWork.CommitAsync();
+                transactionStarted = false;
+                return result;
+            }
+            catch
+            {
+                if (transactionStarted)
+                {
+                    await _unitOfWork.RollbackAsync();
+                }
+
+                throw;
+            }
+        });
+    }
+
+    private static bool IsDemarcationAssignedToProject(
+        EstateManagedAsset asset,
+        IReadOnlyCollection<EstateLandDemarcation> demarcations,
+        EstateLandDemarcation demarcation,
+        ISet<string> assignedLandReferences)
+    {
+        var landReference = EstateLandDemarcationReference.Build(
+            asset.AssetCode,
+            demarcation.DemarcationNumber);
+        if (assignedLandReferences.Contains(landReference))
+        {
+            return true;
+        }
+
+        return demarcations.Count == 1
+            && new[] { asset.AssetCode, asset.ProjectCode, asset.Name, asset.Id.ToString() }
+                .Any(reference => !string.IsNullOrWhiteSpace(reference)
+                    && assignedLandReferences.Contains(reference.Trim()));
     }
 
     private static EstateLandDemarcationDto MapDemarcationToDto(EstateLandDemarcation demarcation) => new()

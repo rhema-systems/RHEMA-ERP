@@ -249,6 +249,13 @@ export default function DemarcateLandDialog({
   );
 
   const editDemarcation = (demarcation: EstateLandDemarcation) => {
+    if (demarcation.isAssignedToProject) {
+      toast.error(
+        'This demarcation is assigned to a project. Reassign the project land before editing it.'
+      );
+      return;
+    }
+
     setEditingId(demarcation.id);
     setDescription(demarcation.description);
     setBeacons(parseBoundary(demarcation.boundaryCoordinates));
@@ -352,10 +359,11 @@ export default function DemarcateLandDialog({
     try {
       setSaving(true);
       if (editingId) {
+        if (!currentPayload) return;
         await estateLandManagementService.updateLandDemarcation(
           asset.id,
           editingId,
-          currentPayload!
+          currentPayload
         );
         toast.success('Demarcation updated.');
       } else {
@@ -408,6 +416,13 @@ export default function DemarcateLandDialog({
   };
 
   const remove = async (demarcation: EstateLandDemarcation) => {
+    if (demarcation.isAssignedToProject) {
+      toast.error(
+        'This demarcation is assigned to a project. Reassign the project land before deleting it.'
+      );
+      return;
+    }
+
     if (
       !asset ||
       !window.confirm(
@@ -536,7 +551,11 @@ export default function DemarcateLandDialog({
                         {demarcation.beaconCount}
                       </td>
                       <td className="px-4 py-3">
-                        {demarcation.boundaryVerified ? 'Verified' : 'Draft'}
+                        {demarcation.isAssignedToProject
+                          ? 'Assigned to project'
+                          : demarcation.boundaryVerified
+                            ? 'Verified'
+                            : 'Draft'}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-1">
@@ -544,7 +563,12 @@ export default function DemarcateLandDialog({
                             type="button"
                             size="icon"
                             variant="ghost"
-                            title="Edit demarcation"
+                            title={
+                              demarcation.isAssignedToProject
+                                ? 'Assigned demarcations cannot be edited.'
+                                : 'Edit demarcation'
+                            }
+                            disabled={demarcation.isAssignedToProject}
                             onClick={() => editDemarcation(demarcation)}
                           >
                             <Edit3 className="h-4 w-4" />
@@ -553,8 +577,15 @@ export default function DemarcateLandDialog({
                             type="button"
                             size="icon"
                             variant="ghost"
-                            title="Delete demarcation"
-                            disabled={deletingId === demarcation.id}
+                            title={
+                              demarcation.isAssignedToProject
+                                ? 'Assigned demarcations cannot be deleted.'
+                                : 'Delete demarcation'
+                            }
+                            disabled={
+                              demarcation.isAssignedToProject ||
+                              deletingId === demarcation.id
+                            }
                             onClick={() => void remove(demarcation)}
                           >
                             {deletingId === demarcation.id ? (
