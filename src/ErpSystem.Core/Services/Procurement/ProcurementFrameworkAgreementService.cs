@@ -300,6 +300,7 @@ public sealed class ProcurementFrameworkAgreementService :
             request.PriceLines, request.CallOffAuthorities);
         var source = await ResolveSourceAsync(
             request.SourceType, request.SourceId, request.BusinessPartnerId, cancellationToken);
+        EnsureSourceCurrency(source, request.CurrencyCode);
         var workflow = await ValidateWorkflowAsync(request.WorkflowDefinitionId, cancellationToken);
         await ValidateCurrencyAsync(request.CurrencyCode, cancellationToken);
         var categoryRows = await ResolveCategoriesAsync(request.CategoryIds, cancellationToken);
@@ -391,6 +392,7 @@ public sealed class ProcurementFrameworkAgreementService :
         var source = await ResolveSourceAsync(
             agreement.SourceType, agreement.SourceId, agreement.BusinessPartnerId,
             cancellationToken);
+        EnsureSourceCurrency(source, request.CurrencyCode);
         var workflow = await ValidateWorkflowAsync(request.WorkflowDefinitionId, cancellationToken);
         await ValidateCurrencyAsync(request.CurrencyCode, cancellationToken);
         var categoryRows = await ResolveCategoriesAsync(request.CategoryIds, cancellationToken);
@@ -981,6 +983,7 @@ public sealed class ProcurementFrameworkAgreementService :
         var source = await ResolveSourceAsync(
             agreement.SourceType, agreement.SourceId, agreement.BusinessPartnerId,
             cancellationToken);
+        EnsureSourceCurrency(source, agreement.CurrencyCode);
         var eligibility = await EnforceSupplierAsync(
             agreement.BusinessPartnerId,
             agreement.Categories.Where(item => !item.IsDeleted)
@@ -1069,6 +1072,7 @@ public sealed class ProcurementFrameworkAgreementService :
             var source = await ResolveSourceAsync(
                 agreement.SourceType, agreement.SourceId, agreement.BusinessPartnerId,
                 cancellationToken);
+            EnsureSourceCurrency(source, agreement.CurrencyCode);
             var eligibility = await EnforceSupplierAsync(
                 agreement.BusinessPartnerId,
                 agreement.Categories.Where(item => !item.IsDeleted)
@@ -1372,6 +1376,22 @@ public sealed class ProcurementFrameworkAgreementService :
                 .AnyAsync(cancellationToken))
             throw Validation("FRAMEWORK_AGREEMENT_CURRENCY_INVALID",
                 "The framework currency is not active in Finance for this tenant.");
+    }
+
+    private static void EnsureSourceCurrency(
+        SourceResolution source,
+        string currencyCode)
+    {
+        var normalizedCurrency = currencyCode.Trim().ToUpperInvariant();
+        if (!string.Equals(
+                normalizedCurrency,
+                source.CurrencyCode,
+                StringComparison.Ordinal))
+        {
+            throw Conflict(
+                "FRAMEWORK_AGREEMENT_CURRENCY_SOURCE_MISMATCH",
+                $"The framework currency must match the approved award currency {source.CurrencyCode}.");
+        }
     }
 
     private async Task<List<CategoryInput>> ResolveCategoriesAsync(

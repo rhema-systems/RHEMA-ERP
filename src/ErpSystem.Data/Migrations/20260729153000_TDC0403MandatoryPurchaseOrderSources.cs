@@ -320,7 +320,14 @@ public partial class TDC0403MandatoryPurchaseOrderSources : Migration
                         OR rfq.SourcingReleaseId <> i.SourcingReleaseId
                         OR rfq.SourcingCaseId <> i.SourcingCaseId
                         OR readiness.SourceType <> 0
-                        OR readiness.SourceId <> rfq.Id))
+                        OR readiness.SourceId <> rfq.Id
+                        OR NOT EXISTS (
+                            SELECT 1
+                            FROM RequestForQuotationAwardLines awardLine
+                            WHERE awardLine.TenantId = i.TenantId
+                              AND awardLine.RfqId = rfq.Id
+                              AND awardLine.BusinessPartnerId = i.BusinessPartnerId
+                              AND awardLine.IsDeleted = 0)))
                     THROW 51207, 'The RFQ award source no longer authorizes this purchase order.', 1;
 
                 IF EXISTS (

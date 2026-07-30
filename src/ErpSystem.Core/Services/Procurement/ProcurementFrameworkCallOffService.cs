@@ -1172,6 +1172,13 @@ public sealed class ProcurementFrameworkCallOffService :
             if (!prices.TryGetValue(request.AgreementPriceLineId, out var priceLine))
                 throw Validation("FRAMEWORK_CALL_OFF_PRICE_LINE_NOT_FOUND",
                     "A selected price line does not belong to the framework version.");
+            var normalized =
+                ProcurementFrameworkCallOffCommercialRules.NormalizeLine(
+                    request.Quantity,
+                    priceLine.UnitPrice);
+            if (normalized.Quantity <= 0)
+                throw Validation("FRAMEWORK_CALL_OFF_LINE_INVALID",
+                    "Every call-off line requires source demand, governed price, and a positive quantity.");
             if (demandLine.InventoryItemId.Value != priceLine.InventoryItemId ||
                 !string.Equals(
                     NormalizeUnit(demandLine.UnitOfMeasure),
@@ -1179,20 +1186,20 @@ public sealed class ProcurementFrameworkCallOffService :
                     StringComparison.OrdinalIgnoreCase))
                 throw Validation("FRAMEWORK_CALL_OFF_ITEM_UOM_MISMATCH",
                     "The governed price item and unit must exactly match source demand.");
-            if (request.Quantity < priceLine.MinimumQuantity ||
+            if (normalized.Quantity < priceLine.MinimumQuantity ||
                 priceLine.MaximumQuantity.HasValue &&
-                request.Quantity > priceLine.MaximumQuantity.Value)
+                normalized.Quantity > priceLine.MaximumQuantity.Value)
                 throw Validation("FRAMEWORK_CALL_OFF_QUANTITY_OUTSIDE_PRICE_BAND",
                     $"Quantity for {priceLine.ItemCode} must be between {priceLine.MinimumQuantity:0.####} and {(priceLine.MaximumQuantity.HasValue ? priceLine.MaximumQuantity.Value.ToString("0.####") : "the remaining demand")}.");
             var otherAllocation = allocated.GetValueOrDefault(demandLine.Id);
-            if (otherAllocation + request.Quantity > demandLine.Quantity)
+            if (otherAllocation + normalized.Quantity > demandLine.Quantity)
                 throw Conflict("FRAMEWORK_CALL_OFF_SOURCE_DEMAND_EXCEEDED",
-                    $"Call-offs would allocate {otherAllocation + request.Quantity:0.####} against source demand of {demandLine.Quantity:0.####} for {demandLine.ItemDescription}.");
+                    $"Call-offs would allocate {otherAllocation + normalized.Quantity:0.####} against source demand of {demandLine.Quantity:0.####} for {demandLine.ItemDescription}.");
             result.Add(new ResolvedLine(
                 demandLine,
                 priceLine,
-                RoundQuantity(request.Quantity),
-                RoundMoney(request.Quantity * priceLine.UnitPrice)));
+                normalized.Quantity,
+                normalized.LineTotal));
         }
         return result;
     }
@@ -2100,8 +2107,6 @@ public sealed class ProcurementFrameworkCallOffService :
     };
     private static decimal RoundMoney(decimal value) =>
         decimal.Round(value, 2, MidpointRounding.AwayFromZero);
-    private static decimal RoundQuantity(decimal value) =>
-        decimal.Round(value, 4, MidpointRounding.AwayFromZero);
     private static decimal SingleCurrencyTotal(
         IReadOnlyDictionary<string, decimal> values) =>
         values.Count == 1 ? values.Values.Single() : 0m;

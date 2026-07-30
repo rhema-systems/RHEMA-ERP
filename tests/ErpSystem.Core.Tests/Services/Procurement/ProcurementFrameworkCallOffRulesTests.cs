@@ -8,6 +8,18 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementFrameworkCallOffRulesTests
 {
+    [Fact]
+    public void LineTotalUsesThePersistedFourDecimalQuantity()
+    {
+        var normalized =
+            ProcurementFrameworkCallOffCommercialRules.NormalizeLine(
+                1.23456m,
+                1000m);
+
+        normalized.Quantity.Should().Be(1.2346m);
+        normalized.LineTotal.Should().Be(1234.60m);
+    }
+
     [Theory]
     [InlineData(ProcurementFrameworkCallOffStatus.Draft, "submit")]
     [InlineData(ProcurementFrameworkCallOffStatus.Draft, "cancel")]

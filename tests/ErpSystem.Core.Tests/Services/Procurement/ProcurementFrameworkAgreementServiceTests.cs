@@ -67,6 +67,51 @@ public sealed class ProcurementFrameworkAgreementServiceTests
     }
 
     [Fact]
+    public async Task CreateAndUpdateRejectCurrencyThatDiffersFromApprovedAward()
+    {
+        await using var fixture = new Fixture();
+        fixture.Context.Add(new Currency
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            CurrencyCode = "USD",
+            CurrencyName = "US dollar",
+            IsActive = true
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var createRequest = fixture.CreateRequest();
+        createRequest.CurrencyCode = "USD";
+        var createAction = () => fixture.Service.CreateAsync(
+            createRequest,
+            "framework-currency-mismatch-create");
+
+        await createAction.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code ==
+                "FRAMEWORK_AGREEMENT_CURRENCY_SOURCE_MISMATCH");
+
+        var created = await fixture.Service.CreateAsync(
+            fixture.CreateRequest(),
+            "framework-currency-match-create");
+        var updateRequest = fixture.UpdateRequest(created.RowVersion);
+        updateRequest.CurrencyCode = "USD";
+        var updateAction = () => fixture.Service.UpdateAsync(
+            created.Id,
+            updateRequest,
+            "framework-currency-mismatch-update");
+
+        await updateAction.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code ==
+                "FRAMEWORK_AGREEMENT_CURRENCY_SOURCE_MISMATCH");
+        (await fixture.Service.GetAsync(created.Id))
+            .CurrencyCode.Should().Be("GHS");
+    }
+
+    [Fact]
     public async Task NewerBlockedReadinessRevokesOlderReadyDecision()
     {
         await using var fixture = new Fixture();
