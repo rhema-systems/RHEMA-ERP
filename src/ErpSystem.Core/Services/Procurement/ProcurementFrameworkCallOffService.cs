@@ -93,16 +93,48 @@ public sealed class ProcurementFrameworkCallOffService :
         var rows = await CallOffs.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .AsNoTracking().ToListAsync(cancellationToken);
-        var balances = await Balances.GetQueryable(item =>
+        var agreements = await _unitOfWork
+            .Repository<ProcurementFrameworkAgreement>()
+            .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted)
-            .Include(item => item.Agreement).ThenInclude(item => item.Extensions)
+            .Include(item => item.Extensions.Where(child => !child.IsDeleted))
             .AsNoTracking().ToListAsync(cancellationToken);
-        var committed = balances.GroupBy(item => item.CurrencyCode)
-            .ToDictionary(group => group.Key, group => group.Sum(item => item.CommittedAmount));
-        var issued = balances.GroupBy(item => item.CurrencyCode)
-            .ToDictionary(group => group.Key, group => group.Sum(item => item.IssuedAmount));
-        var available = balances.GroupBy(item => item.CurrencyCode)
-            .ToDictionary(group => group.Key, group => group.Sum(item => item.AvailableAmount));
+        var balanceAgreementIds = await Balances.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item => item.AgreementId)
+            .ToListAsync(cancellationToken);
+        var balanceAgreementIdSet = balanceAgreementIds.ToHashSet();
+        var balanceFamilyKeys = agreements
+            .Where(item => balanceAgreementIdSet.Contains(item.Id))
+            .Select(item => item.AgreementKey)
+            .ToHashSet();
+        var movements = await BalanceMovements.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .AsNoTracking().ToListAsync(cancellationToken);
+        var familySummaries =
+            ProcurementFrameworkCallOffCommercialRules.SummarizeFamilies(
+                agreements
+                    .Where(item => balanceFamilyKeys.Contains(item.AgreementKey))
+                    .Select(ToAgreementRevisionState),
+                movements.Select(item =>
+                    new ProcurementFrameworkCallOffCommercialRules.MovementState(
+                        item.AgreementId,
+                        item.MovementType,
+                        item.Amount)),
+                now);
+        var committed = familySummaries.GroupBy(item => item.CurrencyCode)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(item => item.CommittedAmount));
+        var issued = familySummaries.GroupBy(item => item.CurrencyCode)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(item => item.IssuedAmount));
+        var available = familySummaries.GroupBy(item => item.CurrencyCode)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(item => item.AvailableAmount));
         return new ProcurementFrameworkCallOffSummaryDto
         {
             TotalCount = rows.Count,
@@ -113,10 +145,11 @@ public sealed class ProcurementFrameworkCallOffService :
                 item.Status == ProcurementFrameworkCallOffStatus.Approved),
             IssuedCount = rows.Count(item =>
                 item.Status == ProcurementFrameworkCallOffStatus.Issued),
-            ExpiringAgreementCount = balances.Count(item =>
+            ExpiringAgreementCount = familySummaries.Count(item =>
                 item.AvailableAmount > 0 &&
-                ProcurementFrameworkAgreementRules.IsEffective(item.Agreement, now) &&
-                ProcurementFrameworkAgreementRules.EffectiveEnd(item.Agreement) <=
+                item.IsEffective &&
+                item.EffectiveEndUtc.HasValue &&
+                item.EffectiveEndUtc.Value <=
                 now.AddDays(ExpiryAlertDays)),
             TotalCommittedAmount = SingleCurrencyTotal(committed),
             TotalIssuedAmount = SingleCurrencyTotal(issued),
@@ -191,8 +224,15 @@ public sealed class ProcurementFrameworkCallOffService :
                            item.EffectiveFromUtc <= now)
             .OrderBy(item => item.AgreementNumber)
             .ToListAsync(cancellationToken);
+        var currentAgreementIds =
+            ProcurementFrameworkCallOffCommercialRules
+                .SelectCurrentEffectiveRevisions(
+                    agreements.Select(ToAgreementRevisionState),
+                    now)
+                .Select(item => item.AgreementId)
+                .ToHashSet();
         agreements = agreements.Where(item =>
-                ProcurementFrameworkAgreementRules.IsEffective(item, now))
+                currentAgreementIds.Contains(item.Id))
             .ToList();
 
         var agreementOptions = new List<ProcurementFrameworkCallOffAgreementOptionDto>();
@@ -337,6 +377,10 @@ public sealed class ProcurementFrameworkCallOffService :
             var agreement = await LoadAgreementAsync(
                 request.AgreementId, true, cancellationToken);
             EnsureEffectiveAgreement(agreement, now, request.RequiredDateUtc);
+            await EnsureCurrentAgreementRevisionAsync(
+                agreement,
+                now,
+                cancellationToken);
             var requisition = await Requisitions.GetQueryable(item =>
                     item.TenantId == _currentUser.TenantId &&
                     item.Id == request.SourceRequisitionId && !item.IsDeleted)
@@ -1051,6 +1095,32 @@ public sealed class ProcurementFrameworkCallOffService :
         ?? throw NotFound("FRAMEWORK_CALL_OFF_AGREEMENT_NOT_FOUND",
             "The framework agreement was not found in the current tenant.");
 
+    private async Task EnsureCurrentAgreementRevisionAsync(
+        ProcurementFrameworkAgreement agreement,
+        DateTime atUtc,
+        CancellationToken cancellationToken)
+    {
+        var family = await _unitOfWork
+            .Repository<ProcurementFrameworkAgreement>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.AgreementKey == agreement.AgreementKey &&
+                !item.IsDeleted)
+            .Include(item => item.Extensions.Where(child => !child.IsDeleted))
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        if (!ProcurementFrameworkCallOffCommercialRules
+                .IsCurrentEffectiveRevision(
+                    ToAgreementRevisionState(agreement),
+                    family.Select(ToAgreementRevisionState),
+                    atUtc))
+        {
+            throw Conflict(
+                "FRAMEWORK_CALL_OFF_AGREEMENT_REVISION_SUPERSEDED",
+                "A newer effective framework revision now governs this agreement family.");
+        }
+    }
+
     private async Task<ProcurementFrameworkAgreement> RevalidateAsync(
         ProcurementFrameworkCallOff callOff,
         bool requireCurrentActorAuthority,
@@ -1061,6 +1131,10 @@ public sealed class ProcurementFrameworkCallOffService :
         var agreement = await LoadAgreementAsync(
             callOff.AgreementId, true, cancellationToken);
         EnsureEffectiveAgreement(agreement, now, callOff.RequiredDateUtc);
+        await EnsureCurrentAgreementRevisionAsync(
+            agreement,
+            now,
+            cancellationToken);
         if (agreement.BusinessPartnerId != callOff.BusinessPartnerId ||
             agreement.AgreementNumber != callOff.AgreementNumber ||
             agreement.Version != callOff.AgreementVersion ||
@@ -1120,12 +1194,21 @@ public sealed class ProcurementFrameworkCallOffService :
         var eligibility = await EnforceSupplierEligibilityAsync(
             agreement, correlationId, cancellationToken);
         callOff.SupplierEligibilityDecisionHash = eligibility.DecisionHash;
-        var balance = await EnsureBalanceAsync(agreement, now, cancellationToken);
-        if ((callOff.Status is ProcurementFrameworkCallOffStatus.Draft or
-             ProcurementFrameworkCallOffStatus.PendingApproval) &&
-            callOff.TotalAmount > balance.AvailableAmount)
-            throw Conflict("FRAMEWORK_CALL_OFF_BALANCE_INSUFFICIENT",
-                $"The call-off total exceeds the available agreement balance of {balance.AvailableAmount:0.00} {balance.CurrencyCode}.");
+        await EnsureBalanceAsync(agreement, now, cancellationToken);
+        if (callOff.Status is ProcurementFrameworkCallOffStatus.Draft or
+            ProcurementFrameworkCallOffStatus.PendingApproval)
+        {
+            var familyCapacity = await EvaluateAgreementFamilyCapacityAsync(
+                agreement,
+                callOff.TotalAmount,
+                cancellationToken);
+            if (!familyCapacity.CanReserve)
+            {
+                throw Conflict(
+                    "FRAMEWORK_CALL_OFF_BALANCE_INSUFFICIENT",
+                    $"The call-off total exceeds the available agreement-family balance of {familyCapacity.AvailableAmount:0.00} {agreement.CurrencyCode}.");
+            }
+        }
         return agreement;
     }
 
@@ -1564,6 +1647,19 @@ public sealed class ProcurementFrameworkCallOffService :
             throw NotFound("FRAMEWORK_CALL_OFF_WAREHOUSE_NOT_FOUND",
                 "The delivery warehouse is not active in the current tenant.");
     }
+
+    private static ProcurementFrameworkCallOffCommercialRules
+        .AgreementRevisionState ToAgreementRevisionState(
+            ProcurementFrameworkAgreement agreement) =>
+        new(
+            agreement.Id,
+            agreement.AgreementKey,
+            agreement.Version,
+            agreement.CurrencyCode,
+            agreement.CeilingAmount,
+            agreement.EffectiveFromUtc,
+            ProcurementFrameworkAgreementRules.EffectiveEnd(agreement),
+            agreement.Status == ProcurementFrameworkAgreementStatus.Published);
 
     private static void EnsureEffectiveAgreement(
         ProcurementFrameworkAgreement agreement,
