@@ -459,18 +459,19 @@ public partial class TDC0403MandatoryPurchaseOrderSources : Migration
                 IF EXISTS (
                     SELECT 1
                     FROM inserted callOff
-                    JOIN PurchaseOrders purchaseOrder
+                    LEFT JOIN PurchaseOrders purchaseOrder
                       ON purchaseOrder.Id = callOff.PurchaseOrderId
                      AND purchaseOrder.TenantId = callOff.TenantId
-                    JOIN ProcurementFrameworkAgreements agreement
+                    LEFT JOIN ProcurementFrameworkAgreements agreement
                       ON agreement.Id = callOff.AgreementId
                      AND agreement.TenantId = callOff.TenantId
-                    JOIN ProcurementAwardReadinessDecisions readiness
+                     AND agreement.IsDeleted = 0
+                    LEFT JOIN ProcurementAwardReadinessDecisions readiness
                       ON readiness.Id = agreement.AwardReadinessDecisionId
                      AND readiness.TenantId = callOff.TenantId
                      AND readiness.Status = 1
                      AND readiness.IsDeleted = 0
-                    JOIN ProcurementSourcingCases sourcing
+                    LEFT JOIN ProcurementSourcingCases sourcing
                       ON sourcing.Id = purchaseOrder.SourcingCaseId
                      AND sourcing.TenantId = callOff.TenantId
                      AND sourcing.SourcingReleaseId =
@@ -497,7 +498,11 @@ public partial class TDC0403MandatoryPurchaseOrderSources : Migration
                      AND exceptional.TenantId = callOff.TenantId
                      AND exceptional.SourcingCaseId = sourcing.Id
                      AND exceptional.IsDeleted = 0
-                    WHERE purchaseOrder.ProcurementSourceType <> 4
+                    WHERE purchaseOrder.Id IS NULL
+                       OR agreement.Id IS NULL
+                       OR readiness.Id IS NULL
+                       OR sourcing.Id IS NULL
+                       OR purchaseOrder.ProcurementSourceType <> 4
                        OR purchaseOrder.ProcurementSourceId <> callOff.Id
                        OR purchaseOrder.ProcurementSourceReference <>
                             callOff.CallOffNumber

@@ -43,6 +43,26 @@ public static class ProcurementPurchaseOrderSourceRules
         (status.Equals("Approved", StringComparison.OrdinalIgnoreCase) ||
          status.Equals("Ordered", StringComparison.OrdinalIgnoreCase));
 
+    public static OrderValidationResult ValidateContractEffectivePeriod(
+        DateTime? startDate,
+        DateTime? endDate,
+        DateTime asOfUtc)
+    {
+        if (startDate.HasValue && startDate.Value > asOfUtc)
+        {
+            return OrderValidationResult.Denied(
+                "PO_CONTRACT_NOT_STARTED",
+                "The contract cannot authorize a purchase order before its start date.");
+        }
+        if (endDate.HasValue && endDate.Value < asOfUtc)
+        {
+            return OrderValidationResult.Denied(
+                "PO_CONTRACT_EXPIRED",
+                "The contract cannot authorize a purchase order after its end date.");
+        }
+        return OrderValidationResult.Allowed();
+    }
+
     public static bool ContainsApprovedSupplier(string? json, Guid value)
     {
         if (string.IsNullOrWhiteSpace(json))

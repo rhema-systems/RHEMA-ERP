@@ -869,6 +869,13 @@ public sealed class ProcurementPurchaseOrderSourceService :
         if (!string.Equals(contract.Status, "Active", StringComparison.OrdinalIgnoreCase))
             throw Invalid("PO_CONTRACT_NOT_ACTIVE",
                 $"Only an active contract can authorize a purchase order (current status: {contract.Status}).");
+        var effectivePeriod =
+            ProcurementPurchaseOrderSourceRules.ValidateContractEffectivePeriod(
+                contract.StartDate,
+                contract.EndDate,
+                DateTime.UtcNow);
+        if (!effectivePeriod.IsValid)
+            throw Invalid(effectivePeriod.Code, effectivePeriod.Message);
         var award = await _unitOfWork.Repository<TenderAward>()
             .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&

@@ -278,6 +278,70 @@ public sealed class ProcurementPurchaseOrderSourceRulesTests
     }
 
     [Fact]
+    public void ContractCannotAuthorizeAnOrderBeforeItsStartDate()
+    {
+        var asOfUtc = new DateTime(2026, 7, 29, 12, 0, 0, DateTimeKind.Utc);
+
+        var result =
+            ProcurementPurchaseOrderSourceRules.ValidateContractEffectivePeriod(
+                asOfUtc.AddMinutes(1),
+                asOfUtc.AddDays(30),
+                asOfUtc);
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_CONTRACT_NOT_STARTED");
+    }
+
+    [Fact]
+    public void ContractCannotAuthorizeAnOrderAfterItsEndDate()
+    {
+        var asOfUtc = new DateTime(2026, 7, 29, 12, 0, 0, DateTimeKind.Utc);
+
+        var result =
+            ProcurementPurchaseOrderSourceRules.ValidateContractEffectivePeriod(
+                asOfUtc.AddDays(-30),
+                asOfUtc.AddTicks(-1),
+                asOfUtc);
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_CONTRACT_EXPIRED");
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void CurrentOrOpenEndedContractCanAuthorizeAnOrder(
+        bool hasStartDate,
+        bool hasEndDate)
+    {
+        var asOfUtc = new DateTime(2026, 7, 29, 12, 0, 0, DateTimeKind.Utc);
+
+        var result =
+            ProcurementPurchaseOrderSourceRules.ValidateContractEffectivePeriod(
+                hasStartDate ? asOfUtc.AddDays(-1) : null,
+                hasEndDate ? asOfUtc.AddDays(1) : null,
+                asOfUtc);
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ContractBoundaryTimestampsCanAuthorizeAnOrder()
+    {
+        var asOfUtc = new DateTime(2026, 7, 29, 12, 0, 0, DateTimeKind.Utc);
+
+        var result =
+            ProcurementPurchaseOrderSourceRules.ValidateContractEffectivePeriod(
+                asOfUtc,
+                asOfUtc,
+                asOfUtc);
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
     public void SourceCurrencyCannotBeChanged()
     {
         var itemId = Guid.NewGuid();
