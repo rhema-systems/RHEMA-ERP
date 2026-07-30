@@ -912,6 +912,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddTransient<ErpSystem.Api.Middleware.SupplierApplicantAccessMiddleware>();
             services.AddTransient<ErpSystem.Api.Middleware.TemporaryPasswordChangeMiddleware>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierDueDiligenceService, ErpSystem.Core.Services.Procurement.ProcurementSupplierDueDiligenceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementFrameworkAgreementService, ErpSystem.Core.Services.Procurement.ProcurementFrameworkAgreementService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementFrameworkCallOffService, ErpSystem.Core.Services.Procurement.ProcurementFrameworkCallOffService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderSourceService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderSourceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierAvlService, ErpSystem.Core.Services.Procurement.ProcurementSupplierAvlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierRiskService, ErpSystem.Core.Services.Procurement.ProcurementSupplierRiskService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierPerformanceScorecardService, ErpSystem.Core.Services.Procurement.ProcurementSupplierPerformanceScorecardService>();

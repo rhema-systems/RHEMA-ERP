@@ -156,7 +156,14 @@ namespace ErpSystem.Data.Repositories
         // CRUD operations
         public virtual async Task<T> AddAsync(T entity)
         {
-            entity.Id = Guid.NewGuid();
+            // BaseEntity assigns an identity when the aggregate is constructed.
+            // Preserve it so pre-insert foreign keys, document-number reservations,
+            // immutable snapshots, and integrity hashes continue to identify the
+            // row that is actually persisted.
+            if (entity.Id == Guid.Empty)
+            {
+                entity.Id = Guid.NewGuid();
+            }
             entity.CreatedAt = DateTime.UtcNow;
             await _dbSet.AddAsync(entity);
             return entity;
@@ -166,7 +173,10 @@ namespace ErpSystem.Data.Repositories
             var entityList = entities.ToList();
             foreach (var entity in entityList)
             {
-                entity.Id = Guid.NewGuid();
+                if (entity.Id == Guid.Empty)
+                {
+                    entity.Id = Guid.NewGuid();
+                }
                 entity.CreatedAt = DateTime.UtcNow;
             }
             await _dbSet.AddRangeAsync(entityList);

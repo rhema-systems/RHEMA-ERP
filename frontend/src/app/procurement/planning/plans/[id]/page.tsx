@@ -711,39 +711,9 @@ export default function ProcurementPlanDetailPage() {
 
   const handleConvertToPurchaseOrder = async () => {
     if (!selectedItemForConversion) return;
-    if (!poForm.supplierId) {
-      toast.error('Please select a supplier');
-      return;
-    }
-
-    // Check budget validation for strict control
-    if (budgetValidation && !budgetValidation.isValid && budgetValidation.controlLevel === 'Strict') {
-      toast.error(budgetValidation.message || 'Insufficient budget');
-      return;
-    }
-
-    try {
-      setConversionLoading(true);
-      const result = await procurementPlanService.convertItemToPurchaseOrder({
-        planItemId: selectedItemForConversion.id,
-        supplierId: poForm.supplierId,
-        requiredDate: poForm.requiredDate || undefined,
-        paymentTerms: poForm.paymentTerms || undefined,
-        shippingTerms: poForm.shippingTerms || undefined,
-        deliveryAddress: poForm.deliveryAddress || undefined,
-        deliveryInstructions: poForm.deliveryInstructions || undefined,
-        notes: poForm.notes || undefined,
-        createSchedule: poForm.createSchedule,
-      });
-      toast.success(result.message);
-      setConversionDialogOpen(false);
-      loadPlanDetails();
-    } catch (error) {
-      console.error('Error converting to purchase order:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to convert to purchase order');
-    } finally {
-      setConversionLoading(false);
-    }
+    toast.error(
+      'Direct plan-to-PO conversion is closed. Create and approve the requisition sourcing/award first, then select that governed source on the Purchase Order page.'
+    );
   };
 
   const canConvertItem = (item: ProcurementPlanItemDto) => {

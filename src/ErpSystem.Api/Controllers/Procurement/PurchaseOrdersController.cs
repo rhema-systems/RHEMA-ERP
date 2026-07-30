@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Data;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
@@ -51,6 +52,7 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IWorkflowService _workflowService;
     private readonly ISupplierValidationService _supplierValidation;
+    private readonly IProcurementPurchaseOrderSourceService _purchaseOrderSources;
     private readonly ILogger<PurchaseOrdersController> _logger;
 
     private const string SpreadToItemCost = "SpreadToItemCost";
@@ -78,6 +80,7 @@ public class PurchaseOrdersController : ControllerBase
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IWorkflowService workflowService,
         ISupplierValidationService supplierValidation,
+        IProcurementPurchaseOrderSourceService purchaseOrderSources,
         ILogger<PurchaseOrdersController> logger)
     {
         _purchaseOrderRepository = purchaseOrderRepository;
@@ -98,7 +101,38 @@ public class PurchaseOrdersController : ControllerBase
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _workflowService = workflowService;
         _supplierValidation = supplierValidation;
+        _purchaseOrderSources = purchaseOrderSources;
         _logger = logger;
+    }
+
+    [HttpGet("source-options")]
+    public async Task<ActionResult<ProcurementPurchaseOrderSourceStatusDto>>
+        GetSourceOptions([FromQuery] Guid? purchaseRequisitionId = null)
+    {
+        var correlationId = CorrelationId();
+        try
+        {
+            return Ok(await _purchaseOrderSources.GetOptionsAsync(
+                purchaseRequisitionId, correlationId, HttpContext.RequestAborted));
+        }
+        catch (ProcurementPurchaseOrderSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId
+            });
+        }
+        catch (ProcurementAccessAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId
+            });
+        }
     }
 
     /// <summary>
@@ -132,7 +166,9 @@ public class PurchaseOrdersController : ControllerBase
                 Status = po.Status,
                 TotalAmount = po.TotalAmount,
                 ItemCount = po.Items?.Count ?? 0,
-                RequestedByName = po.RequestedBy?.FirstName + " " + po.RequestedBy?.LastName
+                RequestedByName = po.RequestedBy?.FirstName + " " + po.RequestedBy?.LastName,
+                ProcurementSourceType = po.ProcurementSourceType,
+                ProcurementSourceReference = po.ProcurementSourceReference
             }).ToList();
 
             await PopulateCurrentStepNamesAsync(purchaseOrderDtos);
@@ -210,6 +246,16 @@ public class PurchaseOrdersController : ControllerBase
                 SupplierPhone = purchaseOrder.BusinessPartner?.PrimaryPhone,
                 SupplierEmail = purchaseOrder.BusinessPartner?.PrimaryEmail,
                 SupplierAddress = $"{purchaseOrder.BusinessPartner?.PhysicalAddress}, {purchaseOrder.BusinessPartner?.PhysicalCity}, {purchaseOrder.BusinessPartner?.PhysicalState} {purchaseOrder.BusinessPartner?.PhysicalPostalCode}",
+                ProcurementSourceType = purchaseOrder.ProcurementSourceType,
+                ProcurementSourceId = purchaseOrder.ProcurementSourceId,
+                ProcurementSourceReference = purchaseOrder.ProcurementSourceReference,
+                SourceRequisitionId = purchaseOrder.SourceRequisitionId,
+                SourceRequisitionNumber = purchaseOrder.SourceRequisitionNumber,
+                SourcingReleaseId = purchaseOrder.SourcingReleaseId,
+                SourcingCaseId = purchaseOrder.SourcingCaseId,
+                AwardReadinessDecisionId = purchaseOrder.AwardReadinessDecisionId,
+                SourceIntegrityHash = purchaseOrder.SourceIntegrityHash,
+                SourceValidatedAtUtc = purchaseOrder.SourceValidatedAtUtc,
                 
                 // Tender/Contract Integration
                 TenderAwardId = purchaseOrder.TenderAwardId,
@@ -289,6 +335,7 @@ public class PurchaseOrdersController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<PurchaseOrderDetailDto>> CreatePurchaseOrder([FromBody] CreatePurchaseOrderDto createDto)
     {
+        var ownsSourceClaimTransaction = false;
         try
         {
             if (!ModelState.IsValid)
@@ -304,6 +351,32 @@ public class PurchaseOrdersController : ControllerBase
             }
 
             var orderType = NormalizeOrderType(createDto.OrderType);
+            if (string.Equals(
+                    orderType, "FrameworkCallOff", StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict(new
+                {
+                    code = "FRAMEWORK_CALL_OFF_DEDICATED_ROUTE_REQUIRED",
+                    message = "Framework call-offs must be created through /api/procurement/framework-call-offs so agreement, price, demand, authority, approval, and balance controls cannot be bypassed."
+                });
+            }
+            if (!createDto.SourceType.HasValue ||
+                !createDto.SourceId.HasValue ||
+                createDto.SourceId.Value == Guid.Empty)
+            {
+                return UnprocessableEntity(new
+                {
+                    code = "PO_SOURCE_REQUIRED",
+                    message = "Select an approved sourcing, award, contract, or exception source before creating a purchase order."
+                });
+            }
+            var correlationId = CorrelationId();
+            var approvedSource = await _purchaseOrderSources.ResolveAsync(
+                createDto.SourceType.Value,
+                createDto.SourceId.Value,
+                createDto.SupplierId,
+                correlationId,
+                HttpContext.RequestAborted);
             await _supplierValidation.EnforceEligibilityAsync(new SupplierEligibilityEvaluationRequest
             {
                 BusinessPartnerId = createDto.SupplierId,
@@ -363,6 +436,22 @@ public class PurchaseOrdersController : ControllerBase
             var totalAmount = subtotal + taxAmount + totalAdditionalCost - discountAmount;
             var costAllocationMethod = NormalizeCostAllocationMethod(createDto.CostAllocationMethod);
             var costApportionmentBasis = NormalizeCostApportionmentBasis(createDto.CostApportionmentBasis);
+            var proposedSourceLines = createDto.Items.Select(item =>
+                new ProcurementPurchaseOrderSourceOrderLine
+                {
+                    InventoryItemId = item.InventoryItemId,
+                    ItemDescription = item.ItemDescription,
+                    OrderedQuantity = item.OrderedQuantity,
+                    UnitOfMeasure = item.UnitOfMeasure,
+                    UnitPrice = item.UnitPrice
+                }).ToList();
+            await _purchaseOrderSources.ValidateOrderAsync(
+                approvedSource,
+                proposedSourceLines,
+                totalAmount,
+                approvedSource.CurrencyCode,
+                correlationId,
+                HttpContext.RequestAborted);
 
             if (costAllocationMethod == GLExpense && string.IsNullOrWhiteSpace(createDto.ExpenseGLAccount))
             {
@@ -400,6 +489,23 @@ public class PurchaseOrdersController : ControllerBase
                 OrderType = orderType,
                 TenantId = tenantId
             };
+            _purchaseOrderSources.Apply(purchaseOrder, approvedSource);
+
+            ownsSourceClaimTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsSourceClaimTransaction)
+            {
+                await _unitOfWork.BeginTransactionAsync(
+                    IsolationLevel.Serializable,
+                    HttpContext.RequestAborted);
+            }
+            await _purchaseOrderSources.ReserveAsync(
+                approvedSource,
+                proposedSourceLines,
+                totalAmount,
+                approvedSource.CurrencyCode,
+                purchaseOrder.Id,
+                correlationId,
+                HttpContext.RequestAborted);
 
             await _purchaseOrderRepository.CreatePurchaseOrderAsync(purchaseOrder);
 
@@ -438,7 +544,22 @@ public class PurchaseOrdersController : ControllerBase
             }
 
             // CRITICAL: Save changes to database
-            await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.SaveChangesAsync(HttpContext.RequestAborted);
+            if (approvedSource.SourceType ==
+                ProcurementPurchaseOrderSourceType.TenderAward)
+            {
+                await _purchaseOrderSources.ClaimTenderAwardAsync(
+                    approvedSource.SourceId,
+                    purchaseOrder,
+                    HttpContext.RequestAborted);
+            }
+            await _purchaseOrderSources.RecordBoundAsync(
+                purchaseOrder,
+                "PurchaseOrderCreated",
+                correlationId,
+                HttpContext.RequestAborted);
+            if (ownsSourceClaimTransaction)
+                await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
 
             // Return the created purchase order
             var createdPurchaseOrder = await GetPurchaseOrderDetailDto(purchaseOrder.Id);
@@ -455,10 +576,53 @@ public class PurchaseOrdersController : ControllerBase
                 eligibility = ex.Result
             });
         }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementPurchaseOrderSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
+        }
+        catch (ProcurementAccessAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating purchase order");
             return StatusCode(500, "An error occurred while creating the purchase order");
+        }
+        finally
+        {
+            if (ownsSourceClaimTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                try
+                {
+                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(
+                        rollbackException,
+                        "Failed to roll back purchase-order source claim");
+                }
+            }
         }
     }
 
@@ -468,6 +632,7 @@ public class PurchaseOrdersController : ControllerBase
     [HttpPut("{id}")]
     public async Task<ActionResult<PurchaseOrderDetailDto>> UpdatePurchaseOrder(Guid id, [FromBody] CreatePurchaseOrderDto updateDto)
     {
+        var ownsSourceCapacityTransaction = false;
         try
         {
             if (!ModelState.IsValid)
@@ -481,11 +646,43 @@ public class PurchaseOrdersController : ControllerBase
                 return NotFound($"Purchase order with ID {id} not found");
             }
 
+            if (await IsFrameworkCallOffAsync(id))
+            {
+                return Conflict(new
+                {
+                    code = "FRAMEWORK_CALL_OFF_DEDICATED_ROUTE_REQUIRED",
+                    message = "A framework call-off PO can be changed only through its dedicated call-off lifecycle."
+                });
+            }
+
             // Only allow editing Draft purchase orders
             if (purchaseOrder.Status != "Draft")
             {
                 return BadRequest($"Only draft purchase orders can be edited. Current status: {purchaseOrder.Status}");
             }
+            if (updateDto.SourceType != purchaseOrder.ProcurementSourceType ||
+                updateDto.SourceId != purchaseOrder.ProcurementSourceId)
+            {
+                return Conflict(new
+                {
+                    code = "PO_SOURCE_IMMUTABLE",
+                    message = "The approved purchase-order source cannot be replaced through draft editing."
+                });
+            }
+            if (updateDto.SupplierId != purchaseOrder.BusinessPartnerId)
+            {
+                return Conflict(new
+                {
+                    code = "PO_SOURCE_SUPPLIER_IMMUTABLE",
+                    message = "The supplier is owned by the approved source and cannot be changed."
+                });
+            }
+            var sourceCorrelationId = CorrelationId();
+            var currentSource = await _purchaseOrderSources.RevalidateAsync(
+                purchaseOrder,
+                "Update",
+                sourceCorrelationId,
+                HttpContext.RequestAborted);
 
             // Get tenant ID from current user
             var tenantId = _currentUserService.TenantId;
@@ -504,6 +701,22 @@ public class PurchaseOrdersController : ControllerBase
             var totalAmount = subtotal + taxAmount + totalAdditionalCost - discountAmount;
             var costAllocationMethod = NormalizeCostAllocationMethod(updateDto.CostAllocationMethod);
             var costApportionmentBasis = NormalizeCostApportionmentBasis(updateDto.CostApportionmentBasis);
+            var proposedSourceLines = updateDto.Items.Select(item =>
+                new ProcurementPurchaseOrderSourceOrderLine
+                {
+                    InventoryItemId = item.InventoryItemId,
+                    ItemDescription = item.ItemDescription,
+                    OrderedQuantity = item.OrderedQuantity,
+                    UnitOfMeasure = item.UnitOfMeasure,
+                    UnitPrice = item.UnitPrice
+                }).ToList();
+            await _purchaseOrderSources.ValidateOrderAsync(
+                currentSource,
+                proposedSourceLines,
+                totalAmount,
+                purchaseOrder.Currency,
+                sourceCorrelationId,
+                HttpContext.RequestAborted);
 
             if (costAllocationMethod == GLExpense && string.IsNullOrWhiteSpace(updateDto.ExpenseGLAccount))
             {
@@ -564,6 +777,22 @@ public class PurchaseOrdersController : ControllerBase
                 }
             }
 
+            ownsSourceCapacityTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsSourceCapacityTransaction)
+            {
+                await _unitOfWork.BeginTransactionAsync(
+                    IsolationLevel.Serializable,
+                    HttpContext.RequestAborted);
+            }
+            await _purchaseOrderSources.ReserveAsync(
+                currentSource,
+                proposedSourceLines,
+                totalAmount,
+                purchaseOrder.Currency,
+                purchaseOrder.Id,
+                sourceCorrelationId,
+                HttpContext.RequestAborted);
+
             purchaseOrder.OrderType = orderType;
 
             await _purchaseOrderRepository.UpdatePurchaseOrderAsync(purchaseOrder);
@@ -621,16 +850,43 @@ public class PurchaseOrdersController : ControllerBase
             }
 
             // CRITICAL: Save changes to database
-            await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.SaveChangesAsync(HttpContext.RequestAborted);
+            if (ownsSourceCapacityTransaction)
+                await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
 
             // Return the updated purchase order
             var updatedPurchaseOrder = await GetPurchaseOrderDetailDto(purchaseOrder.Id);
             return Ok(updatedPurchaseOrder);
         }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating purchase order {PurchaseOrderId}", id);
             return StatusCode(500, "An error occurred while updating the purchase order");
+        }
+        finally
+        {
+            if (ownsSourceCapacityTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                try
+                {
+                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(
+                        rollbackException,
+                        "Failed to roll back purchase-order source capacity reservation");
+                }
+            }
         }
     }
 
@@ -653,10 +909,38 @@ public class PurchaseOrdersController : ControllerBase
                 return NotFound($"Purchase order with ID {id} not found");
             }
 
+            if (await IsFrameworkCallOffAsync(id))
+            {
+                return Conflict(new
+                {
+                    code = "FRAMEWORK_CALL_OFF_DEDICATED_ROUTE_REQUIRED",
+                    message = "A framework call-off PO status can be changed only through its dedicated call-off lifecycle."
+                });
+            }
+            if (!string.Equals(statusDto.Status, "Draft", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(statusDto.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(statusDto.Status, "Rejected", StringComparison.OrdinalIgnoreCase))
+            {
+                await _purchaseOrderSources.RevalidateAsync(
+                    purchaseOrder,
+                    $"Status{statusDto.Status}",
+                    CorrelationId(),
+                    HttpContext.RequestAborted);
+            }
+
             await _purchaseOrderRepository.UpdateStatusAsync(id, statusDto.Status);
             await _unitOfWork.SaveChangesAsync();
 
             return NoContent();
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
         }
         catch (Exception ex)
         {
@@ -689,9 +973,26 @@ public class PurchaseOrdersController : ControllerBase
                 return NotFound($"Purchase order with ID {id} not found");
             }
 
+            if (await IsFrameworkCallOffAsync(id))
+            {
+                return Conflict(new
+                {
+                    code = "FRAMEWORK_CALL_OFF_DEDICATED_ROUTE_REQUIRED",
+                    message = "Approve or reject this framework call-off through /api/procurement/framework-call-offs/{id}/decision."
+                });
+            }
+
             if (purchaseOrder.Status != "Pending Approval" && purchaseOrder.Status != "Draft")
             {
                 return BadRequest($"Purchase order cannot be approved in current status: {purchaseOrder.Status}");
+            }
+            if (approvalDto.Approved)
+            {
+                await _purchaseOrderSources.RevalidateAsync(
+                    purchaseOrder,
+                    "Approve",
+                    CorrelationId(),
+                    HttpContext.RequestAborted);
             }
 
             var userId = _currentUserService.UserId;
@@ -745,6 +1046,15 @@ public class PurchaseOrdersController : ControllerBase
                 currentStepId = workflowResult.ExecutionResult.CurrentStepId
             });
         }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error approving purchase order {PurchaseOrderId}", id);
@@ -771,10 +1081,24 @@ public class PurchaseOrdersController : ControllerBase
                 return NotFound($"Purchase order with ID {id} not found");
             }
 
+            if (await IsFrameworkCallOffAsync(id))
+            {
+                return Conflict(new
+                {
+                    code = "FRAMEWORK_CALL_OFF_DEDICATED_ROUTE_REQUIRED",
+                    message = "Submit this framework call-off through /api/procurement/framework-call-offs/{id}/submit."
+                });
+            }
+
             if (purchaseOrder.Status != "Draft")
             {
                 return BadRequest($"Purchase order cannot be submitted in current status: {purchaseOrder.Status}");
             }
+            await _purchaseOrderSources.RevalidateAsync(
+                purchaseOrder,
+                "Submit",
+                CorrelationId(),
+                HttpContext.RequestAborted);
 
             WorkflowIntegrationResult workflowResult;
             try
@@ -799,6 +1123,15 @@ public class PurchaseOrdersController : ControllerBase
             await _unitOfWork.SaveChangesAsync();
 
             return NoContent();
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = CorrelationId()
+            });
         }
         catch (Exception ex)
         {
@@ -1090,7 +1423,9 @@ public class PurchaseOrdersController : ControllerBase
                 Status = po.Status,
                 TotalAmount = po.TotalAmount,
                 ItemCount = po.Items?.Count ?? 0,
-                RequestedByName = po.RequestedBy?.FirstName + " " + po.RequestedBy?.LastName
+                RequestedByName = po.RequestedBy?.FirstName + " " + po.RequestedBy?.LastName,
+                ProcurementSourceType = po.ProcurementSourceType,
+                ProcurementSourceReference = po.ProcurementSourceReference
             }).ToList();
 
             return Ok(purchaseOrderDtos);
@@ -1125,7 +1460,9 @@ public class PurchaseOrdersController : ControllerBase
                 Status = po.Status,
                 TotalAmount = po.TotalAmount,
                 ItemCount = po.Items?.Count ?? 0,
-                RequestedByName = po.RequestedBy?.FirstName + " " + po.RequestedBy?.LastName
+                RequestedByName = po.RequestedBy?.FirstName + " " + po.RequestedBy?.LastName,
+                ProcurementSourceType = po.ProcurementSourceType,
+                ProcurementSourceReference = po.ProcurementSourceReference
             }).ToList();
 
             return Ok(purchaseOrderDtos);
@@ -1259,6 +1596,16 @@ public class PurchaseOrdersController : ControllerBase
             SupplierPhone = purchaseOrder.BusinessPartner?.PrimaryPhone,
             SupplierEmail = purchaseOrder.BusinessPartner?.PrimaryEmail,
             SupplierAddress = $"{purchaseOrder.BusinessPartner?.PhysicalAddress}, {purchaseOrder.BusinessPartner?.PhysicalCity}, {purchaseOrder.BusinessPartner?.PhysicalState} {purchaseOrder.BusinessPartner?.PhysicalPostalCode}",
+            ProcurementSourceType = purchaseOrder.ProcurementSourceType,
+            ProcurementSourceId = purchaseOrder.ProcurementSourceId,
+            ProcurementSourceReference = purchaseOrder.ProcurementSourceReference,
+            SourceRequisitionId = purchaseOrder.SourceRequisitionId,
+            SourceRequisitionNumber = purchaseOrder.SourceRequisitionNumber,
+            SourcingReleaseId = purchaseOrder.SourcingReleaseId,
+            SourcingCaseId = purchaseOrder.SourcingCaseId,
+            AwardReadinessDecisionId = purchaseOrder.AwardReadinessDecisionId,
+            SourceIntegrityHash = purchaseOrder.SourceIntegrityHash,
+            SourceValidatedAtUtc = purchaseOrder.SourceValidatedAtUtc,
             
             // Tender/Contract Integration
             TenderAwardId = purchaseOrder.TenderAwardId,
@@ -1922,6 +2269,25 @@ public class PurchaseOrdersController : ControllerBase
         {
             return null;
         }
+    }
+
+    private Task<bool> IsFrameworkCallOffAsync(Guid purchaseOrderId) =>
+        _unitOfWork.Repository<ProcurementFrameworkCallOff>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUserService.TenantId &&
+                item.PurchaseOrderId == purchaseOrderId &&
+                !item.IsDeleted)
+            .AnyAsync(HttpContext.RequestAborted);
+
+    private string CorrelationId()
+    {
+        var supplied = Request.Headers["X-Correlation-ID"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(supplied))
+            return HttpContext.TraceIdentifier.Length <= 100
+                ? HttpContext.TraceIdentifier
+                : HttpContext.TraceIdentifier[..100];
+        supplied = supplied.Trim();
+        return supplied.Length <= 100 ? supplied : supplied[..100];
     }
 
     #endregion

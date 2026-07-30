@@ -1294,55 +1294,15 @@ public class PurchaseRequisitionsController : ControllerBase
                 return BadRequest($"Purchase requisition must be approved to convert to purchase order. Current status: {requisition.Status}");
             }
 
-            var items = await _purchaseRequisitionItemRepository.GetItemsByRequisitionIdAsync(id);
-
-            // Group items by preferred business partner
-            var supplierGroups = items
-                .Where(i => i.PreferredBusinessPartnerId.HasValue)
-                .GroupBy(i => i.PreferredBusinessPartnerId!.Value);
-
-            var purchaseOrderDtos = new List<CreatePurchaseOrderDto>();
-
-            foreach (var group in supplierGroups)
+            return Conflict(new
             {
-                var supplierId = group.Key;
-                var supplierItems = group.ToList();
-
-                var purchaseOrderDto = new CreatePurchaseOrderDto
-                {
-                    SupplierId = supplierId,
-                    RequiredDate = supplierItems.Min(i => i.RequiredDate ?? DateTime.UtcNow.AddDays(30)),
-                    PaymentTerms = "Net 30", // Default, should be from supplier
-                    Notes = $"Created from Purchase Requisition: {requisition.RequisitionNumber}",
-                    ReferenceNumber = requisition.RequisitionNumber,
-                    RequestedById = requisition.RequestedById,
-                    Items = supplierItems.Select(item => new CreatePurchaseOrderItemDto
-                    {
-                        InventoryItemId = item.InventoryItemId ?? Guid.Empty,
-                        ItemDescription = item.ItemDescription,
-                        OrderedQuantity = item.Quantity,
-                        UnitPrice = item.EstimatedUnitPrice,
-                        ExpectedDeliveryDate = item.RequiredDate,
-                        Notes = item.Notes
-                    }).ToList()
-                };
-
-                purchaseOrderDtos.Add(purchaseOrderDto);
-            }
-
-            // For this example, return the first purchase order DTO
-            // In a real implementation, you might create all the POs and return their IDs
-            if (purchaseOrderDtos.Any())
-            {
-                // Update requisition status to indicate it's being processed
-                await _purchaseRequisitionRepository.UpdateStatusAsync(id, "Converting to PO");
-
-                return Ok(purchaseOrderDtos.First());
-            }
-            else
-            {
-                return BadRequest("No items with preferred suppliers found to create purchase orders");
-            }
+                code = "PO_APPROVED_SOURCE_REQUIRED",
+                message = "An approved requisition is demand authority, not a sourcing award. Complete the requisition's governed sourcing/award, contract, framework call-off, or approved-exception path before creating a purchase order.",
+                purchaseRequisitionId = requisition.Id,
+                requisition.RequisitionNumber,
+                sourceOptionsUrl =
+                    $"/api/PurchaseOrders/source-options?purchaseRequisitionId={requisition.Id}"
+            });
         }
         catch (Exception ex)
         {

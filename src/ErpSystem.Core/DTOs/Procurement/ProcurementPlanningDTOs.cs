@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Procurement;
 
@@ -615,6 +616,12 @@ public class ConvertPlanItemToPurchaseOrderDto
 {
     [Required]
     public Guid PlanItemId { get; set; }
+
+    [Required]
+    public ProcurementPurchaseOrderSourceType? SourceType { get; set; }
+
+    [Required]
+    public Guid? SourceId { get; set; }
 
     [Required]
     public Guid SupplierId { get; set; }

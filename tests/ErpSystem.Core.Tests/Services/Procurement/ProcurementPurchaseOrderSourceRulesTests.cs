@@ -1,0 +1,446 @@
+using System.Text.Json;
+using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Services.Procurement;
+using FluentAssertions;
+using Xunit;
+
+namespace ErpSystem.Core.Tests.Services.Procurement;
+
+public sealed class ProcurementPurchaseOrderSourceRulesTests
+{
+    [Theory]
+    [InlineData(ProcurementPurchaseOrderSourceType.RfqAward)]
+    [InlineData(ProcurementPurchaseOrderSourceType.TenderAward)]
+    [InlineData(ProcurementPurchaseOrderSourceType.Contract)]
+    [InlineData(ProcurementPurchaseOrderSourceType.ApprovedException)]
+    public void OrdinaryPurchaseOrderSourcesAreExplicit(
+        ProcurementPurchaseOrderSourceType sourceType)
+    {
+        ProcurementPurchaseOrderSourceRules.CanCreate(sourceType).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(ProcurementPurchaseOrderSourceType.FrameworkCallOff)]
+    [InlineData(ProcurementPurchaseOrderSourceType.HistoricalMigration)]
+    public void DedicatedAndMigrationSourcesCannotUseOrdinaryCreation(
+        ProcurementPurchaseOrderSourceType sourceType)
+    {
+        ProcurementPurchaseOrderSourceRules.CanCreate(sourceType).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(ProcurementPurchaseOrderSourceType.RfqAward, true)]
+    [InlineData(ProcurementPurchaseOrderSourceType.TenderAward, true)]
+    [InlineData(ProcurementPurchaseOrderSourceType.ApprovedException, true)]
+    [InlineData(ProcurementPurchaseOrderSourceType.Contract, false)]
+    public void OneTimeSourcesAreExplicit(
+        ProcurementPurchaseOrderSourceType sourceType,
+        bool expected)
+    {
+        ProcurementPurchaseOrderSourceRules.IsOneTime(sourceType)
+            .Should().Be(expected);
+    }
+
+    [Fact]
+    public void ApprovedExceptionReadinessUsesItsTenderSourceId()
+    {
+        var controlId = Guid.NewGuid();
+        var tenderId = Guid.NewGuid();
+
+        ProcurementPurchaseOrderSourceRules.ResolveAwardReadinessSourceId(
+                ProcurementPurchaseOrderSourceType.ApprovedException,
+                controlId,
+                tenderId)
+            .Should().Be(tenderId);
+        ProcurementPurchaseOrderSourceRules.ResolveAwardReadinessSourceId(
+                ProcurementPurchaseOrderSourceType.RfqAward,
+                controlId,
+                tenderId)
+            .Should().Be(controlId);
+    }
+
+    [Fact]
+    public void AwardReservationLockUsesCanonicalSourceAndSupplier()
+    {
+        var tenantId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        var resource =
+            ProcurementPurchaseOrderSourceRules.BuildAwardReservationLock(
+                tenantId,
+                ProcurementAwardReadinessSourceType.Tender,
+                sourceId,
+                supplierId);
+
+        resource.Should().Be(
+            $"TDC:AWARD-SOURCE:{tenantId:N}:{(int)ProcurementAwardReadinessSourceType.Tender}:{sourceId:N}:{supplierId:N}");
+        resource.Length.Should().BeLessThanOrEqualTo(255);
+    }
+
+    [Theory]
+    [InlineData("Submitted")]
+    [InlineData("Pending Approval")]
+    [InlineData("Approved")]
+    [InlineData("Sent")]
+    [InlineData("Acknowledged")]
+    public void ApprovalAndIssueBoundariesRequireRevalidation(string status)
+    {
+        ProcurementPurchaseOrderSourceRules.RequiresRevalidation(status)
+            .Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("PartiallyReceived")]
+    [InlineData("Received")]
+    [InlineData("Cancelled")]
+    public void ReceivingAndTerminalStatusAreOutsideThisSourceGate(string status)
+    {
+        ProcurementPurchaseOrderSourceRules.RequiresRevalidation(status)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void AwardReadinessSupplierMustBeAnExactGuidMember()
+    {
+        var supplier = Guid.NewGuid();
+        var json = JsonSerializer.Serialize(new[] { supplier, Guid.NewGuid() });
+
+        ProcurementPurchaseOrderSourceRules.ContainsApprovedSupplier(json, supplier)
+            .Should().BeTrue();
+        ProcurementPurchaseOrderSourceRules.ContainsApprovedSupplier(
+                json, Guid.NewGuid())
+            .Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("{}")]
+    [InlineData("not-json")]
+    public void MalformedSupplierLineageFailsClosed(string json)
+    {
+        ProcurementPurchaseOrderSourceRules.ContainsApprovedSupplier(
+                json, Guid.NewGuid())
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void OneTimeAwardRequiresExactAuthoritativeLinesAndTotal()
+    {
+        var itemId = Guid.NewGuid();
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.TenderAward,
+            [
+                ApprovedLine(itemId, "Medical supplies", 4m, 25m)
+            ],
+            [
+                OrderLine(itemId, "Medical supplies", 4m, 25m)
+            ],
+            100m,
+            100m,
+            "GHS",
+            "GHS");
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ContractMustBelongToTheRequestedTenderAward()
+    {
+        var requestedAwardId = Guid.NewGuid();
+
+        ProcurementPurchaseOrderSourceRules.IsContractBoundToAward(
+                requestedAwardId,
+                requestedAwardId)
+            .Should().BeTrue();
+        ProcurementPurchaseOrderSourceRules.IsContractBoundToAward(
+                Guid.NewGuid(),
+                requestedAwardId)
+            .Should().BeFalse();
+        ProcurementPurchaseOrderSourceRules.IsContractBoundToAward(
+                Guid.Empty,
+                requestedAwardId)
+            .Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(5, 25, "PO_SOURCE_LINE_QUANTITY_MISMATCH")]
+    [InlineData(4, 30, "PO_SOURCE_LINE_PRICE_MISMATCH")]
+    public void AwardCannotAuthorizeChangedQuantityOrPrice(
+        decimal quantity,
+        decimal price,
+        string expectedCode)
+    {
+        var itemId = Guid.NewGuid();
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.TenderAward,
+            [ApprovedLine(itemId, "Medical supplies", 4m, 25m)],
+            [OrderLine(itemId, "Medical supplies", quantity, price)],
+            100m,
+            quantity * price,
+            "GHS",
+            "GHS");
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be(expectedCode);
+    }
+
+    [Fact]
+    public void AwardCannotAuthorizeAnUnapprovedItem()
+    {
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.ApprovedException,
+            [ApprovedLine(Guid.NewGuid(), "Approved item", 1m, 100m)],
+            [OrderLine(Guid.NewGuid(), "Different item", 1m, 100m)],
+            100m,
+            100m,
+            "GHS",
+            "GHS");
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_SOURCE_LINE_NOT_APPROVED");
+    }
+
+    [Fact]
+    public void AwardCannotOmitAnApprovedLine()
+    {
+        var firstItemId = Guid.NewGuid();
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.RfqAward,
+            [
+                ApprovedLine(firstItemId, "First item", 1m, 40m),
+                ApprovedLine(Guid.NewGuid(), "Second item", 1m, 60m)
+            ],
+            [OrderLine(firstItemId, "First item", 1m, 40m)],
+            100m,
+            100m,
+            "GHS",
+            "GHS");
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_SOURCE_LINE_SET_MISMATCH");
+    }
+
+    [Fact]
+    public void AwardCannotChangeUnitOfMeasure()
+    {
+        var itemId = Guid.NewGuid();
+        var changedLine = new ProcurementPurchaseOrderSourceOrderLine
+        {
+            InventoryItemId = itemId,
+            ItemDescription = "Approved item",
+            OrderedQuantity = 1m,
+            UnitOfMeasure = "BOX",
+            UnitPrice = 100m
+        };
+
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.TenderAward,
+            [ApprovedLine(itemId, "Approved item", 1m, 100m)],
+            [changedLine],
+            100m,
+            100m,
+            "GHS",
+            "GHS");
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_SOURCE_LINE_NOT_APPROVED");
+    }
+
+    [Fact]
+    public void AwardCannotChangeTheApprovedHeaderTotal()
+    {
+        var itemId = Guid.NewGuid();
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.ApprovedException,
+            [ApprovedLine(itemId, "Approved item", 1m, 100m)],
+            [OrderLine(itemId, "Approved item", 1m, 100m)],
+            125m,
+            100m,
+            "GHS",
+            "GHS");
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_SOURCE_TOTAL_MISMATCH");
+    }
+
+    [Fact]
+    public void ContractAllowsAControlledPartialOrderButNotAnExcess()
+    {
+        var itemId = Guid.NewGuid();
+        var approved = new[] { ApprovedLine(itemId, "Contract item", 10m, 20m) };
+
+        ProcurementPurchaseOrderSourceRules.ValidateOrder(
+                ProcurementPurchaseOrderSourceType.Contract,
+                approved,
+                [OrderLine(itemId, "Contract item", 5m, 20m)],
+                200m,
+                100m,
+                "GHS",
+                "GHS")
+            .IsValid.Should().BeTrue();
+
+        var excess = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.Contract,
+            approved,
+            [OrderLine(itemId, "Contract item", 11m, 20m)],
+            200m,
+            220m,
+            "GHS",
+            "GHS");
+        excess.IsValid.Should().BeFalse();
+        excess.Code.Should().Be("PO_SOURCE_LINE_QUANTITY_MISMATCH");
+    }
+
+    [Fact]
+    public void ContractCumulativeOrdersCannotExceedAnApprovedLine()
+    {
+        var itemId = Guid.NewGuid();
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.Contract,
+            [ApprovedLine(itemId, "Contract item", 10m, 20m)],
+            [
+                OrderLine(itemId, "Contract item", 6m, 20m),
+                OrderLine(itemId, "Contract item", 5m, 20m)
+            ],
+            300m,
+            220m,
+            "GHS",
+            "GHS");
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_SOURCE_LINE_QUANTITY_MISMATCH");
+    }
+
+    [Fact]
+    public void ContractCumulativeOrdersCannotExceedTheContractValue()
+    {
+        var itemId = Guid.NewGuid();
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.Contract,
+            [ApprovedLine(itemId, "Contract item", 10m, 20m)],
+            [
+                OrderLine(itemId, "Contract item", 4m, 20m),
+                OrderLine(itemId, "Contract item", 4m, 20m)
+            ],
+            150m,
+            160m,
+            "GHS",
+            "GHS");
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_SOURCE_AMOUNT_EXCEEDED");
+    }
+
+    [Fact]
+    public void ContractCannotAuthorizeAnOrderBeforeItsStartDate()
+    {
+        var asOfUtc = new DateTime(2026, 7, 29, 12, 0, 0, DateTimeKind.Utc);
+
+        var result =
+            ProcurementPurchaseOrderSourceRules.ValidateContractEffectivePeriod(
+                asOfUtc.AddMinutes(1),
+                asOfUtc.AddDays(30),
+                asOfUtc);
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_CONTRACT_NOT_STARTED");
+    }
+
+    [Fact]
+    public void ContractCannotAuthorizeAnOrderAfterItsEndDate()
+    {
+        var asOfUtc = new DateTime(2026, 7, 29, 12, 0, 0, DateTimeKind.Utc);
+
+        var result =
+            ProcurementPurchaseOrderSourceRules.ValidateContractEffectivePeriod(
+                asOfUtc.AddDays(-30),
+                asOfUtc.AddTicks(-1),
+                asOfUtc);
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_CONTRACT_EXPIRED");
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void CurrentOrOpenEndedContractCanAuthorizeAnOrder(
+        bool hasStartDate,
+        bool hasEndDate)
+    {
+        var asOfUtc = new DateTime(2026, 7, 29, 12, 0, 0, DateTimeKind.Utc);
+
+        var result =
+            ProcurementPurchaseOrderSourceRules.ValidateContractEffectivePeriod(
+                hasStartDate ? asOfUtc.AddDays(-1) : null,
+                hasEndDate ? asOfUtc.AddDays(1) : null,
+                asOfUtc);
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ContractBoundaryTimestampsCanAuthorizeAnOrder()
+    {
+        var asOfUtc = new DateTime(2026, 7, 29, 12, 0, 0, DateTimeKind.Utc);
+
+        var result =
+            ProcurementPurchaseOrderSourceRules.ValidateContractEffectivePeriod(
+                asOfUtc,
+                asOfUtc,
+                asOfUtc);
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void SourceCurrencyCannotBeChanged()
+    {
+        var itemId = Guid.NewGuid();
+        var result = ProcurementPurchaseOrderSourceRules.ValidateOrder(
+            ProcurementPurchaseOrderSourceType.RfqAward,
+            [ApprovedLine(itemId, "RFQ item", 1m, 10m)],
+            [OrderLine(itemId, "RFQ item", 1m, 10m)],
+            10m,
+            10m,
+            "GHS",
+            "USD");
+
+        result.IsValid.Should().BeFalse();
+        result.Code.Should().Be("PO_SOURCE_CURRENCY_MISMATCH");
+    }
+
+    private static ProcurementPurchaseOrderSourceLineDto ApprovedLine(
+        Guid inventoryItemId,
+        string description,
+        decimal quantity,
+        decimal unitPrice) =>
+        new()
+        {
+            SourceLineId = Guid.NewGuid(),
+            InventoryItemId = inventoryItemId,
+            Description = description,
+            Quantity = quantity,
+            UnitOfMeasure = "EA",
+            UnitPrice = unitPrice,
+            LineTotal = quantity * unitPrice
+        };
+
+    private static ProcurementPurchaseOrderSourceOrderLine OrderLine(
+        Guid inventoryItemId,
+        string description,
+        decimal quantity,
+        decimal unitPrice) =>
+        new()
+        {
+            InventoryItemId = inventoryItemId,
+            ItemDescription = description,
+            OrderedQuantity = quantity,
+            UnitOfMeasure = "EA",
+            UnitPrice = unitPrice
+        };
+}

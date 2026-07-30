@@ -646,6 +646,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProcurementSupplierDueDiligenceReview> ProcurementSupplierDueDiligenceReviews { get; set; }
     public DbSet<ProcurementSupplierDueDiligenceCheck> ProcurementSupplierDueDiligenceChecks { get; set; }
     public DbSet<ProcurementSupplierDueDiligenceEvidenceLink> ProcurementSupplierDueDiligenceEvidenceLinks { get; set; }
+    public DbSet<ProcurementFrameworkAgreement> ProcurementFrameworkAgreements { get; set; }
+    public DbSet<ProcurementFrameworkAgreementCategory> ProcurementFrameworkAgreementCategories { get; set; }
+    public DbSet<ProcurementFrameworkPriceListLine> ProcurementFrameworkPriceListLines { get; set; }
+    public DbSet<ProcurementFrameworkCallOffAuthority> ProcurementFrameworkCallOffAuthorities { get; set; }
+    public DbSet<ProcurementFrameworkAgreementDocument> ProcurementFrameworkAgreementDocuments { get; set; }
+    public DbSet<ProcurementFrameworkAgreementExtension> ProcurementFrameworkAgreementExtensions { get; set; }
+    public DbSet<ProcurementFrameworkCallOff> ProcurementFrameworkCallOffs { get; set; }
+    public DbSet<ProcurementFrameworkCallOffLine> ProcurementFrameworkCallOffLines { get; set; }
+    public DbSet<ProcurementFrameworkAgreementBalance> ProcurementFrameworkAgreementBalances { get; set; }
+    public DbSet<ProcurementFrameworkBalanceMovement> ProcurementFrameworkBalanceMovements { get; set; }
     public DbSet<ProcurementSupplierAvlRegister> ProcurementSupplierAvlRegisters { get; set; }
     public DbSet<ProcurementSupplierAvlEntry> ProcurementSupplierAvlEntries { get; set; }
     public DbSet<ProcurementSupplierAvlEntryStatusHistory> ProcurementSupplierAvlEntryStatusHistories { get; set; }
@@ -1082,6 +1092,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceReviewConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceCheckConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceEvidenceLinkConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkAgreementConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkAgreementCategoryConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkPriceListLineConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkCallOffAuthorityConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkAgreementDocumentConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkAgreementExtensionConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkCallOffConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkCallOffLineConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkAgreementBalanceConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkBalanceMovementConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierAvlRegisterConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierAvlEntryConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierAvlEntryStatusHistoryConfiguration());
@@ -9497,11 +9517,39 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // PurchaseOrder entity
         builder.Entity<PurchaseOrder>(entity =>
         {
+            entity.ToTable("PurchaseOrders", table =>
+            {
+                table.HasTrigger("TR_PurchaseOrders_FrameworkCallOffProtected");
+                table.HasTrigger("TR_PurchaseOrders_ApprovedSourceProtected");
+                table.HasCheckConstraint(
+                    "CK_PurchaseOrders_ApprovedSourceLineage",
+                    "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND [SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL))");
+            });
             entity.HasIndex(po => po.OrderNumber).IsUnique();
             entity.HasIndex(po => po.Status);
             entity.HasIndex(po => po.OrderDate);
             entity.HasIndex(po => po.RequestedById);
             entity.HasIndex(po => po.TenderAwardId);
+            entity.HasIndex(po => po.TenantId);
+            entity.HasIndex(po => new
+            {
+                po.TenantId,
+                po.ProcurementSourceType,
+                po.ProcurementSourceId
+            });
+            entity.HasIndex(po => new
+                {
+                    po.TenantId,
+                    po.ProcurementSourceType,
+                    po.ProcurementSourceId,
+                    po.BusinessPartnerId
+                },
+                "UX_PurchaseOrders_OneTimeApprovedSource")
+                .IsUnique()
+                .HasFilter("[ProcurementSourceType] IN (0, 1, 3)");
+            entity.HasIndex(po => po.SourcingReleaseId);
+            entity.HasIndex(po => po.SourcingCaseId);
+            entity.HasIndex(po => po.AwardReadinessDecisionId);
 
             entity.HasOne(po => po.RequestedBy)
                 .WithMany()
@@ -9512,11 +9560,28 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(po => po.TenderAwardId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne<ProcurementRequisitionSourcingRelease>()
+                .WithMany()
+                .HasForeignKey(po => po.SourcingReleaseId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne<ProcurementSourcingCase>()
+                .WithMany()
+                .HasForeignKey(po => po.SourcingCaseId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne<ProcurementAwardReadinessDecision>()
+                .WithMany()
+                .HasForeignKey(po => po.AwardReadinessDecisionId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         // PurchaseOrderItem entity
         builder.Entity<PurchaseOrderItem>(entity =>
         {
+            entity.ToTable("PurchaseOrderItems", table =>
+                table.HasTrigger("TR_PurchaseOrderItems_FrameworkCallOffProtected"));
             entity.HasIndex(poi => poi.PurchaseOrderId);
             entity.HasIndex(poi => poi.InventoryItemId);
 

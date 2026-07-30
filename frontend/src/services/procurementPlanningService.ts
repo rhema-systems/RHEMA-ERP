@@ -332,6 +332,8 @@ export interface ConvertPlanItemToTenderDto {
 
 export interface ConvertPlanItemToPurchaseOrderDto {
   planItemId: string;
+  sourceType: 'RfqAward' | 'TenderAward' | 'Contract' | 'ApprovedException';
+  sourceId: string;
   supplierId: string;
   requiredDate?: string;
   paymentTerms?: string;
