@@ -456,11 +456,7 @@ public partial class ProjectService : IProjectService
     private async Task<ProjectDetailDto> UpdateProjectCoreAsync(Guid id, UpdateProjectDto dto)
     {
         var project = await GetProjectForOperationAsync(id, ProjectAccessOperation.UpdateOverview);
-        if (string.Equals(project.Status, ProjectStatuses.Closed, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(project.Status, ProjectStatuses.Archived, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Closed or archived projects are read-only");
-        }
+        EnsureProjectIsMutable(project);
 
         var touchesFinancialFields =
             dto.ApprovedBudget != project.ApprovedBudget ||
@@ -530,6 +526,15 @@ public partial class ProjectService : IProjectService
         await PublishActivityAsync(project, "Updated");
 
         return (await GetProjectByIdAsync(project.Id))!;
+    }
+
+    private static void EnsureProjectIsMutable(Project project)
+    {
+        if (string.Equals(project.Status, ProjectStatuses.Closed, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(project.Status, ProjectStatuses.Archived, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Closed or archived projects are read-only");
+        }
     }
 
     public async Task SubmitProjectForApprovalAsync(Guid id, Guid userId)

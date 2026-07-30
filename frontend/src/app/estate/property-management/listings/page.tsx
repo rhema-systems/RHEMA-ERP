@@ -17,12 +17,7 @@ import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -59,10 +54,12 @@ export default function EstatePropertyListingsPage() {
   const requestedAssetId = searchParams.get('assetId');
   const requestedListingType = searchParams.get('listingType');
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
-  const [documents, setDocuments] = React.useState<EstateManagedAssetDocument[]>(
-    []
-  );
+  const [documents, setDocuments] = React.useState<
+    EstateManagedAssetDocument[]
+  >([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [requestedAssetUnavailable, setRequestedAssetUnavailable] =
+    React.useState(false);
   const [search, setSearch] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
@@ -77,32 +74,45 @@ export default function EstatePropertyListingsPage() {
   });
 
   const selected = React.useMemo(
-    () => assets.find((asset) => asset.id === selectedId) || assets[0],
+    () => assets.find((asset) => asset.id === selectedId),
     [assets, selectedId]
   );
 
-  const loadAssets = React.useCallback(async (query?: string) => {
-    setIsLoading(true);
-    try {
-      const data = await estateLandManagementService.getManagedAssets({
-        search: query,
-        take: 300,
-      });
-      setAssets(data);
-      setSelectedId((current) =>
-        requestedAssetId &&
-        data.some((asset) => asset.id === requestedAssetId)
-          ? requestedAssetId
-          : current && data.some((asset) => asset.id === current)
-          ? current
-          : (data[0]?.id ?? null)
-      );
-    } catch {
-      toast.error('Unable to load managed assets.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [requestedAssetId]);
+  const loadAssets = React.useCallback(
+    async (query?: string) => {
+      setIsLoading(true);
+      try {
+        const data = await estateLandManagementService.getManagedAssets({
+          search: query,
+          take: 300,
+        });
+        setAssets(data);
+        const requestedAsset = requestedAssetId
+          ? data.find((asset) => asset.id === requestedAssetId)
+          : undefined;
+        if (requestedAssetId) {
+          setRequestedAssetUnavailable(!requestedAsset);
+          setSelectedId(requestedAsset?.id ?? null);
+        } else {
+          setRequestedAssetUnavailable(false);
+          setSelectedId((current) =>
+            current && data.some((asset) => asset.id === current)
+              ? current
+              : (data[0]?.id ?? null)
+          );
+        }
+      } catch {
+        if (requestedAssetId) {
+          setSelectedId(null);
+          setRequestedAssetUnavailable(true);
+        }
+        toast.error('Unable to load managed assets.');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [requestedAssetId]
+  );
 
   const loadDocuments = React.useCallback(async (assetId: string) => {
     try {
@@ -122,8 +132,7 @@ export default function EstatePropertyListingsPage() {
     setForm({
       isPublishedToExternalPortal: selected.isPublishedToExternalPortal,
       externalListingType:
-        selected.externalListingType &&
-        selected.externalListingType !== 'None'
+        selected.externalListingType && selected.externalListingType !== 'None'
           ? selected.externalListingType
           : requestedListingType === 'Sale' ||
               requestedListingType === 'Rent' ||
@@ -283,7 +292,10 @@ export default function EstatePropertyListingsPage() {
                     <button
                       key={asset.id}
                       type="button"
-                      onClick={() => setSelectedId(asset.id)}
+                      onClick={() => {
+                        setRequestedAssetUnavailable(false);
+                        setSelectedId(asset.id);
+                      }}
                       className={`w-full rounded-md border p-3 text-left ${
                         active
                           ? 'border-primary bg-primary/5'
@@ -323,7 +335,12 @@ export default function EstatePropertyListingsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            {selected ? (
+            {requestedAssetUnavailable ? (
+              <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
+                The requested managed asset could not be loaded. Search for the
+                asset and select it explicitly before editing a listing.
+              </div>
+            ) : selected ? (
               <>
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="rounded-md border p-3">
@@ -355,9 +372,7 @@ export default function EstatePropertyListingsPage() {
                     <Label>Portal visibility</Label>
                     <Select
                       value={
-                        form.isPublishedToExternalPortal
-                          ? 'published'
-                          : 'draft'
+                        form.isPublishedToExternalPortal ? 'published' : 'draft'
                       }
                       onValueChange={(value) =>
                         setForm((current) => ({

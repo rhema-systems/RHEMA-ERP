@@ -393,6 +393,89 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
+    public void ProjectLandClaims_RejectExternallyPublishedAssets()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Projects",
+            "ProjectService.Construction.cs");
+        var resolver = Slice(
+            source,
+            "private async Task<ReadyProjectLandSelection> RequireReadyProjectLandDemarcationAsync",
+            "private async Task<(int ActiveCount, bool HasUnusedPortion, bool AllPortionsVerified)> GetProjectLandAvailabilityAsync");
+
+        resolver.Should().Contain("&& !asset.IsPublishedToExternalPortal");
+        resolver.Should().Contain(
+            "&& asset.Status == EstateManagedAssetStatus.LandBank");
+        resolver.Should().Contain("&& asset.IsReadyForProjectManagement");
+    }
+
+    [Fact]
+    public void ClosedProjects_CannotSynchronizeDevelopmentProfileLand()
+    {
+        var projectService = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Projects",
+            "ProjectServices.cs");
+        var constructionService = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Projects",
+            "ProjectService.Construction.cs");
+        var updateMethod = Slice(
+            projectService,
+            "private async Task<ProjectDetailDto> UpdateProjectCoreAsync",
+            "private static void EnsureProjectIsMutable");
+        var mutabilityGuard = Slice(
+            projectService,
+            "private static void EnsureProjectIsMutable",
+            "public async Task SubmitProjectForApprovalAsync");
+        var developmentProfileUpsert = Slice(
+            constructionService,
+            "private async Task<ProjectDevelopmentProfile> UpsertDevelopmentProfileEntityAsync",
+            "private async Task<string?> ResolveDevelopmentProfileLandReferenceAsync");
+
+        updateMethod.Should().Contain("EnsureProjectIsMutable(project);");
+        developmentProfileUpsert.Should().Contain(
+            "EnsureProjectIsMutable(project);");
+        mutabilityGuard.Should().Contain("ProjectStatuses.Closed");
+        mutabilityGuard.Should().Contain("ProjectStatuses.Archived");
+        mutabilityGuard.Should().Contain(
+            "Closed or archived projects are read-only");
+    }
+
+    [Fact]
+    public void ListingDeepLinks_DoNotFallbackToAnUnrelatedAsset()
+    {
+        var page = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "property-management",
+            "listings",
+            "page.tsx");
+        var selection = Slice(
+            page,
+            "const selected = React.useMemo",
+            "const loadDocuments = React.useCallback");
+
+        selection.Should().Contain(
+            "() => assets.find((asset) => asset.id === selectedId)");
+        selection.Should().NotContain("|| assets[0]");
+        selection.Should().Contain("if (requestedAssetId)");
+        selection.Should().Contain("setRequestedAssetUnavailable(!requestedAsset)");
+        selection.Should().Contain("setSelectedId(requestedAsset?.id ?? null)");
+        page.Should().Contain(
+            "The requested managed asset could not be loaded.");
+    }
+
+    [Fact]
     public void LegacyWholeParcelAssignments_CannotBeInvalidatedBySubdivision()
     {
         var source = ReadSource(
