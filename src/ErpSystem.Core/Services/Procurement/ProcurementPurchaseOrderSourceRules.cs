@@ -30,6 +30,14 @@ public static class ProcurementPurchaseOrderSourceRules
             or ProcurementPurchaseOrderSourceType.TenderAward
             or ProcurementPurchaseOrderSourceType.ApprovedException;
 
+    public static Guid ResolveAwardReadinessSourceId(
+        ProcurementPurchaseOrderSourceType sourceType,
+        Guid sourceId,
+        Guid? exceptionalTenderId = null) =>
+        sourceType == ProcurementPurchaseOrderSourceType.ApprovedException
+            ? exceptionalTenderId ?? Guid.Empty
+            : sourceId;
+
     public static bool RequiresRevalidation(string? targetStatus) =>
         targetStatus is not null &&
         (targetStatus.Equals("Submitted", StringComparison.OrdinalIgnoreCase) ||

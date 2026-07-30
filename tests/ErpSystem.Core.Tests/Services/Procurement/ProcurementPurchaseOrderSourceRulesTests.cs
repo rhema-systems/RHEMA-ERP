@@ -42,6 +42,24 @@ public sealed class ProcurementPurchaseOrderSourceRulesTests
             .Should().Be(expected);
     }
 
+    [Fact]
+    public void ApprovedExceptionReadinessUsesItsTenderSourceId()
+    {
+        var controlId = Guid.NewGuid();
+        var tenderId = Guid.NewGuid();
+
+        ProcurementPurchaseOrderSourceRules.ResolveAwardReadinessSourceId(
+                ProcurementPurchaseOrderSourceType.ApprovedException,
+                controlId,
+                tenderId)
+            .Should().Be(tenderId);
+        ProcurementPurchaseOrderSourceRules.ResolveAwardReadinessSourceId(
+                ProcurementPurchaseOrderSourceType.RfqAward,
+                controlId,
+                tenderId)
+            .Should().Be(controlId);
+    }
+
     [Theory]
     [InlineData("Submitted")]
     [InlineData("Pending Approval")]

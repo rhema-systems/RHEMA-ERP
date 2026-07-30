@@ -20,6 +20,26 @@ public sealed class ProcurementFrameworkCallOffRulesTests
         normalized.LineTotal.Should().Be(1234.60m);
     }
 
+    [Fact]
+    public void RevisionCannotReserveMoreThanAgreementFamilyBalance()
+    {
+        var rejected =
+            ProcurementFrameworkCallOffCommercialRules.EvaluateFamilyCapacity(
+                1000m,
+                600m,
+                500m);
+        var allowed =
+            ProcurementFrameworkCallOffCommercialRules.EvaluateFamilyCapacity(
+                1000m,
+                600m,
+                400m);
+
+        rejected.CommittedAmount.Should().Be(600m);
+        rejected.AvailableAmount.Should().Be(400m);
+        rejected.CanReserve.Should().BeFalse();
+        allowed.CanReserve.Should().BeTrue();
+    }
+
     [Theory]
     [InlineData(ProcurementFrameworkCallOffStatus.Draft, "submit")]
     [InlineData(ProcurementFrameworkCallOffStatus.Draft, "cancel")]

@@ -983,7 +983,10 @@ public sealed class ProcurementPurchaseOrderSourceService :
             control.SourcingCaseId, cancellationToken);
         var readiness = await RequireCurrentReadinessAsync(
             ProcurementAwardReadinessSourceType.ExceptionalSourcing,
-            control.Id,
+            ProcurementPurchaseOrderSourceRules.ResolveAwardReadinessSourceId(
+                ProcurementPurchaseOrderSourceType.ApprovedException,
+                control.Id,
+                control.TenderId),
             businessPartnerId,
             cancellationToken);
         var approvedLines = await ResolveTenderBidLinesAsync(

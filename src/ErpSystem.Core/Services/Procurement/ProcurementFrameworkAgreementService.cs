@@ -301,6 +301,7 @@ public sealed class ProcurementFrameworkAgreementService :
         var source = await ResolveSourceAsync(
             request.SourceType, request.SourceId, request.BusinessPartnerId, cancellationToken);
         EnsureSourceCurrency(source, request.CurrencyCode);
+        EnsureSourceCeiling(source, request.CeilingAmount);
         var workflow = await ValidateWorkflowAsync(request.WorkflowDefinitionId, cancellationToken);
         await ValidateCurrencyAsync(request.CurrencyCode, cancellationToken);
         var categoryRows = await ResolveCategoriesAsync(request.CategoryIds, cancellationToken);
@@ -393,6 +394,7 @@ public sealed class ProcurementFrameworkAgreementService :
             agreement.SourceType, agreement.SourceId, agreement.BusinessPartnerId,
             cancellationToken);
         EnsureSourceCurrency(source, request.CurrencyCode);
+        EnsureSourceCeiling(source, request.CeilingAmount);
         var workflow = await ValidateWorkflowAsync(request.WorkflowDefinitionId, cancellationToken);
         await ValidateCurrencyAsync(request.CurrencyCode, cancellationToken);
         var categoryRows = await ResolveCategoriesAsync(request.CategoryIds, cancellationToken);
@@ -1391,6 +1393,20 @@ public sealed class ProcurementFrameworkAgreementService :
             throw Conflict(
                 "FRAMEWORK_AGREEMENT_CURRENCY_SOURCE_MISMATCH",
                 $"The framework currency must match the approved award currency {source.CurrencyCode}.");
+        }
+    }
+
+    private static void EnsureSourceCeiling(
+        SourceResolution source,
+        decimal ceilingAmount)
+    {
+        var normalizedCeiling = RoundMoney(ceilingAmount);
+        var authorizedAmount = RoundMoney(source.AwardAmount);
+        if (normalizedCeiling > authorizedAmount)
+        {
+            throw Conflict(
+                "FRAMEWORK_AGREEMENT_CEILING_EXCEEDS_AWARD",
+                $"The framework ceiling {normalizedCeiling:0.00} {source.CurrencyCode} exceeds the approved award amount {authorizedAmount:0.00} {source.CurrencyCode}.");
         }
     }
 

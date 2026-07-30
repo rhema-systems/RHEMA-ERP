@@ -112,6 +112,43 @@ public sealed class ProcurementFrameworkAgreementServiceTests
     }
 
     [Fact]
+    public async Task CreateAndUpdateRejectCeilingAboveApprovedAward()
+    {
+        await using var fixture = new Fixture();
+        var createRequest = fixture.CreateRequest();
+        createRequest.CeilingAmount = 1000.01m;
+
+        var createAction = () => fixture.Service.CreateAsync(
+            createRequest,
+            "framework-ceiling-above-award-create");
+
+        await createAction.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code ==
+                "FRAMEWORK_AGREEMENT_CEILING_EXCEEDS_AWARD");
+
+        var created = await fixture.Service.CreateAsync(
+            fixture.CreateRequest(),
+            "framework-ceiling-at-award-create");
+        var updateRequest = fixture.UpdateRequest(created.RowVersion);
+        updateRequest.CeilingAmount = 1000.01m;
+
+        var updateAction = () => fixture.Service.UpdateAsync(
+            created.Id,
+            updateRequest,
+            "framework-ceiling-above-award-update");
+
+        await updateAction.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code ==
+                "FRAMEWORK_AGREEMENT_CEILING_EXCEEDS_AWARD");
+        (await fixture.Service.GetAsync(created.Id))
+            .CeilingAmount.Should().Be(1000m);
+    }
+
+    [Fact]
     public async Task NewerBlockedReadinessRevokesOlderReadyDecision()
     {
         await using var fixture = new Fixture();

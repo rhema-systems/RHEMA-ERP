@@ -200,7 +200,10 @@ public sealed class ProcurementFrameworkCallOffService :
         {
             var authority = await ResolveAuthorityAsync(
                 agreement, null, now, false, cancellationToken);
-            var balance = agreement.Balance;
+            var familyCapacity = await EvaluateAgreementFamilyCapacityAsync(
+                agreement,
+                0m,
+                cancellationToken);
             var end = ProcurementFrameworkAgreementRules.EffectiveEnd(agreement);
             agreementOptions.Add(new ProcurementFrameworkCallOffAgreementOptionDto
             {
@@ -213,8 +216,8 @@ public sealed class ProcurementFrameworkCallOffService :
                 SupplierName = agreement.BusinessPartner.PartnerName,
                 CurrencyCode = agreement.CurrencyCode,
                 CeilingAmount = agreement.CeilingAmount,
-                CommittedAmount = balance?.CommittedAmount ?? 0m,
-                AvailableAmount = balance?.AvailableAmount ?? agreement.CeilingAmount,
+                CommittedAmount = familyCapacity.CommittedAmount,
+                AvailableAmount = familyCapacity.AvailableAmount,
                 EffectiveFromUtc = agreement.EffectiveFromUtc,
                 EffectiveEndUtc = end,
                 DaysToExpiry = DaysToExpiry(end, now),
@@ -357,10 +360,14 @@ public sealed class ProcurementFrameworkCallOffService :
                     "The current actor has no effective call-off authority for this agreement and amount.");
             var eligibility = await EnforceSupplierEligibilityAsync(
                 agreement, correlation, cancellationToken);
-            var balance = await EnsureBalanceAsync(agreement, now, cancellationToken);
-            if (total > balance.AvailableAmount)
+            await EnsureBalanceAsync(agreement, now, cancellationToken);
+            var familyCapacity = await EvaluateAgreementFamilyCapacityAsync(
+                agreement,
+                total,
+                cancellationToken);
+            if (!familyCapacity.CanReserve)
                 throw Conflict("FRAMEWORK_CALL_OFF_BALANCE_INSUFFICIENT",
-                    $"The call-off total {total:0.00} exceeds the available agreement balance {balance.AvailableAmount:0.00} {agreement.CurrencyCode}.");
+                    $"The call-off total {total:0.00} exceeds the available agreement-family balance {familyCapacity.AvailableAmount:0.00} {agreement.CurrencyCode}.");
 
             var callOffId = Guid.NewGuid();
             var number = await _documentNumbering.GenerateConfiguredAsync(
@@ -404,8 +411,8 @@ public sealed class ProcurementFrameworkCallOffService :
                 ContractStartDate = agreement.EffectiveFromUtc,
                 ContractEndDate = ProcurementFrameworkAgreementRules.EffectiveEnd(agreement),
                 ContractValue = agreement.CeilingAmount,
-                ContractUsedValue = balance.CommittedAmount,
-                ContractRemainingValue = balance.AvailableAmount,
+                ContractUsedValue = familyCapacity.CommittedAmount,
+                ContractRemainingValue = familyCapacity.AvailableAmount,
                 SourceRequisitionId = requisition.Id,
                 SourceRequisitionNumber = requisition.RequisitionNumber,
                 Currency = agreement.CurrencyCode,
@@ -1330,6 +1337,56 @@ public sealed class ProcurementFrameworkCallOffService :
         return balance;
     }
 
+    private async Task<ProcurementFrameworkCallOffCommercialRules.FamilyCapacity>
+        EvaluateAgreementFamilyCapacityAsync(
+            ProcurementFrameworkAgreement agreement,
+            decimal proposedAmount,
+            CancellationToken cancellationToken)
+    {
+        var familyAgreementIds = await _unitOfWork
+            .Repository<ProcurementFrameworkAgreement>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.AgreementKey == agreement.AgreementKey &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (familyAgreementIds.Count == 0)
+        {
+            throw Conflict(
+                "FRAMEWORK_CALL_OFF_BALANCE_LINEAGE_INVALID",
+                "The framework agreement family is unavailable.");
+        }
+
+        var committedAmount = await BalanceMovements.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                familyAgreementIds.Contains(item.AgreementId) &&
+                !item.IsDeleted &&
+                (item.MovementType ==
+                    ProcurementFrameworkBalanceMovementType.Commitment ||
+                 item.MovementType ==
+                    ProcurementFrameworkBalanceMovementType.Release))
+            .SumAsync(item =>
+                    item.MovementType ==
+                    ProcurementFrameworkBalanceMovementType.Commitment
+                        ? item.Amount
+                        : -item.Amount,
+                cancellationToken);
+        if (committedAmount < 0m)
+        {
+            throw Conflict(
+                "FRAMEWORK_CALL_OFF_BALANCE_LINEAGE_INVALID",
+                "The framework agreement-family commitment ledger is negative.");
+        }
+
+        return ProcurementFrameworkCallOffCommercialRules
+            .EvaluateFamilyCapacity(
+                agreement.CeilingAmount,
+                committedAmount,
+                proposedAmount);
+    }
+
     private async Task CommitBalanceAsync(
         ProcurementFrameworkCallOff callOff,
         ProcurementFrameworkAgreement agreement,
@@ -1352,9 +1409,13 @@ public sealed class ProcurementFrameworkCallOffService :
         }
         var balance = await EnsureBalanceAsync(agreement, now, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        if (callOff.TotalAmount > balance.AvailableAmount)
+        var familyCapacity = await EvaluateAgreementFamilyCapacityAsync(
+            agreement,
+            callOff.TotalAmount,
+            cancellationToken);
+        if (!familyCapacity.CanReserve)
             throw Conflict("FRAMEWORK_CALL_OFF_BALANCE_INSUFFICIENT",
-                $"Final approval would exceed the available agreement balance of {balance.AvailableAmount:0.00} {balance.CurrencyCode}.");
+                $"Final approval would exceed the available agreement-family balance of {familyCapacity.AvailableAmount:0.00} {balance.CurrencyCode}.");
         var before = balance.AvailableAmount;
         var committedAmount = RoundMoney(
             balance.CommittedAmount + callOff.TotalAmount);
@@ -1723,6 +1784,10 @@ public sealed class ProcurementFrameworkCallOffService :
         CancellationToken cancellationToken)
     {
         var list = MapList(item, DateTime.UtcNow);
+        var familyCapacity = await EvaluateAgreementFamilyCapacityAsync(
+            item.Agreement,
+            0m,
+            cancellationToken);
         var ids = item.Lines.Select(line => line.PurchaseRequisitionItemId).ToArray();
         var allocated = ids.Length == 0
             ? new Dictionary<Guid, decimal>()
@@ -1753,9 +1818,9 @@ public sealed class ProcurementFrameworkCallOffService :
             CurrencyCode = list.CurrencyCode,
             TotalAmount = list.TotalAmount,
             AgreementCeilingAmount = list.AgreementCeilingAmount,
-            AgreementCommittedAmount = list.AgreementCommittedAmount,
+            AgreementCommittedAmount = familyCapacity.CommittedAmount,
             AgreementIssuedAmount = list.AgreementIssuedAmount,
-            AgreementAvailableAmount = list.AgreementAvailableAmount,
+            AgreementAvailableAmount = familyCapacity.AvailableAmount,
             RequiredDateUtc = list.RequiredDateUtc,
             AgreementEffectiveEndUtc = list.AgreementEffectiveEndUtc,
             AgreementIsEffective = list.AgreementIsEffective,
