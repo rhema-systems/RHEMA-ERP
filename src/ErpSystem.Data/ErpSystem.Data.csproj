@@ -63,6 +63,8 @@
     <Compile Include="Migrations\20260727101510_AddProcurementSupplierMasterChangeRollout.Designer.cs" />
     <Compile Include="Migrations\20260727113854_AddProcurementSupplierApplicantAccess.Designer.cs" />
     <Compile Include="Migrations\20260729084856_TDC0401FrameworkAgreements.Designer.cs" />
+    <Compile Include="Migrations\20260730032601_TDC0406PurchaseOrderAmendments.Designer.cs" />
+    <Compile Include="Migrations\20260730132714_TDC0407ContractActivationGate.Designer.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(Tdc0402FocusedEfBuild)' == 'true'">

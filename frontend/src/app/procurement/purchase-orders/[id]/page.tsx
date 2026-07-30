@@ -46,8 +46,13 @@ import {
   purchasingService,
   PurchaseOrderDetailDto,
   PurchaseOrderLandedCostPlanDto,
+  ProcurementPurchaseOrderComplianceDto,
+  ProcurementPurchaseOrderSodReadinessDto,
   ApprovalDto
 } from '@/services/purchasingService';
+import { PurchaseOrderComplianceGate } from '@/components/procurement/PurchaseOrderComplianceGate';
+import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
+import { PurchaseOrderAmendmentWorkspace } from '@/components/procurement/PurchaseOrderAmendmentWorkspace';
 import { format } from 'date-fns';
 import Link from 'next/link';
 
@@ -81,6 +86,10 @@ export default function PurchaseOrderDetailPage() {
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   
   const [order, setOrder] = useState<PurchaseOrderDetailDto | null>(null);
+  const [complianceReadiness, setComplianceReadiness] =
+    useState<ProcurementPurchaseOrderComplianceDto | null>(null);
+  const [sodReadiness, setSodReadiness] =
+    useState<ProcurementPurchaseOrderSodReadinessDto | null>(null);
   const [landedCostPlan, setLandedCostPlan] = useState<PurchaseOrderLandedCostPlanDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -123,6 +132,38 @@ export default function PurchaseOrderDetailPage() {
       </Badge>
     );
   };
+
+  const complianceIsCurrent =
+    complianceReadiness?.purchaseOrderId === id;
+  const complianceForwardBlocked =
+    (order?.status === 'Draft' ||
+      order?.status === 'Pending Approval' ||
+      order?.status === 'Submitted') &&
+    (!complianceIsCurrent || complianceReadiness?.isCompliant !== true);
+  const complianceBlockedReason = complianceIsCurrent
+    ? complianceReadiness?.blockedReasons[0] ||
+      'All purchase-order compliance checks must pass before progressing.'
+    : 'Wait for the purchase-order compliance check to finish.';
+  const sodIsCurrent = sodReadiness?.purchaseOrderId === id;
+  const sodApprovalBlocked =
+    (order?.status === 'Pending Approval' ||
+      order?.status === 'Submitted') &&
+    (!sodIsCurrent || sodReadiness?.canApprove !== true);
+  const sodApprovalBlockedReason = sodIsCurrent
+    ? sodReadiness?.checks.find((check) => check.key === 'approval')?.message ||
+      'An independent actor must make the positive approval decision.'
+    : 'Wait for the purchase-order role-separation check to finish.';
+  const forwardActionsBlocked =
+    complianceForwardBlocked || sodApprovalBlocked;
+  const forwardActionsBlockedReason = complianceForwardBlocked
+    ? complianceBlockedReason
+    : sodApprovalBlockedReason;
+  const sodReceiptAllowed =
+    sodIsCurrent && sodReadiness?.canReceive === true;
+  const sodReceiptBlockedReason = sodIsCurrent
+    ? sodReadiness?.checks.find((check) => check.key === 'receipt')?.message ||
+      'The PO creator cannot confirm its goods receipt.'
+    : 'Wait for the purchase-order role-separation check to finish.';
 
   const workflow = useWorkflowRecord({
     entityType: 'PurchaseOrder',
@@ -223,15 +264,25 @@ export default function PurchaseOrderDetailPage() {
             </Link>
           )}
           
-          <WorkflowApprovalActions {...workflow.actionProps} />
+          <WorkflowApprovalActions
+            {...workflow.actionProps}
+            forwardActionsDisabled={forwardActionsBlocked}
+            forwardActionsDisabledReason={forwardActionsBlockedReason}
+          />
           
-          {canReceive && (
+          {canReceive && sodReceiptAllowed && (
             <Link href={`/procurement/purchase-orders/${id}/receive`}>
               <Button>
                 <Package className="h-4 w-4 mr-2" />
                 Receive Goods
               </Button>
             </Link>
+          )}
+          {canReceive && !sodReceiptAllowed && (
+            <Button disabled title={sodReceiptBlockedReason}>
+              <Package className="h-4 w-4 mr-2" />
+              Receive Goods
+            </Button>
           )}
           
           <Button variant="outline">
@@ -273,6 +324,7 @@ export default function PurchaseOrderDetailPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="items">Items ({order.itemCount})</TabsTrigger>
           <TabsTrigger value="receipts">Receipts ({order.receipts?.length || 0})</TabsTrigger>
+          <TabsTrigger value="amendments">Amendments</TabsTrigger>
           <WorkflowTabTrigger value="approval" />
         </TabsList>
 
@@ -329,6 +381,17 @@ export default function PurchaseOrderDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          <PurchaseOrderComplianceGate
+            purchaseOrderId={order.id}
+            status={order.status}
+            onReadinessChange={setComplianceReadiness}
+          />
+          <PurchaseOrderSodControl
+            purchaseOrderId={order.id}
+            status={order.status}
+            onReadinessChange={setSodReadiness}
+          />
 
           {/* Order Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -784,13 +847,19 @@ export default function PurchaseOrderDetailPage() {
                 <div className="text-center py-12 border-2 border-dashed rounded-lg">
                   <TruckIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                   <p className="text-muted-foreground mb-4">No receipts recorded yet</p>
-                  {canReceive && (
+                  {canReceive && sodReceiptAllowed && (
                     <Link href={`/procurement/purchase-orders/${id}/receive`}>
                       <Button>
                         <Package className="h-4 w-4 mr-2" />
                         Receive Goods
                       </Button>
                     </Link>
+                  )}
+                  {canReceive && !sodReceiptAllowed && (
+                    <Button disabled title={sodReceiptBlockedReason}>
+                      <Package className="h-4 w-4 mr-2" />
+                      Receive Goods
+                    </Button>
                   )}
                 </div>
               ) : (
@@ -842,6 +911,13 @@ export default function PurchaseOrderDetailPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="amendments" className="space-y-6">
+          <PurchaseOrderAmendmentWorkspace
+            order={order}
+            onApplied={fetchOrder}
+          />
         </TabsContent>
 
         <WorkflowTabContent

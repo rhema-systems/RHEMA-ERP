@@ -404,6 +404,87 @@ public sealed class ProcurementGhanepsExchangeServiceTests
         prepared.History.Should().ContainSingle(item => item.Kind == "Exchange");
     }
 
+    [Fact]
+    public async Task AwardComplianceFailsClosedUntilEveryConfiguredTerminalEvidenceExists()
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAwardLineageAsync(blockLatest: false);
+        var prepared = await fixture.PrepareAsync(
+            "compliance-incomplete",
+            "AWARD",
+            ProcurementGhanepsEventFamily.AwardNotification);
+
+        var result = await fixture.Service.GetAwardComplianceAsync(
+            ProcurementGhanepsSourceType.Tender,
+            fixture.Tender.Id);
+
+        result.IsCompliant.Should().BeFalse();
+        result.Code.Should().Be("PO_GHANEPS_EVIDENCE_INCOMPLETE");
+        result.Mappings.Should().ContainSingle(item =>
+            item.ExchangeEventId == prepared.Id &&
+            !item.SuccessfulTransfer &&
+            !item.AcceptedAcknowledgement &&
+            !item.CompletedReconciliation);
+    }
+
+    [Fact]
+    public async Task AwardCompliancePassesOnlyForCurrentSuccessfulAcknowledgedReconciledEvidence()
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAwardLineageAsync(blockLatest: false);
+        var prepared = await fixture.PrepareAsync(
+            "compliance-complete",
+            "AWARD",
+            ProcurementGhanepsEventFamily.AwardNotification);
+        var sent = await fixture.Service.RecordAttemptAsync(
+            prepared.Id,
+            new RecordProcurementGhanepsAttemptRequest
+            {
+                PayloadId = prepared.Payloads[0].Id,
+                Outcome = ProcurementGhanepsAttemptOutcome.Succeeded,
+                TransportReference = "GH-COMPLIANCE-001",
+                EvidenceReference = "evidence://compliance/transfer",
+                IdempotencyKey = "compliance-transfer",
+                ExpectedRowVersion = prepared.RowVersion
+            },
+            "compliance-transfer");
+        fixture.SwitchActor(Guid.NewGuid());
+        var accepted = await fixture.Service.RecordAcknowledgementAsync(
+            prepared.Id,
+            fixture.Acknowledgement(
+                ProcurementGhanepsAcknowledgementOutcome.Accepted,
+                "GH-COMPLIANCE-ACK",
+                "compliance-ack",
+                sent.RowVersion),
+            "compliance-ack");
+        fixture.SwitchActor(Guid.NewGuid());
+        var payload = accepted.Payloads.Single(item =>
+            item.Id == accepted.Acknowledgements.Single().PayloadId);
+        _ = await fixture.Service.ReconcileAsync(
+            prepared.Id,
+            new ReconcileProcurementGhanepsExchangeRequest
+            {
+                ActualReference = fixture.Tender.TenderNumber,
+                ActualChecksumSha256 = payload.PayloadChecksumSha256,
+                EvidenceReference = "evidence://compliance/reconciliation",
+                IdempotencyKey = "compliance-reconciliation",
+                ExpectedRowVersion = accepted.RowVersion
+            },
+            "compliance-reconciliation");
+
+        var result = await fixture.Service.GetAwardComplianceAsync(
+            ProcurementGhanepsSourceType.Tender,
+            fixture.Tender.Id);
+
+        result.IsCompliant.Should().BeTrue();
+        result.Code.Should().Be("PO_GHANEPS_EVIDENCE_CURRENT");
+        result.Mappings.Should().ContainSingle(item =>
+            item.SuccessfulTransfer &&
+            item.AcceptedAcknowledgement &&
+            item.CompletedReconciliation &&
+            item.EvidenceAvailable);
+    }
+
     [Theory]
     [InlineData("rfq", ProcurementGhanepsSourceType.RequestForQuotation,
         "RequestForQuotation")]

@@ -69,6 +69,11 @@ const menuItems: MenuItem[] = [
     icon: FileText,
   },
   {
+    title: 'PO Amendments',
+    href: '/external-portal/purchase-order-amendments',
+    icon: FileText,
+  },
+  {
     title: 'My Tasks',
     href: '/external-portal/task-list',
     icon: ListTodo,

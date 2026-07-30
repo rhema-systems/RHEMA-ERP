@@ -49,6 +49,7 @@ public sealed class ProcurementPurchaseOrderSourceResolution
     public string SourceReference { get; init; } = string.Empty;
     public Guid PurchaseRequisitionId { get; init; }
     public string PurchaseRequisitionNumber { get; init; } = string.Empty;
+    public Guid PurchaseRequisitionRequestedById { get; init; }
     public Guid SourcingCaseId { get; init; }
     public Guid SourcingReleaseId { get; init; }
     public Guid AwardReadinessDecisionId { get; init; }

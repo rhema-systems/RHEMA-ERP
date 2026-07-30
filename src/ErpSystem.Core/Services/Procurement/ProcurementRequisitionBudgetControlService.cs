@@ -299,15 +299,41 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         var result = BaseReadiness(requisition);
         if (commitment?.Status == ProcurementBudgetCommitmentStatus.Reserved)
         {
-            if (commitment.ProcurementBudgetId != requisition.BudgetId || commitment.ReservedAmount != requisition.TotalAmount)
+            var latestAmendmentAdjustment = await _unitOfWork
+                .Repository<ProcurementPurchaseOrderCommitmentAdjustment>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseRequisitionId == requisition.Id &&
+                    !item.IsDeleted &&
+                    item.Amendment.Status !=
+                    ProcurementPurchaseOrderAmendmentStatus.Rejected &&
+                    item.Amendment.Status !=
+                    ProcurementPurchaseOrderAmendmentStatus.Cancelled &&
+                    !item.Amendment.IsDeleted)
+                .AsNoTracking()
+                .OrderByDescending(item => item.AppliedAtUtc)
+                .ThenByDescending(item => item.Sequence)
+                .FirstOrDefaultAsync(cancellationToken);
+            var expectedReservedAmount =
+                latestAmendmentAdjustment?.CommitmentAmountAfter ??
+                requisition.TotalAmount;
+            if (commitment.ProcurementBudgetId != requisition.BudgetId ||
+                commitment.ReservedAmount != expectedReservedAmount)
                 return Block(result, "PR_BUDGET_COMMITMENT_MISMATCH",
-                    "The existing reservation does not match the Draft budget or requested amount.",
-                    "Release the existing commitment before changing the linked budget or requested amount.");
+                    "The active reservation does not match the approved requisition or latest applied PO-amendment commitment adjustment.",
+                    "Reconcile the budget commitment and immutable amendment-adjustment ledger before progressing procurement.");
             result.IsCompliant = true;
             result.CanReserve = true;
-            result.DecisionCode = "PR_BUDGET_COMMITMENT_ACTIVE";
-            result.Message = "An idempotent active budget commitment already protects this requisition.";
-            result.Basis = "ExistingCommitment";
+            result.DecisionCode = latestAmendmentAdjustment is null
+                ? "PR_BUDGET_COMMITMENT_ACTIVE"
+                : "PR_BUDGET_COMMITMENT_AMENDMENT_ADJUSTED";
+            result.Message = latestAmendmentAdjustment is null
+                ? "An idempotent active budget commitment already protects this requisition."
+                : $"The active budget commitment is reconciled to PO amendment {latestAmendmentAdjustment.Amendment.AmendmentNumber}.";
+            result.Basis = latestAmendmentAdjustment is null
+                ? "ExistingCommitment"
+                : "ApprovedPurchaseOrderAmendment";
+            result.RequestedAmount = commitment.ReservedAmount;
             return PopulateCommitment(result, commitment, budget);
         }
 

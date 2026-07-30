@@ -462,6 +462,12 @@ const navigationItems: NavItem[] = [
           { title: 'Awards', href: '/procurement/awards', icon: Award },
           { title: 'Contracts', href: '/procurement/contracts', icon: FileText },
           {
+            title: 'Contract Operations',
+            href: '/procurement/contract-operations',
+            icon: Activity,
+            permissions: ['procurement.reports.read'],
+          },
+          {
             title: 'Framework Agreements',
             href: '/procurement/framework-agreements',
             icon: FileCheck,

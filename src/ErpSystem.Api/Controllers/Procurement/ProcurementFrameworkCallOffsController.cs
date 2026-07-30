@@ -129,6 +129,22 @@ public sealed class ProcurementFrameworkCallOffsController : ControllerBase
                 403, "FRAMEWORK_CALL_OFF_ACCESS_FORBIDDEN",
                 "Framework call-off access forbidden", exception.Message));
         }
+        catch (ProcurementPurchaseOrderSodAuthorizationException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, Problem(
+                403, "PO_SOD_FORBIDDEN",
+                "Purchase-order SOD access forbidden", exception.Message));
+        }
+        catch (ProcurementPurchaseOrderSodBlockedException exception)
+        {
+            var problem = Problem(
+                403,
+                exception.Code,
+                "Purchase-order SOD blocked",
+                exception.Message);
+            problem.Extensions["readiness"] = exception.Readiness;
+            return StatusCode(StatusCodes.Status403Forbidden, problem);
+        }
         catch (ProcurementFrameworkCallOffConflictException exception)
         {
             return Conflict(Problem(

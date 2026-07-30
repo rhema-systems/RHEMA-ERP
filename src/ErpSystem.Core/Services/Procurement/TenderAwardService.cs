@@ -28,6 +28,7 @@ public class TenderAwardService : ITenderAwardService
     private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
     private readonly IProcurementAwardReadinessService _awardReadiness;
     private readonly IProcurementPurchaseOrderSourceService _purchaseOrderSources;
+    private readonly IProcurementPurchaseOrderSodService _purchaseOrderSod;
 
     public TenderAwardService(
         ITenderAwardRepository awardRepository,
@@ -46,6 +47,7 @@ public class TenderAwardService : ITenderAwardService
         IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
         IProcurementAwardReadinessService awardReadiness,
         IProcurementPurchaseOrderSourceService purchaseOrderSources,
+        IProcurementPurchaseOrderSodService purchaseOrderSod,
         ILogger<TenderAwardService> logger)
     {
         _awardRepository = awardRepository;
@@ -64,6 +66,7 @@ public class TenderAwardService : ITenderAwardService
         _exceptionalSourcingControlService = exceptionalSourcingControlService;
         _awardReadiness = awardReadiness;
         _purchaseOrderSources = purchaseOrderSources;
+        _purchaseOrderSod = purchaseOrderSod;
         _logger = logger;
     }
 
@@ -549,10 +552,9 @@ public class TenderAwardService : ITenderAwardService
                 BusinessPartnerId = award.BusinessPartnerId,
                 OrderDate = DateTime.UtcNow,
                 RequiredDate = dto.RequiredDate,
-                Status = dto.AutoApprove ? "Approved" : "Draft",
-                RequestedById = _currentUserProvider.UserId,
-                ApprovedById = dto.AutoApprove ? _currentUserProvider.UserId : null,
-                ApprovedAt = dto.AutoApprove ? DateTime.UtcNow : null,
+                Status = "Draft",
+                RequestedById =
+                    approvedSource.PurchaseRequisitionRequestedById,
                 
                 // Financial details from award (uses negotiated amount if available)
                 SubTotal = award.AwardedAmount,
@@ -586,6 +588,13 @@ public class TenderAwardService : ITenderAwardService
                 CreatedById = _currentUserProvider.UserId
             };
             _purchaseOrderSources.Apply(purchaseOrder, approvedSource);
+            if (dto.AutoApprove)
+            {
+                await _purchaseOrderSod.RejectApprovalBypassAsync(
+                    purchaseOrder,
+                    "AwardAutoApprove",
+                    sourceCorrelationId);
+            }
 
             ownsSourceClaimTransaction = !_unitOfWork.HasActiveTransaction;
             if (ownsSourceClaimTransaction)

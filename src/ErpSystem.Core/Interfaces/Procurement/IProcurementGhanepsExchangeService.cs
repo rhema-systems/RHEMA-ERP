@@ -15,6 +15,11 @@ public interface IProcurementGhanepsExchangeService
         Guid sourceId,
         CancellationToken cancellationToken = default);
 
+    Task<ProcurementGhanepsComplianceDto> GetAwardComplianceAsync(
+        ProcurementGhanepsSourceType sourceType,
+        Guid sourceId,
+        CancellationToken cancellationToken = default);
+
     Task<ProcurementGhanepsExchangeEventDto> GetAsync(
         Guid exchangeEventId,
         CancellationToken cancellationToken = default);

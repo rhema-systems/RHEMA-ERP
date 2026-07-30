@@ -915,6 +915,15 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementFrameworkAgreementService, ErpSystem.Core.Services.Procurement.ProcurementFrameworkAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementFrameworkCallOffService, ErpSystem.Core.Services.Procurement.ProcurementFrameworkCallOffService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderSourceService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderSourceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderComplianceService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderComplianceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderSodService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderSodService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderAmendmentStore, ErpSystem.Data.Repositories.Procurement.ProcurementPurchaseOrderAmendmentStore>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderAmendmentService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderAmendmentService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementContractActivationStore, ErpSystem.Data.Repositories.Procurement.ProcurementContractActivationStore>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementContractActivationService, ErpSystem.Core.Services.Procurement.ProcurementContractActivationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementContractOperationsService, ErpSystem.Core.Services.Procurement.ProcurementContractOperationsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementWorksCloseoutService, ErpSystem.Core.Services.Procurement.ProcurementWorksCloseoutService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementWorksCloseoutStore, ErpSystem.Data.Repositories.Procurement.ProcurementWorksCloseoutStore>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierAvlService, ErpSystem.Core.Services.Procurement.ProcurementSupplierAvlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierRiskService, ErpSystem.Core.Services.Procurement.ProcurementSupplierRiskService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSupplierPerformanceScorecardService, ErpSystem.Core.Services.Procurement.ProcurementSupplierPerformanceScorecardService>();
