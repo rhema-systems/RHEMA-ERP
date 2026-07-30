@@ -54,12 +54,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         }
 
         var assets = await assetsQuery
+            .AsNoTracking()
             .OrderBy(item => item.AssetCode)
             .ThenBy(item => item.Name)
             .Take(take)
             .ToListAsync();
 
-        await RepairLandAcquisitionAssetsAsync(assets);
+        await EnrichLandAcquisitionAssetsForReadAsync(assets);
 
         var mappedAssets = assets.Select(MapToDto).ToList();
         if (assets.Count == 0)
@@ -375,63 +376,51 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         }).ToList();
     }
 
-    public async Task<EstateLandDemarcationDto> CreateLandDemarcationAsync(
+    public Task<EstateLandDemarcationDto> CreateLandDemarcationAsync(
+        Guid assetId,
+        SaveEstateLandDemarcationDto request)
+        => ExecuteSerializableMutationAsync(
+            () => CreateLandDemarcationCoreAsync(assetId, request));
+
+    private async Task<EstateLandDemarcationDto> CreateLandDemarcationCoreAsync(
         Guid assetId,
         SaveEstateLandDemarcationDto request)
     {
-        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        var asset = await RequireLandAssetAsync(assetId);
+        EnsureDemarcationsCanBeChanged(asset);
+        var measurement = ValidateDemarcationRequest(asset, request);
+        var repository = _unitOfWork.Repository<EstateLandDemarcation>();
+        var existingBoundaries = await repository
+            .GetQueryable(item => item.EstateManagedAssetId == assetId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted)
+            .Select(item => item.BoundaryCoordinates)
+            .ToListAsync();
+        EnsureDoesNotOverlap(request.BoundaryCoordinates, existingBoundaries);
+        var lastDemarcationNumber = await repository
+            .GetQueryable(item => item.EstateManagedAssetId == assetId
+                && item.TenantId == _currentUserProvider.TenantId)
+            .Select(item => (int?)item.DemarcationNumber)
+            .MaxAsync() ?? 0;
+
+        var demarcation = new EstateLandDemarcation
         {
-            var asset = await RequireLandAssetAsync(assetId);
-            var measurement = ValidateDemarcationRequest(asset, request);
-            var repository = _unitOfWork.Repository<EstateLandDemarcation>();
-            var transactionStarted = false;
-            try
-            {
-                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
-                transactionStarted = true;
-                var existingBoundaries = await repository
-                    .GetQueryable(item => item.EstateManagedAssetId == assetId
-                        && item.TenantId == _currentUserProvider.TenantId
-                        && !item.IsDeleted)
-                    .Select(item => item.BoundaryCoordinates)
-                    .ToListAsync();
-                EnsureDoesNotOverlap(request.BoundaryCoordinates, existingBoundaries);
-                var lastDemarcationNumber = await repository
-                    .GetQueryable(item => item.EstateManagedAssetId == assetId
-                        && item.TenantId == _currentUserProvider.TenantId)
-                    .Select(item => (int?)item.DemarcationNumber)
-                    .MaxAsync() ?? 0;
+            TenantId = _currentUserProvider.TenantId,
+            EstateManagedAssetId = assetId,
+            DemarcationNumber = lastDemarcationNumber + 1,
+            Description = request.Description.Trim(),
+            BeaconCount = measurement.BeaconCount,
+            BoundaryCoordinates = request.BoundaryCoordinates.Trim(),
+            AreaSquareFeet = measurement.AreaSquareFeet,
+            BoundaryVerified = request.BoundaryVerified,
+            CreatedBy = _currentUserProvider.Username,
+            CreatedById = _currentUserProvider.UserId
+        };
 
-                var demarcation = new EstateLandDemarcation
-                {
-                    TenantId = _currentUserProvider.TenantId,
-                    EstateManagedAssetId = assetId,
-                    DemarcationNumber = lastDemarcationNumber + 1,
-                    Description = request.Description.Trim(),
-                    BeaconCount = measurement.BeaconCount,
-                    BoundaryCoordinates = request.BoundaryCoordinates.Trim(),
-                    AreaSquareFeet = measurement.AreaSquareFeet,
-                    BoundaryVerified = request.BoundaryVerified,
-                    CreatedBy = _currentUserProvider.Username,
-                    CreatedById = _currentUserProvider.UserId
-                };
-
-                await repository.AddAsync(demarcation);
-                await ResetProjectReadinessAsync(asset);
-                await _unitOfWork.SaveChangesAsync();
-                transactionStarted = false;
-                await _unitOfWork.CommitAsync();
-                return MapDemarcationToDto(demarcation);
-            }
-            catch
-            {
-                if (transactionStarted)
-                {
-                    await _unitOfWork.RollbackAsync();
-                }
-                throw;
-            }
-        });
+        await repository.AddAsync(demarcation);
+        await ResetProjectReadinessAsync(asset);
+        await _unitOfWork.SaveChangesAsync();
+        return MapDemarcationToDto(demarcation);
     }
 
     public Task<EstateLandDemarcationDto> UpdateLandDemarcationAsync(
@@ -447,6 +436,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         SaveEstateLandDemarcationDto request)
     {
         var asset = await RequireLandAssetAsync(assetId);
+        EnsureDemarcationsCanBeChanged(asset);
         var measurement = ValidateDemarcationRequest(asset, request);
         var repository = _unitOfWork.Repository<EstateLandDemarcation>();
         var demarcation = await repository.FirstOrDefaultAsync(item =>
@@ -511,6 +501,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
     private async Task DeleteLandDemarcationCoreAsync(Guid assetId, Guid demarcationId)
     {
         var asset = await RequireLandAssetAsync(assetId);
+        EnsureDemarcationsCanBeChanged(asset);
         var repository = _unitOfWork.Repository<EstateLandDemarcation>();
         var demarcation = await repository.FirstOrDefaultAsync(item =>
             item.Id == demarcationId
@@ -855,7 +846,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         return asset ?? throw new InvalidOperationException("Land asset was not found.");
     }
 
-    private async Task RepairLandAcquisitionAssetsAsync(
+    private async Task EnrichLandAcquisitionAssetsForReadAsync(
         IReadOnlyCollection<EstateManagedAsset> assets)
     {
         var repairCandidates = assets
@@ -863,7 +854,6 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 asset.SourceType == EstateManagedAssetSourceType.LandAcquisition
                 && asset.LandAcquisitionId.HasValue
                 && (string.IsNullOrWhiteSpace(asset.BoundaryCoordinates)
-                    || (!asset.BoundaryVerified && !string.IsNullOrWhiteSpace(asset.BoundaryCoordinates))
                     || string.IsNullOrWhiteSpace(asset.SurveyorName)
                     || !asset.SurveyDate.HasValue
                     || string.IsNullOrWhiteSpace(asset.Region)
@@ -902,46 +892,25 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             .GroupBy(item => item.LandAcquisitionId)
             .ToDictionary(group => group.Key, group => group.First());
 
-        var repository = _unitOfWork.Repository<EstateManagedAsset>();
-        var hasRepairs = false;
         foreach (var asset in repairCandidates)
         {
-            var changed = false;
-            if (!asset.BoundaryVerified && !string.IsNullOrWhiteSpace(asset.BoundaryCoordinates))
-            {
-                asset.BoundaryVerified = true;
-                changed = true;
-            }
-
             if (!acquisitions.TryGetValue(asset.LandAcquisitionId!.Value, out var acquisition))
             {
-                if (changed)
-                {
-                    await SaveRepairAsync(asset, repository);
-                    hasRepairs = true;
-                }
-
                 continue;
             }
 
             var workspace = ReadCadastralWorkspace(acquisition.WorkspaceDataJson);
             latestSurveyByAcquisition.TryGetValue(asset.LandAcquisitionId.Value, out var survey);
 
-            changed |= SetIfBlank(
+            SetIfBlank(
                 asset.BoundaryCoordinates,
-                FirstNonBlank(
+                FirstNonBlankOrNull(
                     survey?.BoundaryCoordinates,
                     WorkspaceText(workspace, "boundaryCoordinates")),
                 value => asset.BoundaryCoordinates = value);
-            if (!asset.BoundaryVerified && !string.IsNullOrWhiteSpace(asset.BoundaryCoordinates))
-            {
-                asset.BoundaryVerified = true;
-                changed = true;
-            }
-
-            changed |= SetIfBlank(
+            SetIfBlank(
                 asset.SurveyorName,
-                FirstNonBlank(
+                FirstNonBlankOrNull(
                     survey?.SurveyorName,
                     WorkspaceText(workspace, "surveyorName")),
                 value => asset.SurveyorName = value);
@@ -951,19 +920,18 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 if (surveyDate.HasValue)
                 {
                     asset.SurveyDate = surveyDate;
-                    changed = true;
                 }
             }
 
-            changed |= SetIfBlank(
+            SetIfBlank(
                 asset.Region,
                 WorkspaceText(workspace, "regionId"),
                 value => asset.Region = value);
-            changed |= SetIfBlank(
+            SetIfBlank(
                 asset.District,
                 WorkspaceText(workspace, "districtId"),
                 value => asset.District = value);
-            changed |= SetIfBlank(
+            SetIfBlank(
                 asset.Town,
                 WorkspaceText(workspace, "townId"),
                 value => asset.Town = value);
@@ -974,33 +942,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 if (beaconCount.HasValue)
                 {
                     asset.BeaconCount = beaconCount;
-                    changed = true;
                 }
             }
-
-            if (!changed)
-            {
-                continue;
-            }
-
-            await SaveRepairAsync(asset, repository);
-            hasRepairs = true;
         }
-
-        if (hasRepairs)
-        {
-            await _unitOfWork.SaveChangesAsync();
-        }
-    }
-
-    private async Task SaveRepairAsync(
-        EstateManagedAsset asset,
-        IGenericRepository<EstateManagedAsset> repository)
-    {
-        asset.UpdatedAt = DateTime.UtcNow;
-        asset.UpdatedBy = _currentUserProvider.Username;
-        asset.LastModifiedById = _currentUserProvider.UserId;
-        await repository.UpdateAsync(asset);
     }
 
     private static bool SetIfBlank(
@@ -1121,6 +1065,15 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.UpdatedBy = _currentUserProvider.Username;
         asset.LastModifiedById = _currentUserProvider.UserId;
         await _unitOfWork.Repository<EstateManagedAsset>().UpdateAsync(asset);
+    }
+
+    private static void EnsureDemarcationsCanBeChanged(EstateManagedAsset asset)
+    {
+        if (asset.IsPublishedToExternalPortal)
+        {
+            throw new InvalidOperationException(
+                "Withdraw the active external land listing before changing its demarcations.");
+        }
     }
 
     private async Task<HashSet<string>> GetAssignedProjectLandReferencesAsync()
@@ -1264,6 +1217,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
     private static string FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? "LAND-ASSET";
+
+    private static string? FirstNonBlankOrNull(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
     private static decimal ConvertAreaToSquareMeters(decimal value, string unit)
         => unit.Trim().ToLowerInvariant() switch

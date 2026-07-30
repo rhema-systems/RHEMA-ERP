@@ -46,6 +46,67 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         method.Should().NotContain("[\"accountsPayableSupplierId\"] = payee.Id");
     }
 
+    [Fact]
+    public void ManagedAssetReads_EnrichDetachedResultsWithoutPersistingRepairs()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var getMethod = Slice(
+            source,
+            "public async Task<IReadOnlyList<EstateManagedAssetDto>> GetManagedAssetsAsync",
+            "public async Task<EstateManagedAssetDto> PublishLandAcquisitionAsync");
+        var enrichmentMethod = Slice(
+            source,
+            "private async Task EnrichLandAcquisitionAssetsForReadAsync",
+            "private static bool SetIfBlank");
+
+        getMethod.Should().Contain(".AsNoTracking()");
+        getMethod.Should().Contain("EnrichLandAcquisitionAssetsForReadAsync(assets)");
+        enrichmentMethod.Should().NotContain("SaveChangesAsync");
+        enrichmentMethod.Should().NotContain("UpdateAsync");
+        enrichmentMethod.Should().NotContain("BoundaryVerified = true");
+        source.Should().NotContain("RepairLandAcquisitionAssetsAsync");
+        source.Should().NotContain("SaveRepairAsync");
+    }
+
+    [Fact]
+    public void DemarcationMutations_RejectLandWithAnActiveExternalListing()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var createMethod = Slice(
+            source,
+            "private async Task<EstateLandDemarcationDto> CreateLandDemarcationCoreAsync",
+            "public Task<EstateLandDemarcationDto> UpdateLandDemarcationAsync");
+        var updateMethod = Slice(
+            source,
+            "private async Task<EstateLandDemarcationDto> UpdateLandDemarcationCoreAsync",
+            "public async Task DeleteLandDemarcationAsync");
+        var deleteMethod = Slice(
+            source,
+            "private async Task DeleteLandDemarcationCoreAsync",
+            "public async Task<EstateManagedAssetDto> MarkReadyForProjectManagementAsync");
+        var guard = Slice(
+            source,
+            "private static void EnsureDemarcationsCanBeChanged",
+            "private async Task<HashSet<string>> GetAssignedProjectLandReferencesAsync");
+
+        createMethod.Should().Contain("EnsureDemarcationsCanBeChanged(asset);");
+        updateMethod.Should().Contain("EnsureDemarcationsCanBeChanged(asset);");
+        deleteMethod.Should().Contain("EnsureDemarcationsCanBeChanged(asset);");
+        guard.Should().Contain("asset.IsPublishedToExternalPortal");
+        guard.Should().Contain(
+            "Withdraw the active external land listing before changing its demarcations.");
+    }
+
     private static string ReadSource(params string[] path)
         => File.ReadAllText(Path.Combine([FindRepositoryRoot(), .. path]));
 
