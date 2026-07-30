@@ -14,6 +14,9 @@ namespace ErpSystem.Api.Controllers;
 [Authorize]
 public class RoleController : ControllerBase
 {
+    private const string RoleAdministrators =
+        "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin";
+
     private readonly IRoleService _roleService;
     private readonly IPermissionService _permissionService;
     private readonly IRolePermissionService _rolePermissionService;
@@ -41,7 +44,7 @@ public class RoleController : ControllerBase
     /// Get all roles
     /// </summary>
     [HttpGet]
-    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    [Authorize(Roles = RoleAdministrators)]
     public async Task<ActionResult<IEnumerable<RoleDto>>> GetRoles()
     {
         try
@@ -71,7 +74,7 @@ public class RoleController : ControllerBase
     /// Get role by ID
     /// </summary>
     [HttpGet("{id}")]
-    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    [Authorize(Roles = RoleAdministrators)]
     public async Task<ActionResult<RoleDto>> GetRole(Guid id)
     {
         try
@@ -106,7 +109,7 @@ public class RoleController : ControllerBase
     /// Create a new role
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    [Authorize(Roles = RoleAdministrators)]
     public async Task<ActionResult<RoleDto>> CreateRole([FromBody] CreateRoleRequest request)
     {
         try
@@ -193,7 +196,7 @@ public class RoleController : ControllerBase
     /// Update role
     /// </summary>
     [HttpPut("{id}")]
-    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    [Authorize(Roles = RoleAdministrators)]
     public async Task<ActionResult<RoleDto>> UpdateRole(Guid id, [FromBody] UpdateRoleRequest request)
     {
         try

@@ -58,6 +58,16 @@ const GIS_LINK_ROLES = [
   'Land Registry Officer',
   'Survey Officer',
 ];
+const PROJECT_READINESS_ROLES = [
+  'admin',
+  'Admin',
+  'SystemAdmin',
+  'SuperAdmin',
+  'TenantAdmin',
+  'Estate Manager',
+  'Land Registry Officer',
+  'Land Project Readiness Officer',
+];
 
 type LandManagementRecord =
   | { key: string; type: 'asset'; asset: EstateManagedAsset }
@@ -163,6 +173,7 @@ function DetailRow({
 export default function EstateLandManagementPage() {
   const { hasAnyRole } = useAuth();
   const canLinkGis = hasAnyRole(GIS_LINK_ROLES);
+  const canMarkProjectReady = hasAnyRole(PROJECT_READINESS_ROLES);
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [acquisitions, setAcquisitions] = React.useState<LandAcquisitionItem[]>(
     []
@@ -657,6 +668,7 @@ export default function EstateLandManagementPage() {
                     <Button
                       variant="outline"
                       disabled={
+                        !canMarkProjectReady ||
                         !selected.asset.boundaryVerified ||
                         selected.asset.demarcationCount === 0 ||
                         selected.asset.verifiedDemarcationCount !==
@@ -665,7 +677,9 @@ export default function EstateLandManagementPage() {
                       }
                       onClick={() => void markAssetProjectReady(selected.asset)}
                       title={
-                        !selected.asset.boundaryVerified
+                        !canMarkProjectReady
+                          ? 'Requires Estate Manager, Land Registry Officer, or Land Project Readiness Officer.'
+                          : !selected.asset.boundaryVerified
                           ? 'Verify the main cadastral boundary first.'
                           : selected.asset.demarcationCount === 0
                             ? 'Add at least one demarcation first.'

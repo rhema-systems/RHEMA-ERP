@@ -2,7 +2,7 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
-import { Edit3, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
+import { Copy, Edit3, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -39,6 +39,10 @@ type ParsedBeacon = {
   easting: number;
   bearing: string;
   distance?: number;
+};
+
+type PendingDemarcation = SaveEstateLandDemarcation & {
+  id: string;
 };
 
 const emptyBeacons = (): Beacon[] =>
@@ -102,11 +106,16 @@ function parseBoundary(value?: string): Beacon[] {
 function serializeBoundary(beacons: Beacon[]) {
   const points = beacons
     .map((item): ParsedBeacon | null => {
-      const northing = Number(item.northing);
-      const easting = Number(item.easting);
+      const northingText = item.northing.trim();
+      const eastingText = item.easting.trim();
+      if (!northingText || !eastingText) return null;
+
+      const northing = Number(northingText);
+      const easting = Number(eastingText);
       if (!Number.isFinite(northing) || !Number.isFinite(easting)) return null;
 
-      const distance = Number(item.distance);
+      const distanceText = item.distance.trim();
+      const distance = distanceText ? Number(distanceText) : Number.NaN;
       return {
         beacon: item.beacon.trim() || 'Beacon',
         northing,
@@ -138,6 +147,9 @@ export default function DemarcateLandDialog({
 }) {
   const [demarcations, setDemarcations] = React.useState<
     EstateLandDemarcation[]
+  >([]);
+  const [pendingDemarcations, setPendingDemarcations] = React.useState<
+    PendingDemarcation[]
   >([]);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [description, setDescription] = React.useState('');
@@ -175,6 +187,7 @@ export default function DemarcateLandDialog({
   React.useEffect(() => {
     if (!open || !asset) return;
     resetEditor();
+    setPendingDemarcations([]);
     void loadDemarcations();
   }, [asset, loadDemarcations, open, resetEditor]);
 
@@ -192,6 +205,13 @@ export default function DemarcateLandDialog({
         !item.easting.trim()
     ) ||
     !boundaryCoordinates;
+  const hasDraftValues =
+    Boolean(description.trim()) ||
+    beacons.some((item) =>
+      [item.beacon, item.northing, item.easting, item.bearing, item.distance]
+        .some((value) => value.trim())
+    ) ||
+    boundaryVerified;
 
   const mapDemarcations = React.useMemo(
     () => [
@@ -202,6 +222,12 @@ export default function DemarcateLandDialog({
           description: `Parcel ${item.demarcationNumber}: ${item.description}`,
           boundaryCoordinates: item.boundaryCoordinates,
         })),
+      ...pendingDemarcations.map((item, index) => ({
+        id: item.id,
+        description: `Unsaved Parcel ${demarcations.length + index + 1}: ${item.description}`,
+        boundaryCoordinates: item.boundaryCoordinates,
+        isDraft: true,
+      })),
       ...(boundaryCoordinates
         ? [
             {
@@ -213,28 +239,115 @@ export default function DemarcateLandDialog({
           ]
         : []),
     ],
-    [boundaryCoordinates, demarcations, description, editingId]
+    [
+      boundaryCoordinates,
+      demarcations,
+      description,
+      editingId,
+      pendingDemarcations,
+    ]
   );
 
   const editDemarcation = (demarcation: EstateLandDemarcation) => {
+    setPendingDemarcations([]);
     setEditingId(demarcation.id);
     setDescription(demarcation.description);
     setBeacons(parseBoundary(demarcation.boundaryCoordinates));
     setBoundaryVerified(demarcation.boundaryVerified);
   };
 
-  const save = async () => {
-    if (!asset || isIncomplete) {
+  const addPendingDemarcation = () => {
+    if (editingId) {
+      toast.error('Finish or cancel the saved demarcation edit first.');
+      return;
+    }
+
+    if (isIncomplete) {
       toast.error('Enter a description and at least three complete beacons.');
       return;
     }
 
-    const payload: SaveEstateLandDemarcation = {
-      description: description.trim(),
-      beaconCount: beacons.length,
-      boundaryCoordinates,
-      boundaryVerified,
-    };
+    setPendingDemarcations((current) => [
+      ...current,
+      {
+        id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        description: description.trim(),
+        beaconCount: beacons.length,
+        boundaryCoordinates,
+        boundaryVerified,
+      },
+    ]);
+    resetEditor();
+  };
+
+  const editPendingDemarcation = (item: PendingDemarcation) => {
+    setPendingDemarcations((current) =>
+      current.filter((pending) => pending.id !== item.id)
+    );
+    setEditingId(null);
+    setDescription(item.description);
+    setBeacons(parseBoundary(item.boundaryCoordinates));
+    setBoundaryVerified(item.boundaryVerified);
+  };
+
+  const removePendingDemarcation = (id: string) => {
+    setPendingDemarcations((current) =>
+      current.filter((pending) => pending.id !== id)
+    );
+  };
+
+  const useWholeParcel = () => {
+    if (
+      !asset?.boundaryVerified ||
+      !asset.boundaryCoordinates?.trim()
+    ) {
+      toast.error(
+        'The main cadastral boundary must be recorded and verified first.'
+      );
+      return;
+    }
+
+    if (demarcations.length || pendingDemarcations.length) {
+      toast.error(
+        'Whole Parcel can only be used when no other demarcations exist.'
+      );
+      return;
+    }
+
+    const parentBeacons = parseBoundary(asset.boundaryCoordinates);
+    if (!serializeBoundary(parentBeacons)) {
+      toast.error('The main cadastral boundary coordinates are invalid.');
+      return;
+    }
+
+    setEditingId(null);
+    setDescription('Whole parcel');
+    setBeacons(parentBeacons);
+    setBoundaryVerified(true);
+    toast.success('The complete parent boundary is ready to save as one parcel.');
+  };
+
+  const save = async () => {
+    if (!asset) {
+      return;
+    }
+
+    const currentPayload: SaveEstateLandDemarcation | null = isIncomplete
+      ? null
+      : {
+          description: description.trim(),
+          beaconCount: beacons.length,
+          boundaryCoordinates,
+          boundaryVerified,
+        };
+    if (editingId && !currentPayload) {
+      toast.error('Enter a description and at least three complete beacons.');
+      return;
+    }
+    if (!editingId && pendingDemarcations.length === 0 && !currentPayload) {
+      toast.error('Add at least one demarcation before saving.');
+      return;
+    }
 
     try {
       setSaving(true);
@@ -242,15 +355,28 @@ export default function DemarcateLandDialog({
         await estateLandManagementService.updateLandDemarcation(
           asset.id,
           editingId,
-          payload
+          currentPayload
         );
         toast.success('Demarcation updated.');
       } else {
-        await estateLandManagementService.createLandDemarcation(
-          asset.id,
-          payload
+        const payloads = [
+          ...pendingDemarcations.map(
+            ({ id: _id, ...pendingPayload }) => pendingPayload
+          ),
+          ...(currentPayload ? [currentPayload] : []),
+        ];
+        for (const payload of payloads) {
+          await estateLandManagementService.createLandDemarcation(
+            asset.id,
+            payload
+          );
+        }
+        toast.success(
+          payloads.length === 1
+            ? 'Demarcation added within the main cadastral boundary.'
+            : `${payloads.length} demarcations added within the main cadastral boundary.`
         );
-        toast.success('Demarcation added within the main cadastral boundary.');
+        setPendingDemarcations([]);
       }
       resetEditor();
       await loadDemarcations();
@@ -325,17 +451,46 @@ export default function DemarcateLandDialog({
         <div className="overflow-hidden rounded-md border">
           <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
             <p className="text-sm font-semibold">Defined parcels</p>
-            <Button type="button" size="sm" variant="outline" onClick={resetEditor}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Demarcation
-            </Button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={
+                  saving ||
+                  deletingId !== null ||
+                  !asset?.boundaryVerified ||
+                  !asset.boundaryCoordinates?.trim() ||
+                  demarcations.length > 0 ||
+                  pendingDemarcations.length > 0
+                }
+                title={
+                  demarcations.length || pendingDemarcations.length
+                    ? 'Whole Parcel cannot overlap another demarcation.'
+                    : 'Copy the complete verified parent boundary into one demarcation.'
+                }
+                onClick={useWholeParcel}
+              >
+                <Copy className="mr-2 h-4 w-4" />
+                Use Whole Parcel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={resetEditor}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                New Demarcation
+              </Button>
+            </div>
           </div>
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading demarcations
             </div>
-          ) : demarcations.length ? (
+          ) : demarcations.length || pendingDemarcations.length ? (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="bg-muted/60 text-left text-xs uppercase text-muted-foreground">
@@ -390,6 +545,45 @@ export default function DemarcateLandDialog({
                             ) : (
                               <Trash2 className="h-4 w-4" />
                             )}
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {pendingDemarcations.map((pending, index) => (
+                    <tr key={pending.id}>
+                      <td className="px-4 py-3 font-medium">
+                        {demarcations.length + index + 1}
+                      </td>
+                      <td className="max-w-xs px-4 py-3">
+                        {pending.description}
+                      </td>
+                      <td className="px-4 py-3 tabular-nums">Pending save</td>
+                      <td className="px-4 py-3 tabular-nums">
+                        {pending.beaconCount}
+                      </td>
+                      <td className="px-4 py-3">
+                        {pending.boundaryVerified ? 'Verified' : 'Draft'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            title="Edit pending demarcation"
+                            onClick={() => editPendingDemarcation(pending)}
+                          >
+                            <Edit3 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            title="Remove pending demarcation"
+                            onClick={() => removePendingDemarcation(pending.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </td>
@@ -491,25 +685,36 @@ export default function DemarcateLandDialog({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() =>
-              setBeacons((current) => [
-                ...current,
-                {
-                  beacon: `Beacon ${current.length + 1}`,
-                  northing: '',
-                  easting: '',
-                  bearing: '',
-                  distance: '',
-                },
-              ])
-            }
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Add Beacon
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                setBeacons((current) => [
+                  ...current,
+                  {
+                    beacon: `Beacon ${current.length + 1}`,
+                    northing: '',
+                    easting: '',
+                    bearing: '',
+                    distance: '',
+                  },
+                ])
+              }
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Beacon
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={saving || editingId !== null || isIncomplete}
+              onClick={addPendingDemarcation}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Demarcation
+            </Button>
+          </div>
           <label className="flex items-center gap-2 text-sm">
             <Checkbox
               checked={boundaryVerified}
@@ -542,13 +747,26 @@ export default function DemarcateLandDialog({
           >
             Close
           </Button>
-          <Button onClick={() => void save()} disabled={saving || isIncomplete}>
+          <Button
+            onClick={() => void save()}
+            disabled={
+              saving ||
+              (editingId
+                ? isIncomplete
+                : pendingDemarcations.length === 0 &&
+                  (isIncomplete || !hasDraftValues))
+            }
+          >
             {saving ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Save className="mr-2 h-4 w-4" />
             )}
-            {editingId ? 'Update Demarcation' : 'Save Demarcation'}
+            {editingId
+              ? 'Update Demarcation'
+              : pendingDemarcations.length > 1
+                ? 'Save Demarcations'
+                : 'Save Demarcation'}
           </Button>
         </DialogFooter>
       </DialogContent>

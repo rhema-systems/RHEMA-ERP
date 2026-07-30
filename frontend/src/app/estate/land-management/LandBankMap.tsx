@@ -76,8 +76,15 @@ function parseBoundary(value?: string): BeaconPoint[] {
   }
 }
 
-function toPlanPoint(point: BeaconPoint): PlanPoint {
-  return [point.northing, point.easting];
+function toPlanPoint(
+  point: BeaconPoint,
+  origin: PlanPoint = DEFAULT_CENTER
+): PlanPoint {
+  return [point.northing - origin[0], point.easting - origin[1]];
+}
+
+function normalizePlanPoint(point: PlanPoint, origin: PlanPoint): PlanPoint {
+  return [point[0] - origin[0], point[1] - origin[1]];
 }
 
 function centerOf(points: BeaconPoint[]): PlanPoint {
@@ -102,6 +109,19 @@ function gridStep(span: number): number {
   if (normalized <= 2) return 2 * magnitude;
   if (normalized <= 5) return 5 * magnitude;
   return 10 * magnitude;
+}
+
+function surveyZoom(points: BeaconPoint[]): number {
+  if (points.length < 2) return 0;
+
+  const northings = points.map((point) => point.northing);
+  const eastings = points.map((point) => point.easting);
+  const span = Math.max(
+    Math.max(...northings) - Math.min(...northings),
+    Math.max(...eastings) - Math.min(...eastings),
+    1
+  );
+  return Math.max(-5, Math.min(5, Math.floor(Math.log2(280 / span))));
 }
 
 function gridLines(points: BeaconPoint[]): PlanPoint[][] {
@@ -141,19 +161,42 @@ function gridLines(points: BeaconPoint[]): PlanPoint[][] {
   return lines;
 }
 
-function MapSync({ points }: { points: BeaconPoint[] }) {
+function MapSync({
+  points,
+  origin,
+  fitToPoints,
+}: {
+  points: BeaconPoint[];
+  origin: PlanPoint;
+  fitToPoints: boolean;
+}) {
   const map = useMap();
 
   React.useEffect(() => {
-    window.setTimeout(() => map.invalidateSize(), 0);
+    const syncMap = () => {
+      map.invalidateSize();
 
-    if (points.length >= 2) {
-      map.fitBounds(points.map(toPlanPoint), { padding: [28, 28] });
-      return;
-    }
+      if (fitToPoints && points.length >= 2) {
+        map.fitBounds(
+          points.map((point) => toPlanPoint(point, origin)),
+          { padding: [28, 28] }
+        );
+        return;
+      }
 
-    map.setView(DEFAULT_CENTER, 0);
-  }, [map, points]);
+      map.setView(DEFAULT_CENTER, surveyZoom(points));
+    };
+    const syncTimer = window.setTimeout(syncMap, 0);
+    const postAnimationTimer = window.setTimeout(syncMap, 250);
+    const resizeObserver = new ResizeObserver(syncMap);
+    resizeObserver.observe(map.getContainer());
+
+    return () => {
+      window.clearTimeout(syncTimer);
+      window.clearTimeout(postAnimationTimer);
+      resizeObserver.disconnect();
+    };
+  }, [fitToPoints, map, origin, points]);
 
   return null;
 }
@@ -162,9 +205,21 @@ function GisMapSync({ geometry }: { geometry: FeatureCollection }) {
   const map = useMap();
 
   React.useEffect(() => {
-    window.setTimeout(() => map.invalidateSize(), 0);
-    const bounds = createGeoJsonLayer(geometry as GeoJsonObject).getBounds();
-    if (bounds.isValid()) map.fitBounds(bounds, { padding: [28, 28] });
+    const syncMap = () => {
+      map.invalidateSize();
+      const bounds = createGeoJsonLayer(geometry as GeoJsonObject).getBounds();
+      if (bounds.isValid()) map.fitBounds(bounds, { padding: [28, 28] });
+    };
+    const syncTimer = window.setTimeout(syncMap, 0);
+    const postAnimationTimer = window.setTimeout(syncMap, 250);
+    const resizeObserver = new ResizeObserver(syncMap);
+    resizeObserver.observe(map.getContainer());
+
+    return () => {
+      window.clearTimeout(syncTimer);
+      window.clearTimeout(postAnimationTimer);
+      resizeObserver.disconnect();
+    };
   }, [geometry, map]);
 
   return null;
@@ -172,6 +227,120 @@ function GisMapSync({ geometry }: { geometry: FeatureCollection }) {
 
 function formatPoint(point: BeaconPoint) {
   return `${point.beacon}: N ${point.northing.toFixed(2)} ft, E ${point.easting.toFixed(2)} ft`;
+}
+
+function SurveyPlanCanvas({
+  points,
+  demarcations,
+}: {
+  points: BeaconPoint[];
+  demarcations: Array<{
+    id: string;
+    description: string;
+    isDraft?: boolean;
+    points: BeaconPoint[];
+  }>;
+}) {
+  const allPoints = [
+    ...points,
+    ...demarcations.flatMap((demarcation) => demarcation.points),
+  ];
+  const northings = allPoints.map((point) => point.northing);
+  const eastings = allPoints.map((point) => point.easting);
+  const minNorth = Math.min(...northings);
+  const maxNorth = Math.max(...northings);
+  const minEast = Math.min(...eastings);
+  const maxEast = Math.max(...eastings);
+  const spanNorth = Math.max(maxNorth - minNorth, 1);
+  const spanEast = Math.max(maxEast - minEast, 1);
+  const padding = Math.max(spanNorth, spanEast) * 0.18;
+  const viewBox = [
+    minEast - padding,
+    -maxNorth - padding,
+    spanEast + padding * 2,
+    spanNorth + padding * 2,
+  ].join(' ');
+  const markerRadius = Math.max(Math.min(spanNorth, spanEast) * 0.018, 3);
+  const labelSize = markerRadius * 3.2;
+  const toSvgPoints = (boundary: BeaconPoint[]) =>
+    boundary.map((point) => `${point.easting},${-point.northing}`).join(' ');
+
+  return (
+    <div
+      className="h-[360px] w-full overflow-hidden bg-background"
+      style={{
+        backgroundColor: '#f8fafc',
+        backgroundImage:
+          'linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px)',
+        backgroundSize: '32px 32px',
+      }}
+    >
+      <svg
+        aria-label="Survey boundary plan"
+        className="h-full w-full"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        viewBox={viewBox}
+      >
+        <polygon
+          fill="#60a5fa"
+          fillOpacity="0.08"
+          points={toSvgPoints(points)}
+          stroke="#1d4ed8"
+          strokeWidth="3"
+          vectorEffect="non-scaling-stroke"
+        >
+          <title>Main cadastral boundary</title>
+        </polygon>
+
+        {demarcations.map((demarcation, index) => {
+          const color = demarcation.isDraft
+            ? '#dc2626'
+            : ['#0f766e', '#7c3aed', '#c2410c', '#047857'][index % 4];
+          return (
+            <polygon
+              key={demarcation.id}
+              fill={color}
+              fillOpacity={demarcation.isDraft ? 0.12 : 0.22}
+              points={toSvgPoints(demarcation.points)}
+              stroke={color}
+              strokeDasharray={demarcation.isDraft ? '8 6' : undefined}
+              strokeWidth="3"
+              vectorEffect="non-scaling-stroke"
+            >
+              <title>{demarcation.description}</title>
+            </polygon>
+          );
+        })}
+
+        {points.map((point) => (
+          <g key={`survey-beacon-${point.beacon}-${point.northing}-${point.easting}`}>
+            <circle
+              cx={point.easting}
+              cy={-point.northing}
+              fill="#ffffff"
+              r={markerRadius}
+              stroke="#1d4ed8"
+              strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
+            >
+              <title>{formatPoint(point)}</title>
+            </circle>
+            <text
+              fill="#1e3a8a"
+              fontSize={labelSize}
+              fontWeight="600"
+              textAnchor="middle"
+              x={point.easting}
+              y={-point.northing - markerRadius * 2}
+            >
+              {point.beacon}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
 }
 
 interface LandBankMapProps {
@@ -212,7 +381,10 @@ export default function LandBankMap({
     () => [...points, ...demarcationPolygons.flatMap((item) => item.points)],
     [demarcationPolygons, points]
   );
-  const center = React.useMemo(() => centerOf(allSurveyPoints), [allSurveyPoints]);
+  const surveyOrigin = React.useMemo(
+    () => centerOf(allSurveyPoints),
+    [allSurveyPoints]
+  );
   const surveyGridLines = React.useMemo(() => gridLines(allSurveyPoints), [allSurveyPoints]);
   const isLinked = Boolean(!forceSurvey && assetId && gisFeatureId && gisLayerReference);
   const [mode, setMode] = React.useState<'gis' | 'survey'>(
@@ -344,9 +516,14 @@ export default function LandBankMap({
             />
             <GisMapSync geometry={gisGeometry} />
           </MapContainer>
+        ) : allSurveyPoints.length >= 3 && forceSurvey ? (
+          <SurveyPlanCanvas
+            points={points}
+            demarcations={demarcationPolygons}
+          />
         ) : allSurveyPoints.length >= 3 ? (
           <MapContainer
-            center={center}
+            center={DEFAULT_CENTER}
             zoom={0}
             minZoom={-5}
             maxZoom={5}
@@ -360,17 +537,25 @@ export default function LandBankMap({
               backgroundSize: '32px 32px',
             }}
           >
-            <MapSync points={allSurveyPoints} />
+            <MapSync
+              points={allSurveyPoints}
+              origin={surveyOrigin}
+              fitToPoints={!forceSurvey}
+            />
             {surveyGridLines.map((line, index) => (
               <Polyline
                 key={`grid-${index}`}
-                positions={line}
+                positions={line.map((point) =>
+                  normalizePlanPoint(point, surveyOrigin)
+                )}
                 pathOptions={GRID_LINE_STYLE}
                 interactive={false}
               />
             ))}
             <Polygon
-              positions={points.map(toPlanPoint)}
+              positions={points.map((point) =>
+                toPlanPoint(point, surveyOrigin)
+              )}
               pathOptions={{
                 color: '#1d4ed8',
                 fillColor: '#60a5fa',
@@ -390,7 +575,7 @@ export default function LandBankMap({
             {points.map((point) => (
               <CircleMarker
                 key={`beacon-${point.beacon}-${point.northing}-${point.easting}`}
-                center={toPlanPoint(point)}
+                center={toPlanPoint(point, surveyOrigin)}
                 radius={5}
                 pathOptions={{
                   color: '#1d4ed8',
@@ -411,7 +596,9 @@ export default function LandBankMap({
               return (
                 <Polygon
                   key={demarcation.id}
-                  positions={demarcation.points.map(toPlanPoint)}
+                  positions={demarcation.points.map((point) =>
+                    toPlanPoint(point, surveyOrigin)
+                  )}
                   pathOptions={{
                     color,
                     fillColor: color,

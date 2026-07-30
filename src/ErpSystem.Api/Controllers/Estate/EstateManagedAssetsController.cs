@@ -81,7 +81,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/ready-for-project-management")]
-    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Manager,Land Registry Officer")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Manager,Land Registry Officer,Land Project Readiness Officer")]
     public async Task<IActionResult> MarkReadyForProjectManagement(Guid id)
     {
         if (!CanMarkReadyForProjectManagement())
@@ -420,7 +420,8 @@ public sealed class EstateManagedAssetsController : ControllerBase
             || _currentUserService.IsInRole("SuperAdmin")
             || _currentUserService.IsInRole("TenantAdmin")
             || _currentUserService.IsInRole("Estate Manager")
-            || _currentUserService.IsInRole("Land Registry Officer");
+            || _currentUserService.IsInRole("Land Registry Officer")
+            || _currentUserService.IsInRole("Land Project Readiness Officer");
 
     private async Task<string> NextDocumentReferenceAsync(Guid tenantId, CancellationToken cancellationToken)
     {

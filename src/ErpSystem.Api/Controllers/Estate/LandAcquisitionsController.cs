@@ -915,7 +915,6 @@ public class LandAcquisitionsController : ControllerBase
             pair => (object?)pair.Value,
             StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-
         var asset = acquisition.LandAssets
             .Where(item => !item.IsDeleted)
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
@@ -969,7 +968,7 @@ public class LandAcquisitionsController : ControllerBase
                     IsCurrentOwner = item.IsCurrentOwner
                 })
                 .ToList(),
-            BoundaryVerified = false,
+            BoundaryVerified = true,
             IsReadyForProjectManagement = false,
             Notes = "Land asset published from land acquisition into Estate Land Bank for demarcation and project-readiness review."
         });

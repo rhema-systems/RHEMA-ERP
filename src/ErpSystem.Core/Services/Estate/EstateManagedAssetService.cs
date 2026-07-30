@@ -58,6 +58,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             .Take(take)
             .ToListAsync();
 
+        await RepairLandAcquisitionAssetsAsync(assets);
+
         var mappedAssets = assets.Select(MapToDto).ToList();
         if (assets.Count == 0)
         {
@@ -129,8 +131,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.PlanningComplianceStatus = TrimOrNull(handoff.PlanningComplianceStatus) ?? "Pending";
         asset.GisLayerReference = TrimOrNull(handoff.GisLayerReference);
         asset.GisProvider = string.IsNullOrWhiteSpace(asset.GisProvider) ? "GeoServer" : asset.GisProvider;
-        asset.BoundaryVerified = handoff.BoundaryVerified;
-        asset.BoundaryCoordinates = TrimOrNull(handoff.BoundaryCoordinates);
+        var boundaryCoordinates = TrimOrNull(handoff.BoundaryCoordinates);
+        asset.BoundaryCoordinates = boundaryCoordinates;
+        asset.BoundaryVerified = asset.BoundaryVerified || boundaryCoordinates != null;
         asset.SurveyPlanNumber = TrimOrNull(handoff.SurveyPlanNumber);
         asset.MapSheetNumber = TrimOrNull(handoff.MapSheetNumber);
         asset.CadastreDescription = TrimOrNull(handoff.CadastreDescription);
@@ -744,6 +747,222 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 && item.AssetType == EstateManagedAssetType.Land);
         return asset ?? throw new InvalidOperationException("Land asset was not found.");
     }
+
+    private async Task RepairLandAcquisitionAssetsAsync(
+        IReadOnlyCollection<EstateManagedAsset> assets)
+    {
+        var repairCandidates = assets
+            .Where(asset =>
+                asset.SourceType == EstateManagedAssetSourceType.LandAcquisition
+                && asset.LandAcquisitionId.HasValue
+                && (string.IsNullOrWhiteSpace(asset.BoundaryCoordinates)
+                    || (!asset.BoundaryVerified && !string.IsNullOrWhiteSpace(asset.BoundaryCoordinates))
+                    || string.IsNullOrWhiteSpace(asset.SurveyorName)
+                    || !asset.SurveyDate.HasValue
+                    || string.IsNullOrWhiteSpace(asset.Region)
+                    || string.IsNullOrWhiteSpace(asset.District)
+                    || string.IsNullOrWhiteSpace(asset.Town)
+                    || !asset.BeaconCount.HasValue))
+            .ToList();
+        if (repairCandidates.Count == 0)
+        {
+            return;
+        }
+
+        var acquisitionIds = repairCandidates
+            .Select(asset => asset.LandAcquisitionId!.Value)
+            .Distinct()
+            .ToList();
+        var acquisitions = await _unitOfWork.Repository<LandAcquisition>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted
+                && acquisitionIds.Contains(item.Id))
+            .Select(item => new
+            {
+                item.Id,
+                item.WorkspaceDataJson
+            })
+            .ToDictionaryAsync(item => item.Id);
+        var surveys = await _unitOfWork.Repository<CadastralSurvey>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted
+                && acquisitionIds.Contains(item.LandAcquisitionId))
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .ToListAsync();
+        var latestSurveyByAcquisition = surveys
+            .GroupBy(item => item.LandAcquisitionId)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        var repository = _unitOfWork.Repository<EstateManagedAsset>();
+        var hasRepairs = false;
+        foreach (var asset in repairCandidates)
+        {
+            var changed = false;
+            if (!asset.BoundaryVerified && !string.IsNullOrWhiteSpace(asset.BoundaryCoordinates))
+            {
+                asset.BoundaryVerified = true;
+                changed = true;
+            }
+
+            if (!acquisitions.TryGetValue(asset.LandAcquisitionId!.Value, out var acquisition))
+            {
+                if (changed)
+                {
+                    await SaveRepairAsync(asset, repository);
+                    hasRepairs = true;
+                }
+
+                continue;
+            }
+
+            var workspace = ReadCadastralWorkspace(acquisition.WorkspaceDataJson);
+            latestSurveyByAcquisition.TryGetValue(asset.LandAcquisitionId.Value, out var survey);
+
+            changed |= SetIfBlank(
+                asset.BoundaryCoordinates,
+                FirstNonBlank(
+                    survey?.BoundaryCoordinates,
+                    WorkspaceText(workspace, "boundaryCoordinates")),
+                value => asset.BoundaryCoordinates = value);
+            if (!asset.BoundaryVerified && !string.IsNullOrWhiteSpace(asset.BoundaryCoordinates))
+            {
+                asset.BoundaryVerified = true;
+                changed = true;
+            }
+
+            changed |= SetIfBlank(
+                asset.SurveyorName,
+                FirstNonBlank(
+                    survey?.SurveyorName,
+                    WorkspaceText(workspace, "surveyorName")),
+                value => asset.SurveyorName = value);
+            if (!asset.SurveyDate.HasValue)
+            {
+                var surveyDate = survey?.SurveyDate ?? WorkspaceDate(workspace, "surveyDate");
+                if (surveyDate.HasValue)
+                {
+                    asset.SurveyDate = surveyDate;
+                    changed = true;
+                }
+            }
+
+            changed |= SetIfBlank(
+                asset.Region,
+                WorkspaceText(workspace, "regionId"),
+                value => asset.Region = value);
+            changed |= SetIfBlank(
+                asset.District,
+                WorkspaceText(workspace, "districtId"),
+                value => asset.District = value);
+            changed |= SetIfBlank(
+                asset.Town,
+                WorkspaceText(workspace, "townId"),
+                value => asset.Town = value);
+            if (!asset.BeaconCount.HasValue)
+            {
+                var beaconCount = ParsePositiveInt(survey?.BeaconCount)
+                    ?? WorkspaceInt(workspace, "beaconCount");
+                if (beaconCount.HasValue)
+                {
+                    asset.BeaconCount = beaconCount;
+                    changed = true;
+                }
+            }
+
+            if (!changed)
+            {
+                continue;
+            }
+
+            await SaveRepairAsync(asset, repository);
+            hasRepairs = true;
+        }
+
+        if (hasRepairs)
+        {
+            await _unitOfWork.SaveChangesAsync();
+        }
+    }
+
+    private async Task SaveRepairAsync(
+        EstateManagedAsset asset,
+        IGenericRepository<EstateManagedAsset> repository)
+    {
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = _currentUserProvider.Username;
+        asset.LastModifiedById = _currentUserProvider.UserId;
+        await repository.UpdateAsync(asset);
+    }
+
+    private static bool SetIfBlank(
+        string? currentValue,
+        string? sourceValue,
+        Action<string> apply)
+    {
+        var normalizedSource = TrimOrNull(sourceValue);
+        if (!string.IsNullOrWhiteSpace(currentValue) || normalizedSource == null)
+        {
+            return false;
+        }
+
+        apply(normalizedSource);
+        return true;
+    }
+
+    private static Dictionary<string, JsonElement> ReadCadastralWorkspace(string? workspaceDataJson)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceDataJson))
+        {
+            return new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        try
+        {
+            var snapshots = JsonSerializer.Deserialize<Dictionary<int, Dictionary<string, JsonElement>>>(
+                workspaceDataJson);
+            return snapshots != null
+                && snapshots.TryGetValue((int)AcquisitionProcedure.CadastralSurvey, out var cadastral)
+                    ? new Dictionary<string, JsonElement>(cadastral, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static string? WorkspaceText(
+        IReadOnlyDictionary<string, JsonElement> workspace,
+        string key)
+    {
+        if (!workspace.TryGetValue(key, out var value)
+            || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return value.ValueKind == JsonValueKind.String
+            ? TrimOrNull(value.GetString())
+            : TrimOrNull(value.ToString());
+    }
+
+    private static DateTime? WorkspaceDate(
+        IReadOnlyDictionary<string, JsonElement> workspace,
+        string key)
+    {
+        var value = WorkspaceText(workspace, key);
+        return DateTime.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static int? WorkspaceInt(
+        IReadOnlyDictionary<string, JsonElement> workspace,
+        string key) =>
+        ParsePositiveInt(WorkspaceText(workspace, key));
+
+    private static int? ParsePositiveInt(string? value) =>
+        int.TryParse(value, out var parsed) && parsed >= 0 ? parsed : null;
 
     private static EstateBoundaryMeasurement ValidateDemarcationRequest(
         EstateManagedAsset asset,
