@@ -6739,6 +6739,13 @@ namespace ErpSystem.Web.Services
                 },
                 new
                 {
+                    Name = "estate.land.project-readiness",
+                    DisplayName = "Mark Land Project Ready",
+                    Description = "Approve verified land demarcations for project management handoff",
+                    Category = "Estate - Land Management"
+                },
+                new
+                {
                     Name = "Finance.Read",
                     DisplayName = "View Finance",
                     Description = "View finance module records, setup, and reports",

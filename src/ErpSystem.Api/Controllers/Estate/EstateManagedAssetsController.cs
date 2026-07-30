@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
+using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Models;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -18,17 +19,20 @@ namespace ErpSystem.Api.Controllers.Estate;
 public sealed class EstateManagedAssetsController : ControllerBase
 {
     private readonly IEstateManagedAssetService _managedAssetService;
+    private readonly IProjectService _projectService;
     private readonly IFileStorageService _fileStorageService;
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
 
     public EstateManagedAssetsController(
         IEstateManagedAssetService managedAssetService,
+        IProjectService projectService,
         IFileStorageService fileStorageService,
         ApplicationDbContext db,
         ICurrentUserService currentUserService)
     {
         _managedAssetService = managedAssetService;
+        _projectService = projectService;
         _fileStorageService = fileStorageService;
         _db = db;
         _currentUserService = currentUserService;
@@ -64,7 +68,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer")]
     public async Task<IActionResult> CreateManualLand([FromBody] CreateManualExistingLandDto request)
     {
-        if (request.IsReadyForProjectManagement && !CanMarkReadyForProjectManagement())
+        if (request.IsReadyForProjectManagement && !await CanMarkReadyForProjectManagementAsync())
         {
             return Forbid();
         }
@@ -81,10 +85,9 @@ public sealed class EstateManagedAssetsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/ready-for-project-management")]
-    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Manager,Land Registry Officer")]
     public async Task<IActionResult> MarkReadyForProjectManagement(Guid id)
     {
-        if (!CanMarkReadyForProjectManagement())
+        if (!await CanMarkReadyForProjectManagementAsync())
         {
             return Forbid();
         }
@@ -115,6 +118,34 @@ public sealed class EstateManagedAssetsController : ControllerBase
         {
             return NotFound(new { success = false, message = ex.Message });
         }
+    }
+
+    [HttpGet("project-ready-demarcations")]
+    public async Task<IActionResult> GetProjectReadyLandDemarcations([FromQuery] Guid? projectId = null)
+    {
+        if (projectId.HasValue)
+        {
+            try
+            {
+                // Reuse Project Management's tenant, membership, and role-aware view authorization
+                // before exposing the selected parcel for a specific project.
+                await _projectService.GetDevelopmentProfileAsync(projectId.Value);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { success = false, message = ex.Message });
+            }
+        }
+
+        return Ok(new
+        {
+            success = true,
+            data = await _managedAssetService.GetProjectReadyLandDemarcationsAsync(projectId)
+        });
     }
 
     [HttpPost("{id:guid}/demarcations")]
@@ -413,14 +444,28 @@ public sealed class EstateManagedAssetsController : ControllerBase
     private Guid? GetUserId()
         => Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : null;
 
-    private bool CanMarkReadyForProjectManagement()
-        => _currentUserService.IsInRole("admin")
-            || _currentUserService.IsInRole("Admin")
-            || _currentUserService.IsInRole("SystemAdmin")
-            || _currentUserService.IsInRole("SuperAdmin")
-            || _currentUserService.IsInRole("TenantAdmin")
-            || _currentUserService.IsInRole("Estate Manager")
-            || _currentUserService.IsInRole("Land Registry Officer");
+    private async Task<bool> CanMarkReadyForProjectManagementAsync()
+    {
+        if (_currentUserService.IsInRole("SuperAdmin") ||
+            _currentUserService.IsInRole("TenantAdmin"))
+        {
+            return true;
+        }
+
+        var userId = GetUserId();
+        if (!userId.HasValue)
+        {
+            return false;
+        }
+
+        return await _db.UserRoles
+            .AsNoTracking()
+            .Where(userRole => userRole.UserId == userId.Value)
+            .SelectMany(userRole => userRole.Role.RolePermissions)
+            .AnyAsync(rolePermission =>
+                rolePermission.Permission.Name == "estate.land.project-readiness"
+                || rolePermission.Permission.Name == "*");
+    }
 
     private async Task<string> NextDocumentReferenceAsync(Guid tenantId, CancellationToken cancellationToken)
     {

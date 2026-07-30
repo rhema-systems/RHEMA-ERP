@@ -1,10 +1,12 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Data;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Assets;
@@ -305,6 +307,39 @@ public partial class ProjectService : IProjectService
 
     public async Task<ProjectDetailDto> CreateProjectAsync(CreateProjectDto dto)
     {
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            var transactionStarted = false;
+            try
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+                transactionStarted = true;
+                var result = await CreateProjectCoreAsync(dto);
+                await _unitOfWork.CommitAsync();
+                transactionStarted = false;
+                return result;
+            }
+            catch
+            {
+                try
+                {
+                    if (transactionStarted && _unitOfWork.HasActiveTransaction)
+                    {
+                        await _unitOfWork.RollbackAsync();
+                    }
+                }
+                finally
+                {
+                    _unitOfWork.ClearTrackedChanges();
+                }
+
+                throw;
+            }
+        });
+    }
+
+    private async Task<ProjectDetailDto> CreateProjectCoreAsync(CreateProjectDto dto)
+    {
         EnsureInternalProjectAccess();
         if (IsReadOnlyUser())
         {
@@ -322,11 +357,6 @@ public partial class ProjectService : IProjectService
 
         var slackMonths = NormalizeSlackMonths(dto.SlackMonths);
         EnsureChronologicalDateRange(dto.StartDate, dto.TargetEndDate, "project schedule");
-        if (dto.DevelopmentProfile != null)
-        {
-            dto.DevelopmentProfile.LandReference = await ResolveReadyProjectLandReferenceAsync(dto.DevelopmentProfile.LandReference);
-        }
-
         var project = new Project
         {
             TenantId = _currentUserProvider.TenantId,
@@ -392,8 +422,40 @@ public partial class ProjectService : IProjectService
 
     public async Task<ProjectDetailDto> UpdateProjectAsync(Guid id, UpdateProjectDto dto)
     {
-        var project = await GetProjectForOperationAsync(id, ProjectAccessOperation.UpdateOverview);
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            var transactionStarted = false;
+            try
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+                transactionStarted = true;
+                var result = await UpdateProjectCoreAsync(id, dto);
+                await _unitOfWork.CommitAsync();
+                transactionStarted = false;
+                return result;
+            }
+            catch
+            {
+                try
+                {
+                    if (transactionStarted && _unitOfWork.HasActiveTransaction)
+                    {
+                        await _unitOfWork.RollbackAsync();
+                    }
+                }
+                finally
+                {
+                    _unitOfWork.ClearTrackedChanges();
+                }
 
+                throw;
+            }
+        });
+    }
+
+    private async Task<ProjectDetailDto> UpdateProjectCoreAsync(Guid id, UpdateProjectDto dto)
+    {
+        var project = await GetProjectForOperationAsync(id, ProjectAccessOperation.UpdateOverview);
         if (string.Equals(project.Status, ProjectStatuses.Closed, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(project.Status, ProjectStatuses.Archived, StringComparison.OrdinalIgnoreCase))
         {
