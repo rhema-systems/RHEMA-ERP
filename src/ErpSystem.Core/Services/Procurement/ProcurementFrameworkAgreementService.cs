@@ -986,6 +986,7 @@ public sealed class ProcurementFrameworkAgreementService :
             agreement.SourceType, agreement.SourceId, agreement.BusinessPartnerId,
             cancellationToken);
         EnsureSourceCurrency(source, agreement.CurrencyCode);
+        EnsureSourceCeiling(source, agreement.CeilingAmount);
         var eligibility = await EnforceSupplierAsync(
             agreement.BusinessPartnerId,
             agreement.Categories.Where(item => !item.IsDeleted)
@@ -1075,6 +1076,7 @@ public sealed class ProcurementFrameworkAgreementService :
                 agreement.SourceType, agreement.SourceId, agreement.BusinessPartnerId,
                 cancellationToken);
             EnsureSourceCurrency(source, agreement.CurrencyCode);
+            EnsureSourceCeiling(source, agreement.CeilingAmount);
             var eligibility = await EnforceSupplierAsync(
                 agreement.BusinessPartnerId,
                 agreement.Categories.Where(item => !item.IsDeleted)

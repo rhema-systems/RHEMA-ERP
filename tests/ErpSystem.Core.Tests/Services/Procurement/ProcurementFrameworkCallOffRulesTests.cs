@@ -109,6 +109,46 @@ public sealed class ProcurementFrameworkCallOffRulesTests
         summary.AvailableAmount.Should().Be(400m);
     }
 
+    [Fact]
+    public void HistoryRowsUseTheSameFamilyBalanceAcrossAllRevisions()
+    {
+        var atUtc = new DateTime(
+            2026,
+            8,
+            1,
+            0,
+            0,
+            0,
+            DateTimeKind.Utc);
+        var v1 = Revision(
+            version: 1,
+            effectiveFromUtc: new DateTime(
+                2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        var v2 = Revision(
+            version: 2,
+            effectiveFromUtc: new DateTime(
+                2026, 7, 1, 0, 0, 0, DateTimeKind.Utc));
+        var summaries = ProcurementFrameworkCallOffCommercialRules
+            .SummarizeRevisionFamilies(
+                [v1, v2],
+                [
+                    Movement(
+                        v1.AgreementId,
+                        ProcurementFrameworkBalanceMovementType.Commitment,
+                        600m),
+                    Movement(
+                        v2.AgreementId,
+                        ProcurementFrameworkBalanceMovementType.Commitment,
+                        400m)
+                ],
+                atUtc);
+
+        summaries[v1.AgreementId].CommittedAmount.Should().Be(1000m);
+        summaries[v1.AgreementId].AvailableAmount.Should().Be(0m);
+        summaries[v2.AgreementId].CommittedAmount.Should().Be(1000m);
+        summaries[v2.AgreementId].AvailableAmount.Should().Be(0m);
+    }
+
     [Theory]
     [InlineData(ProcurementFrameworkCallOffStatus.Draft, "submit")]
     [InlineData(ProcurementFrameworkCallOffStatus.Draft, "cancel")]

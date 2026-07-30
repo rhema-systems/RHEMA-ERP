@@ -149,6 +149,60 @@ public sealed class ProcurementFrameworkAgreementServiceTests
     }
 
     [Fact]
+    public async Task SubmitRejectsCeilingAboveTheCurrentAwardAmount()
+    {
+        await using var fixture = new Fixture();
+        var draft = await fixture.Service.CreateAsync(
+            fixture.CreateRequest(),
+            "framework-submit-ceiling-create");
+        await fixture.AttachRequiredDocumentAsync(draft);
+        await fixture.SetAwardAmountAsync(900m);
+
+        var action = () => fixture.Service.SubmitAsync(
+            draft.Id,
+            Lifecycle(draft.RowVersion, "Submit after award reduction."),
+            "framework-submit-ceiling-reduced");
+
+        await action.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code ==
+                "FRAMEWORK_AGREEMENT_CEILING_EXCEEDS_AWARD");
+        (await fixture.Service.GetAsync(draft.Id)).Status.Should()
+            .Be(ProcurementFrameworkAgreementStatus.Draft);
+    }
+
+    [Fact]
+    public async Task ApprovalRejectsCeilingAboveTheCurrentAwardAmount()
+    {
+        await using var fixture = new Fixture();
+        var draft = await fixture.Service.CreateAsync(
+            fixture.CreateRequest(),
+            "framework-approve-ceiling-create");
+        await fixture.AttachRequiredDocumentAsync(draft);
+        var submitted = await fixture.Service.SubmitAsync(
+            draft.Id,
+            Lifecycle(draft.RowVersion, "Submit before award reduction."),
+            "framework-approve-ceiling-submit");
+        await fixture.SetAwardAmountAsync(900m);
+        fixture.CompleteLatestWorkflow();
+        fixture.SetUser(Guid.NewGuid());
+
+        var action = () => fixture.Service.ApproveAsync(
+            draft.Id,
+            Lifecycle(submitted.RowVersion, "Approve after award reduction."),
+            "framework-approve-ceiling-reduced");
+
+        await action.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code ==
+                "FRAMEWORK_AGREEMENT_CEILING_EXCEEDS_AWARD");
+        (await fixture.Service.GetAsync(draft.Id)).Status.Should()
+            .Be(ProcurementFrameworkAgreementStatus.PendingApproval);
+    }
+
+    [Fact]
     public async Task NewerBlockedReadinessRevokesOlderReadyDecision()
     {
         await using var fixture = new Fixture();
@@ -797,6 +851,16 @@ public sealed class ProcurementFrameworkAgreementServiceTests
         public void SetUser(Guid userId) => _userId = userId;
         public void SetTenant(Guid tenantId) => _tenantId = tenantId;
         public void SetExternal(bool isExternal) => _isExternal = isExternal;
+
+        public async Task SetAwardAmountAsync(decimal amount)
+        {
+            var awardLine = await Context.Set<RequestForQuotationAwardLine>()
+                .SingleAsync(item =>
+                    item.RfqId == Rfq.Id &&
+                    item.BusinessPartnerId == Supplier.Id);
+            awardLine.LineTotal = amount;
+            await Context.SaveChangesAsync();
+        }
 
         public void CompleteLatestWorkflow()
         {

@@ -195,12 +195,21 @@ public sealed class ProcurementFrameworkCallOffService :
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+        var familySummaries = await ResolveRevisionFamilySummariesAsync(
+            rows.Select(item => item.Agreement),
+            now,
+            cancellationToken);
         return new ProcurementFrameworkCallOffPageDto
         {
             Page = request.Page,
             PageSize = request.PageSize,
             TotalCount = total,
-            Items = rows.Select(item => MapList(item, DateTime.UtcNow)).ToList()
+            Items = rows.Select(item => MapList(
+                    item,
+                    now,
+                    familySummaries.GetValueOrDefault(item.AgreementId)))
+                .ToList()
         };
     }
 
@@ -1470,6 +1479,54 @@ public sealed class ProcurementFrameworkCallOffService :
                 proposedAmount);
     }
 
+    private async Task<IReadOnlyDictionary<Guid,
+        ProcurementFrameworkCallOffCommercialRules.FamilySummary>>
+        ResolveRevisionFamilySummariesAsync(
+            IEnumerable<ProcurementFrameworkAgreement> agreements,
+            DateTime atUtc,
+            CancellationToken cancellationToken)
+    {
+        var familyKeys = agreements
+            .Select(item => item.AgreementKey)
+            .Distinct()
+            .ToArray();
+        if (familyKeys.Length == 0)
+        {
+            return new Dictionary<Guid,
+                ProcurementFrameworkCallOffCommercialRules.FamilySummary>();
+        }
+
+        var revisions = await _unitOfWork
+            .Repository<ProcurementFrameworkAgreement>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                familyKeys.Contains(item.AgreementKey) &&
+                !item.IsDeleted)
+            .Include(item => item.Extensions.Where(child => !child.IsDeleted))
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var agreementIds = revisions
+            .Select(item => item.Id)
+            .ToArray();
+        var movements = await BalanceMovements.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                agreementIds.Contains(item.AgreementId) &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item =>
+                new ProcurementFrameworkCallOffCommercialRules.MovementState(
+                    item.AgreementId,
+                    item.MovementType,
+                    item.Amount))
+            .ToListAsync(cancellationToken);
+
+        return ProcurementFrameworkCallOffCommercialRules
+            .SummarizeRevisionFamilies(
+                revisions.Select(ToAgreementRevisionState),
+                movements,
+                atUtc);
+    }
+
     private async Task CommitBalanceAsync(
         ProcurementFrameworkCallOff callOff,
         ProcurementFrameworkAgreement agreement,
@@ -1834,7 +1891,9 @@ public sealed class ProcurementFrameworkCallOffService :
 
     private static ProcurementFrameworkCallOffListItemDto MapList(
         ProcurementFrameworkCallOff item,
-        DateTime now)
+        DateTime now,
+        ProcurementFrameworkCallOffCommercialRules.FamilySummary?
+            familySummary = null)
     {
         var end = ProcurementFrameworkAgreementRules.EffectiveEnd(item.Agreement);
         var balance = item.Agreement.Balance;
@@ -1856,10 +1915,16 @@ public sealed class ProcurementFrameworkCallOffService :
             SupplierName = item.BusinessPartner.PartnerName,
             CurrencyCode = item.CurrencyCode,
             TotalAmount = item.TotalAmount,
-            AgreementCeilingAmount = balance?.CeilingAmount ?? item.Agreement.CeilingAmount,
-            AgreementCommittedAmount = balance?.CommittedAmount ?? 0m,
-            AgreementIssuedAmount = balance?.IssuedAmount ?? 0m,
-            AgreementAvailableAmount = balance?.AvailableAmount ?? item.Agreement.CeilingAmount,
+            AgreementCeilingAmount = familySummary?.CeilingAmount ??
+                                     balance?.CeilingAmount ??
+                                     item.Agreement.CeilingAmount,
+            AgreementCommittedAmount = familySummary?.CommittedAmount ??
+                                       balance?.CommittedAmount ?? 0m,
+            AgreementIssuedAmount = familySummary?.IssuedAmount ??
+                                    balance?.IssuedAmount ?? 0m,
+            AgreementAvailableAmount = familySummary?.AvailableAmount ??
+                                       balance?.AvailableAmount ??
+                                       item.Agreement.CeilingAmount,
             RequiredDateUtc = item.RequiredDateUtc,
             AgreementEffectiveEndUtc = end,
             AgreementIsEffective =
@@ -1879,11 +1944,15 @@ public sealed class ProcurementFrameworkCallOffService :
         ProcurementFrameworkCallOff item,
         CancellationToken cancellationToken)
     {
-        var list = MapList(item, DateTime.UtcNow);
-        var familyCapacity = await EvaluateAgreementFamilyCapacityAsync(
-            item.Agreement,
-            0m,
+        var now = DateTime.UtcNow;
+        var familySummaries = await ResolveRevisionFamilySummariesAsync(
+            [item.Agreement],
+            now,
             cancellationToken);
+        var list = MapList(
+            item,
+            now,
+            familySummaries.GetValueOrDefault(item.AgreementId));
         var ids = item.Lines.Select(line => line.PurchaseRequisitionItemId).ToArray();
         var allocated = ids.Length == 0
             ? new Dictionary<Guid, decimal>()
@@ -1914,9 +1983,9 @@ public sealed class ProcurementFrameworkCallOffService :
             CurrencyCode = list.CurrencyCode,
             TotalAmount = list.TotalAmount,
             AgreementCeilingAmount = list.AgreementCeilingAmount,
-            AgreementCommittedAmount = familyCapacity.CommittedAmount,
+            AgreementCommittedAmount = list.AgreementCommittedAmount,
             AgreementIssuedAmount = list.AgreementIssuedAmount,
-            AgreementAvailableAmount = familyCapacity.AvailableAmount,
+            AgreementAvailableAmount = list.AgreementAvailableAmount,
             RequiredDateUtc = list.RequiredDateUtc,
             AgreementEffectiveEndUtc = list.AgreementEffectiveEndUtc,
             AgreementIsEffective = list.AgreementIsEffective,

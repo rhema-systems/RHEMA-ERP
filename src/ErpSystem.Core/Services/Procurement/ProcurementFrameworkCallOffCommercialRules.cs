@@ -170,6 +170,24 @@ public static class ProcurementFrameworkCallOffCommercialRules
         return summaries;
     }
 
+    public static IReadOnlyDictionary<Guid, FamilySummary>
+        SummarizeRevisionFamilies(
+            IEnumerable<AgreementRevisionState> revisions,
+            IEnumerable<MovementState> movements,
+            DateTime atUtc)
+    {
+        var revisionList = revisions.ToList();
+        var summariesByFamily = SummarizeFamilies(
+                revisionList,
+                movements,
+                atUtc)
+            .ToDictionary(item => item.AgreementKey);
+
+        return revisionList.ToDictionary(
+            item => item.AgreementId,
+            item => summariesByFamily[item.AgreementKey]);
+    }
+
     private static DateTime EnsureUtc(DateTime value) => value.Kind switch
     {
         DateTimeKind.Utc => value,
