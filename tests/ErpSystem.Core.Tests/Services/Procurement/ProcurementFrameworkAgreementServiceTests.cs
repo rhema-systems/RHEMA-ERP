@@ -475,6 +475,61 @@ public sealed class ProcurementFrameworkAgreementServiceTests
         current.EffectiveEndUtc.Should().BeCloseTo(proposedEnd, TimeSpan.FromSeconds(1));
     }
 
+    [Fact]
+    public async Task ExtensionApprovalIsRejectedAfterParentAgreementTerminates()
+    {
+        await using var fixture = new Fixture();
+        var draft = await fixture.Service.CreateAsync(
+            fixture.CreateRequest(DateTime.UtcNow.AddDays(-1), DateTime.UtcNow.AddDays(60)),
+            "framework-extension-terminal-create");
+        await fixture.AttachRequiredDocumentAsync(draft);
+        var submitted = await fixture.Service.SubmitAsync(
+            draft.Id,
+            Lifecycle(draft.RowVersion, "Submit agreement."),
+            "framework-extension-terminal-submit");
+        fixture.CompleteLatestWorkflow();
+        fixture.SetUser(Guid.NewGuid());
+        var published = await fixture.Service.ApproveAsync(
+            draft.Id,
+            Lifecycle(submitted.RowVersion, "Approve agreement."),
+            "framework-extension-terminal-publish");
+        var extension = await fixture.Service.RequestExtensionAsync(
+            published.Id,
+            new RequestProcurementFrameworkAgreementExtension
+            {
+                AgreementRowVersion = published.RowVersion,
+                ProposedEndUtc = published.EffectiveEndUtc.AddMonths(6),
+                WorkflowDefinitionId = fixture.Workflow.Id,
+                Reason = "Retain pricing while the replacement tender completes.",
+                Evidence = Evidence("EXTENSION-TERMINAL-REQUEST")
+            },
+            "framework-extension-terminal-request");
+        fixture.CompleteLatestWorkflow();
+        fixture.SetUser(Guid.NewGuid());
+        await fixture.Service.TerminateAsync(
+            published.Id,
+            Lifecycle(published.RowVersion, "Terminate agreement."),
+            "framework-extension-parent-terminate");
+        fixture.SetUser(Guid.NewGuid());
+
+        var action = () => fixture.Service.DecideExtensionAsync(
+            published.Id,
+            extension.Id,
+            new DecideProcurementFrameworkAgreementExtension
+            {
+                RowVersion = extension.RowVersion,
+                Approve = true,
+                Comment = "Approve stale extension.",
+                Evidence = Evidence("EXTENSION-TERMINAL-APPROVAL")
+            },
+            "framework-extension-terminal-approve");
+
+        await action.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code == "FRAMEWORK_AGREEMENT_STATUS_INVALID");
+    }
+
     private static ProcurementFrameworkAgreementLifecycleRequest Lifecycle(
         string rowVersion,
         string comment) =>

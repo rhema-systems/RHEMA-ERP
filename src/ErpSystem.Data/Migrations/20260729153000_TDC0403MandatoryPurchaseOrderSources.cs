@@ -390,6 +390,10 @@ public partial class TDC0403MandatoryPurchaseOrderSources : Migration
                       AND (
                            contract.Id IS NULL
                         OR contract.Status <> 'Active'
+                        OR (contract.StartDate IS NOT NULL
+                            AND contract.StartDate > SYSUTCDATETIME())
+                        OR (contract.EndDate IS NOT NULL
+                            AND contract.EndDate < SYSUTCDATETIME())
                         OR contract.BusinessPartnerId <> i.BusinessPartnerId
                         OR award.Id IS NULL
                         OR tender.SourcePurchaseRequisitionId <> i.SourceRequisitionId
@@ -432,7 +436,7 @@ public partial class TDC0403MandatoryPurchaseOrderSources : Migration
                         OR tender.SourcePurchaseRequisitionId <> i.SourceRequisitionId
                         OR tender.SourcingReleaseId <> i.SourcingReleaseId
                         OR readiness.SourceType <> 2
-                        OR readiness.SourceId <> exceptional.Id))
+                        OR readiness.SourceId <> exceptional.TenderId))
                     THROW 51210, 'The approved-exception source no longer authorizes this purchase order.', 1;
 
                 IF EXISTS (

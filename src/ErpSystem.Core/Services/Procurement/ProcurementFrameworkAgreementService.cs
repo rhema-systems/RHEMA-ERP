@@ -852,6 +852,11 @@ public sealed class ProcurementFrameworkAgreementService :
         EnsureRowVersion(extension.RowVersion, request.RowVersion);
         if (extension.Status != ProcurementFrameworkExtensionStatus.PendingApproval)
             return Map(extension);
+        if (request.Approve)
+            EnsureStatus(
+                agreement,
+                ProcurementFrameworkAgreementStatus.Published,
+                "Only a Published framework agreement can receive an approved extension.");
         await EnsureIndependentActorAsync(
             extension.SubmittedById, agreement.AgreementNumber, correlation, cancellationToken);
         await EnsureWorkflowOutcomeAsync(

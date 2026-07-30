@@ -28,6 +28,21 @@ public sealed class ProcurementPurchaseOrderSourceMigrationTests
     }
 
     [Fact]
+    public void OrdinarySourceHardStopUsesTenderReadinessAndContractEffectivePeriod()
+    {
+        var initialSql = Sql(new TDC0403MandatoryPurchaseOrderSources());
+
+        initialSql.Should().Contain(
+            "readiness.SourceId <> exceptional.TenderId");
+        initialSql.Should().NotContain(
+            "readiness.SourceId <> exceptional.Id");
+        initialSql.Should().Contain(
+            "contract.StartDate > SYSUTCDATETIME()");
+        initialSql.Should().Contain(
+            "contract.EndDate < SYSUTCDATETIME()");
+    }
+
+    [Fact]
     public void CorrectiveMigrationUpgradesAlreadyAppliedSourceTriggerFailClosed()
     {
         var correctiveSql = Sql(
@@ -84,6 +99,28 @@ public sealed class ProcurementPurchaseOrderSourceMigrationTests
         correctiveSql.Should().Contain(
             "EXEC sys.sp_executesql @definition");
         correctiveSql.Should().Contain("THROW 51217");
+        correctiveSql.Should().NotContain("DISABLE TRIGGER");
+    }
+
+    [Fact]
+    public void CorrectiveOrdinarySourceMigrationUpgradesAppliedTriggerFailClosed()
+    {
+        var correctiveSql = Sql(
+            new TDC0403OrdinarySourceTriggerCorrections());
+
+        correctiveSql.Should().Contain(
+            "OBJECT_DEFINITION(");
+        correctiveSql.Should().Contain(
+            "readiness.SourceId <> exceptional.TenderId");
+        correctiveSql.Should().Contain(
+            "contract.StartDate > SYSUTCDATETIME()");
+        correctiveSql.Should().Contain(
+            "contract.EndDate < SYSUTCDATETIME()");
+        correctiveSql.Should().Contain(
+            "N'CREATE OR ALTER '");
+        correctiveSql.Should().Contain(
+            "EXEC sys.sp_executesql @definition");
+        correctiveSql.Should().Contain("THROW 51218");
         correctiveSql.Should().NotContain("DISABLE TRIGGER");
     }
 

@@ -4,6 +4,9 @@ namespace ErpSystem.Core.Services.Procurement;
 
 public static class ProcurementFrameworkCallOffCommercialRules
 {
+    public static bool RequiresCommercialRevalidationOnDecision(bool approved) =>
+        approved;
+
     public sealed record AgreementRevisionState(
         Guid AgreementId,
         Guid AgreementKey,

@@ -40,6 +40,8 @@ public sealed class ProcurementFrameworkCallOffService :
     private readonly INotificationTopicPublisher _notificationTopics;
     private readonly IDocumentNumberingService _documentNumbering;
     private readonly IProcurementPurchaseOrderSourceService _purchaseOrderSources;
+    private readonly IProcurementPurchaseOrderComplianceService _purchaseOrderCompliance;
+    private readonly IProcurementPurchaseOrderSodService _purchaseOrderSod;
     private readonly ILogger<ProcurementFrameworkCallOffService> _logger;
 
     public ProcurementFrameworkCallOffService(
@@ -53,6 +55,8 @@ public sealed class ProcurementFrameworkCallOffService :
         INotificationTopicPublisher notificationTopics,
         IDocumentNumberingService documentNumbering,
         IProcurementPurchaseOrderSourceService purchaseOrderSources,
+        IProcurementPurchaseOrderComplianceService purchaseOrderCompliance,
+        IProcurementPurchaseOrderSodService purchaseOrderSod,
         ILogger<ProcurementFrameworkCallOffService> logger)
     {
         _unitOfWork = unitOfWork;
@@ -65,6 +69,8 @@ public sealed class ProcurementFrameworkCallOffService :
         _notificationTopics = notificationTopics;
         _documentNumbering = documentNumbering;
         _purchaseOrderSources = purchaseOrderSources;
+        _purchaseOrderCompliance = purchaseOrderCompliance;
+        _purchaseOrderSod = purchaseOrderSod;
         _logger = logger;
     }
 
@@ -443,7 +449,7 @@ public sealed class ProcurementFrameworkCallOffService :
                 OrderDate = now,
                 RequiredDate = EnsureUtc(request.RequiredDateUtc),
                 Status = "Draft",
-                RequestedById = _currentUser.UserId,
+                RequestedById = requisition.RequestedById,
                 SubTotal = total,
                 TaxAmount = 0m,
                 ShippingCost = 0m,
@@ -599,90 +605,95 @@ public sealed class ProcurementFrameworkCallOffService :
             ManagePermission, id.ToString(), correlation, cancellationToken);
         EnsureEvidence(request.Evidence);
         ProcurementFrameworkCallOff? result = null;
-        await ExecuteAsync(async () =>
+        PurchaseOrder? automaticApprovalPurchaseOrder = null;
+        try
         {
-            var callOff = await LoadAsync(id, true, cancellationToken);
-            if (IsReplay(callOff, "Submitted", correlation) ||
-                IsReplay(callOff, "ApprovedOnSubmit", correlation))
+            await ExecuteAsync(async () =>
             {
-                result = callOff;
-                return;
-            }
-            EnsureStatus(callOff, ProcurementFrameworkCallOffStatus.Draft,
-                "Only a Draft call-off can be submitted.");
-            EnsureRowVersion(callOff.RowVersion, request.RowVersion);
-            var agreement = await RevalidateAsync(
-                callOff, true, correlation, cancellationToken);
-            var definition = await ResolvePurchaseOrderWorkflowAsync(cancellationToken)
-                ?? throw Conflict("FRAMEWORK_CALL_OFF_WORKFLOW_REQUIRED",
-                    "A Published and active TDC Purchase Order Approval workflow is required.");
-            var workflowResult = await _workflow.SubmitAsync(
-                PurchaseOrderWorkflowEntity, callOff.PurchaseOrderId, definition.Id);
-            if (!workflowResult.ExecutionResult.Success)
-                throw Conflict("FRAMEWORK_CALL_OFF_WORKFLOW_START_FAILED",
-                    workflowResult.ExecutionResult.Message ??
-                    "The shared purchase-order workflow could not start.");
+                var callOff = await LoadAsync(id, true, cancellationToken);
+                if (IsReplay(callOff, "Submitted", correlation) ||
+                    IsReplay(callOff, "ApprovedOnSubmit", correlation))
+                {
+                    result = callOff;
+                    return;
+                }
+                EnsureStatus(callOff, ProcurementFrameworkCallOffStatus.Draft,
+                    "Only a Draft call-off can be submitted.");
+                EnsureRowVersion(callOff.RowVersion, request.RowVersion);
+                var agreement = await RevalidateAsync(
+                    callOff, true, correlation, cancellationToken);
+                await EnforcePurchaseOrderComplianceAsync(
+                    callOff.PurchaseOrder,
+                    "Submit",
+                    correlation,
+                    cancellationToken);
+                var definition = await ResolvePurchaseOrderWorkflowAsync(cancellationToken)
+                    ?? throw Conflict("FRAMEWORK_CALL_OFF_WORKFLOW_REQUIRED",
+                        "A Published and active TDC Purchase Order Approval workflow is required.");
+                var workflowResult = await _workflow.SubmitAsync(
+                    PurchaseOrderWorkflowEntity, callOff.PurchaseOrderId, definition.Id);
+                if (!workflowResult.ExecutionResult.Success)
+                    throw Conflict("FRAMEWORK_CALL_OFF_WORKFLOW_START_FAILED",
+                        workflowResult.ExecutionResult.Message ??
+                        "The shared purchase-order workflow could not start.");
+                if (ProcurementPurchaseOrderSodRules.IsAutomaticApproval(
+                        workflowResult.Outcome))
+                {
+                    automaticApprovalPurchaseOrder = callOff.PurchaseOrder;
+                    throw new AutomaticApprovalDetectedException();
+                }
+                if (workflowResult.Outcome == WorkflowOutcome.Rejected)
+                {
+                    throw Conflict("FRAMEWORK_CALL_OFF_WORKFLOW_START_REJECTED",
+                        "The shared workflow rejected or failed while starting; the call-off remains Draft.");
+                }
 
-            var now = DateTime.UtcNow;
-            callOff.WorkflowDefinitionId = definition.Id;
-            callOff.WorkflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId;
-            callOff.SubmittedById = _currentUser.UserId;
-            callOff.SubmittedByName = ActorName;
-            callOff.SubmittedAtUtc = now;
-            callOff.DecisionComment = Trim(request.Comment, 1000);
-            if (workflowResult.Outcome == WorkflowOutcome.Approved)
-            {
-                await CommitBalanceAsync(callOff, agreement, correlation, now, cancellationToken);
-                callOff.Status = ProcurementFrameworkCallOffStatus.Approved;
-                callOff.ApprovedById = _currentUser.UserId;
-                callOff.ApprovedByName = ActorName;
-                callOff.ApprovedAtUtc = now;
-                callOff.LastOperation = "ApprovedOnSubmit";
-            }
-            else if (workflowResult.Outcome == WorkflowOutcome.Rejected)
-            {
-                throw Conflict("FRAMEWORK_CALL_OFF_WORKFLOW_START_REJECTED",
-                    "The shared workflow rejected or failed while starting; the call-off remains Draft.");
-            }
-            else
-            {
+                var now = DateTime.UtcNow;
+                callOff.WorkflowDefinitionId = definition.Id;
+                callOff.WorkflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId;
+                callOff.SubmittedById = _currentUser.UserId;
+                callOff.SubmittedByName = ActorName;
+                callOff.SubmittedAtUtc = now;
+                callOff.DecisionComment = Trim(request.Comment, 1000);
                 callOff.Status = ProcurementFrameworkCallOffStatus.PendingApproval;
                 callOff.LastOperation = "Submitted";
-            }
-            callOff.LastOperationCorrelationId = correlation;
-            callOff.UpdatedAt = now;
-            callOff.UpdatedBy = ActorName;
-            callOff.LastModifiedById = _currentUser.UserId;
-            Capture(callOff);
-            await CallOffs.UpdateAsync(callOff);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+                callOff.LastOperationCorrelationId = correlation;
+                callOff.UpdatedAt = now;
+                callOff.UpdatedBy = ActorName;
+                callOff.LastModifiedById = _currentUser.UserId;
+                Capture(callOff);
+                await CallOffs.UpdateAsync(callOff);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            var purchaseOrder = callOff.PurchaseOrder;
-            _workflowAdapters.GetAdapter(PurchaseOrderWorkflowEntity)
-                .ApplySubmitOutcome(
-                    purchaseOrder, workflowResult.Outcome, _currentUser.UserId);
-            purchaseOrder.UpdatedAt = now;
-            purchaseOrder.UpdatedBy = ActorName;
-            purchaseOrder.LastModifiedById = _currentUser.UserId;
-            await PurchaseOrders.UpdateAsync(purchaseOrder);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+                var purchaseOrder = callOff.PurchaseOrder;
+                _workflowAdapters.GetAdapter(PurchaseOrderWorkflowEntity)
+                    .ApplySubmitOutcome(
+                        purchaseOrder, workflowResult.Outcome, _currentUser.UserId);
+                purchaseOrder.UpdatedAt = now;
+                purchaseOrder.UpdatedBy = ActorName;
+                purchaseOrder.LastModifiedById = _currentUser.UserId;
+                await PurchaseOrders.UpdateAsync(purchaseOrder);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            await RecordEventAsync(
-                callOff, agreement,
-                workflowResult.Outcome == WorkflowOutcome.Approved
-                    ? "ApprovedOnSubmit"
-                    : "Submitted",
-                workflowResult.Outcome == WorkflowOutcome.Approved
-                    ? ProcurementControlEventResult.Succeeded
-                    : ProcurementControlEventResult.ReviewRequired,
-                null, Snapshot(callOff), request.Comment, request.Evidence,
-                correlation, now, cancellationToken);
-            result = callOff;
-        }, cancellationToken);
+                await RecordEventAsync(
+                    callOff, agreement, "Submitted",
+                    ProcurementControlEventResult.ReviewRequired,
+                    null, Snapshot(callOff), request.Comment, request.Evidence,
+                    correlation, now, cancellationToken);
+                result = callOff;
+            }, cancellationToken);
+        }
+        catch (AutomaticApprovalDetectedException)
+        {
+            await _purchaseOrderSod.RejectApprovalBypassAsync(
+                automaticApprovalPurchaseOrder!,
+                "FrameworkWorkflowAutoApprove",
+                correlation,
+                cancellationToken);
+            throw;
+        }
         await PublishNotificationAsync(
-            result!.Status == ProcurementFrameworkCallOffStatus.Approved
-                ? "procurement.framework-call-off.approved"
-                : "procurement.framework-call-off.submitted",
+            "procurement.framework-call-off.submitted",
             result, cancellationToken);
         return await GetInternalAsync(result.Id, cancellationToken);
     }
@@ -722,8 +733,22 @@ public sealed class ProcurementFrameworkCallOffService :
                 throw Authorization(
                     "The current actor is not assigned to the active purchase-order workflow step.");
 
-            var agreement = await RevalidateAsync(
-                callOff, false, correlation, cancellationToken);
+            ProcurementFrameworkAgreement? agreement = null;
+            if (ProcurementFrameworkCallOffCommercialRules
+                    .RequiresCommercialRevalidationOnDecision(request.Approved))
+            {
+                agreement = await RevalidateAsync(
+                    callOff, false, correlation, cancellationToken);
+                await _purchaseOrderSod.EnforceApprovalAsync(
+                    callOff.PurchaseOrder,
+                    correlation,
+                    cancellationToken);
+                await EnforcePurchaseOrderComplianceAsync(
+                    callOff.PurchaseOrder,
+                    "Approve",
+                    correlation,
+                    cancellationToken);
+            }
             var workflowResult = await _workflow.ProcessApprovalAsync(
                 PurchaseOrderWorkflowEntity,
                 callOff.PurchaseOrderId,
@@ -744,7 +769,12 @@ public sealed class ProcurementFrameworkCallOffService :
             var now = DateTime.UtcNow;
             if (workflowResult.Outcome == WorkflowOutcome.Approved)
             {
-                await CommitBalanceAsync(callOff, agreement, correlation, now, cancellationToken);
+                await CommitBalanceAsync(
+                    callOff,
+                    agreement!,
+                    correlation,
+                    now,
+                    cancellationToken);
                 callOff.Status = ProcurementFrameworkCallOffStatus.Approved;
                 callOff.ApprovedById = _currentUser.UserId;
                 callOff.ApprovedByName = ActorName;
@@ -2129,6 +2159,30 @@ public sealed class ProcurementFrameworkCallOffService :
             })
     };
 
+    private async Task EnforcePurchaseOrderComplianceAsync(
+        PurchaseOrder purchaseOrder,
+        string action,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _purchaseOrderCompliance.EnforceAsync(
+                purchaseOrder,
+                action,
+                correlationId,
+                cancellationToken);
+        }
+        catch (ProcurementPurchaseOrderComplianceBlockedException exception)
+        {
+            throw Conflict(exception.Code, exception.Message);
+        }
+        catch (ProcurementPurchaseOrderComplianceAuthorizationException exception)
+        {
+            throw Authorization(exception.Message);
+        }
+    }
+
     private static void Capture(ProcurementFrameworkCallOff item)
     {
         item.SnapshotJson = Serialize(Snapshot(item));
@@ -2387,6 +2441,10 @@ public sealed class ProcurementFrameworkCallOffService :
             "department",
             "department_id"
         };
+
+    private sealed class AutomaticApprovalDetectedException : Exception
+    {
+    }
 
     private sealed record ResolvedLine(
         PurchaseRequisitionItem DemandLine,

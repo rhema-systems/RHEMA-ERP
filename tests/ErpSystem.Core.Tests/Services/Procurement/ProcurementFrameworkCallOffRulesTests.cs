@@ -8,6 +8,18 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementFrameworkCallOffRulesTests
 {
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void CommercialRevalidationRunsOnlyForApproval(
+        bool approved,
+        bool expected)
+    {
+        ProcurementFrameworkCallOffCommercialRules
+            .RequiresCommercialRevalidationOnDecision(approved)
+            .Should().Be(expected);
+    }
+
     [Fact]
     public void LineTotalUsesThePersistedFourDecimalQuantity()
     {
