@@ -67,13 +67,23 @@ public partial class TDC0403FrameworkLineageFailClosed : Migration
                        AND tender.IsDeleted = 0
                       LEFT JOIN ProcurementExceptionalSourcingControls exceptional
                         ON readiness.SourceType = 2
-                       AND exceptional.Id = readiness.SourceId
+                       AND exceptional.TenderId = readiness.SourceId
                        AND exceptional.TenantId = callOff.TenantId
                        AND exceptional.SourcingCaseId = sourcing.Id
                        AND exceptional.IsDeleted = 0
                       WHERE purchaseOrder.Id IS NULL
                          OR agreement.Id IS NULL
                          OR readiness.Id IS NULL
+                         OR EXISTS (
+                              SELECT 1
+                              FROM ProcurementAwardReadinessDecisions newer
+                              WHERE newer.TenantId = callOff.TenantId
+                                AND newer.SourceType = readiness.SourceType
+                                AND newer.SourceId = readiness.SourceId
+                                AND newer.IsDeleted = 0
+                                AND newer.DecisionSequence >
+                                    readiness.DecisionSequence
+                         )
                          OR sourcing.Id IS NULL
                          OR purchaseOrder.ProcurementSourceType <> 4
                          OR purchaseOrder.ProcurementSourceId <> callOff.Id
@@ -143,11 +153,21 @@ public partial class TDC0403FrameworkLineageFailClosed : Migration
                        AND tender.IsDeleted = 0
                       LEFT JOIN ProcurementExceptionalSourcingControls exceptional
                         ON readiness.SourceType = 2
-                       AND exceptional.Id = readiness.SourceId
+                       AND exceptional.TenderId = readiness.SourceId
                        AND exceptional.TenantId = callOff.TenantId
                        AND exceptional.SourcingCaseId = sourcing.Id
                        AND exceptional.IsDeleted = 0
-                      WHERE purchaseOrder.ProcurementSourceType <> 4
+                      WHERE EXISTS (
+                              SELECT 1
+                              FROM ProcurementAwardReadinessDecisions newer
+                              WHERE newer.TenantId = callOff.TenantId
+                                AND newer.SourceType = readiness.SourceType
+                                AND newer.SourceId = readiness.SourceId
+                                AND newer.IsDeleted = 0
+                                AND newer.DecisionSequence >
+                                    readiness.DecisionSequence
+                         )
+                         OR purchaseOrder.ProcurementSourceType <> 4
                          OR purchaseOrder.ProcurementSourceId <> callOff.Id
                          OR purchaseOrder.ProcurementSourceReference <>
                               callOff.CallOffNumber

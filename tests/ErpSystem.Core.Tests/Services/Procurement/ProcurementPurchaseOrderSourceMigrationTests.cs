@@ -47,6 +47,46 @@ public sealed class ProcurementPurchaseOrderSourceMigrationTests
         correctiveSql.Should().NotContain("DISABLE TRIGGER");
     }
 
+    [Fact]
+    public void FrameworkTriggerUsesExceptionalTenderAndRejectsSupersededReadiness()
+    {
+        var initialSql = Sql(
+            new TDC0403FrameworkLineageFailClosed());
+
+        initialSql.Should().Contain(
+            "exceptional.TenderId = readiness.SourceId");
+        initialSql.Should().NotContain(
+            "exceptional.Id = readiness.SourceId");
+        initialSql.Should().Contain(
+            "newer.SourceType = readiness.SourceType");
+        initialSql.Should().Contain(
+            "newer.SourceId = readiness.SourceId");
+        initialSql.Should().Contain(
+            "newer.DecisionSequence >");
+        initialSql.Should().Contain(
+            "readiness.DecisionSequence");
+    }
+
+    [Fact]
+    public void CorrectiveFrameworkMigrationUpgradesAppliedTriggerFailClosed()
+    {
+        var correctiveSql = Sql(
+            new TDC0403ExceptionalFrameworkLineage());
+
+        correctiveSql.Should().Contain(
+            "OBJECT_DEFINITION(");
+        correctiveSql.Should().Contain(
+            "exceptional.TenderId = readiness.SourceId");
+        correctiveSql.Should().Contain(
+            "newer.DecisionSequence >");
+        correctiveSql.Should().Contain(
+            "N'CREATE OR ALTER '");
+        correctiveSql.Should().Contain(
+            "EXEC sys.sp_executesql @definition");
+        correctiveSql.Should().Contain("THROW 51217");
+        correctiveSql.Should().NotContain("DISABLE TRIGGER");
+    }
+
     private static string Sql(Migration migration)
     {
         var builder = new MigrationBuilder(

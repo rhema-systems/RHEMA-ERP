@@ -203,12 +203,30 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 "The framework call-off does not match its governed agreement.");
         }
 
-        var readiness = await ReadinessDecisions.GetQueryable(item =>
+        var retainedReadiness = await ReadinessDecisions.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
-                item.Id == agreement.AwardReadinessDecisionId && !item.IsDeleted)
+                item.Id == agreement.AwardReadinessDecisionId &&
+                item.SourceType == agreement.SourceType &&
+                item.SourceId == agreement.SourceId &&
+                !item.IsDeleted)
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
             ?? throw Invalid("PO_SOURCE_READINESS_NOT_FOUND",
                 "The framework agreement award-readiness decision was not found.");
+        var readiness = await ReadinessDecisions.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.SourceType == retainedReadiness.SourceType &&
+                item.SourceId == retainedReadiness.SourceId &&
+                !item.IsDeleted)
+            .OrderByDescending(item => item.DecisionSequence)
+            .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+            ?? throw Invalid("PO_SOURCE_READINESS_NOT_FOUND",
+                "The framework source has no current award-readiness decision.");
+        if (readiness.Id != retainedReadiness.Id)
+        {
+            throw Invalid(
+                "PO_FRAMEWORK_SOURCE_READINESS_SUPERSEDED",
+                "The framework agreement does not retain the latest award-readiness decision.");
+        }
         EnsureReady(readiness);
         var sourceLink = await ResolveSourceLinkAsync(
             readiness.SourceType, readiness.SourceId, cancellationToken);
@@ -1408,11 +1426,13 @@ public sealed class ProcurementPurchaseOrderSourceService :
     }
 
     private async Task<(PurchaseRequisition Requisition, ProcurementSourcingCase SourcingCase)>
-        ResolveExceptionSourceLinkAsync(Guid id, CancellationToken cancellationToken)
+        ResolveExceptionSourceLinkAsync(
+            Guid tenderId,
+            CancellationToken cancellationToken)
     {
         var control = await _unitOfWork.Repository<ProcurementExceptionalSourcingControl>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
-                item.Id == id && !item.IsDeleted)
+                item.TenderId == tenderId && !item.IsDeleted)
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
             ?? throw Invalid("PO_EXCEPTION_SOURCE_NOT_FOUND",
                 "The approved-exception source was not found.");
