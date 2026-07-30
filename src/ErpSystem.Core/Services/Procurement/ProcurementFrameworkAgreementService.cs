@@ -93,17 +93,31 @@ public sealed class ProcurementFrameworkAgreementService :
             item.TenantId == _currentUser.TenantId && !item.IsDeleted);
         var all = await query.AsNoTracking()
             .Include(item => item.Extensions)
-            .Include(item => item.Balance)
             .ToListAsync(cancellationToken);
-        var effective = all.Where(item =>
-            ProcurementFrameworkAgreementRules.IsEffective(item, now)).ToList();
-        var byCurrency = effective.GroupBy(item => item.CurrencyCode)
-            .ToDictionary(group => group.Key, group => group.Sum(item => item.CeilingAmount));
-        var availableByCurrency = effective.GroupBy(item => item.CurrencyCode)
+        var movements = await BalanceMovements.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var effectiveFamilies = ProcurementFrameworkCallOffCommercialRules
+            .SummarizeFamilies(
+                all.Select(ToAgreementRevisionState),
+                movements.Select(item =>
+                    new ProcurementFrameworkCallOffCommercialRules.MovementState(
+                        item.AgreementId,
+                        item.MovementType,
+                        item.Amount)),
+                now)
+            .Where(item => item.IsEffective)
+            .ToList();
+        var byCurrency = effectiveFamilies.GroupBy(item => item.CurrencyCode)
             .ToDictionary(
                 group => group.Key,
-                group => group.Sum(item =>
-                    item.Balance?.AvailableAmount ?? item.CeilingAmount));
+                group => group.Sum(item => item.CeilingAmount));
+        var availableByCurrency = effectiveFamilies
+            .GroupBy(item => item.CurrencyCode)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(item => item.AvailableAmount));
         return new ProcurementFrameworkAgreementSummaryDto
         {
             TotalVersions = all.Count,
@@ -112,9 +126,10 @@ public sealed class ProcurementFrameworkAgreementService :
                 item.Status == ProcurementFrameworkAgreementStatus.PendingApproval),
             PublishedCount = all.Count(item =>
                 item.Status == ProcurementFrameworkAgreementStatus.Published),
-            EffectiveCount = effective.Count,
-            ExpiringWithin90DaysCount = effective.Count(item =>
-                ProcurementFrameworkAgreementRules.EffectiveEnd(item) <= now.AddDays(90)),
+            EffectiveCount = effectiveFamilies.Count,
+            ExpiringWithin90DaysCount = effectiveFamilies.Count(item =>
+                item.EffectiveEndUtc.HasValue &&
+                item.EffectiveEndUtc.Value <= now.AddDays(90)),
             PendingExtensionCount = all.Sum(item => item.Extensions.Count(extension =>
                 !extension.IsDeleted &&
                 extension.Status == ProcurementFrameworkExtensionStatus.PendingApproval)),

@@ -386,11 +386,57 @@ public sealed class ProcurementFrameworkAgreementServiceTests
             {
                 Search = secondPublished.AgreementNumber
             });
+        var summary = await fixture.Service.GetSummaryAsync();
 
         detail.AvailableCeiling.Should().Be(400m);
         page.Items.Should().Contain(item =>
             item.Id == secondPublished.Id &&
             item.AvailableCeiling == 400m);
+        summary.EffectiveAvailableByCurrency["GHS"].Should().Be(400m);
+    }
+
+    [Fact]
+    public async Task SummaryCountsOnlyTheGoverningEffectiveFamilyRevision()
+    {
+        await using var fixture = new Fixture();
+        var firstPublished = await fixture.PublishCurrentAgreementAsync(
+            "framework-summary-family");
+        var futureStart = DateTime.UtcNow.AddDays(20);
+        var secondDraft = await fixture.Service.CloneAsync(
+            firstPublished.Id,
+            new CloneProcurementFrameworkAgreementRequest
+            {
+                RowVersion = firstPublished.RowVersion,
+                EffectiveFromUtc = futureStart,
+                EffectiveToUtc = futureStart.AddMonths(12),
+                WorkflowDefinitionId = fixture.Workflow.Id,
+                ChangeSummary = "Scheduled summary revision."
+            },
+            "framework-summary-family-v2-clone");
+        await fixture.AttachRequiredDocumentAsync(secondDraft);
+        var secondSubmitted = await fixture.Service.SubmitAsync(
+            secondDraft.Id,
+            Lifecycle(secondDraft.RowVersion, "Submit summary revision."),
+            "framework-summary-family-v2-submit");
+        fixture.CompleteLatestWorkflow();
+        fixture.SetUser(Guid.NewGuid());
+        var secondPublished = await fixture.Service.ApproveAsync(
+            secondDraft.Id,
+            Lifecycle(secondSubmitted.RowVersion, "Approve summary revision."),
+            "framework-summary-family-v2-approve");
+        var storedRevision = await fixture.Context
+            .ProcurementFrameworkAgreements
+            .SingleAsync(item => item.Id == secondPublished.Id);
+        storedRevision.EffectiveFromUtc = DateTime.UtcNow.AddMinutes(-1);
+        storedRevision.RowVersion = Guid.NewGuid().ToByteArray();
+        await fixture.Context.SaveChangesAsync();
+
+        var summary = await fixture.Service.GetSummaryAsync();
+
+        summary.PublishedCount.Should().Be(2);
+        summary.EffectiveCount.Should().Be(1);
+        summary.EffectiveCeilingByCurrency["GHS"].Should().Be(1000m);
+        summary.EffectiveAvailableByCurrency["GHS"].Should().Be(1000m);
     }
 
     [Fact]

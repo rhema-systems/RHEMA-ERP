@@ -41,3 +41,25 @@ export const frameworkRemainingCeilingNote = (agreement: FrameworkAgreement) =>
   agreement.availableCeiling === agreement.ceilingAmount
     ? 'No call-off deductions are applied in TDC-0401.'
     : 'Available ceiling reflects downstream call-off deductions.';
+
+export const frameworkUtcInstantToLocalInput = (
+  value?: string,
+  offsetMinutes?: number
+) => {
+  if (!value) return '';
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) return '';
+  const offset = offsetMinutes ?? instant.getTimezoneOffset();
+  return new Date(instant.getTime() - offset * 60_000)
+    .toISOString()
+    .slice(0, 16);
+};
+
+export const frameworkLocalInputToUtcInstant = (
+  value: string,
+  offsetMinutes?: number
+) => {
+  if (offsetMinutes === undefined) return new Date(value).toISOString();
+  const localAsUtc = new Date(`${value}:00.000Z`);
+  return new Date(localAsUtc.getTime() + offsetMinutes * 60_000).toISOString();
+};

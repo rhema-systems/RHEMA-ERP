@@ -855,6 +855,7 @@ namespace ErpSystem.Data.Migrations
                     IF EXISTS (
                         SELECT 1
                         FROM inserted i
+                        LEFT JOIN deleted prior ON prior.Id = i.Id
                         LEFT JOIN [ProcurementFrameworkAgreements] agreement
                             ON agreement.Id = i.AgreementId
                            AND agreement.TenantId = i.TenantId
@@ -867,7 +868,9 @@ namespace ErpSystem.Data.Migrations
                            AND workflowInstance.WorkflowDefinitionId
                                = i.WorkflowDefinitionId
                            AND workflowInstance.EntityId = i.Id
-                        WHERE agreement.Id IS NULL OR agreement.Status <> 2
+                        WHERE agreement.Id IS NULL
+                           OR ((prior.Id IS NULL OR i.Status = 1)
+                               AND agreement.Status <> 2)
                            OR workflowDefinition.Id IS NULL OR i.IsDeleted <> 0
                            OR (i.WorkflowInstanceId IS NOT NULL
                                AND workflowInstance.Id IS NULL)

@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   frameworkActionState,
+  frameworkLocalInputToUtcInstant,
   frameworkRemainingCeilingNote,
   frameworkStatusTone,
+  frameworkUtcInstantToLocalInput,
 } from './procurement-framework-agreement';
 import type { FrameworkAgreement } from '@/types/procurement-framework-agreement';
 
@@ -35,6 +37,18 @@ describe('framework agreement presentation contract', () => {
   it('does not imply call-off spend deductions in the TDC-0401 UI', () => {
     expect(frameworkRemainingCeilingNote(agreement())).toContain(
       'No call-off deductions'
+    );
+  });
+
+  it('round-trips UTC instants through a non-UTC date-time editor', () => {
+    const input = frameworkUtcInstantToLocalInput(
+      '2026-07-30T12:00:00.000Z',
+      300
+    );
+
+    expect(input).toBe('2026-07-30T07:00');
+    expect(frameworkLocalInputToUtcInstant(input, 300)).toBe(
+      '2026-07-30T12:00:00.000Z'
     );
   });
 });

@@ -122,6 +122,31 @@ public sealed class ProcurementFrameworkCallOffRulesTests
     }
 
     [Fact]
+    public void UnusedPublishedFamilyContributesItsFullAvailableCapacity()
+    {
+        var atUtc = new DateTime(
+            2026,
+            8,
+            1,
+            0,
+            0,
+            0,
+            DateTimeKind.Utc);
+        var agreement = Revision(
+            version: 1,
+            effectiveFromUtc: new DateTime(
+                2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        var summary = ProcurementFrameworkCallOffCommercialRules
+            .SummarizeFamilies([agreement], [], atUtc)
+            .Should().ContainSingle().Which;
+
+        summary.IsEffective.Should().BeTrue();
+        summary.CommittedAmount.Should().Be(0m);
+        summary.AvailableAmount.Should().Be(1000m);
+    }
+
+    [Fact]
     public void HistoryRowsUseTheSameFamilyBalanceAcrossAllRevisions()
     {
         var atUtc = new DateTime(

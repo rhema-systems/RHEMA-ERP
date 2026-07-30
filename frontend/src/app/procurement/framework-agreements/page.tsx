@@ -53,8 +53,10 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   frameworkActionState,
   frameworkExtensionTone,
+  frameworkLocalInputToUtcInstant,
   frameworkRemainingCeilingNote,
   frameworkStatusTone,
+  frameworkUtcInstantToLocalInput,
 } from '@/lib/procurement-framework-agreement';
 import { procurementFrameworkAgreementService as service } from '@/services/procurement-framework-agreement.service';
 import type {
@@ -85,13 +87,13 @@ const authorityKinds: FrameworkAuthorityKind[] = [
   'Permission',
 ];
 
-const toInputDate = (value?: string) => (value ? value.slice(0, 16) : '');
-const toUtc = (value: string) => new Date(value).toISOString();
+const toInputDate = frameworkUtcInstantToLocalInput;
+const toUtc = frameworkLocalInputToUtcInstant;
 const dateAfter = (days: number) => {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + days);
   date.setUTCSeconds(0, 0);
-  return date.toISOString().slice(0, 16);
+  return toInputDate(date.toISOString());
 };
 const formatDate = (value?: string) =>
   value ? new Date(value).toLocaleDateString() : '—';

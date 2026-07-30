@@ -49,6 +49,43 @@ public sealed class ProcurementFrameworkCallOffMigrationTests
         sql.Should().NotContain("DISABLE TRIGGER");
     }
 
+    [Fact]
+    public void TerminalCallOffsDoNotRequireAStillApprovedRequisition()
+    {
+        var freshSql = Sql(new TDC0402FrameworkCallOffs());
+        var correctiveSql = Sql(new TDC0402TerminalReviewPaths());
+
+        freshSql.Should().Contain(
+            "prior.Id IS NULL OR i.Status NOT IN (4, 5)");
+        freshSql.Should().Contain(
+            "AND requisition.Status <> 'Approved'");
+        correctiveSql.Should().Contain(
+            "prior.Id IS NULL OR i.Status NOT IN (4, 5)");
+        correctiveSql.Should().Contain(
+            "TR_ProcurementFrameworkCallOffs_Lifecycle");
+        correctiveSql.Should().Contain("THROW 51220");
+    }
+
+    [Fact]
+    public void RejectedExtensionsDoNotRequireAStillPublishedAgreement()
+    {
+        var freshSql = Sql(new TDC0401FrameworkAgreements());
+        var correctiveSql = Sql(new TDC0402TerminalReviewPaths());
+
+        freshSql.Should().Contain(
+            "LEFT JOIN deleted prior ON prior.Id = i.Id");
+        freshSql.Should().Contain(
+            "prior.Id IS NULL OR i.Status = 1");
+        freshSql.Should().Contain(
+            "AND agreement.Status <> 2");
+        correctiveSql.Should().Contain(
+            "TR_ProcurementFrameworkAgreementExtensions_Lifecycle");
+        correctiveSql.Should().Contain(
+            "prior.Id IS NULL OR i.Status = 1");
+        correctiveSql.Should().Contain("THROW 51221");
+        correctiveSql.Should().NotContain("DISABLE TRIGGER");
+    }
+
     private static string Sql(Migration migration)
     {
         var builder = new MigrationBuilder(

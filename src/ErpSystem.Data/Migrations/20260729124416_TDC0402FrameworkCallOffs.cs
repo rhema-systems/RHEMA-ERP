@@ -573,7 +573,8 @@ namespace ErpSystem.Data.Migrations
                            OR purchaseOrder.ContractEndDate <> i.AgreementEffectiveEndUtc
                            OR purchaseOrder.ContractValue IS NULL
                            OR purchaseOrder.ContractValue <> agreement.CeilingAmount
-                           OR requisition.Status <> 'Approved'
+                           OR ((prior.Id IS NULL OR i.Status NOT IN (4, 5))
+                               AND requisition.Status <> 'Approved')
                            OR (i.WorkflowDefinitionId IS NULL
                                AND i.WorkflowInstanceId IS NOT NULL)
                            OR (i.WorkflowDefinitionId IS NOT NULL

@@ -105,24 +105,12 @@ public sealed class ProcurementFrameworkCallOffService :
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .Include(item => item.Extensions.Where(child => !child.IsDeleted))
             .AsNoTracking().ToListAsync(cancellationToken);
-        var balanceAgreementIds = await Balances.GetQueryable(item =>
-                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
-            .AsNoTracking()
-            .Select(item => item.AgreementId)
-            .ToListAsync(cancellationToken);
-        var balanceAgreementIdSet = balanceAgreementIds.ToHashSet();
-        var balanceFamilyKeys = agreements
-            .Where(item => balanceAgreementIdSet.Contains(item.Id))
-            .Select(item => item.AgreementKey)
-            .ToHashSet();
         var movements = await BalanceMovements.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .AsNoTracking().ToListAsync(cancellationToken);
         var familySummaries =
             ProcurementFrameworkCallOffCommercialRules.SummarizeFamilies(
-                agreements
-                    .Where(item => balanceFamilyKeys.Contains(item.AgreementKey))
-                    .Select(ToAgreementRevisionState),
+                agreements.Select(ToAgreementRevisionState),
                 movements.Select(item =>
                     new ProcurementFrameworkCallOffCommercialRules.MovementState(
                         item.AgreementId,
