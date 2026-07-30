@@ -39,6 +39,7 @@ export interface ContractDto {
   completedAt?: string;
   terminatedAt?: string;
   terminationReason?: string;
+  rowVersion: string;
   milestones: ContractMilestoneDto[];
   amendments: ContractAmendmentDto[];
   documents: ContractDocumentDto[];
@@ -112,6 +113,9 @@ export interface ContractDocumentDto {
   documentType: string;
   fileName: string;
   filePath: string;
+  fileUploadRecordId?: string;
+  centralDocumentRecordId?: string;
+  centralDocumentVersionId?: string;
   contentType?: string;
   fileSize?: number;
   description?: string;
@@ -208,11 +212,248 @@ export interface UpdateContractStatusDto {
   notes?: string;
 }
 
+export type ContractActivationCheckStatus = 'Passed' | 'Failed' | 'NotRequired' | 'Pending' | number;
+export type ContractActivationStatus =
+  | 'PendingApproval'
+  | 'Approved'
+  | 'Rejected'
+  | 'Activated'
+  | 'RevalidationFailed'
+  | 'Cancelled'
+  | number;
+
+export interface ContractActivationCheck {
+  key: string;
+  label: string;
+  status: ContractActivationCheckStatus;
+  code: string;
+  message: string;
+  isRequired: boolean;
+  referenceId?: string;
+  reference?: string;
+}
+
+export interface ContractActivationEvidence {
+  id: string;
+  requirementKey: string;
+  requirementLabel: string;
+  referenceKind: 'WorkflowEvidenceDocument' | 'CentralDocumentUpload' | number;
+  workflowEvidenceDocumentId?: string;
+  fileUploadRecordId?: string;
+  evidenceReference: string;
+  evidenceHash: string;
+}
+
+export interface ContractActivation {
+  id: string;
+  contractId: string;
+  sequence: number;
+  status: ContractActivationStatus;
+  configurationProfileId: string;
+  configurationProfileVersion: number;
+  policySetId: string;
+  policyVersion: number;
+  authorityRuleId: string;
+  authorityName: string;
+  workflowDefinitionId: string;
+  workflowInstanceId?: string;
+  awardReadinessDecisionId: string;
+  awardReadinessSequence: number;
+  ghanepsRequired: boolean;
+  ghanepsCompliant: boolean;
+  performanceSecurityRequired: boolean;
+  performanceBondRequestId?: string;
+  submittedById: string;
+  submittedByName: string;
+  submittedAtUtc: string;
+  decidedById?: string;
+  decidedByName?: string;
+  decidedAtUtc?: string;
+  activatedById?: string;
+  activatedByName?: string;
+  activatedAtUtc?: string;
+  reason: string;
+  decisionComment?: string;
+  integrityHash: string;
+  rowVersion: string;
+  evidence: ContractActivationEvidence[];
+}
+
+export interface ContractActivationOverview {
+  contractId: string;
+  contractNumber: string;
+  contractStatus: string;
+  isReady: boolean;
+  canSubmit: boolean;
+  canDecide: boolean;
+  canActivate: boolean;
+  requiredEvidenceKeys: string[];
+  decisionKeys: string[];
+  checks: ContractActivationCheck[];
+  history: ContractActivation[];
+}
+
+export interface SubmitContractActivationRequest {
+  reason: string;
+  idempotencyKey: string;
+  contractRowVersion: string;
+  evidence: Array<{
+    requirementKey: string;
+    referenceKind: 'CentralDocumentUpload';
+    fileUploadRecordId: string;
+    evidenceReference: string;
+  }>;
+}
+
+export interface ContractOperationsPrompt {
+  key: string;
+  type: string;
+  severity: 'Critical' | 'High' | 'Medium' | 'Low';
+  title: string;
+  message: string;
+  recommendedAction: string;
+  sourceId: string;
+  sourceReference: string;
+  dueAtUtc?: string;
+  daysOverdue: number;
+  estimatedPenaltyAmount?: number;
+  calculationBasis: string;
+  requiresIndependentApproval: boolean;
+  amountAutoPosted: boolean;
+}
+
+export interface ContractOperationsSummary {
+  contractId: string;
+  contractNumber: string;
+  contractTitle: string;
+  contractType: string;
+  status: string;
+  businessPartnerId: string;
+  businessPartnerName: string;
+  currency: string;
+  contractValue: number;
+  committedSpend: number;
+  invoicedAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  retentionHeldAmount: number;
+  retentionReleasedAmount: number;
+  purchaseOrderCount: number;
+  receiptCount: number;
+  totalMilestones: number;
+  completedMilestones: number;
+  overdueMilestones: number;
+  milestoneCompletionPercent: number;
+  endDate?: string;
+  daysToExpiry?: number;
+  renewalStatus: string;
+  supplierPerformanceScore?: number;
+  supplierPerformanceBand?: string;
+  supplierRiskScore?: number;
+  supplierRiskBand?: string;
+  promptCount: number;
+  criticalPromptCount: number;
+  overallRisk: 'Critical' | 'High' | 'Medium' | 'Low';
+}
+
+export interface ContractOperationsCurrencyTotal {
+  currency: string;
+  contractValue: number;
+  committedSpend: number;
+  invoicedAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  retentionHeldAmount: number;
+}
+
+export interface ContractOperationsPortfolio {
+  generatedAtUtc: string;
+  totalContracts: number;
+  activeContracts: number;
+  contractsWithPrompts: number;
+  criticalPromptCount: number;
+  currencyTotals: ContractOperationsCurrencyTotal[];
+  items: ContractOperationsSummary[];
+  decisionKeys: string[];
+}
+
+export interface ContractOperationsDetail {
+  summary: ContractOperationsSummary;
+  generatedAtUtc: string;
+  penaltyClause?: string;
+  paymentTerms?: string;
+  retentionPercentage: number;
+  milestones: Array<{
+    id: string;
+    name: string;
+    sequence: number;
+    status: string;
+    paymentAmount: number;
+    plannedDate?: string;
+    actualDate?: string;
+    daysLate: number;
+  }>;
+  purchaseOrders: Array<{
+    id: string;
+    number: string;
+    status: string;
+    currency: string;
+    amount: number;
+    orderDate: string;
+    promisedDate?: string;
+    receivedDate?: string;
+    receiptCount: number;
+  }>;
+  invoices: Array<{
+    id: string;
+    number: string;
+    status: string;
+    currency: string;
+    totalAmount: number;
+    paidAmount: number;
+    outstandingAmount: number;
+    invoiceDate: string;
+    dueDate?: string;
+    isOverdue: boolean;
+  }>;
+  kpis: Array<{
+    key: string;
+    label: string;
+    score?: number;
+    target?: number;
+    status: string;
+    sourceReference: string;
+  }>;
+  prompts: ContractOperationsPrompt[];
+  lineage: {
+    activationId?: string;
+    activationSequence?: number;
+    activationStatus: string;
+    configurationProfileId?: string;
+    configurationProfileVersion?: number;
+    policySetId?: string;
+    policyVersion?: number;
+    workflowDefinitionId?: string;
+    workflowInstanceId?: string;
+    awardReadinessDecisionId?: string;
+    integrityHash?: string;
+  };
+  decisionKeys: string[];
+}
+
+export interface ProcessContractOperationsAlertsResult {
+  processedAtUtc: string;
+  evaluatedPromptCount: number;
+  publishedAlertCount: number;
+  alreadyPublishedCount: number;
+  publishedPromptKeys: string[];
+}
+
 // ==================== API FUNCTIONS ====================
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
-function getAuthHeaders(): HeadersInit {
+function getAuthHeaders(): Record<string, string> {
   const token = typeof window !== 'undefined'
     ? (localStorage.getItem('token') || localStorage.getItem('authToken'))
     : null;
@@ -220,6 +461,17 @@ function getAuthHeaders(): HeadersInit {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+}
+
+async function apiError(response: Response, fallback: string): Promise<Error> {
+  const text = await response.text();
+  if (!text) return new Error(fallback);
+  try {
+    const payload = JSON.parse(text);
+    return new Error(payload?.detail || payload?.message || payload?.title || fallback);
+  } catch {
+    return new Error(text || fallback);
+  }
 }
 
 export const contractService = {
@@ -346,6 +598,123 @@ export const contractService = {
       throw new Error(error || 'Failed to activate contract');
     }
 
+    return response.json();
+  },
+
+  async getActivationOverview(contractId: string): Promise<ContractActivationOverview> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/contract-activations/contracts/${contractId}`,
+      { headers: getAuthHeaders(), cache: 'no-store' }
+    );
+    if (!response.ok) throw await apiError(response, 'Failed to load contract activation controls');
+    return response.json();
+  },
+
+  async submitActivation(
+    contractId: string,
+    data: SubmitContractActivationRequest
+  ): Promise<ContractActivation> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/contract-activations/contracts/${contractId}/submit`,
+      {
+        method: 'POST',
+        headers: {
+          ...getAuthHeaders(),
+          'X-Correlation-ID': crypto.randomUUID(),
+        },
+        body: JSON.stringify(data),
+      }
+    );
+    if (!response.ok) throw await apiError(response, 'Failed to submit contract activation');
+    return response.json();
+  },
+
+  async decideActivation(
+    activationId: string,
+    approved: boolean,
+    comment: string,
+    rowVersion: string
+  ): Promise<ContractActivation> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/contract-activations/${activationId}/decision`,
+      {
+        method: 'POST',
+        headers: {
+          ...getAuthHeaders(),
+          'X-Correlation-ID': crypto.randomUUID(),
+        },
+        body: JSON.stringify({ approved, comment, rowVersion }),
+      }
+    );
+    if (!response.ok) throw await apiError(response, 'Failed to decide contract activation');
+    return response.json();
+  },
+
+  async applyActivation(
+    activationId: string,
+    contractorSignatoryName: string,
+    comment: string,
+    rowVersion: string
+  ): Promise<ContractDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/contract-activations/${activationId}/activate`,
+      {
+        method: 'POST',
+        headers: {
+          ...getAuthHeaders(),
+          'X-Correlation-ID': crypto.randomUUID(),
+        },
+        body: JSON.stringify({ contractorSignatoryName, comment, rowVersion }),
+      }
+    );
+    if (!response.ok) throw await apiError(response, 'Failed to activate contract');
+    return response.json();
+  },
+
+  async getContractOperations(
+    search?: string,
+    status?: string,
+    risk?: string,
+    take = 100
+  ): Promise<ContractOperationsPortfolio> {
+    const params = new URLSearchParams({ take: String(take) });
+    if (search) params.set('search', search);
+    if (status) params.set('status', status);
+    if (risk) params.set('risk', risk);
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/contract-operations?${params.toString()}`,
+      { headers: getAuthHeaders(), cache: 'no-store' }
+    );
+    if (!response.ok) throw await apiError(response, 'Failed to load contract operations');
+    return response.json();
+  },
+
+  async getContractOperationsDetail(
+    contractId: string
+  ): Promise<ContractOperationsDetail> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/contract-operations/${contractId}`,
+      { headers: getAuthHeaders(), cache: 'no-store' }
+    );
+    if (!response.ok) throw await apiError(response, 'Failed to load contract operations detail');
+    return response.json();
+  },
+
+  async processContractOperationsAlerts(
+    contractId?: string
+  ): Promise<ProcessContractOperationsAlertsResult> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/contract-operations/process-alerts`,
+      {
+        method: 'POST',
+        headers: {
+          ...getAuthHeaders(),
+          'X-Correlation-ID': crypto.randomUUID(),
+        },
+        body: JSON.stringify({ contractId }),
+      }
+    );
+    if (!response.ok) throw await apiError(response, 'Failed to publish contract operations prompts');
     return response.json();
   },
 

@@ -175,6 +175,8 @@ public class ContractService : IContractService
 
             var tender = await _tenderRepository.GetByIdAsync(award.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {award.TenderId} not found");
+            EnsureExactAwardCommercials(
+                dto.ContractValue, dto.Currency, award.AwardedAmount, award.Currency);
 
             await _supplierValidation.EnforceEligibilityAsync(new SupplierEligibilityEvaluationRequest
             {
@@ -267,6 +269,16 @@ public class ContractService : IContractService
                 throw new InvalidOperationException($"Cannot edit contract in {contract.Status} status. Use amendments for changes.");
             }
 
+            if (dto.ContractValue.HasValue)
+            {
+                var award = await _awardRepository.GetByIdAsync(contract.TenderAwardId)
+                    ?? throw new InvalidOperationException(
+                        $"Award with ID {contract.TenderAwardId} not found");
+                EnsureExactAwardCommercials(
+                    dto.ContractValue.Value, contract.Currency,
+                    award.AwardedAmount, award.Currency);
+            }
+
             if (!string.IsNullOrEmpty(dto.ContractTitle)) contract.ContractTitle = dto.ContractTitle;
             if (!string.IsNullOrEmpty(dto.ContractType)) contract.ContractType = dto.ContractType;
             if (dto.ContractValue.HasValue) contract.ContractValue = dto.ContractValue.Value;
@@ -327,6 +339,12 @@ public class ContractService : IContractService
     {
         try
         {
+            if (string.Equals(dto.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Direct contract activation is prohibited. Use the controlled TDC-0407 approval and activation gate.");
+            }
+
             var contract = await _contractRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Contract with ID {id} not found");
 
@@ -354,37 +372,9 @@ public class ContractService : IContractService
 
     public async Task<ContractDto> ActivateContractAsync(Guid id, UpdateContractStatusDto dto)
     {
-        try
-        {
-            var contract = await _contractRepository.GetByIdAsync(id)
-                ?? throw new InvalidOperationException($"Contract with ID {id} not found");
-
-            if (contract.Status != "Draft" && contract.Status != "PendingSignature")
-            {
-                throw new InvalidOperationException($"Cannot activate contract in {contract.Status} status");
-            }
-
-            contract.Status = "Active";
-            contract.ActivatedAt = DateTime.UtcNow;
-            contract.SignedDate = dto.SignedDate ?? DateTime.UtcNow;
-            contract.SignedByName = dto.SignedByName;
-            contract.SignedById = _currentUserProvider.UserId;
-            contract.ContractorSignatoryName = dto.ContractorSignatoryName;
-            contract.ContractorSignedDate = dto.ContractorSignedDate;
-
-            await _contractRepository.UpdateAsync(contract);
-            await _unitOfWork.SaveChangesAsync();
-
-            _logger.LogInformation("Activated contract {ContractNumber}", contract.ContractNumber);
-
-            var updatedContract = await _contractRepository.GetByIdWithDetailsAsync(id);
-            return MapToDto(updatedContract!);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error activating contract {ContractId}", id);
-            throw;
-        }
+        await Task.CompletedTask;
+        throw new InvalidOperationException(
+            "Direct contract activation is prohibited. Use the controlled TDC-0407 approval and activation gate.");
     }
 
     public async Task<ContractDto> CompleteContractAsync(Guid id)
@@ -393,6 +383,12 @@ public class ContractService : IContractService
         {
             var contract = await _contractRepository.GetByIdWithDetailsAsync(id)
                 ?? throw new InvalidOperationException($"Contract with ID {id} not found");
+
+            if (ProcurementWorksCloseoutRules.IsWorks(contract.ContractType))
+            {
+                throw new InvalidOperationException(
+                    "Direct completion of a Works contract is prohibited. Use the controlled TDC-0409 Works closeout workflow.");
+            }
 
             if (contract.Status != "Active")
             {
@@ -430,6 +426,12 @@ public class ContractService : IContractService
         {
             var contract = await _contractRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Contract with ID {id} not found");
+
+            if (ProcurementWorksCloseoutRules.IsWorks(contract.ContractType))
+            {
+                throw new InvalidOperationException(
+                    "Direct termination of a Works contract is prohibited. Use the controlled TDC-0409 Works closeout workflow.");
+            }
 
             if (contract.Status == "Completed" || contract.Status == "Terminated")
             {
@@ -804,7 +806,17 @@ public class ContractService : IContractService
 
     #region Documents
 
-    public async Task<ContractDocumentDto> UploadDocumentAsync(Guid contractId, string documentType, string fileName, string filePath, string? contentType, long? fileSize, string? description)
+    public async Task<ContractDocumentDto> UploadDocumentAsync(
+        Guid contractId,
+        string documentType,
+        string fileName,
+        string filePath,
+        string? contentType,
+        long? fileSize,
+        string? description,
+        Guid fileUploadRecordId,
+        Guid centralDocumentRecordId,
+        Guid centralDocumentVersionId)
     {
         try
         {
@@ -817,6 +829,9 @@ public class ContractService : IContractService
                 DocumentType = documentType,
                 FileName = fileName,
                 FilePath = filePath,
+                FileUploadRecordId = fileUploadRecordId,
+                CentralDocumentRecordId = centralDocumentRecordId,
+                CentralDocumentVersionId = centralDocumentVersionId,
                 ContentType = contentType,
                 FileSize = fileSize,
                 Description = description,
@@ -911,6 +926,7 @@ public class ContractService : IContractService
             CompletedAt = contract.CompletedAt,
             TerminatedAt = contract.TerminatedAt,
             TerminationReason = contract.TerminationReason,
+            RowVersion = Convert.ToBase64String(contract.RowVersion),
             Milestones = contract.Milestones.Where(m => !m.IsDeleted).Select(MapMilestoneToDto).OrderBy(m => m.SequenceNumber).ToList(),
             Amendments = contract.Amendments.Where(a => !a.IsDeleted).Select(MapAmendmentToDto).OrderBy(a => a.SequenceNumber).ToList(),
             Documents = contract.Documents.Where(d => !d.IsDeleted).Select(MapDocumentToDto).ToList(),
@@ -1000,12 +1016,33 @@ public class ContractService : IContractService
             DocumentType = document.DocumentType,
             FileName = document.FileName,
             FilePath = document.FilePath,
+            FileUploadRecordId = document.FileUploadRecordId,
+            CentralDocumentRecordId = document.CentralDocumentRecordId,
+            CentralDocumentVersionId = document.CentralDocumentVersionId,
             ContentType = document.ContentType,
             FileSize = document.FileSize,
             Description = document.Description,
             UploadedByName = document.UploadedBy?.UserName,
             CreatedAt = document.CreatedAt
         };
+    }
+
+    private static void EnsureExactAwardCommercials(
+        decimal contractValue,
+        string contractCurrency,
+        decimal awardValue,
+        string awardCurrency)
+    {
+        if (decimal.Round(contractValue, 2, MidpointRounding.AwayFromZero) !=
+            decimal.Round(awardValue, 2, MidpointRounding.AwayFromZero))
+            throw new InvalidOperationException(
+                "Contract value must exactly match the approved award amount.");
+        if (!string.Equals(
+                contractCurrency?.Trim(),
+                awardCurrency?.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "Contract currency must exactly match the approved award currency.");
     }
 
     #endregion

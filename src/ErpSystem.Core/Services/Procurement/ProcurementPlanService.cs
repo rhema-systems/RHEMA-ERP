@@ -1560,6 +1560,8 @@ public class ProcurementPlanService : IProcurementPlanService
             DeliveryInstructions = dto.DeliveryInstructions,
             Notes = dto.Notes ?? $"Created from procurement plan item: {planItem.ItemDescription}",
             TenantId = _currentUserProvider.TenantId,
+            RequestedById =
+                approvedSource.PurchaseRequisitionRequestedById,
             CreatedById = _currentUserProvider.UserId,
             CreatedAt = DateTime.UtcNow
         };

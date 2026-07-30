@@ -32,6 +32,10 @@ public interface IProcurementPurchaseOrderSourceService
         string correlationId,
         CancellationToken cancellationToken = default);
 
+    Task<ProcurementPurchaseOrderSourceResolution> EvaluateCurrentAsync(
+        PurchaseOrder purchaseOrder,
+        CancellationToken cancellationToken = default);
+
     Task ValidateOrderAsync(
         ProcurementPurchaseOrderSourceResolution source,
         IReadOnlyCollection<ProcurementPurchaseOrderSourceOrderLine> lines,

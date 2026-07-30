@@ -124,6 +124,45 @@ public sealed class ProcurementFrameworkCallOffsControllerTests
         service.VerifyAll();
     }
 
+    [Fact]
+    public async Task PurchaseOrderSodFailureMapsToStructuredForbiddenProblem()
+    {
+        var service = new Mock<IProcurementFrameworkCallOffService>();
+        var readiness = new ProcurementPurchaseOrderSodReadinessDto
+        {
+            PurchaseOrderId = Guid.NewGuid(),
+            OrderNumber = "PO-TDC0405",
+            CanApprove = false,
+            CanReceive = true,
+            Code = "PO_SOD_RESTRICTED"
+        };
+        service.Setup(item => item.DecideAsync(
+                Guid.Empty,
+                It.IsAny<ProcurementFrameworkCallOffDecisionRequest>(),
+                "corr-0402",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementPurchaseOrderSodBlockedException(
+                "PO_SOD_APPROVAL_BLOCKED",
+                "The requester cannot approve.",
+                readiness));
+        var controller = Controller(service);
+
+        var result = await controller.Decide(
+            Guid.Empty,
+            new ProcurementFrameworkCallOffDecisionRequest
+            {
+                Approved = true
+            },
+            default);
+
+        var problem = result.Should().BeAssignableTo<ObjectResult>().Subject;
+        problem.StatusCode.Should().Be(403);
+        var details = problem.Value.Should()
+            .BeAssignableTo<ProblemDetails>().Subject;
+        details.Extensions["code"].Should().Be("PO_SOD_APPROVAL_BLOCKED");
+        details.Extensions["readiness"].Should().BeSameAs(readiness);
+    }
+
     private static void AssertProblem(
         IActionResult result,
         int expectedStatus,

@@ -269,103 +269,8 @@ public sealed class ProcurementPurchaseOrderSourceService :
     {
         try
         {
-            if (purchaseOrder.TenantId != _currentUser.TenantId)
-                throw new ProcurementPurchaseOrderSourceAuthorizationException(
-                    "The purchase order is not in the current tenant.");
-            if (!purchaseOrder.ProcurementSourceType.HasValue ||
-                !purchaseOrder.ProcurementSourceId.HasValue)
-            {
-                throw Invalid("PO_SOURCE_REQUIRED",
-                    "The purchase order has no governed approved source lineage.");
-            }
-            if (purchaseOrder.ProcurementSourceType ==
-                ProcurementPurchaseOrderSourceType.HistoricalMigration)
-            {
-                throw Invalid("PO_HISTORICAL_SOURCE_REVALIDATION_REQUIRED",
-                    "This historical purchase order predates mandatory source lineage and cannot enter a new approval lifecycle without remediation.");
-            }
-
-            ProcurementPurchaseOrderSourceResolution current;
-            if (purchaseOrder.ProcurementSourceType ==
-                ProcurementPurchaseOrderSourceType.FrameworkCallOff)
-            {
-                var callOff = await _unitOfWork.Repository<ProcurementFrameworkCallOff>()
-                    .GetQueryable(item =>
-                        item.TenantId == _currentUser.TenantId &&
-                        item.Id == purchaseOrder.ProcurementSourceId.Value &&
-                        item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted)
-                    .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
-                    ?? throw Invalid("PO_FRAMEWORK_SOURCE_NOT_FOUND",
-                        "The linked framework call-off was not found.");
-                if (callOff.Status is ProcurementFrameworkCallOffStatus.Rejected or
-                    ProcurementFrameworkCallOffStatus.Cancelled)
-                {
-                    throw Invalid("PO_FRAMEWORK_SOURCE_TERMINAL",
-                        "A rejected or cancelled framework call-off cannot authorize a purchase order.");
-                }
-                var agreement = await _unitOfWork.Repository<ProcurementFrameworkAgreement>()
-                    .GetQueryable(item =>
-                        item.TenantId == _currentUser.TenantId &&
-                        item.Id == callOff.AgreementId && !item.IsDeleted)
-                    .AsNoTracking().SingleAsync(cancellationToken);
-                current = await ResolveFrameworkCallOffAsync(
-                    callOff, agreement, correlationId, cancellationToken);
-            }
-            else
-            {
-                current = await ResolveCoreAsync(
-                    purchaseOrder.ProcurementSourceType.Value,
-                    purchaseOrder.ProcurementSourceId.Value,
-                    purchaseOrder.BusinessPartnerId,
-                    purchaseOrder.Id,
-                    cancellationToken);
-            }
-
-            if (current.PurchaseRequisitionId != purchaseOrder.SourceRequisitionId ||
-                current.SourcingReleaseId != purchaseOrder.SourcingReleaseId ||
-                current.SourcingCaseId != purchaseOrder.SourcingCaseId ||
-                current.AwardReadinessDecisionId != purchaseOrder.AwardReadinessDecisionId ||
-                !string.Equals(current.SourceIntegrityHash,
-                    purchaseOrder.SourceIntegrityHash, StringComparison.OrdinalIgnoreCase))
-            {
-                throw Invalid("PO_SOURCE_LINEAGE_CHANGED",
-                    "The persisted purchase-order source snapshot no longer matches the authoritative approved source.");
-            }
-
-            if (current.SourceType !=
-                ProcurementPurchaseOrderSourceType.FrameworkCallOff)
-            {
-                var persistedLines = await _unitOfWork.Repository<PurchaseOrderItem>()
-                    .GetQueryable(item =>
-                        item.TenantId == _currentUser.TenantId &&
-                        item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted)
-                    .AsNoTracking()
-                    .Select(item => new ProcurementPurchaseOrderSourceOrderLine
-                    {
-                        InventoryItemId = item.InventoryItemId,
-                        ItemDescription = item.ItemDescription,
-                        OrderedQuantity = item.OrderedQuantity,
-                        UnitOfMeasure = item.UnitOfMeasure,
-                        UnitPrice = item.UnitPrice
-                    })
-                    .ToListAsync(cancellationToken);
-                EnsureOrderMatchesSource(
-                    current,
-                    persistedLines,
-                    purchaseOrder.TotalAmount,
-                    purchaseOrder.Currency);
-                if (current.SourceType ==
-                    ProcurementPurchaseOrderSourceType.Contract)
-                {
-                    await EnsureContractCapacityAsync(
-                        current,
-                        persistedLines,
-                        purchaseOrder.TotalAmount,
-                        purchaseOrder.Currency,
-                        purchaseOrder.Id,
-                        cancellationToken);
-                }
-            }
+            var current = await EvaluateCurrentAsync(
+                purchaseOrder, cancellationToken);
 
             purchaseOrder.SourceValidatedAtUtc = current.ValidatedAtUtc;
             await RecordAsync(
@@ -409,6 +314,111 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 cancellationToken);
             throw;
         }
+    }
+
+    public async Task<ProcurementPurchaseOrderSourceResolution> EvaluateCurrentAsync(
+        PurchaseOrder purchaseOrder,
+        CancellationToken cancellationToken = default)
+    {
+        if (purchaseOrder.TenantId != _currentUser.TenantId)
+            throw new ProcurementPurchaseOrderSourceAuthorizationException(
+                "The purchase order is not in the current tenant.");
+        if (!purchaseOrder.ProcurementSourceType.HasValue ||
+            !purchaseOrder.ProcurementSourceId.HasValue)
+        {
+            throw Invalid("PO_SOURCE_REQUIRED",
+                "The purchase order has no governed approved source lineage.");
+        }
+        if (purchaseOrder.ProcurementSourceType ==
+            ProcurementPurchaseOrderSourceType.HistoricalMigration)
+        {
+            throw Invalid("PO_HISTORICAL_SOURCE_REVALIDATION_REQUIRED",
+                "This historical purchase order predates mandatory source lineage and cannot enter a new approval lifecycle without remediation.");
+        }
+
+        ProcurementPurchaseOrderSourceResolution current;
+        if (purchaseOrder.ProcurementSourceType ==
+            ProcurementPurchaseOrderSourceType.FrameworkCallOff)
+        {
+            var callOff = await _unitOfWork.Repository<ProcurementFrameworkCallOff>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.Id == purchaseOrder.ProcurementSourceId.Value &&
+                    item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted)
+                .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+                ?? throw Invalid("PO_FRAMEWORK_SOURCE_NOT_FOUND",
+                    "The linked framework call-off was not found.");
+            if (callOff.Status is ProcurementFrameworkCallOffStatus.Rejected or
+                ProcurementFrameworkCallOffStatus.Cancelled)
+            {
+                throw Invalid("PO_FRAMEWORK_SOURCE_TERMINAL",
+                    "A rejected or cancelled framework call-off cannot authorize a purchase order.");
+            }
+            var agreement = await _unitOfWork.Repository<ProcurementFrameworkAgreement>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.Id == callOff.AgreementId && !item.IsDeleted)
+                .AsNoTracking().SingleAsync(cancellationToken);
+            current = await ResolveFrameworkCallOffAsync(
+                callOff, agreement, string.Empty, cancellationToken);
+        }
+        else
+        {
+            current = await ResolveCoreAsync(
+                purchaseOrder.ProcurementSourceType.Value,
+                purchaseOrder.ProcurementSourceId.Value,
+                purchaseOrder.BusinessPartnerId,
+                purchaseOrder.Id,
+                cancellationToken);
+        }
+
+        if (current.PurchaseRequisitionId != purchaseOrder.SourceRequisitionId ||
+            current.SourcingReleaseId != purchaseOrder.SourcingReleaseId ||
+            current.SourcingCaseId != purchaseOrder.SourcingCaseId ||
+            current.AwardReadinessDecisionId != purchaseOrder.AwardReadinessDecisionId ||
+            !string.Equals(current.SourceIntegrityHash,
+                purchaseOrder.SourceIntegrityHash, StringComparison.OrdinalIgnoreCase))
+        {
+            throw Invalid("PO_SOURCE_LINEAGE_CHANGED",
+                "The persisted purchase-order source snapshot no longer matches the authoritative approved source.");
+        }
+
+        if (current.SourceType !=
+            ProcurementPurchaseOrderSourceType.FrameworkCallOff)
+        {
+            var persistedLines = await _unitOfWork.Repository<PurchaseOrderItem>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted)
+                .AsNoTracking()
+                .Select(item => new ProcurementPurchaseOrderSourceOrderLine
+                {
+                    InventoryItemId = item.InventoryItemId,
+                    ItemDescription = item.ItemDescription,
+                    OrderedQuantity = item.OrderedQuantity,
+                    UnitOfMeasure = item.UnitOfMeasure,
+                    UnitPrice = item.UnitPrice
+                })
+                .ToListAsync(cancellationToken);
+            EnsureOrderMatchesSource(
+                current,
+                persistedLines,
+                purchaseOrder.TotalAmount,
+                purchaseOrder.Currency);
+            if (current.SourceType ==
+                ProcurementPurchaseOrderSourceType.Contract)
+            {
+                await EnsureContractCapacityAsync(
+                    current,
+                    persistedLines,
+                    purchaseOrder.TotalAmount,
+                    purchaseOrder.Currency,
+                    purchaseOrder.Id,
+                    cancellationToken);
+            }
+        }
+
+        return current;
     }
 
     public async Task ValidateOrderAsync(
@@ -1627,6 +1637,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
             SourceReference = sourceReference,
             PurchaseRequisitionId = requisition.Id,
             PurchaseRequisitionNumber = requisition.RequisitionNumber,
+            PurchaseRequisitionRequestedById = requisition.RequestedById,
             SourcingCaseId = sourcingCase.Id,
             SourcingReleaseId = sourcingCase.SourcingReleaseId,
             AwardReadinessDecisionId = readiness.Id,

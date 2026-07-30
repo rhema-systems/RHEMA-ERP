@@ -13,9 +13,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, FileSignature, Calendar, DollarSign, Building, CheckCircle, Clock, FileText, Edit, Plus, Trash2, Play, XCircle, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, FileSignature, Calendar, DollarSign, Building, CheckCircle, Clock, FileText, Edit, Plus, Trash2, XCircle, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { contractService, type ContractDto, type ContractMilestoneDto, type ContractAmendmentDto, type CreateContractMilestoneDto, type CreateContractAmendmentDto, type UpdateContractDto } from '@/services/contractService';
+import { ContractActivationGate } from '@/components/procurement/ContractActivationGate';
+import { ContractOperationsDashboard } from '@/components/procurement/ContractOperationsDashboard';
+import { WorksCloseoutWorkspace } from '@/components/procurement/WorksCloseoutWorkspace';
 import { format } from 'date-fns';
 
 export default function ContractDetailPage() {
@@ -49,10 +52,8 @@ export default function ContractDetailPage() {
   const [documentDescription, setDocumentDescription] = useState('');
 
   // Status dialogs
-  const [showActivateDialog, setShowActivateDialog] = useState(false);
   const [showTerminateDialog, setShowTerminateDialog] = useState(false);
   const [terminateReason, setTerminateReason] = useState('');
-  const [activateData, setActivateData] = useState({ signedByName: '', contractorSignatoryName: '' });
 
   useEffect(() => {
     if (contractId) loadContract(contractId);
@@ -236,21 +237,6 @@ export default function ContractDetailPage() {
   };
 
   // Contract status actions
-  const handleActivateContract = async () => {
-    if (!contract) return;
-    try {
-      setSaving(true);
-      await contractService.activateContract(contract.id, activateData);
-      toast.success('Contract activated successfully');
-      setShowActivateDialog(false);
-      loadContract(contract.id);
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to activate contract');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleCompleteContract = async () => {
     if (!contract || !confirm('Are you sure you want to mark this contract as completed?')) return;
     try {
@@ -372,12 +358,7 @@ export default function ContractDetailPage() {
               <Edit className="h-4 w-4 mr-1" />Edit
             </Button>
           )}
-          {contract.status === 'Draft' && (
-            <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => setShowActivateDialog(true)} disabled={saving}>
-              <Play className="h-4 w-4 mr-1" />Activate
-            </Button>
-          )}
-          {contract.status === 'Active' && (
+          {contract.status === 'Active' && contract.contractType.toLowerCase() !== 'works' && (
             <>
               <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={handleCompleteContract} disabled={saving}>
                 <CheckCircle2 className="h-4 w-4 mr-1" />Complete
@@ -386,6 +367,11 @@ export default function ContractDetailPage() {
                 <XCircle className="h-4 w-4 mr-1" />Terminate
               </Button>
             </>
+          )}
+          {contract.status === 'Active' && contract.contractType.toLowerCase() === 'works' && (
+            <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">
+              Complete or terminate through Works closeout
+            </Badge>
           )}
         </div>
       </div>
@@ -414,6 +400,11 @@ export default function ContractDetailPage() {
       <Tabs defaultValue="details" className="space-y-4">
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
+          <TabsTrigger value="activation">Approval &amp; activation</TabsTrigger>
+          <TabsTrigger value="operations">Operations</TabsTrigger>
+          {contract.contractType.toLowerCase() === 'works' && (
+            <TabsTrigger value="works-closeout">Works closeout</TabsTrigger>
+          )}
           <TabsTrigger value="milestones">Milestones ({contract.milestones.length})</TabsTrigger>
           <TabsTrigger value="amendments">Amendments ({contract.amendments.length})</TabsTrigger>
           <TabsTrigger value="documents">Documents ({contract.documents.length})</TabsTrigger>
@@ -450,6 +441,29 @@ export default function ContractDetailPage() {
             )}
           </div>
         </TabsContent>
+
+        <TabsContent value="activation">
+          <ContractActivationGate
+            contractId={contract.id}
+            contractRowVersion={contract.rowVersion}
+            documents={contract.documents}
+            onContractChanged={() => loadContract(contract.id)}
+          />
+        </TabsContent>
+
+        <TabsContent value="operations">
+          <ContractOperationsDashboard contractId={contract.id} />
+        </TabsContent>
+
+        {contract.contractType.toLowerCase() === 'works' && (
+          <TabsContent value="works-closeout">
+            <WorksCloseoutWorkspace
+              contractId={contract.id}
+              documents={contract.documents}
+              onContractChanged={() => loadContract(contract.id)}
+            />
+          </TabsContent>
+        )}
 
         <TabsContent value="milestones">
           <Card>
@@ -800,32 +814,6 @@ export default function ContractDetailPage() {
             <Button variant="outline" onClick={() => setShowAmendmentDialog(false)}>Cancel</Button>
             <Button onClick={handleCreateAmendment} disabled={saving}>
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Submit Amendment
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Activate Contract Dialog */}
-      <Dialog open={showActivateDialog} onOpenChange={setShowActivateDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Activate Contract</DialogTitle>
-            <DialogDescription>Enter signatory information to activate the contract</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label>Signed By (Your Organization)</Label>
-              <Input value={activateData.signedByName} onChange={(e) => setActivateData({ ...activateData, signedByName: e.target.value })} placeholder="Name of signatory" />
-            </div>
-            <div>
-              <Label>Contractor Signatory</Label>
-              <Input value={activateData.contractorSignatoryName} onChange={(e) => setActivateData({ ...activateData, contractorSignatoryName: e.target.value })} placeholder="Contractor representative name" />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowActivateDialog(false)}>Cancel</Button>
-            <Button className="bg-green-600 hover:bg-green-700" onClick={handleActivateContract} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Activate Contract
             </Button>
           </DialogFooter>
         </DialogContent>

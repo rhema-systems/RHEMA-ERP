@@ -733,7 +733,8 @@ public class RfqService : IRfqService
                         BusinessPartnerId = supplierId,
                         OrderDate = DateTime.UtcNow,
                         Status = "Draft",
-                        RequestedById = _currentUserProvider.UserId,
+                        RequestedById =
+                            approvedSource.PurchaseRequisitionRequestedById,
 
                         SubTotal = subTotal,
                         TaxAmount = 0,
