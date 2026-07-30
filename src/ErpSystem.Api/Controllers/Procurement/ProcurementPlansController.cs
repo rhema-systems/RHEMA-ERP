@@ -442,6 +442,24 @@ public class ProcurementPlansController : ControllerBase
                 correlationId = HttpContext.TraceIdentifier
             });
         }
+        catch (ProcurementPurchaseOrderSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementAccessAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
         catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
         catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
         catch (Exception ex)

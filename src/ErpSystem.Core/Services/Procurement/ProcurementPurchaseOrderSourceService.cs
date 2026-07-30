@@ -665,6 +665,13 @@ public sealed class ProcurementPurchaseOrderSourceService :
         string correlationId,
         CancellationToken cancellationToken = default)
     {
+        if (!_unitOfWork.HasActiveTransaction)
+        {
+            throw Invalid(
+                "PO_SOURCE_BOUND_TRANSACTION_REQUIRED",
+                "Purchase-order source binding, audit, and notification outbox records must be committed atomically.");
+        }
+
         await RecordAsync(
             purchaseOrder.Id,
             purchaseOrder.OrderNumber,
@@ -684,6 +691,9 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 purchaseOrder.SourceIntegrityHash
             },
             cancellationToken);
+        // NotificationTopicPublisher only appends durable Notification queue rows
+        // through this same scoped unit of work. The dispatcher cannot observe
+        // them unless the surrounding source-claim transaction commits.
         await PublishNotificationAsync(
             "procurement.purchase-order.source-bound",
             purchaseOrder,
