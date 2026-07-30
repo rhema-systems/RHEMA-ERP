@@ -345,6 +345,54 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
+    public void QueuedDemarcations_CannotDiscardAnIncompleteEditorDraft()
+    {
+        var dialog = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "land-management",
+            "DemarcateLandDialog.tsx");
+        var saveMethod = Slice(
+            dialog,
+            "const save = async () =>",
+            "const remove = async");
+        var saveButton = Slice(
+            dialog,
+            "<Button\n            onClick={() => void save()}",
+            "</DialogFooter>");
+
+        saveMethod.Should().Contain("if (hasEditorValues && !currentPayload)");
+        saveMethod.Should().Contain(
+            "Complete or clear the current demarcation draft before saving.");
+        saveButton.Should().Contain("hasEditorValues && isIncomplete");
+        saveButton.Should().Contain(
+            "pendingDemarcations.length === 0 && !hasEditorValues");
+    }
+
+    [Fact]
+    public void SaleListingAction_DisablesWhenAnyDemarcationIsAssigned()
+    {
+        var page = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "land-management",
+            "page.tsx");
+        var disabledReason = Slice(
+            page,
+            "const saleListingDisabledReason",
+            "const saleListingLabel");
+
+        disabledReason.Should().Contain(
+            "selectedDemarcations.some((item) => item.isAssignedToProject)");
+        disabledReason.Should().Contain(
+            "Land with an assigned demarcation cannot be listed for sale.");
+    }
+
+    [Fact]
     public void LegacyWholeParcelAssignments_CannotBeInvalidatedBySubdivision()
     {
         var source = ReadSource(

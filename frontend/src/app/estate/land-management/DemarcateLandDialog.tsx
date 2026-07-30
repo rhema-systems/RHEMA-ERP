@@ -388,6 +388,12 @@ export default function DemarcateLandDialog({
           boundaryCoordinates,
           boundaryVerified,
         };
+    if (hasEditorValues && !currentPayload) {
+      toast.error(
+        'Complete or clear the current demarcation draft before saving.'
+      );
+      return;
+    }
     if (editingId && !currentPayload) {
       toast.error('Enter a description and at least three complete beacons.');
       return;
@@ -893,8 +899,8 @@ export default function DemarcateLandDialog({
               saving ||
               (editingId
                 ? isIncomplete
-                : pendingDemarcations.length === 0 &&
-                  (isIncomplete || !hasDraftValues))
+                : (hasEditorValues && isIncomplete) ||
+                  (pendingDemarcations.length === 0 && !hasEditorValues))
             }
           >
             {saving ? (

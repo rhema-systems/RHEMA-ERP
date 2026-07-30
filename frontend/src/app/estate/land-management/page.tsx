@@ -311,14 +311,16 @@ export default function EstateLandManagementPage() {
     ? undefined
     : selectedAsset.status !== EstateManagedAssetStatus.LandBank
       ? 'Land already assigned to a project cannot be listed for sale.'
-      : !selectedAsset.boundaryVerified
-        ? 'Verify the main cadastral boundary first.'
-        : selectedAsset.demarcationCount === 0
-          ? 'Add at least one demarcation first.'
-          : selectedAsset.verifiedDemarcationCount !==
-              selectedAsset.demarcationCount
-            ? 'Verify every demarcation first.'
-            : undefined;
+      : selectedDemarcations.some((item) => item.isAssignedToProject)
+        ? 'Land with an assigned demarcation cannot be listed for sale.'
+        : !selectedAsset.boundaryVerified
+          ? 'Verify the main cadastral boundary first.'
+          : selectedAsset.demarcationCount === 0
+            ? 'Add at least one demarcation first.'
+            : selectedAsset.verifiedDemarcationCount !==
+                selectedAsset.demarcationCount
+              ? 'Verify every demarcation first.'
+              : undefined;
   const saleListingLabel =
     selectedAsset?.isPublishedToExternalPortal &&
     (selectedAsset.externalListingType === 'Sale' ||
