@@ -40,7 +40,7 @@ public sealed class ProcurementFrameworkAgreementConfiguration :
 
         builder.HasIndex(item => new { item.TenantId, item.AgreementKey, item.Version })
             .IsUnique();
-        builder.HasIndex(item => new { item.TenantId, item.AgreementNumber })
+        builder.HasIndex(item => new { item.TenantId, item.AgreementNumber, item.Version })
             .IsUnique();
         builder.HasIndex(item => new { item.TenantId, item.CreationCorrelationId })
             .IsUnique();
@@ -89,7 +89,8 @@ public sealed class ProcurementFrameworkAgreementCategoryConfiguration :
         });
 
         builder.HasIndex(item => new { item.TenantId, item.AgreementId, item.PartnerCategoryId })
-            .IsUnique();
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0");
         builder.HasOne(item => item.Agreement).WithMany(item => item.Categories)
             .HasForeignKey(item => item.AgreementId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.PartnerCategory).WithMany()
@@ -114,7 +115,8 @@ public sealed class ProcurementFrameworkPriceListLineConfiguration :
         });
 
         builder.HasIndex(item => new { item.TenantId, item.AgreementId, item.InventoryItemId })
-            .IsUnique();
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0");
         builder.HasOne(item => item.Agreement).WithMany(item => item.PriceLines)
             .HasForeignKey(item => item.AgreementId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.InventoryItem).WithMany()
@@ -146,7 +148,9 @@ public sealed class ProcurementFrameworkCallOffAuthorityConfiguration :
             item.AgreementId,
             item.AuthorityKind,
             item.AuthorityValue
-        }).IsUnique();
+        })
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0");
         builder.HasIndex(item => new { item.TenantId, item.AgreementId, item.IsActive });
         builder.HasOne(item => item.Agreement).WithMany(item => item.CallOffAuthorities)
             .HasForeignKey(item => item.AgreementId).OnDelete(DeleteBehavior.Restrict);

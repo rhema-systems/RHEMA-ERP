@@ -53042,7 +53042,7 @@ namespace ErpSystem.Data.Migrations
                         .HasDatabaseName("UX_ProcurementFrameworkAgreements_OpenRevision")
                         .HasFilter("[Status] IN (0, 1) AND [IsDeleted] = 0");
 
-                    b.HasIndex("TenantId", "AgreementNumber")
+                    b.HasIndex("TenantId", "AgreementNumber", "Version")
                         .IsUnique();
 
                     b.HasIndex("TenantId", "CreationCorrelationId")
@@ -53229,7 +53229,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("PartnerCategoryId");
 
                     b.HasIndex("TenantId", "AgreementId", "PartnerCategoryId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("ProcurementFrameworkAgreementCategories", null, t =>
                         {
@@ -53947,7 +53948,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "AgreementId", "IsActive");
 
                     b.HasIndex("TenantId", "AgreementId", "AuthorityKind", "AuthorityValue")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("ProcurementFrameworkCallOffAuthorities", null, t =>
                         {
@@ -54165,7 +54167,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("InventoryItemId");
 
                     b.HasIndex("TenantId", "AgreementId", "InventoryItemId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("ProcurementFrameworkPriceListLines", null, t =>
                         {
