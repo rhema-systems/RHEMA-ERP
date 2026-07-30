@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Data;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Procurement;
@@ -306,6 +307,32 @@ public partial class ProjectService : IProjectService
 
     public async Task<ProjectDetailDto> CreateProjectAsync(CreateProjectDto dto)
     {
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            var transactionStarted = false;
+            try
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+                transactionStarted = true;
+                var result = await CreateProjectCoreAsync(dto);
+                await _unitOfWork.CommitAsync();
+                transactionStarted = false;
+                return result;
+            }
+            catch
+            {
+                if (transactionStarted)
+                {
+                    await _unitOfWork.RollbackAsync();
+                }
+
+                throw;
+            }
+        });
+    }
+
+    private async Task<ProjectDetailDto> CreateProjectCoreAsync(CreateProjectDto dto)
+    {
         EnsureInternalProjectAccess();
         if (IsReadOnlyUser())
         {
@@ -323,14 +350,14 @@ public partial class ProjectService : IProjectService
 
         var slackMonths = NormalizeSlackMonths(dto.SlackMonths);
         EnsureChronologicalDateRange(dto.StartDate, dto.TargetEndDate, "project schedule");
-        EstateManagedAsset? selectedLandAsset = null;
+        ReadyProjectLandSelection? selectedLandSelection = null;
         if (dto.DevelopmentProfile != null)
         {
             var requestedLandReference = TrimOrNull(dto.DevelopmentProfile.LandReference);
             if (requestedLandReference != null)
             {
-                selectedLandAsset = await RequireReadyProjectLandAssetAsync(requestedLandReference);
-                dto.DevelopmentProfile.LandReference = GetProjectLandReference(selectedLandAsset);
+                selectedLandSelection = await RequireReadyProjectLandDemarcationAsync(requestedLandReference);
+                dto.DevelopmentProfile.LandReference = selectedLandSelection.LandReference;
             }
             else
             {
@@ -394,16 +421,12 @@ public partial class ProjectService : IProjectService
             await UpsertProjectConstructionFoundationAsync(project, dto.DevelopmentProfile);
         }
 
-        if (selectedLandAsset != null)
+        if (selectedLandSelection != null)
         {
-            selectedLandAsset.ProjectId = project.Id;
-            selectedLandAsset.ProjectTitle = project.Title;
-            selectedLandAsset.Status = EstateManagedAssetStatus.UnderDevelopment;
-            selectedLandAsset.IsReadyForProjectManagement = false;
-            selectedLandAsset.UpdatedAt = DateTime.UtcNow;
-            selectedLandAsset.UpdatedBy = _currentUserProvider.Username;
-            selectedLandAsset.LastModifiedById = _currentUserProvider.UserId;
-            await _unitOfWork.Repository<EstateManagedAsset>().UpdateAsync(selectedLandAsset);
+            await SynchronizeProjectLandAssetsAsync(
+                project,
+                null,
+                selectedLandSelection.LandReference);
         }
 
         await SaveInitiationSnapshotAsync(project, "Created", "Initial project creation");
@@ -415,7 +438,39 @@ public partial class ProjectService : IProjectService
 
     public async Task<ProjectDetailDto> UpdateProjectAsync(Guid id, UpdateProjectDto dto)
     {
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            var transactionStarted = false;
+            try
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+                transactionStarted = true;
+                var result = await UpdateProjectCoreAsync(id, dto);
+                await _unitOfWork.CommitAsync();
+                transactionStarted = false;
+                return result;
+            }
+            catch
+            {
+                if (transactionStarted)
+                {
+                    await _unitOfWork.RollbackAsync();
+                }
+
+                throw;
+            }
+        });
+    }
+
+    private async Task<ProjectDetailDto> UpdateProjectCoreAsync(Guid id, UpdateProjectDto dto)
+    {
         var project = await GetProjectForOperationAsync(id, ProjectAccessOperation.UpdateOverview);
+        var previousLandReference = (await _unitOfWork.Repository<ProjectDevelopmentProfile>()
+                .FirstOrDefaultAsync(profile =>
+                    profile.ProjectId == project.Id
+                    && profile.TenantId == _currentUserProvider.TenantId
+                    && !profile.IsDeleted))
+            ?.LandReference;
 
         if (string.Equals(project.Status, ProjectStatuses.Closed, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(project.Status, ProjectStatuses.Archived, StringComparison.OrdinalIgnoreCase))
@@ -486,6 +541,10 @@ public partial class ProjectService : IProjectService
         if (dto.DevelopmentProfile != null)
         {
             await UpsertProjectConstructionFoundationAsync(project, dto.DevelopmentProfile);
+            await SynchronizeProjectLandAssetsAsync(
+                project,
+                previousLandReference,
+                dto.DevelopmentProfile.LandReference);
         }
 
         await PublishActivityAsync(project, "Updated");

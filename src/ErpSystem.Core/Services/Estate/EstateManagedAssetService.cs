@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
@@ -352,14 +353,31 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
     public async Task<IReadOnlyList<EstateLandDemarcationDto>> GetLandDemarcationsAsync(Guid assetId)
     {
-        await RequireLandAssetAsync(assetId);
+        var asset = await RequireLandAssetAsync(assetId);
         var demarcations = await _unitOfWork.Repository<EstateLandDemarcation>()
             .GetQueryable(item => item.EstateManagedAssetId == assetId
                 && item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted)
             .OrderBy(item => item.DemarcationNumber)
             .ToListAsync();
-        return demarcations.Select(MapDemarcationToDto).ToList();
+        var assignedLandReferences = (await _unitOfWork.Repository<ProjectDevelopmentProfile>()
+                .FindAsync(item => item.TenantId == _currentUserProvider.TenantId
+                    && !item.IsDeleted
+                    && item.LandReference != null))
+            .Select(item => item.LandReference!.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return demarcations.Select(item =>
+        {
+            var dto = MapDemarcationToDto(item);
+            dto.LandReference = EstateLandDemarcationReference.Build(asset.AssetCode, item.DemarcationNumber);
+            dto.IsAssignedToProject = assignedLandReferences.Contains(dto.LandReference)
+                || (demarcations.Count == 1
+                    && new[] { asset.AssetCode, asset.ProjectCode, asset.Name, asset.Id.ToString() }
+                        .Any(reference => !string.IsNullOrWhiteSpace(reference)
+                            && assignedLandReferences.Contains(reference.Trim())));
+            return dto;
+        }).ToList();
     }
 
     public async Task<EstateLandDemarcationDto> CreateLandDemarcationAsync(
@@ -492,6 +510,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         var asset = await repository.FirstOrDefaultAsync(item => item.Id == assetId &&
             item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted && item.AssetType == EstateManagedAssetType.Land);
         if (asset == null) throw new InvalidOperationException("Land asset was not found.");
+        if (asset.IsPublishedToExternalPortal)
+            throw new InvalidOperationException("Withdraw the active external land listing before marking it ready for project management.");
         if (!asset.BoundaryVerified || string.IsNullOrWhiteSpace(asset.BoundaryCoordinates))
             throw new InvalidOperationException("Verify and record the cadastral boundary before project handoff.");
         var demarcations = await _unitOfWork.Repository<EstateLandDemarcation>()

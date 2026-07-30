@@ -155,12 +155,14 @@ public class EstateLandDemarcationDto
 {
     public Guid Id { get; set; }
     public Guid EstateManagedAssetId { get; set; }
+    public string LandReference { get; set; } = string.Empty;
     public int DemarcationNumber { get; set; }
     public string Description { get; set; } = string.Empty;
     public int BeaconCount { get; set; }
     public string BoundaryCoordinates { get; set; } = string.Empty;
     public decimal AreaSquareFeet { get; set; }
     public bool BoundaryVerified { get; set; }
+    public bool IsAssignedToProject { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
 }

@@ -126,12 +126,14 @@ export interface CreateManualExistingLand {
 export interface EstateLandDemarcation {
   id: string;
   estateManagedAssetId: string;
+  landReference: string;
   demarcationNumber: number;
   description: string;
   beaconCount: number;
   boundaryCoordinates: string;
   areaSquareFeet: number;
   boundaryVerified: boolean;
+  isAssignedToProject: boolean;
   createdAt: string;
   createdBy?: string;
 }

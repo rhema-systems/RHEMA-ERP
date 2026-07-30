@@ -36,6 +36,7 @@ import {
   EstateManagedAssetStatus,
   EstateManagedAssetType,
   type EstateManagedAsset,
+  type EstateLandDemarcation,
 } from '@/services/estate-land-management.service';
 import { userService } from '@/services/user';
 import type { User } from '@/types';
@@ -74,15 +75,22 @@ const formatBusinessPartnerLabel = (partner: BusinessPartnerDto) =>
 const formatContractLabel = (contract: ContractDto) =>
   `${contract.contractNumber} - ${contract.contractTitle}`;
 
-const readyLandReferenceValue = (asset: EstateManagedAsset) =>
-  asset.projectCode?.trim() || asset.assetCode;
+interface ReadyLandPortion {
+  asset: EstateManagedAsset;
+  demarcation: EstateLandDemarcation;
+}
 
-const formatReadyLandLabel = (asset: EstateManagedAsset) => {
-  const details = [asset.assetCode, asset.name, asset.location].filter(Boolean).join(' - ');
-  const acquisitionReference = asset.projectCode?.trim();
-  return acquisitionReference && acquisitionReference !== asset.assetCode
-    ? `${acquisitionReference} (${details})`
-    : details;
+const formatReadyLandPortionLabel = ({ asset, demarcation }: ReadyLandPortion) => {
+  const isWholeParcel = demarcation.description.trim().toLowerCase() === 'whole parcel';
+  const portionName = isWholeParcel
+    ? 'Whole Parcel'
+    : `Portion ${demarcation.demarcationNumber}: ${demarcation.description}`;
+  const acres = demarcation.areaSquareFeet / 43560;
+  const area = acres >= 0.01
+    ? `${acres.toLocaleString(undefined, { maximumFractionDigits: 2 })} acres`
+    : `${demarcation.areaSquareFeet.toLocaleString(undefined, { maximumFractionDigits: 0 })} sq ft`;
+  const parent = [asset.assetCode, asset.name, asset.location].filter(Boolean).join(' - ');
+  return `${portionName} — ${area} (${parent})`;
 };
 
 const resolveCatalogOptions = (entries: ProjectCatalogEntryDto[], fallbackValues: string[], currentValue?: string) => {
@@ -210,7 +218,7 @@ export default function NewProjectPage() {
   const [financeBaseCurrency, setFinanceBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const [businessPartners, setBusinessPartners] = useState<BusinessPartnerDto[]>([]);
   const [contracts, setContracts] = useState<ContractDto[]>([]);
-  const [readyLandAssets, setReadyLandAssets] = useState<EstateManagedAsset[]>([]);
+  const [readyLandPortions, setReadyLandPortions] = useState<ReadyLandPortion[]>([]);
   const [methodologyCatalog, setMethodologyCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [fundingSourceCatalog, setFundingSourceCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [form, setForm] = useState<CreateProjectDto>(initialForm);
@@ -339,9 +347,16 @@ export default function NewProjectPage() {
           status: EstateManagedAssetStatus.LandBank,
           take: 500,
         });
-        setReadyLandAssets(
-          assets.filter((asset) => asset.isReadyForProjectManagement)
+        const readyAssets = assets.filter((asset) => asset.isReadyForProjectManagement);
+        const portions = await Promise.all(
+          readyAssets.map(async (asset) => {
+            const demarcations = await estateLandManagementService.getLandDemarcations(asset.id);
+            return demarcations
+              .filter((demarcation) => demarcation.boundaryVerified && !demarcation.isAssignedToProject)
+              .map((demarcation) => ({ asset, demarcation }));
+          })
         );
+        setReadyLandPortions(portions.flat());
       } catch (error: any) {
         toast.error(error.message || 'Failed to load project-ready land');
       }
@@ -412,7 +427,11 @@ export default function NewProjectPage() {
       }
 
       setLoading(true);
-      const created = await projectService.createProject(form);
+      const created = await projectService.createProject({
+        ...form,
+        startDate: form.startDate?.trim() || undefined,
+        targetEndDate: form.targetEndDate?.trim() || undefined,
+      });
       toast.success('Project created');
       router.push(`/development/projects/${created.id}`);
     } catch (error: any) {
@@ -756,16 +775,16 @@ export default function NewProjectPage() {
               <SelectTrigger><SelectValue placeholder="Select ready land" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No land selected</SelectItem>
-                {readyLandAssets.map((asset) => (
-                  <SelectItem key={asset.id} value={readyLandReferenceValue(asset)}>
-                    {formatReadyLandLabel(asset)}
+                {readyLandPortions.map((portion) => (
+                  <SelectItem key={portion.demarcation.id} value={portion.demarcation.landReference}>
+                    {formatReadyLandPortionLabel(portion)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {readyLandAssets.length === 0 ? (
+            {readyLandPortions.length === 0 ? (
               <div className="text-xs text-muted-foreground">
-                No demarcated land is ready for project management yet.
+                No verified, unused demarcated land is ready for project management yet.
               </div>
             ) : null}
           </div>
