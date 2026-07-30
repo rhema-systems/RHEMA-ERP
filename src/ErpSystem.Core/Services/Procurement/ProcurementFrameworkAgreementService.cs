@@ -409,18 +409,35 @@ public sealed class ProcurementFrameworkAgreementService :
         Capture(agreement);
         await ExecuteAsync(async () =>
         {
-            if (await Agreements.GetQueryable(item =>
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    ProcurementPurchaseOrderSourceRules.BuildAwardReservationLock(
+                        _currentUser.TenantId,
+                        source.SourceType,
+                        source.SourceId,
+                        source.Supplier.Id),
+                    cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                throw Conflict(
+                    "FRAMEWORK_AGREEMENT_SOURCE_RESERVATION_BUSY",
+                    "Another transaction is currently reserving this approved award. Retry after it completes.");
+            }
+
+            await EnsureSourceNotConsumedByPurchaseOrderAsync(
+                source,
+                cancellationToken);
+            if (await Agreements.GetQueryableIncludingDeleted(item =>
                     item.TenantId == _currentUser.TenantId &&
-                    item.SourceType == request.SourceType &&
-                    item.SourceId == request.SourceId &&
-                    item.BusinessPartnerId == request.BusinessPartnerId &&
-                    !item.IsDeleted &&
-                    item.Status != ProcurementFrameworkAgreementStatus.Rejected &&
-                    item.Status != ProcurementFrameworkAgreementStatus.Terminated)
+                    item.SourceType == source.SourceType &&
+                    item.SourceId == source.SourceId &&
+                    item.BusinessPartnerId == source.Supplier.Id)
                 .AnyAsync(cancellationToken))
             {
                 throw Conflict("FRAMEWORK_AGREEMENT_SOURCE_ALREADY_REGISTERED",
-                    "This supplier and approved source already have a framework-agreement family.");
+                    "This supplier and approved source have already been permanently assigned to a framework-agreement family.");
             }
             await Agreements.AddAsync(agreement);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1379,6 +1396,79 @@ public sealed class ProcurementFrameworkAgreementService :
             _ => throw Validation("FRAMEWORK_AGREEMENT_SOURCE_TYPE_INVALID",
                 "Unsupported framework source type.")
         };
+    }
+
+    private async Task EnsureSourceNotConsumedByPurchaseOrderAsync(
+        SourceResolution source,
+        CancellationToken cancellationToken)
+    {
+        var purchaseOrders = _unitOfWork.Repository<PurchaseOrder>()
+            .GetQueryableIncludingDeleted(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.BusinessPartnerId == source.Supplier.Id);
+
+        switch (source.SourceType)
+        {
+            case ProcurementAwardReadinessSourceType.RequestForQuotation:
+                purchaseOrders = purchaseOrders.Where(item =>
+                    item.ProcurementSourceType ==
+                        ProcurementPurchaseOrderSourceType.RfqAward &&
+                    item.ProcurementSourceId == source.SourceId);
+                break;
+
+            case ProcurementAwardReadinessSourceType.Tender:
+            {
+                var awardIds = await _unitOfWork.Repository<TenderAward>()
+                    .GetQueryableIncludingDeleted(item =>
+                        item.TenantId == _currentUser.TenantId &&
+                        item.TenderId == source.SourceId &&
+                        item.BusinessPartnerId == source.Supplier.Id)
+                    .AsNoTracking()
+                    .Select(item => item.Id)
+                    .ToListAsync(cancellationToken);
+                purchaseOrders = purchaseOrders.Where(item =>
+                    item.ProcurementSourceType ==
+                        ProcurementPurchaseOrderSourceType.TenderAward &&
+                    item.ProcurementSourceId.HasValue &&
+                    awardIds.Contains(item.ProcurementSourceId.Value));
+                break;
+            }
+
+            case ProcurementAwardReadinessSourceType.ExceptionalSourcing:
+            {
+                var controlIds = await _unitOfWork
+                    .Repository<ProcurementExceptionalSourcingControl>()
+                    .GetQueryableIncludingDeleted(item =>
+                        item.TenantId == _currentUser.TenantId &&
+                        item.TenderId == source.SourceId)
+                    .AsNoTracking()
+                    .Select(item => item.Id)
+                    .ToListAsync(cancellationToken);
+                purchaseOrders = purchaseOrders.Where(item =>
+                    item.ProcurementSourceType ==
+                        ProcurementPurchaseOrderSourceType.ApprovedException &&
+                    item.ProcurementSourceId.HasValue &&
+                    controlIds.Contains(item.ProcurementSourceId.Value));
+                break;
+            }
+
+            default:
+                throw Validation(
+                    "FRAMEWORK_AGREEMENT_SOURCE_TYPE_INVALID",
+                    "Unsupported framework source type.");
+        }
+
+        var existing = await purchaseOrders
+            .AsNoTracking()
+            .OrderBy(item => item.CreatedAt)
+            .Select(item => new { item.Id, item.OrderNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (existing is not null)
+        {
+            throw Conflict(
+                "FRAMEWORK_AGREEMENT_SOURCE_ALREADY_CONSUMED",
+                $"The approved award has already been permanently consumed by purchase order {existing.OrderNumber} ({existing.Id}).");
+        }
     }
 
     private async Task<SourceResolution> ResolveRfqSourceAsync(

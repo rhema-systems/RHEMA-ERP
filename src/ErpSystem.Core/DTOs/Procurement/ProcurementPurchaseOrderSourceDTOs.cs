@@ -18,6 +18,7 @@ public sealed class ProcurementPurchaseOrderSourceOptionDto
     public string BusinessPartnerName { get; set; } = string.Empty;
     public decimal? ApprovedAmount { get; set; }
     public string CurrencyCode { get; set; } = string.Empty;
+    public IReadOnlyList<ProcurementPurchaseOrderSourceLineDto> ApprovedLines { get; set; } = [];
 }
 
 public sealed class ProcurementPurchaseOrderSourceLineDto

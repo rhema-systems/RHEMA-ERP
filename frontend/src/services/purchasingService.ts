@@ -511,6 +511,17 @@ export type ProcurementPurchaseOrderSourceType =
   | 'FrameworkCallOff'
   | 'HistoricalMigration';
 
+export interface ProcurementPurchaseOrderSourceLineDto {
+  sourceLineId: string;
+  inventoryItemId?: string;
+  itemCode: string;
+  description: string;
+  quantity: number;
+  unitOfMeasure: string;
+  unitPrice: number;
+  lineTotal: number;
+}
+
 export interface ProcurementPurchaseOrderSourceOptionDto {
   sourceType: ProcurementPurchaseOrderSourceType;
   sourceId: string;
@@ -525,6 +536,7 @@ export interface ProcurementPurchaseOrderSourceOptionDto {
   businessPartnerName: string;
   approvedAmount?: number;
   currencyCode: string;
+  approvedLines: ProcurementPurchaseOrderSourceLineDto[];
 }
 
 export interface ProcurementPurchaseOrderSourceStatusDto {

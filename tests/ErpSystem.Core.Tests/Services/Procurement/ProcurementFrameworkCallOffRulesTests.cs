@@ -33,6 +33,30 @@ public sealed class ProcurementFrameworkCallOffRulesTests
     }
 
     [Fact]
+    public void OneGovernedPriceLineCanServeDistinctDemandLines()
+    {
+        var sharedPriceLineId = Guid.NewGuid();
+
+        ProcurementFrameworkCallOffCommercialRules.HasDistinctDemandLineage(
+            [
+                (Guid.NewGuid(), sharedPriceLineId),
+                (Guid.NewGuid(), sharedPriceLineId)
+            ]).Should().BeTrue();
+    }
+
+    [Fact]
+    public void OneDemandLineCannotBeDuplicated()
+    {
+        var demandLineId = Guid.NewGuid();
+
+        ProcurementFrameworkCallOffCommercialRules.HasDistinctDemandLineage(
+            [
+                (demandLineId, Guid.NewGuid()),
+                (demandLineId, Guid.NewGuid())
+            ]).Should().BeFalse();
+    }
+
+    [Fact]
     public void RevisionCannotReserveMoreThanAgreementFamilyBalance()
     {
         var rejected =

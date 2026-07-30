@@ -86,6 +86,30 @@ public sealed class ProcurementFrameworkCallOffMigrationTests
         correctiveSql.Should().NotContain("DISABLE TRIGGER");
     }
 
+    [Fact]
+    public void SharedFrameworkPriceLineMigrationRetainsDemandLineUniqueness()
+    {
+        var builder = new MigrationBuilder(
+            "Microsoft.EntityFrameworkCore.SqlServer");
+        var migration = new TDC0402SharedFrameworkPriceLines();
+        migration.GetType()
+            .GetMethod(
+                "Up",
+                BindingFlags.Instance |
+                BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+
+        builder.Operations.OfType<DropIndexOperation>()
+            .Should().ContainSingle(item =>
+                item.Name ==
+                "IX_ProcurementFrameworkCallOffLines_TenantId_CallOffId_AgreementPriceLineId");
+        builder.Operations.OfType<CreateIndexOperation>()
+            .Should().ContainSingle(item =>
+                item.Name ==
+                "IX_ProcurementFrameworkCallOffLines_TenantId_CallOffId_AgreementPriceLineId" &&
+                !item.IsUnique);
+    }
+
     private static string Sql(Migration migration)
     {
         var builder = new MigrationBuilder(

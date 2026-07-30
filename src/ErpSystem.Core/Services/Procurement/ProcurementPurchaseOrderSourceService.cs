@@ -490,12 +490,28 @@ public sealed class ProcurementPurchaseOrderSourceService :
             ProcurementPurchaseOrderSourceType.Contract
                 ? Guid.Empty
                 : source.BusinessPartnerId;
+        var lockResource =
+            $"TDC:PO-SOURCE:{_currentUser.TenantId:N}:{(int)source.SourceType}:{source.SourceId:N}:{lockSupplier:N}";
+        if (ProcurementPurchaseOrderSourceRules.IsOneTime(source.SourceType))
+        {
+            var awardReservation = await ResolveAwardReservationAsync(
+                source.SourceType,
+                source.SourceId,
+                source.BusinessPartnerId,
+                cancellationToken);
+            lockResource =
+                ProcurementPurchaseOrderSourceRules.BuildAwardReservationLock(
+                    _currentUser.TenantId,
+                    awardReservation.SourceType,
+                    awardReservation.SourceId,
+                    source.BusinessPartnerId);
+        }
         try
         {
             try
             {
                 await _unitOfWork.AcquireTransactionLockAsync(
-                    $"TDC:PO-SOURCE:{_currentUser.TenantId:N}:{(int)source.SourceType}:{source.SourceId:N}:{lockSupplier:N}",
+                    lockResource,
                     cancellationToken);
             }
             catch (TimeoutException)
@@ -814,6 +830,12 @@ public sealed class ProcurementPurchaseOrderSourceService :
             throw Invalid("PO_TENDER_AWARD_NOT_APPROVED",
                 $"The tender award is not usable (current status: {award.Status}).");
         }
+        await EnsureOneTimeSourceAvailableAsync(
+            ProcurementPurchaseOrderSourceType.TenderAward,
+            award.Id,
+            businessPartnerId,
+            owningPurchaseOrderId,
+            cancellationToken);
         var tender = await RequireTenderAsync(award.TenderId, cancellationToken);
         var link = await RequireSourceLinkAsync(
             tender.SourcePurchaseRequisitionId, tender.SourcingReleaseId,
@@ -1386,7 +1408,8 @@ public sealed class ProcurementPurchaseOrderSourceService :
             BusinessPartnerId = source.BusinessPartnerId,
             BusinessPartnerName = supplierName,
             ApprovedAmount = approvedAmount,
-            CurrencyCode = source.CurrencyCode
+            CurrencyCode = source.CurrencyCode,
+            ApprovedLines = source.ApprovedLines
         };
     }
 
@@ -1655,12 +1678,99 @@ public sealed class ProcurementPurchaseOrderSourceService :
             .OrderBy(item => item.CreatedAt)
             .Select(item => new { item.Id, item.OrderNumber })
             .FirstOrDefaultAsync(cancellationToken);
-        if (existing is null)
-            return;
+        if (existing is not null)
+        {
+            throw Invalid(
+                "PO_ONE_TIME_SOURCE_ALREADY_CONSUMED",
+                $"The {sourceType} source has already been consumed by purchase order {existing.OrderNumber} ({existing.Id}) for this supplier.");
+        }
+
+        var awardReservation = await ResolveAwardReservationAsync(
+            sourceType,
+            sourceId,
+            businessPartnerId,
+            cancellationToken);
+        var framework = await _unitOfWork
+            .Repository<ProcurementFrameworkAgreement>()
+            .GetQueryableIncludingDeleted(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.SourceType == awardReservation.SourceType &&
+                item.SourceId == awardReservation.SourceId &&
+                item.BusinessPartnerId == businessPartnerId)
+            .AsNoTracking()
+            .OrderBy(item => item.CreatedAt)
+            .Select(item => new { item.Id, item.AgreementNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (framework is not null)
+        {
+            throw Invalid(
+                "PO_ONE_TIME_SOURCE_RESERVED_FOR_FRAMEWORK",
+                $"The {sourceType} award is permanently reserved by framework agreement {framework.AgreementNumber} ({framework.Id}) for this supplier.");
+        }
+    }
+
+    private async Task<AwardReservation> ResolveAwardReservationAsync(
+        ProcurementPurchaseOrderSourceType sourceType,
+        Guid sourceId,
+        Guid businessPartnerId,
+        CancellationToken cancellationToken)
+    {
+        if (sourceType == ProcurementPurchaseOrderSourceType.RfqAward)
+        {
+            return new AwardReservation(
+                ProcurementAwardReadinessSourceType.RequestForQuotation,
+                sourceId);
+        }
+
+        if (sourceType == ProcurementPurchaseOrderSourceType.TenderAward)
+        {
+            var award = await _unitOfWork.Repository<TenderAward>()
+                .GetQueryableIncludingDeleted(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.Id == sourceId)
+                .AsNoTracking()
+                .Select(item => new
+                {
+                    item.TenderId,
+                    item.BusinessPartnerId
+                })
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw Invalid(
+                    "PO_TENDER_AWARD_NOT_FOUND",
+                    "The tender award was not found in the current tenant.");
+            if (award.BusinessPartnerId != businessPartnerId)
+            {
+                throw Invalid(
+                    "PO_SOURCE_SUPPLIER_MISMATCH",
+                    "The selected supplier is not the awarded supplier.");
+            }
+
+            return new AwardReservation(
+                ProcurementAwardReadinessSourceType.Tender,
+                award.TenderId);
+        }
+
+        if (sourceType == ProcurementPurchaseOrderSourceType.ApprovedException)
+        {
+            var tenderId = await _unitOfWork
+                .Repository<ProcurementExceptionalSourcingControl>()
+                .GetQueryableIncludingDeleted(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.Id == sourceId)
+                .AsNoTracking()
+                .Select(item => (Guid?)item.TenderId)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw Invalid(
+                    "PO_EXCEPTION_SOURCE_NOT_FOUND",
+                    "The approved-exception sourcing control was not found in the current tenant.");
+            return new AwardReservation(
+                ProcurementAwardReadinessSourceType.ExceptionalSourcing,
+                tenderId);
+        }
 
         throw Invalid(
-            "PO_ONE_TIME_SOURCE_ALREADY_CONSUMED",
-            $"The {sourceType} source has already been consumed by purchase order {existing.OrderNumber} ({existing.Id}) for this supplier.");
+            "PO_SOURCE_TYPE_INVALID",
+            "The purchase-order source is not a one-time award.");
     }
 
     private async Task EnsureContractCapacityAsync(
@@ -1868,6 +1978,10 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 purchaseOrder.Id);
         }
     }
+
+    private sealed record AwardReservation(
+        ProcurementAwardReadinessSourceType SourceType,
+        Guid SourceId);
 
     private static string NormalizeCorrelation(string? value) =>
         string.IsNullOrWhiteSpace(value)

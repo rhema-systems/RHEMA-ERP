@@ -563,6 +563,36 @@ function NewPurchaseOrderPageContent() {
     if (!source) return;
     setSelectedSupplierId(source.businessPartnerId);
     loadSupplierDetails(source.businessPartnerId);
+    if (
+      source.sourceType === 'RfqAward' ||
+      source.sourceType === 'TenderAward' ||
+      source.sourceType === 'ApprovedException'
+    ) {
+      const authoritativeLines: POItemFormData[] = (source.approvedLines || []).map(
+        (line, index) => ({
+          tempId: `source-${line.sourceLineId || index}`,
+          inventoryItemId: line.inventoryItemId || '',
+          itemCode: line.itemCode,
+          itemName: line.description,
+          supplierItemCode: '',
+          itemDescription: line.description,
+          orderedQuantity: line.quantity,
+          unitOfMeasure: line.unitOfMeasure || 'EA',
+          unitPrice: line.unitPrice,
+          expectedDeliveryDate: requiredDate || '',
+          notes: ''
+        })
+      );
+      setItems(authoritativeLines);
+      setEditingRowIndex(null);
+      setIsAddingNewRow(false);
+      setEditingItem(null);
+      if (authoritativeLines.length > 0) {
+        toast.success('Approved award quantities and prices applied');
+      } else {
+        toast.error('The selected award has no authoritative commercial lines');
+      }
+    }
   };
 
   const handleInlineWarehouseSelect = async (warehouseId: string) => {

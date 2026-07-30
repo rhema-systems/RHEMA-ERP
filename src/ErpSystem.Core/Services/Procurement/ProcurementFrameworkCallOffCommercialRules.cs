@@ -72,6 +72,18 @@ public static class ProcurementFrameworkCallOffCommercialRules
         return (normalizedQuantity, lineTotal);
     }
 
+    public static bool HasDistinctDemandLineage(
+        IEnumerable<(Guid PurchaseRequisitionItemId, Guid AgreementPriceLineId)> lines)
+    {
+        var mappings = lines.ToList();
+        return mappings.All(item =>
+                   item.PurchaseRequisitionItemId != Guid.Empty &&
+                   item.AgreementPriceLineId != Guid.Empty) &&
+               mappings.Select(item => item.PurchaseRequisitionItemId)
+                   .Distinct()
+                   .Count() == mappings.Count;
+    }
+
     public static FamilyCapacity EvaluateFamilyCapacity(
         decimal ceilingAmount,
         decimal committedAmount,

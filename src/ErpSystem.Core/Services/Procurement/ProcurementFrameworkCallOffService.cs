@@ -363,6 +363,7 @@ public sealed class ProcurementFrameworkCallOffService :
         await EnsureCapabilityAsync(
             ManagePermission, request.AgreementId.ToString(), correlation, cancellationToken);
         ProcurementFrameworkCallOff? result = null;
+        var created = false;
         await ExecuteAsync(async () =>
         {
             var replay = await CallOffs.GetQueryable(item =>
@@ -576,9 +577,13 @@ public sealed class ProcurementFrameworkCallOffService :
                 null, Snapshot(callOff), "Server-derived call-off draft created.",
                 [], correlation, now, cancellationToken);
             result = callOff;
+            created = true;
         }, cancellationToken);
-        await PublishNotificationAsync(
-            "procurement.framework-call-off.created", result!, cancellationToken);
+        if (created)
+        {
+            await PublishNotificationAsync(
+                "procurement.framework-call-off.created", result!, cancellationToken);
+        }
         return await GetInternalAsync(result!.Id, cancellationToken);
     }
 
@@ -594,6 +599,7 @@ public sealed class ProcurementFrameworkCallOffService :
         EnsureEvidence(request.Evidence);
         ProcurementFrameworkCallOff? result = null;
         PurchaseOrder? automaticApprovalPurchaseOrder = null;
+        var submitted = false;
         try
         {
             await ExecuteAsync(async () =>
@@ -669,6 +675,7 @@ public sealed class ProcurementFrameworkCallOffService :
                     null, Snapshot(callOff), request.Comment, request.Evidence,
                     correlation, now, cancellationToken);
                 result = callOff;
+                submitted = true;
             }, cancellationToken);
         }
         catch (AutomaticApprovalDetectedException)
@@ -680,9 +687,12 @@ public sealed class ProcurementFrameworkCallOffService :
                 cancellationToken);
             throw;
         }
-        await PublishNotificationAsync(
-            "procurement.framework-call-off.submitted",
-            result, cancellationToken);
+        if (submitted)
+        {
+            await PublishNotificationAsync(
+                "procurement.framework-call-off.submitted",
+                result!, cancellationToken);
+        }
         return await GetInternalAsync(result.Id, cancellationToken);
     }
 
@@ -697,6 +707,7 @@ public sealed class ProcurementFrameworkCallOffService :
             ApprovePermission, id.ToString(), correlation, cancellationToken);
         EnsureEvidence(request.Evidence);
         ProcurementFrameworkCallOff? result = null;
+        var decided = false;
         await ExecuteAsync(async () =>
         {
             var callOff = await LoadAsync(id, true, cancellationToken);
@@ -817,17 +828,21 @@ public sealed class ProcurementFrameworkCallOffService :
                 null, Snapshot(callOff), request.Comment, request.Evidence,
                 correlation, now, cancellationToken);
             result = callOff;
+            decided = true;
         }, cancellationToken);
-        await PublishNotificationAsync(
-            result!.Status switch
-            {
-                ProcurementFrameworkCallOffStatus.Approved =>
-                    "procurement.framework-call-off.approved",
-                ProcurementFrameworkCallOffStatus.Rejected =>
-                    "procurement.framework-call-off.rejected",
-                _ => "procurement.framework-call-off.approval-progressed"
-            },
-            result, cancellationToken);
+        if (decided)
+        {
+            await PublishNotificationAsync(
+                result!.Status switch
+                {
+                    ProcurementFrameworkCallOffStatus.Approved =>
+                        "procurement.framework-call-off.approved",
+                    ProcurementFrameworkCallOffStatus.Rejected =>
+                        "procurement.framework-call-off.rejected",
+                    _ => "procurement.framework-call-off.approval-progressed"
+                },
+                result, cancellationToken);
+        }
         return await GetInternalAsync(result.Id, cancellationToken);
     }
 
@@ -842,6 +857,7 @@ public sealed class ProcurementFrameworkCallOffService :
             ManagePermission, id.ToString(), correlation, cancellationToken);
         EnsureEvidence(request.Evidence);
         ProcurementFrameworkCallOff? result = null;
+        var issued = false;
         await ExecuteAsync(async () =>
         {
             var callOff = await LoadAsync(id, true, cancellationToken);
@@ -916,9 +932,13 @@ public sealed class ProcurementFrameworkCallOffService :
                 null, Snapshot(callOff), request.Comment, request.Evidence,
                 correlation, now, cancellationToken);
             result = callOff;
+            issued = true;
         }, cancellationToken);
-        await PublishNotificationAsync(
-            "procurement.framework-call-off.issued", result!, cancellationToken);
+        if (issued)
+        {
+            await PublishNotificationAsync(
+                "procurement.framework-call-off.issued", result!, cancellationToken);
+        }
         return await GetInternalAsync(result!.Id, cancellationToken);
     }
 
@@ -933,6 +953,7 @@ public sealed class ProcurementFrameworkCallOffService :
             ManagePermission, id.ToString(), correlation, cancellationToken);
         EnsureEvidence(request.Evidence);
         ProcurementFrameworkCallOff? result = null;
+        var cancelled = false;
         await ExecuteAsync(async () =>
         {
             var callOff = await LoadAsync(id, true, cancellationToken);
@@ -990,9 +1011,13 @@ public sealed class ProcurementFrameworkCallOffService :
                 null, Snapshot(callOff), request.Comment, request.Evidence,
                 correlation, now, cancellationToken);
             result = callOff;
+            cancelled = true;
         }, cancellationToken);
-        await PublishNotificationAsync(
-            "procurement.framework-call-off.cancelled", result!, cancellationToken);
+        if (cancelled)
+        {
+            await PublishNotificationAsync(
+                "procurement.framework-call-off.cancelled", result!, cancellationToken);
+        }
         return await GetInternalAsync(result!.Id, cancellationToken);
     }
 
@@ -1314,14 +1339,12 @@ public sealed class ProcurementFrameworkCallOffService :
                 item.Quantity <= 0))
             throw Validation("FRAMEWORK_CALL_OFF_LINE_INVALID",
                 "Every call-off line requires source demand, governed price, and a positive quantity.");
-        if (requests.Select(item => item.PurchaseRequisitionItemId).Distinct().Count() !=
-            requests.Count)
+        if (!ProcurementFrameworkCallOffCommercialRules.HasDistinctDemandLineage(
+                requests.Select(item => (
+                    item.PurchaseRequisitionItemId,
+                    item.AgreementPriceLineId))))
             throw Validation("FRAMEWORK_CALL_OFF_DEMAND_LINE_DUPLICATE",
                 "A requisition line can appear only once in a call-off.");
-        if (requests.Select(item => item.AgreementPriceLineId).Distinct().Count() !=
-            requests.Count)
-            throw Validation("FRAMEWORK_CALL_OFF_PRICE_LINE_DUPLICATE",
-                "A governed framework price line can appear only once in a call-off.");
 
         var demand = requisition.Items.ToDictionary(item => item.Id);
         var prices = agreement.PriceLines.Where(item => !item.IsDeleted)

@@ -45,6 +45,13 @@ public static class ProcurementPurchaseOrderSourceRules
             ? exceptionalTenderId ?? Guid.Empty
             : sourceId;
 
+    public static string BuildAwardReservationLock(
+        Guid tenantId,
+        ProcurementAwardReadinessSourceType sourceType,
+        Guid sourceId,
+        Guid businessPartnerId) =>
+        $"TDC:AWARD-SOURCE:{tenantId:N}:{(int)sourceType}:{sourceId:N}:{businessPartnerId:N}";
+
     public static bool RequiresRevalidation(string? targetStatus) =>
         targetStatus is not null &&
         (targetStatus.Equals("Submitted", StringComparison.OrdinalIgnoreCase) ||

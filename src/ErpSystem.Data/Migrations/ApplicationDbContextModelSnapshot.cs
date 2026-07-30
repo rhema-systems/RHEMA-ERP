@@ -54066,8 +54066,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "PurchaseRequisitionItemId");
 
-                    b.HasIndex("TenantId", "CallOffId", "AgreementPriceLineId")
-                        .IsUnique();
+                    b.HasIndex("TenantId", "CallOffId", "AgreementPriceLineId");
 
                     b.HasIndex("TenantId", "CallOffId", "PurchaseRequisitionItemId")
                         .IsUnique();

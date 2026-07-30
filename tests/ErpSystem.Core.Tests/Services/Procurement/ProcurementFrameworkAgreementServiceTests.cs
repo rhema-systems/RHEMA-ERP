@@ -274,6 +274,65 @@ public sealed class ProcurementFrameworkAgreementServiceTests
     }
 
     [Fact]
+    public async Task OrdinaryPurchaseOrderPermanentlyConsumesAwardBeforeFrameworkCreation()
+    {
+        await using var fixture = new Fixture();
+        var purchaseOrder = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            OrderNumber = "PO-AWARD-CONSUMED-001",
+            BusinessPartnerId = fixture.Supplier.Id,
+            ProcurementSourceType =
+                ProcurementPurchaseOrderSourceType.RfqAward,
+            ProcurementSourceId = fixture.Rfq.Id,
+            Status = "Cancelled",
+            IsDeleted = true
+        };
+        fixture.Context.Add(purchaseOrder);
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.CreateAsync(
+            fixture.CreateRequest(),
+            "framework-after-ordinary-po");
+
+        await action.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code ==
+                "FRAMEWORK_AGREEMENT_SOURCE_ALREADY_CONSUMED");
+        fixture.Context.ProcurementFrameworkAgreements.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TerminatedDeletedFrameworkStillPermanentlyConsumesAward()
+    {
+        await using var fixture = new Fixture();
+        var created = await fixture.Service.CreateAsync(
+            fixture.CreateRequest(),
+            "framework-source-first-use");
+        var stored = await fixture.Context.ProcurementFrameworkAgreements
+            .SingleAsync(item => item.Id == created.Id);
+        stored.Status = ProcurementFrameworkAgreementStatus.Terminated;
+        stored.IsDeleted = true;
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.CreateAsync(
+            fixture.CreateRequest(),
+            "framework-source-reuse-after-terminal-delete");
+
+        await action.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code ==
+                "FRAMEWORK_AGREEMENT_SOURCE_ALREADY_REGISTERED");
+        fixture.Context.ProcurementFrameworkAgreements
+            .IgnoreQueryFilters()
+            .Count()
+            .Should().Be(1);
+    }
+
+    [Fact]
     public async Task FuturePublishedRevisionKeepsCurrentAgreementUntilEffectiveLifecycleProcessing()
     {
         await using var fixture = new Fixture();

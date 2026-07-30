@@ -60,6 +60,25 @@ public sealed class ProcurementPurchaseOrderSourceRulesTests
             .Should().Be(controlId);
     }
 
+    [Fact]
+    public void AwardReservationLockUsesCanonicalSourceAndSupplier()
+    {
+        var tenantId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        var resource =
+            ProcurementPurchaseOrderSourceRules.BuildAwardReservationLock(
+                tenantId,
+                ProcurementAwardReadinessSourceType.Tender,
+                sourceId,
+                supplierId);
+
+        resource.Should().Be(
+            $"TDC:AWARD-SOURCE:{tenantId:N}:{(int)ProcurementAwardReadinessSourceType.Tender}:{sourceId:N}:{supplierId:N}");
+        resource.Length.Should().BeLessThanOrEqualTo(255);
+    }
+
     [Theory]
     [InlineData("Submitted")]
     [InlineData("Pending Approval")]

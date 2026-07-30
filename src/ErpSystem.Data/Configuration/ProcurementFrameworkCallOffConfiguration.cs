@@ -81,8 +81,7 @@ public sealed class ProcurementFrameworkCallOffLineConfiguration :
 
         builder.HasIndex(item => new { item.TenantId, item.CallOffId, item.PurchaseRequisitionItemId })
             .IsUnique();
-        builder.HasIndex(item => new { item.TenantId, item.CallOffId, item.AgreementPriceLineId })
-            .IsUnique();
+        builder.HasIndex(item => new { item.TenantId, item.CallOffId, item.AgreementPriceLineId });
         builder.HasIndex(item => new { item.TenantId, item.PurchaseOrderItemId }).IsUnique();
         builder.HasIndex(item => new { item.TenantId, item.PurchaseRequisitionItemId });
 
