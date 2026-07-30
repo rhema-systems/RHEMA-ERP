@@ -337,6 +337,120 @@ public sealed class ProcurementFrameworkAgreementServiceTests
     }
 
     [Fact]
+    public async Task AgreementReadsUseFamilyCommitmentsAcrossPublishedRevisions()
+    {
+        await using var fixture = new Fixture();
+        var firstDraft = await fixture.Service.CreateAsync(
+            fixture.CreateRequest(DateTime.UtcNow.AddDays(-10), DateTime.UtcNow.AddDays(60)),
+            "framework-family-read-v1-create");
+        await fixture.AttachRequiredDocumentAsync(firstDraft);
+        var firstSubmitted = await fixture.Service.SubmitAsync(
+            firstDraft.Id,
+            Lifecycle(firstDraft.RowVersion, "Submit first agreement."),
+            "framework-family-read-v1-submit");
+        fixture.CompleteLatestWorkflow();
+        fixture.SetUser(Guid.NewGuid());
+        var firstPublished = await fixture.Service.ApproveAsync(
+            firstDraft.Id,
+            Lifecycle(firstSubmitted.RowVersion, "Approve first agreement."),
+            "framework-family-read-v1-approve");
+        await fixture.AddFamilyCommitmentAsync(firstPublished.Id, 600m);
+
+        var futureStart = DateTime.UtcNow.AddDays(20);
+        var secondDraft = await fixture.Service.CloneAsync(
+            firstPublished.Id,
+            new CloneProcurementFrameworkAgreementRequest
+            {
+                RowVersion = firstPublished.RowVersion,
+                EffectiveFromUtc = futureStart,
+                EffectiveToUtc = futureStart.AddMonths(12),
+                WorkflowDefinitionId = fixture.Workflow.Id,
+                ChangeSummary = "Scheduled revision with retained commitments."
+            },
+            "framework-family-read-v2-clone");
+        await fixture.AttachRequiredDocumentAsync(secondDraft);
+        var secondSubmitted = await fixture.Service.SubmitAsync(
+            secondDraft.Id,
+            Lifecycle(secondDraft.RowVersion, "Submit second agreement."),
+            "framework-family-read-v2-submit");
+        fixture.CompleteLatestWorkflow();
+        fixture.SetUser(Guid.NewGuid());
+        var secondPublished = await fixture.Service.ApproveAsync(
+            secondDraft.Id,
+            Lifecycle(secondSubmitted.RowVersion, "Approve second agreement."),
+            "framework-family-read-v2-approve");
+
+        var detail = await fixture.Service.GetAsync(secondPublished.Id);
+        var page = await fixture.Service.SearchAsync(
+            new ProcurementFrameworkAgreementSearchRequest
+            {
+                Search = secondPublished.AgreementNumber
+            });
+
+        detail.AvailableCeiling.Should().Be(400m);
+        page.Items.Should().Contain(item =>
+            item.Id == secondPublished.Id &&
+            item.AvailableCeiling == 400m);
+    }
+
+    [Fact]
+    public async Task RevisionSubmissionRejectsCeilingBelowFamilyCommitments()
+    {
+        await using var fixture = new Fixture();
+        var firstPublished = await fixture.PublishCurrentAgreementAsync(
+            "framework-family-submit");
+        await fixture.AddFamilyCommitmentAsync(firstPublished.Id, 600m);
+        var secondDraft = await fixture.CloneWithCeilingAsync(
+            firstPublished,
+            500m,
+            "framework-family-submit-v2");
+        await fixture.AttachRequiredDocumentAsync(secondDraft);
+
+        var action = () => fixture.Service.SubmitAsync(
+            secondDraft.Id,
+            Lifecycle(secondDraft.RowVersion, "Submit reduced revision ceiling."),
+            "framework-family-submit-v2-submit");
+
+        await action.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code ==
+                "FRAMEWORK_AGREEMENT_CEILING_BELOW_COMMITMENTS");
+    }
+
+    [Fact]
+    public async Task RevisionApprovalRechecksCommitmentsAddedAfterSubmission()
+    {
+        await using var fixture = new Fixture();
+        var firstPublished = await fixture.PublishCurrentAgreementAsync(
+            "framework-family-approve");
+        await fixture.AddFamilyCommitmentAsync(firstPublished.Id, 400m);
+        var secondDraft = await fixture.CloneWithCeilingAsync(
+            firstPublished,
+            500m,
+            "framework-family-approve-v2");
+        await fixture.AttachRequiredDocumentAsync(secondDraft);
+        var secondSubmitted = await fixture.Service.SubmitAsync(
+            secondDraft.Id,
+            Lifecycle(secondDraft.RowVersion, "Submit viable revision ceiling."),
+            "framework-family-approve-v2-submit");
+        await fixture.AddFamilyCommitmentAsync(firstPublished.Id, 200m);
+        fixture.CompleteLatestWorkflow();
+        fixture.SetUser(Guid.NewGuid());
+
+        var action = () => fixture.Service.ApproveAsync(
+            secondDraft.Id,
+            Lifecycle(secondSubmitted.RowVersion, "Approve stale revision ceiling."),
+            "framework-family-approve-v2-approve");
+
+        await action.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code ==
+                "FRAMEWORK_AGREEMENT_CEILING_BELOW_COMMITMENTS");
+    }
+
+    [Fact]
     public async Task CompletedWorkflowCannotBeRecordedAsRejection()
     {
         await using var fixture = new Fixture();
@@ -914,6 +1028,79 @@ public sealed class ProcurementFrameworkAgreementServiceTests
                     item.RfqId == Rfq.Id &&
                     item.BusinessPartnerId == Supplier.Id);
             awardLine.LineTotal = amount;
+            await Context.SaveChangesAsync();
+        }
+
+        public async Task<ProcurementFrameworkAgreementDto>
+            PublishCurrentAgreementAsync(string correlationPrefix)
+        {
+            var draft = await Service.CreateAsync(
+                CreateRequest(
+                    DateTime.UtcNow.AddDays(-10),
+                    DateTime.UtcNow.AddMonths(12)),
+                $"{correlationPrefix}-v1-create");
+            await AttachRequiredDocumentAsync(draft);
+            var submitted = await Service.SubmitAsync(
+                draft.Id,
+                Lifecycle(draft.RowVersion, "Submit current agreement."),
+                $"{correlationPrefix}-v1-submit");
+            CompleteLatestWorkflow();
+            SetUser(Guid.NewGuid());
+            return await Service.ApproveAsync(
+                draft.Id,
+                Lifecycle(submitted.RowVersion, "Approve current agreement."),
+                $"{correlationPrefix}-v1-approve");
+        }
+
+        public async Task<ProcurementFrameworkAgreementDto> CloneWithCeilingAsync(
+            ProcurementFrameworkAgreementDto source,
+            decimal ceilingAmount,
+            string correlationPrefix)
+        {
+            var effectiveFrom = DateTime.UtcNow.AddDays(20);
+            var effectiveTo = effectiveFrom.AddMonths(12);
+            var clone = await Service.CloneAsync(
+                source.Id,
+                new CloneProcurementFrameworkAgreementRequest
+                {
+                    RowVersion = source.RowVersion,
+                    EffectiveFromUtc = effectiveFrom,
+                    EffectiveToUtc = effectiveTo,
+                    WorkflowDefinitionId = Workflow.Id,
+                    ChangeSummary = "Commercial ceiling revision."
+                },
+                $"{correlationPrefix}-clone");
+            var stored = await Context.ProcurementFrameworkAgreements
+                .SingleAsync(item => item.Id == clone.Id);
+            stored.CeilingAmount = ceilingAmount;
+            stored.RowVersion = Guid.NewGuid().ToByteArray();
+            await Context.SaveChangesAsync();
+            return await Service.GetAsync(clone.Id);
+        }
+
+        public async Task AddFamilyCommitmentAsync(
+            Guid agreementId,
+            decimal amount)
+        {
+            Context.Add(new ProcurementFrameworkBalanceMovement
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                AgreementId = agreementId,
+                AgreementBalanceId = Guid.NewGuid(),
+                CallOffId = Guid.NewGuid(),
+                MovementType =
+                    ProcurementFrameworkBalanceMovementType.Commitment,
+                Amount = amount,
+                BalanceBefore = 1000m,
+                BalanceAfter = 1000m - amount,
+                IdempotencyKey = $"test-commitment-{Guid.NewGuid():N}",
+                CorrelationId = $"test-commitment-{Guid.NewGuid():N}",
+                ActorUserId = _userId,
+                ActorName = "Framework test actor",
+                OccurredAtUtc = DateTime.UtcNow,
+                IntegrityHash = new string('f', 64)
+            });
             await Context.SaveChangesAsync();
         }
 

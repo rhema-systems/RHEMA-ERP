@@ -77,6 +77,8 @@ public sealed class ProcurementFrameworkAgreementService :
         _unitOfWork.Repository<ProcurementFrameworkAgreementDocument>();
     private IGenericRepository<ProcurementFrameworkAgreementExtension> Extensions =>
         _unitOfWork.Repository<ProcurementFrameworkAgreementExtension>();
+    private IGenericRepository<ProcurementFrameworkBalanceMovement> BalanceMovements =>
+        _unitOfWork.Repository<ProcurementFrameworkBalanceMovement>();
     private IGenericRepository<WorkflowDefinition> WorkflowDefinitions =>
         _unitOfWork.Repository<WorkflowDefinition>();
     private IGenericRepository<WorkflowInstance> WorkflowInstances =>
@@ -157,14 +159,23 @@ public sealed class ProcurementFrameworkAgreementService :
             rows = rows.Where(item => ProcurementFrameworkAgreementRules.IsEffective(item, now))
                 .ToList();
         var total = rows.Count;
+        var pageRows = rows.Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .ToList();
+        var familySummaries = await ResolveFamilySummariesAsync(
+            pageRows,
+            now,
+            cancellationToken);
         return new ProcurementFrameworkAgreementPageDto
         {
             Page = request.Page,
             PageSize = request.PageSize,
             TotalCount = total,
-            Items = rows.Skip((request.Page - 1) * request.PageSize)
-                .Take(request.PageSize)
-                .Select(item => MapList(item, now))
+            Items = pageRows
+                .Select(item => MapList(
+                    item,
+                    now,
+                    familySummaries.GetValueOrDefault(item.Id)))
                 .ToList()
         };
     }
@@ -174,7 +185,16 @@ public sealed class ProcurementFrameworkAgreementService :
         CancellationToken cancellationToken = default)
     {
         EnsureInternalReader();
-        return Map(await LoadAsync(id, false, cancellationToken), DateTime.UtcNow);
+        var now = DateTime.UtcNow;
+        var agreement = await LoadAsync(id, false, cancellationToken);
+        var familySummaries = await ResolveFamilySummariesAsync(
+            [agreement],
+            now,
+            cancellationToken);
+        return Map(
+            agreement,
+            now,
+            familySummaries.GetValueOrDefault(agreement.Id));
     }
 
     public async Task<IReadOnlyList<ProcurementFrameworkWorkflowOptionDto>>
@@ -992,6 +1012,9 @@ public sealed class ProcurementFrameworkAgreementService :
             cancellationToken);
         EnsureSourceCurrency(source, agreement.CurrencyCode);
         EnsureSourceCeiling(source, agreement.CeilingAmount);
+        await EnsureFamilyCommitmentCeilingAsync(
+            agreement,
+            cancellationToken);
         var eligibility = await EnforceSupplierAsync(
             agreement.BusinessPartnerId,
             agreement.Categories.Where(item => !item.IsDeleted)
@@ -1107,6 +1130,12 @@ public sealed class ProcurementFrameworkAgreementService :
         Capture(agreement);
         await ExecuteAsync(async () =>
         {
+            if (approve)
+            {
+                await EnsureFamilyCommitmentCeilingAsync(
+                    agreement,
+                    cancellationToken);
+            }
             await Agreements.UpdateAsync(agreement);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             if (approve && agreement.EffectiveFromUtc <= now)
@@ -1136,7 +1165,7 @@ public sealed class ProcurementFrameworkAgreementService :
                     : ProcurementControlEventResult.Rejected,
                 before, Snapshot(agreement), request.Comment, request.Evidence,
                 correlation, now, cancellationToken);
-        }, cancellationToken);
+        }, cancellationToken, IsolationLevel.Serializable);
         await PublishNotificationAsync(
             approve
                 ? "procurement.framework-agreement.published"
@@ -1167,6 +1196,103 @@ public sealed class ProcurementFrameworkAgreementService :
             ?? throw NotFound("FRAMEWORK_AGREEMENT_NOT_FOUND",
                 "The framework agreement was not found in the current tenant.");
     }
+
+    private async Task<IReadOnlyDictionary<Guid,
+        ProcurementFrameworkCallOffCommercialRules.FamilySummary>>
+        ResolveFamilySummariesAsync(
+            IEnumerable<ProcurementFrameworkAgreement> agreements,
+            DateTime atUtc,
+            CancellationToken cancellationToken)
+    {
+        var familyKeys = agreements
+            .Select(item => item.AgreementKey)
+            .Distinct()
+            .ToArray();
+        if (familyKeys.Length == 0)
+        {
+            return new Dictionary<Guid,
+                ProcurementFrameworkCallOffCommercialRules.FamilySummary>();
+        }
+
+        var revisions = await Agreements.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                familyKeys.Contains(item.AgreementKey) &&
+                !item.IsDeleted)
+            .Include(item => item.Extensions.Where(child => !child.IsDeleted))
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var agreementIds = revisions.Select(item => item.Id).ToArray();
+        var movements = await BalanceMovements.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                agreementIds.Contains(item.AgreementId) &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        return ProcurementFrameworkCallOffCommercialRules
+            .SummarizeRevisionFamilies(
+                revisions.Select(ToAgreementRevisionState),
+                movements.Select(item =>
+                    new ProcurementFrameworkCallOffCommercialRules.MovementState(
+                        item.AgreementId,
+                        item.MovementType,
+                        item.Amount)),
+                atUtc);
+    }
+
+    private async Task EnsureFamilyCommitmentCeilingAsync(
+        ProcurementFrameworkAgreement agreement,
+        CancellationToken cancellationToken)
+    {
+        var familyAgreementIds = await Agreements.GetQueryable(item =>
+                item.TenantId == agreement.TenantId &&
+                item.AgreementKey == agreement.AgreementKey &&
+                !item.IsDeleted)
+            .Select(item => item.Id)
+            .ToArrayAsync(cancellationToken);
+        var movements = await BalanceMovements.GetQueryable(item =>
+                item.TenantId == agreement.TenantId &&
+                familyAgreementIds.Contains(item.AgreementId) &&
+                !item.IsDeleted &&
+                (item.MovementType ==
+                     ProcurementFrameworkBalanceMovementType.Commitment ||
+                 item.MovementType ==
+                     ProcurementFrameworkBalanceMovementType.Release))
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var committed = decimal.Round(
+            Math.Max(
+                0m,
+                movements.Sum(item =>
+                    item.MovementType ==
+                    ProcurementFrameworkBalanceMovementType.Commitment
+                        ? item.Amount
+                        : -item.Amount)),
+            2,
+            MidpointRounding.AwayFromZero);
+        if (decimal.Round(
+                agreement.CeilingAmount,
+                2,
+                MidpointRounding.AwayFromZero) < committed)
+        {
+            throw Conflict(
+                "FRAMEWORK_AGREEMENT_CEILING_BELOW_COMMITMENTS",
+                $"The proposed ceiling cannot be below the agreement family's committed amount of {committed:0.00} {agreement.CurrencyCode}.");
+        }
+    }
+
+    private static ProcurementFrameworkCallOffCommercialRules
+        .AgreementRevisionState ToAgreementRevisionState(
+            ProcurementFrameworkAgreement agreement) =>
+        new(
+            agreement.Id,
+            agreement.AgreementKey,
+            agreement.Version,
+            agreement.CurrencyCode,
+            agreement.CeilingAmount,
+            agreement.EffectiveFromUtc,
+            ProcurementFrameworkAgreementRules.EffectiveEnd(agreement),
+            agreement.Status == ProcurementFrameworkAgreementStatus.Published);
 
     private async Task<SourceResolution> ResolveSourceAsync(
         ProcurementAwardReadinessSourceType sourceType,
@@ -1978,7 +2104,9 @@ public sealed class ProcurementFrameworkAgreementService :
 
     private static ProcurementFrameworkAgreementListItemDto MapList(
         ProcurementFrameworkAgreement item,
-        DateTime now)
+        DateTime now,
+        ProcurementFrameworkCallOffCommercialRules.FamilySummary?
+            familySummary = null)
     {
         var end = ProcurementFrameworkAgreementRules.EffectiveEnd(item);
         return new ProcurementFrameworkAgreementListItemDto
@@ -1998,7 +2126,14 @@ public sealed class ProcurementFrameworkAgreementService :
             PriceListReference = item.PriceListReference,
             PriceListVersion = item.PriceListVersion,
             CeilingAmount = item.CeilingAmount,
-            AvailableCeiling = item.Balance?.AvailableAmount ?? item.CeilingAmount,
+            AvailableCeiling = familySummary is not null
+                ? ProcurementFrameworkCallOffCommercialRules
+                    .EvaluateFamilyCapacity(
+                        familySummary.CeilingAmount,
+                        familySummary.CommittedAmount,
+                        0m)
+                    .AvailableAmount
+                : item.Balance?.AvailableAmount ?? item.CeilingAmount,
             CurrencyCode = item.CurrencyCode,
             EffectiveFromUtc = item.EffectiveFromUtc,
             EffectiveToUtc = item.EffectiveToUtc,
@@ -2016,9 +2151,11 @@ public sealed class ProcurementFrameworkAgreementService :
 
     private static ProcurementFrameworkAgreementDto Map(
         ProcurementFrameworkAgreement item,
-        DateTime now)
+        DateTime now,
+        ProcurementFrameworkCallOffCommercialRules.FamilySummary?
+            familySummary = null)
     {
-        var list = MapList(item, now);
+        var list = MapList(item, now, familySummary);
         return new ProcurementFrameworkAgreementDto
         {
             Id = list.Id,

@@ -542,12 +542,13 @@ namespace ErpSystem.Data.Migrations
                            OR i.PriceListVersion <> agreement.PriceListVersion
                            OR i.CurrencyCode <> agreement.CurrencyCode
                            OR i.AgreementEffectiveFromUtc <> agreement.EffectiveFromUtc
-                           OR i.AgreementEffectiveEndUtc
-                                <> CASE
-                                    WHEN extension.ApprovedEndUtc > agreement.EffectiveToUtc
-                                        THEN extension.ApprovedEndUtc
-                                    ELSE agreement.EffectiveToUtc
-                                   END
+                           OR (prior.Id IS NULL
+                               AND i.AgreementEffectiveEndUtc
+                                    <> CASE
+                                        WHEN extension.ApprovedEndUtc > agreement.EffectiveToUtc
+                                            THEN extension.ApprovedEndUtc
+                                        ELSE agreement.EffectiveToUtc
+                                       END)
                            OR i.AuthorityKind <> authority.AuthorityKind
                            OR i.AuthorityValue <> authority.AuthorityValue
                            OR ISNULL(i.AuthorityThreshold, -1)
