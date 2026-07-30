@@ -7,6 +7,23 @@ public static class ProcurementFrameworkCallOffCommercialRules
     public static bool RequiresCommercialRevalidationOnDecision(bool approved) =>
         approved;
 
+    public static bool ShouldEmitExpiryAlert(
+        FamilySummary summary,
+        Guid agreementId,
+        DateTime? lastAlertAtUtc,
+        DateTime atUtc,
+        int alertDays)
+    {
+        var at = EnsureUtc(atUtc);
+        return summary.IsEffective &&
+               summary.CurrentAgreementId == agreementId &&
+               summary.AvailableAmount > 0m &&
+               summary.EffectiveEndUtc.HasValue &&
+               summary.EffectiveEndUtc.Value <= at.AddDays(alertDays) &&
+               (!lastAlertAtUtc.HasValue ||
+                EnsureUtc(lastAlertAtUtc.Value) < at.AddHours(-24));
+    }
+
     public sealed record AgreementRevisionState(
         Guid AgreementId,
         Guid AgreementKey,

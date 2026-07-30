@@ -161,6 +161,66 @@ public sealed class ProcurementFrameworkCallOffRulesTests
         summaries[v2.AgreementId].AvailableAmount.Should().Be(0m);
     }
 
+    [Fact]
+    public void ExpiryAlertUsesTheCurrentRevisionAndFamilyWideCapacity()
+    {
+        var atUtc = new DateTime(
+            2026,
+            12,
+            15,
+            0,
+            0,
+            0,
+            DateTimeKind.Utc);
+        var v1 = Revision(
+            version: 1,
+            effectiveFromUtc: new DateTime(
+                2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        var v2 = Revision(
+            version: 2,
+            effectiveFromUtc: new DateTime(
+                2026, 7, 1, 0, 0, 0, DateTimeKind.Utc));
+        var summary = ProcurementFrameworkCallOffCommercialRules
+            .SummarizeFamilies(
+                [v1, v2],
+                [
+                    Movement(
+                        v1.AgreementId,
+                        ProcurementFrameworkBalanceMovementType.Commitment,
+                        900m),
+                    Movement(
+                        v2.AgreementId,
+                        ProcurementFrameworkBalanceMovementType.Commitment,
+                        100m)
+                ],
+                atUtc)
+            .Should().ContainSingle().Which;
+
+        ProcurementFrameworkCallOffCommercialRules.ShouldEmitExpiryAlert(
+                summary,
+                v2.AgreementId,
+                null,
+                atUtc,
+                30)
+            .Should().BeFalse(
+                "the agreement family has no remaining capacity");
+        ProcurementFrameworkCallOffCommercialRules.ShouldEmitExpiryAlert(
+                summary with { AvailableAmount = 100m },
+                v1.AgreementId,
+                null,
+                atUtc,
+                30)
+            .Should().BeFalse(
+                "only the current effective revision may emit the family alert");
+        ProcurementFrameworkCallOffCommercialRules.ShouldEmitExpiryAlert(
+                summary with { AvailableAmount = 100m },
+                v2.AgreementId,
+                null,
+                atUtc,
+                30)
+            .Should().BeTrue();
+    }
+
     [Theory]
     [InlineData(ProcurementFrameworkCallOffStatus.Draft, "submit")]
     [InlineData(ProcurementFrameworkCallOffStatus.Draft, "cancel")]

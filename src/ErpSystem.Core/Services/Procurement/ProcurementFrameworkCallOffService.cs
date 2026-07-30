@@ -1012,23 +1012,36 @@ public sealed class ProcurementFrameworkCallOffService :
             $"framework-call-off-expiry-{DateTime.UtcNow:yyyyMMddHH}");
         await EnsureCapabilityAsync(
             ManagePermission, "expiry-alerts", correlation, cancellationToken);
-        var alerted = new List<ProcurementFrameworkAgreementBalance>();
+        var alerted = new List<(
+            ProcurementFrameworkAgreementBalance Balance,
+            ProcurementFrameworkCallOffCommercialRules.FamilySummary Summary)>();
         await ExecuteAsync(async () =>
         {
             var now = DateTime.UtcNow;
             var candidates = await Balances.GetQueryable(item =>
-                    item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
-                    item.AvailableAmount > 0 &&
-                    (!item.LastExpiryAlertAtUtc.HasValue ||
-                     item.LastExpiryAlertAtUtc.Value < now.AddHours(-24)))
+                    item.TenantId == _currentUser.TenantId && !item.IsDeleted)
                 .Include(item => item.Agreement).ThenInclude(item => item.Extensions)
                 .ToListAsync(cancellationToken);
-            foreach (var balance in candidates.Where(item =>
-                         ProcurementFrameworkAgreementRules.IsEffective(
-                             item.Agreement, now) &&
-                         ProcurementFrameworkAgreementRules.EffectiveEnd(
-                             item.Agreement) <= now.AddDays(ExpiryAlertDays)))
+            var familySummaries = await ResolveRevisionFamilySummariesAsync(
+                candidates.Select(item => item.Agreement),
+                now,
+                cancellationToken);
+            foreach (var balance in candidates)
             {
+                if (!familySummaries.TryGetValue(
+                        balance.AgreementId,
+                        out var familySummary) ||
+                    !ProcurementFrameworkCallOffCommercialRules
+                        .ShouldEmitExpiryAlert(
+                            familySummary,
+                            balance.AgreementId,
+                            balance.LastExpiryAlertAtUtc,
+                            now,
+                            ExpiryAlertDays))
+                {
+                    continue;
+                }
+
                 balance.LastExpiryAlertAtUtc = now;
                 balance.UpdatedAt = now;
                 balance.UpdatedBy = ActorName;
@@ -1053,20 +1066,24 @@ public sealed class ProcurementFrameworkCallOffService :
                     Reason = "Effective framework has remaining balance and expires within 30 days.",
                     ResultValues = new
                     {
-                        balance.AvailableAmount,
-                        balance.CurrencyCode,
-                        EffectiveEndUtc =
-                            ProcurementFrameworkAgreementRules.EffectiveEnd(balance.Agreement)
+                        familySummary.AvailableAmount,
+                        familySummary.CurrencyCode,
+                        familySummary.EffectiveEndUtc
                     },
                     CorrelationId = correlation,
                     CausationId = correlation,
                     OccurredAtUtc = now
                 }, cancellationToken);
-                alerted.Add(balance);
+                alerted.Add((balance, familySummary));
             }
         }, cancellationToken);
-        foreach (var balance in alerted)
-            await PublishExpiryNotificationAsync(balance, cancellationToken);
+        foreach (var (balance, familySummary) in alerted)
+        {
+            await PublishExpiryNotificationAsync(
+                balance,
+                familySummary,
+                cancellationToken);
+        }
         return alerted.Count;
     }
 
@@ -1886,6 +1903,7 @@ public sealed class ProcurementFrameworkCallOffService :
 
     private async Task PublishExpiryNotificationAsync(
         ProcurementFrameworkAgreementBalance balance,
+        ProcurementFrameworkCallOffCommercialRules.FamilySummary familySummary,
         CancellationToken cancellationToken)
     {
         try
@@ -1901,12 +1919,11 @@ public sealed class ProcurementFrameworkCallOffService :
                 Data = new Dictionary<string, object>
                 {
                     ["agreementNumber"] = balance.Agreement.AgreementNumber,
-                    ["availableAmount"] = balance.AvailableAmount,
-                    ["currencyCode"] = balance.CurrencyCode,
-                    ["effectiveEndUtc"] =
-                        ProcurementFrameworkAgreementRules.EffectiveEnd(balance.Agreement),
+                    ["availableAmount"] = familySummary.AvailableAmount,
+                    ["currencyCode"] = familySummary.CurrencyCode,
+                    ["effectiveEndUtc"] = familySummary.EffectiveEndUtc!.Value,
                     ["daysToExpiry"] = DaysToExpiry(
-                        ProcurementFrameworkAgreementRules.EffectiveEnd(balance.Agreement),
+                        familySummary.EffectiveEndUtc.Value,
                         DateTime.UtcNow)
                 }
             }, cancellationToken);
