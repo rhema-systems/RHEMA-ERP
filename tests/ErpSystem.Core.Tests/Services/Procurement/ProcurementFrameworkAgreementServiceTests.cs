@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
@@ -8,6 +9,7 @@ using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Services;
 using ErpSystem.Core.Services.Procurement;
@@ -62,6 +64,77 @@ public sealed class ProcurementFrameworkAgreementServiceTests
                     request.BusinessPartnerId == fixture.Supplier.Id &&
                     request.CategoryIds.SequenceEqual(new[] { fixture.Category.Id })),
                 It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task NewerBlockedReadinessRevokesOlderReadyDecision()
+    {
+        await using var fixture = new Fixture();
+        fixture.Context.Add(new ProcurementAwardReadinessDecision
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            SourceType = ProcurementAwardReadinessSourceType.RequestForQuotation,
+            SourceId = fixture.Rfq.Id,
+            SourceReference = fixture.Rfq.RfqNumber,
+            Method = ProcurementMethodType.RequestForQuotation,
+            DecisionSequence = fixture.Readiness.DecisionSequence + 1,
+            Status = ProcurementAwardReadinessDecisionStatus.Blocked,
+            RecommendationSubjectType = "RequestForQuotationQuote",
+            RecommendedBusinessPartnerIdsJson =
+                JsonSerializer.Serialize(new[] { fixture.Supplier.Id }),
+            SourceIntegrityHash = new string('d', 64),
+            IntegrityHash = new string('e', 64),
+            IdempotencyKey = "framework-readiness-blocked",
+            CorrelationId = "framework-readiness-blocked",
+            EvaluatedAtUtc = DateTime.UtcNow,
+            EvaluatedByUserId = Guid.NewGuid(),
+            EvaluatedByName = "Award control reviewer"
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.CreateAsync(
+            fixture.CreateRequest(),
+            "framework-blocked-readiness");
+
+        await action.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code == "FRAMEWORK_AGREEMENT_AWARD_READINESS_REQUIRED");
+        fixture.Context.ProcurementFrameworkAgreements.Should().BeEmpty();
+        (await fixture.Service.GetSourceOptionsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SourceFamilyUniquenessIsRecheckedInsideSerializableTransaction()
+    {
+        await using var fixture = new Fixture();
+        var injected = false;
+        fixture.AfterTransactionStarted = async () =>
+        {
+            if (injected)
+                return;
+            injected = true;
+            fixture.AfterTransactionStarted = null;
+            await fixture.InsertCompetingAgreementAsync();
+        };
+
+        var action = () => fixture.Service.CreateAsync(
+            fixture.CreateRequest(),
+            "framework-concurrent-source");
+
+        await action.Should()
+            .ThrowAsync<ProcurementFrameworkAgreementConflictException>()
+            .Where(exception =>
+                exception.Code == "FRAMEWORK_AGREEMENT_SOURCE_ALREADY_REGISTERED");
+        fixture.LastTransactionIsolationLevel.Should().Be(IsolationLevel.Serializable);
+        fixture.Context.ProcurementFrameworkAgreements.Count(item =>
+                item.TenantId == fixture.TenantId &&
+                item.SourceType ==
+                ProcurementAwardReadinessSourceType.RequestForQuotation &&
+                item.SourceId == fixture.Rfq.Id &&
+                item.BusinessPartnerId == fixture.Supplier.Id)
+            .Should().Be(1);
     }
 
     [Fact]
@@ -297,7 +370,7 @@ public sealed class ProcurementFrameworkAgreementServiceTests
         private Guid _tenantId;
         private Guid _userId;
         private bool _isExternal;
-        private readonly UnitOfWork _unitOfWork;
+        private readonly RecordingUnitOfWork _unitOfWork;
         private readonly Mock<ICurrentUserProvider> _currentUser = new();
         private readonly List<WorkflowInstance> _workflowInstances = new();
 
@@ -313,7 +386,7 @@ public sealed class ProcurementFrameworkAgreementServiceTests
                     warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
                 .Options;
             Context = new ApplicationDbContext(options);
-            _unitOfWork = new UnitOfWork(Context);
+            _unitOfWork = new RecordingUnitOfWork(new UnitOfWork(Context));
 
             Supplier = new BusinessPartner
             {
@@ -563,6 +636,13 @@ public sealed class ProcurementFrameworkAgreementServiceTests
         public Mock<ISupplierValidationService> SupplierValidation { get; } = new();
         public Mock<ICentralDocumentRepositoryFileService> Documents { get; } = new();
         public Mock<INotificationTopicPublisher> NotificationTopics { get; } = new();
+        public IsolationLevel? LastTransactionIsolationLevel =>
+            _unitOfWork.LastIsolationLevel;
+        public Func<Task>? AfterTransactionStarted
+        {
+            get => _unitOfWork.AfterTransactionStarted;
+            set => _unitOfWork.AfterTransactionStarted = value;
+        }
 
         public CreateProcurementFrameworkAgreementRequest CreateRequest(
             DateTime? effectiveFrom = null,
@@ -644,6 +724,46 @@ public sealed class ProcurementFrameworkAgreementServiceTests
             Context.SaveChanges();
         }
 
+        public async Task InsertCompetingAgreementAsync()
+        {
+            var now = DateTime.UtcNow;
+            Context.Add(new ProcurementFrameworkAgreement
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                AgreementKey = Guid.NewGuid(),
+                AgreementNumber = $"FA-RACE-{Guid.NewGuid():N}"[..20],
+                Title = "Concurrent framework",
+                Version = 1,
+                Status = ProcurementFrameworkAgreementStatus.Draft,
+                BusinessPartnerId = Supplier.Id,
+                SourceType =
+                    ProcurementAwardReadinessSourceType.RequestForQuotation,
+                SourceId = Rfq.Id,
+                SourceReference = Rfq.RfqNumber,
+                AwardReadinessDecisionId = Readiness.Id,
+                SourceIntegrityHash = Readiness.IntegrityHash,
+                SupplierEligibilityDecisionHash = EligibilityHash,
+                PriceListReference = $"FPL-RACE-{Guid.NewGuid():N}"[..21],
+                PriceListVersion = 1,
+                CeilingAmount = 1000m,
+                CurrencyCode = "GHS",
+                EffectiveFromUtc = now.AddDays(1),
+                EffectiveToUtc = now.AddYears(1),
+                WorkflowDefinitionId = Workflow.Id,
+                CreationCorrelationId = "framework-concurrent-winner",
+                LastOperationCorrelationId = "framework-concurrent-winner",
+                LastOperation = "Created",
+                SnapshotJson = "{}",
+                IntegrityHash = new string('f', 64),
+                RowVersion = Guid.NewGuid().ToByteArray(),
+                CreatedAt = now,
+                CreatedBy = "Concurrent request",
+                CreatedById = Guid.NewGuid()
+            });
+            await Context.SaveChangesAsync();
+        }
+
         public async Task<ProcurementFrameworkAgreementDocumentDto>
             AttachRequiredDocumentAsync(ProcurementFrameworkAgreementDto agreement)
         {
@@ -682,5 +802,75 @@ public sealed class ProcurementFrameworkAgreementServiceTests
             _unitOfWork.Dispose();
             await Task.CompletedTask;
         }
+    }
+
+    private sealed class RecordingUnitOfWork(IUnitOfWork inner) : IUnitOfWork
+    {
+        public IsolationLevel? LastIsolationLevel { get; private set; }
+        public Func<Task>? AfterTransactionStarted { get; set; }
+
+        public IAccountRepository Accounts => inner.Accounts;
+        public IAccountSegmentStructureRepository AccountSegmentStructures =>
+            inner.AccountSegmentStructures;
+        public IAccountSegmentValueRepository AccountSegmentValues =>
+            inner.AccountSegmentValues;
+        public ISegmentLookupValueRepository SegmentLookupValues =>
+            inner.SegmentLookupValues;
+        public bool HasActiveTransaction => inner.HasActiveTransaction;
+
+        public Task<int> SaveChangesAsync(
+            CancellationToken cancellationToken = default) =>
+            inner.SaveChangesAsync(cancellationToken);
+
+        public int SaveChanges() => inner.SaveChanges();
+
+        public async Task BeginTransactionAsync(
+            CancellationToken cancellationToken = default)
+        {
+            LastIsolationLevel = IsolationLevel.ReadCommitted;
+            await inner.BeginTransactionAsync(cancellationToken);
+            if (AfterTransactionStarted is not null)
+                await AfterTransactionStarted();
+        }
+
+        public async Task BeginTransactionAsync(
+            IsolationLevel isolationLevel,
+            CancellationToken cancellationToken = default)
+        {
+            LastIsolationLevel = isolationLevel;
+            await inner.BeginTransactionAsync(isolationLevel, cancellationToken);
+            if (AfterTransactionStarted is not null)
+                await AfterTransactionStarted();
+        }
+
+        public Task AcquireTransactionLockAsync(
+            string resource,
+            CancellationToken cancellationToken = default) =>
+            inner.AcquireTransactionLockAsync(resource, cancellationToken);
+
+        public Task CommitAsync(
+            CancellationToken cancellationToken = default) =>
+            inner.CommitAsync(cancellationToken);
+
+        public Task RollbackAsync(
+            CancellationToken cancellationToken = default) =>
+            inner.RollbackAsync(cancellationToken);
+
+        public void ClearTrackedChanges() => inner.ClearTrackedChanges();
+
+        public IGenericRepository<T> Repository<T>() where T : BaseEntity =>
+            inner.Repository<T>();
+
+        public Task ExecuteInStrategyAsync(
+            Func<Task> operation,
+            CancellationToken cancellationToken = default) =>
+            inner.ExecuteInStrategyAsync(operation, cancellationToken);
+
+        public Task<T> ExecuteInStrategyAsync<T>(
+            Func<Task<T>> operation,
+            CancellationToken cancellationToken = default) =>
+            inner.ExecuteInStrategyAsync(operation, cancellationToken);
+
+        public void Dispose() => inner.Dispose();
     }
 }

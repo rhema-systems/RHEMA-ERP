@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -308,17 +309,6 @@ public sealed class ProcurementFrameworkAgreementService :
         await ValidateAuthorityUsersAsync(authorityRows, cancellationToken);
         var eligibility = await EnforceSupplierAsync(
             request.BusinessPartnerId, request.CategoryIds, source, correlation, cancellationToken);
-        if (await Agreements.GetQueryable(item =>
-                item.TenantId == _currentUser.TenantId &&
-                item.SourceType == request.SourceType &&
-                item.SourceId == request.SourceId &&
-                item.BusinessPartnerId == request.BusinessPartnerId &&
-                !item.IsDeleted &&
-                item.Status != ProcurementFrameworkAgreementStatus.Rejected &&
-                item.Status != ProcurementFrameworkAgreementStatus.Terminated)
-            .AnyAsync(cancellationToken))
-            throw Conflict("FRAMEWORK_AGREEMENT_SOURCE_ALREADY_REGISTERED",
-                "This supplier and approved source already have a framework-agreement family.");
         var now = DateTime.UtcNow;
         var family = Guid.NewGuid();
         var agreement = new ProcurementFrameworkAgreement
@@ -357,13 +347,26 @@ public sealed class ProcurementFrameworkAgreementService :
         Capture(agreement);
         await ExecuteAsync(async () =>
         {
+            if (await Agreements.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.SourceType == request.SourceType &&
+                    item.SourceId == request.SourceId &&
+                    item.BusinessPartnerId == request.BusinessPartnerId &&
+                    !item.IsDeleted &&
+                    item.Status != ProcurementFrameworkAgreementStatus.Rejected &&
+                    item.Status != ProcurementFrameworkAgreementStatus.Terminated)
+                .AnyAsync(cancellationToken))
+            {
+                throw Conflict("FRAMEWORK_AGREEMENT_SOURCE_ALREADY_REGISTERED",
+                    "This supplier and approved source already have a framework-agreement family.");
+            }
             await Agreements.AddAsync(agreement);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordEventAsync(
                 agreement, "Created", ProcurementControlEventResult.Succeeded,
                 null, Snapshot(agreement), request.Description, [],
                 correlation, now, cancellationToken);
-        }, cancellationToken);
+        }, cancellationToken, IsolationLevel.Serializable);
         return Map(await LoadAsync(agreement.Id, false, cancellationToken), now);
     }
 
@@ -1172,13 +1175,17 @@ public sealed class ProcurementFrameworkAgreementService :
             .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.SourceType == sourceType && item.SourceId == sourceId &&
-                item.Status == ProcurementAwardReadinessDecisionStatus.Ready &&
                 !item.IsDeleted)
             .AsNoTracking()
             .OrderByDescending(item => item.DecisionSequence)
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw Conflict("FRAMEWORK_AGREEMENT_AWARD_READINESS_REQUIRED",
                 "The source has no current Ready award-readiness decision.");
+        if (readiness.Status != ProcurementAwardReadinessDecisionStatus.Ready)
+        {
+            throw Conflict("FRAMEWORK_AGREEMENT_AWARD_READINESS_REQUIRED",
+                $"The latest source readiness decision is {readiness.Status}; a current Ready decision is required.");
+        }
         if (!ParseIds(readiness.RecommendedBusinessPartnerIdsJson).Contains(businessPartnerId))
             throw Conflict("FRAMEWORK_AGREEMENT_SUPPLIER_NOT_RECOMMENDED",
                 "The supplier is not in the exact approved recommendation lineage.");
@@ -2366,11 +2373,14 @@ public sealed class ProcurementFrameworkAgreementService :
 
     private async Task ExecuteAsync(
         Func<Task> action,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IsolationLevel isolationLevel = IsolationLevel.ReadCommitted)
     {
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            await _unitOfWork.BeginTransactionAsync(
+                isolationLevel,
+                cancellationToken);
             try
             {
                 await action();
