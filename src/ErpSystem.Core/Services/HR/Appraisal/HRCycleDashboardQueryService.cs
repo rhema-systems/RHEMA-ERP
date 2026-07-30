@@ -23,6 +23,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
     private readonly IGenericRepository<CalibrationSession>      _calibSessionRepo;
     private readonly IGenericRepository<AppraisalManualAdvanceLog> _advanceLogRepo;
     private readonly IGenericRepository<Employee>                _employeeRepo;
+    private readonly ICurrentUserProvider                        _currentUserProvider;
     private readonly ILogger<HRCycleDashboardQueryService>       _logger;
 
     // Predefined color palette for grade distribution chart slices.
@@ -39,6 +40,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         IGenericRepository<CalibrationSession>       calibSessionRepo,
         IGenericRepository<AppraisalManualAdvanceLog> advanceLogRepo,
         IGenericRepository<Employee>                 employeeRepo,
+        ICurrentUserProvider                         currentUserProvider,
         ILogger<HRCycleDashboardQueryService>        logger)
     {
         _cycleRepo        = cycleRepo;
@@ -47,15 +49,29 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         _calibSessionRepo = calibSessionRepo;
         _advanceLogRepo   = advanceLogRepo;
         _employeeRepo     = employeeRepo;
+        _currentUserProvider = currentUserProvider;
         _logger           = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     // ── GetActiveCycleIdAsync ─────────────────────────────────────────────────
 
     public async Task<Guid> GetActiveCycleIdAsync(CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var cycle = await _cycleRepo
             .GetQueryable(c =>
+                c.TenantId == tenantId &&
                 !c.IsDeleted &&
                 (c.Status == AppraisalCycleStatus.Open || c.Status == AppraisalCycleStatus.InProgress))
             .OrderByDescending(c => c.UpdatedAt ?? c.CreatedAt)
@@ -72,9 +88,11 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
     {
         try
         {
+            var tenantId = GetTenantId();
+
             // 1. Load cycle with its settings ──────────────────────────────────
             var cycle = await _cycleRepo
-                .GetQueryable(c => c.Id == cycleId && !c.IsDeleted)
+                .GetQueryable(c => c.Id == cycleId && c.TenantId == tenantId && !c.IsDeleted)
                 .Include(c => c.AppraisalSettings)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(ct);
@@ -84,7 +102,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
 
             // 2. Load all appraisals for this cycle with selected navigations ──
             var appraisals = await _appraisalRepo
-                .GetQueryable(a => a.AppraisalCycleId == cycleId && !a.IsDeleted)
+                .GetQueryable(a => a.AppraisalCycleId == cycleId && a.TenantId == tenantId && !a.IsDeleted)
                 .Include(a => a.Employee)
                     .ThenInclude(e => e!.OrganizationUnit)
                 .Include(a => a.EvaluatorEvaluations)
@@ -98,12 +116,12 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
 
             // 3. Load grade definitions ─────────────────────────────────────────
             var allGrades = (await _gradeRepo.GetAllAsync())
-                .Where(g => !g.IsDeleted)
+                .Where(g => g.TenantId == tenantId && !g.IsDeleted)
                 .ToList();
 
             // 4. Load calibration sessions for this cycle ────────────────────────
             var calibSessions = await _calibSessionRepo
-                .GetQueryable(cs => cs.AppraisalCycleId == cycleId && !cs.IsDeleted)
+                .GetQueryable(cs => cs.AppraisalCycleId == cycleId && cs.TenantId == tenantId && !cs.IsDeleted)
                 .AsNoTracking()
                 .ToListAsync(ct);
 
@@ -119,7 +137,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             if (managerIds.Count > 0)
             {
                 var managers = await _employeeRepo
-                    .GetQueryable(e => managerIds.Contains(e.Id) && !e.IsDeleted)
+                    .GetQueryable(e => e.TenantId == tenantId && managerIds.Contains(e.Id) && !e.IsDeleted)
                     .AsNoTracking()
                     .ToListAsync(ct);
                 managerLookup = managers.ToDictionary(m => m.Id, m => m.FullName);
@@ -151,7 +169,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             // 7. Load recent manual-advance logs for the activity feed ────────────
             var appraisalIds = appraisals.Select(a => a.Id).ToHashSet();
             var advanceLogs = await _advanceLogRepo
-                .GetQueryable(l => !l.IsDeleted && appraisalIds.Contains(l.PerformanceAppraisalId))
+                .GetQueryable(l => l.TenantId == tenantId && !l.IsDeleted && appraisalIds.Contains(l.PerformanceAppraisalId))
                 .Include(l => l.AdvancedBy)
                 .Include(l => l.Appraisal)
                     .ThenInclude(a => a!.Employee)

@@ -16,41 +16,64 @@ namespace ErpSystem.Core.Services.HR;
 public class AppraisalCompetencyService : IAppraisalCompetencyService
 {
     private readonly IGenericRepository<AppraisalCompetency> _appraisalCompetencyRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalCompetencyService> _logger;
 
     public AppraisalCompetencyService(
         IGenericRepository<AppraisalCompetency> appraisalCompetencyRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalCompetencyService> logger)
     {
         _unitOfWork = unitOfWork;
         _logger = logger;
         _appraisalCompetencyRepository = appraisalCompetencyRepository;
+        _currentUserProvider = currentUserProvider;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An appraisal competency owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<AppraisalCompetency> GetOwnedAsync(Guid id)
+    {
+        var entity = await _appraisalCompetencyRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Appraisal competency with ID '{id}' not found.");
+        return entity;
     }
 
     public async Task<AppraisalCompetencyDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _appraisalCompetencyRepository.GetByIdAsync(id);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"Appraisal competency with ID '{id}' not found.");
-        }
-
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<AppraisalCompetencyDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _appraisalCompetencyRepository.GetAllAsync();
+        var tenantId = GetTenantId();
+        var entities = await _appraisalCompetencyRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
         return entities.ToDtoList();
     }
 
     public async Task<PagedResult<AppraisalCompetencyDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var query = _appraisalCompetencyRepository.GetQueryable()
-                                                  .OrderBy(c => c.CriteriaName);
+            .Where(c => c.TenantId == tenantId)
+            .OrderBy(c => c.CriteriaName);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var paged = await query.Skip((pageNumber - 1) * pageSize)
@@ -71,6 +94,7 @@ public class AppraisalCompetencyService : IAppraisalCompetencyService
     public async Task<AppraisalCompetencyDto> CreateAsync(CreateAppraisalCompetencyDto createDto, CancellationToken cancellationToken = default)
     {
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         await _appraisalCompetencyRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -82,12 +106,7 @@ public class AppraisalCompetencyService : IAppraisalCompetencyService
 
     public async Task<AppraisalCompetencyDto> UpdateAsync(UpdateAppraisalCompetencyDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _appraisalCompetencyRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"Appraisal competency with ID '{updateDto.Id}' not found.");
-        }
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         updateDto.UpdateEntity(entity);
         await _appraisalCompetencyRepository.UpdateAsync(entity);
@@ -100,12 +119,7 @@ public class AppraisalCompetencyService : IAppraisalCompetencyService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _appraisalCompetencyRepository.GetByIdAsync(id);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"Appraisal competency with ID '{id}' not found.");
-        }
+        var entity = await GetOwnedAsync(id);
 
         await _appraisalCompetencyRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -117,4 +131,3 @@ public class AppraisalCompetencyService : IAppraisalCompetencyService
 }
 
 #endregion Appraisal Competency
-

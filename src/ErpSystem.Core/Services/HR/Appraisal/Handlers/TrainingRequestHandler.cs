@@ -18,19 +18,41 @@ public class TrainingRequestHandler : IOutcomeRecommendationHandler
 {
     private readonly IGenericRepository<TrainingRequest> _requestRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TrainingRequestHandler> _logger;
 
     public TrainingRequestHandler(
         IGenericRepository<TrainingRequest> requestRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TrainingRequestHandler> logger)
     {
         _requestRepository = requestRepository;
         _appraisalRepository = appraisalRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
     }
 
     public RecommendationType Type => RecommendationType.TrainingNomination;
@@ -38,8 +60,9 @@ public class TrainingRequestHandler : IOutcomeRecommendationHandler
     public async Task<(string TargetEntityType, Guid TargetEntityId)?> HandleAsync(
         AppraisalOutcomeRecommendation recommendation, CancellationToken cancellationToken = default)
     {
+        var tenantId = RequireCurrentTenant(recommendation.TenantId);
         var appraisal = await _appraisalRepository.GetQueryable()
-            .FirstOrDefaultAsync(a => a.Id == recommendation.PerformanceAppraisalId, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == recommendation.PerformanceAppraisalId && a.TenantId == tenantId, cancellationToken);
         if (appraisal == null)
         {
             _logger.LogWarning("TrainingRequestHandler: appraisal {Id} not found", recommendation.PerformanceAppraisalId);
@@ -52,7 +75,7 @@ public class TrainingRequestHandler : IOutcomeRecommendationHandler
         var requestNumber = $"TR-APR-{recommendation.Id:N}";
 
         var existing = await _requestRepository.GetQueryable()
-            .FirstOrDefaultAsync(r => r.RequestNumber == requestNumber, cancellationToken);
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.RequestNumber == requestNumber, cancellationToken);
         if (existing != null)
         {
             _logger.LogInformation("Training: existing request {RequestNumber} reused for recommendation {Id}", requestNumber, recommendation.Id);
@@ -65,6 +88,7 @@ public class TrainingRequestHandler : IOutcomeRecommendationHandler
 
         var entity = new TrainingRequest
         {
+            TenantId = tenantId,
             RequestNumber = requestNumber,
             EmployeeId = appraisal.EmployeeId,
             RequestedTrainingTitle = title,

@@ -18,6 +18,7 @@ public class CalibrationSessionService : ICalibrationSessionService
     private readonly IGenericRepository<CalibrationRatingAdjustment> _adjustmentRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<AppraisalAttachment> _attachmentRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CalibrationSessionService> _logger;
 
@@ -27,6 +28,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         IGenericRepository<CalibrationRatingAdjustment> adjustmentRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IGenericRepository<AppraisalAttachment> attachmentRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<CalibrationSessionService> logger)
     {
@@ -35,14 +37,44 @@ public class CalibrationSessionService : ICalibrationSessionService
         _adjustmentRepository = adjustmentRepository;
         _appraisalRepository = appraisalRepository;
         _attachmentRepository = attachmentRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    private IQueryable<CalibrationSession> BaseQuery => _sessionRepository.GetQueryable()
-        .Include(s => s.AppraisalCycle)
-        .Include(s => s.OrganizationUnit)
-        .Include(s => s.FacilitatedBy);
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A calibration session owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<CalibrationSession> GetOwnedSessionAsync(Guid id)
+    {
+        var entity = await _sessionRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Calibration session with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<CalibrationSession> BaseQuery
+    {
+        get
+        {
+            var tenantId = GetTenantId();
+            return _sessionRepository.GetQueryable()
+                .Where(s => s.TenantId == tenantId)
+                .Include(s => s.AppraisalCycle)
+                .Include(s => s.OrganizationUnit)
+                .Include(s => s.FacilitatedBy);
+        }
+    }
 
     // ─── CRUD ─────────────────────────────────────────────────────────────────
 
@@ -80,6 +112,7 @@ public class CalibrationSessionService : ICalibrationSessionService
     public async Task<CalibrationSessionDto> CreateAsync(CreateCalibrationSessionDto createDto, CancellationToken cancellationToken = default)
     {
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
         entity.Status = CalibrationStatus.Pending;
 
         await _sessionRepository.AddAsync(entity);
@@ -91,9 +124,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<CalibrationSessionDto> UpdateAsync(UpdateCalibrationSessionDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _sessionRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Calibration session with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedSessionAsync(updateDto.Id);
 
         if (entity.Status == CalibrationStatus.Completed)
             throw new InvalidOperationException("Cannot update a completed calibration session.");
@@ -108,9 +139,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _sessionRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Calibration session with ID '{id}' not found.");
+        var entity = await GetOwnedSessionAsync(id);
 
         if (entity.Status == CalibrationStatus.Completed)
             throw new InvalidOperationException("Cannot delete a completed calibration session.");
@@ -125,9 +154,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<CalibrationSessionDto> OpenSessionAsync(Guid sessionId, Guid facilitatedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _sessionRepository.GetByIdAsync(sessionId);
-        if (entity == null)
-            throw new ArgumentException("Calibration session not found.");
+        var entity = await GetOwnedSessionAsync(sessionId);
 
         if (entity.Status != CalibrationStatus.Pending)
             throw new InvalidOperationException($"Session must be in Pending status to open. Current: {entity.Status}");
@@ -144,9 +171,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<CalibrationSessionDto> StartSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
-        var entity = await _sessionRepository.GetByIdAsync(sessionId);
-        if (entity == null)
-            throw new ArgumentException("Calibration session not found.");
+        var entity = await GetOwnedSessionAsync(sessionId);
 
         if (entity.Status != CalibrationStatus.InProgress)
             throw new InvalidOperationException("Session must be opened before it can be started.");
@@ -163,9 +188,7 @@ public class CalibrationSessionService : ICalibrationSessionService
     public async Task<CalibrationSessionDto> CompleteSessionAsync(
         Guid sessionId, Guid completedById, string? meetingNotes, CancellationToken cancellationToken = default)
     {
-        var entity = await _sessionRepository.GetByIdAsync(sessionId);
-        if (entity == null)
-            throw new ArgumentException("Calibration session not found.");
+        var entity = await GetOwnedSessionAsync(sessionId);
 
         if (entity.Status != CalibrationStatus.InProgress)
             throw new InvalidOperationException("Only in-progress sessions can be completed.");
@@ -185,9 +208,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<CalibrationParticipantDto> AddParticipantAsync(Guid sessionId, CreateCalibrationParticipantDto dto, CancellationToken cancellationToken = default)
     {
-        var sessionExists = await _sessionRepository.ExistsAsync(s => s.Id == sessionId);
-        if (!sessionExists)
-            throw new ArgumentException("Calibration session not found.");
+        var session = await GetOwnedSessionAsync(sessionId);
 
         var duplicate = await _participantRepository.ExistsAsync(p =>
             p.CalibrationSessionId == sessionId && p.EmployeeId == dto.EmployeeId);
@@ -196,6 +217,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
         var entity = dto.ToEntity();
         entity.CalibrationSessionId = sessionId;
+        entity.TenantId = session.TenantId;
 
         await _participantRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -211,6 +233,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<IEnumerable<CalibrationParticipantDto>> GetParticipantsAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedSessionAsync(sessionId);
         var entities = await _participantRepository.GetQueryable(p => p.CalibrationSessionId == sessionId)
             .Include(p => p.Employee)
             .OrderBy(p => p.Employee.LastName)
@@ -220,6 +243,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<bool> RemoveParticipantAsync(Guid sessionId, Guid participantId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedSessionAsync(sessionId);
         var entity = await _participantRepository.GetQueryable()
             .FirstOrDefaultAsync(p => p.Id == participantId && p.CalibrationSessionId == sessionId, cancellationToken);
 
@@ -234,6 +258,7 @@ public class CalibrationSessionService : ICalibrationSessionService
     public async Task<bool> RecordAttendanceAsync(
         Guid sessionId, Guid participantId, bool attended, CancellationToken cancellationToken = default)
     {
+        await GetOwnedSessionAsync(sessionId);
         var entity = await _participantRepository.GetQueryable()
             .Include(p => p.Employee)
             .FirstOrDefaultAsync(p => p.Id == participantId && p.CalibrationSessionId == sessionId, cancellationToken);
@@ -253,9 +278,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<CalibrationRatingAdjustmentDto> AddRatingAdjustmentAsync(Guid sessionId, CreateCalibrationRatingAdjustmentDto dto, CancellationToken cancellationToken = default)
     {
-        var session = await _sessionRepository.GetByIdAsync(sessionId);
-        if (session == null)
-            throw new ArgumentException("Calibration session not found.");
+        var session = await GetOwnedSessionAsync(sessionId);
 
         // Guard: adjustments can only be recorded on an in-progress session
         if (session.Status == CalibrationStatus.Completed)
@@ -269,6 +292,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
         var entity = dto.ToEntity();
         entity.CalibrationSessionId = sessionId;
+        entity.TenantId = session.TenantId;
         entity.AdjustmentDate = DateTime.UtcNow;
 
         await _adjustmentRepository.AddAsync(entity);
@@ -287,6 +311,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<IEnumerable<CalibrationRatingAdjustmentDto>> GetRatingAdjustmentsAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedSessionAsync(sessionId);
         var entities = await _adjustmentRepository.GetQueryable(a => a.CalibrationSessionId == sessionId)
             .Include(a => a.PerformanceAppraisal)
                 .ThenInclude(ap => ap.Employee)
@@ -298,6 +323,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<IEnumerable<CalibrationRatingAdjustmentDto>> GetAdjustmentsByAppraisalAsync(Guid sessionId, Guid appraisalId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedSessionAsync(sessionId);
         var entities = await _adjustmentRepository.GetQueryable(
                 a => a.CalibrationSessionId == sessionId && a.PerformanceAppraisalId == appraisalId)
             .Include(a => a.PerformanceAppraisal)
@@ -310,6 +336,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<CalibrationRatingAdjustmentDto> UpdateRatingAdjustmentAsync(Guid sessionId, UpdateCalibrationRatingAdjustmentDto dto, CancellationToken cancellationToken = default)
     {
+        var session = await GetOwnedSessionAsync(sessionId);
         var entity = await _adjustmentRepository.GetQueryable()
             .Include(a => a.PerformanceAppraisal)
                 .ThenInclude(ap => ap.Employee)
@@ -320,10 +347,9 @@ public class CalibrationSessionService : ICalibrationSessionService
             throw new ArgumentException("Rating adjustment not found in this session.");
 
         // Guard: cannot edit adjustments on a closed session
-        var session = await _sessionRepository.GetByIdAsync(sessionId);
-        if (session?.Status == CalibrationStatus.Completed)
+        if (session.Status == CalibrationStatus.Completed)
             throw new InvalidOperationException("Cannot modify adjustments on a completed calibration session.");
-        if (session?.Status == CalibrationStatus.Cancelled)
+        if (session.Status == CalibrationStatus.Cancelled)
             throw new InvalidOperationException("Cannot modify adjustments on a cancelled calibration session.");
 
         dto.UpdateEntity(entity);
@@ -336,6 +362,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<bool> DeleteRatingAdjustmentAsync(Guid sessionId, Guid adjustmentId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedSessionAsync(sessionId);
         var entity = await _adjustmentRepository.GetQueryable()
             .FirstOrDefaultAsync(a => a.Id == adjustmentId && a.CalibrationSessionId == sessionId, cancellationToken);
 
@@ -351,9 +378,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<int> ApplyAllAdjustmentsAsync(Guid sessionId, Guid appliedById, CancellationToken cancellationToken = default)
     {
-        var session = await _sessionRepository.GetByIdAsync(sessionId);
-        if (session == null)
-            throw new ArgumentException("Calibration session not found.");
+        var session = await GetOwnedSessionAsync(sessionId);
 
         if (session.Status != CalibrationStatus.Completed)
             throw new InvalidOperationException("Adjustments can only be applied to a completed session.");
@@ -373,7 +398,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         foreach (var (appraisalId, adjustment) in latestPerAppraisal)
         {
             var appraisal = await _appraisalRepository.GetByIdAsync(appraisalId);
-            if (appraisal == null) continue;
+            if (appraisal == null || appraisal.TenantId != session.TenantId) continue;
 
             if (!appraisal.IsCalibrated)
                 appraisal.PreCalibrationScore = appraisal.OverallScore;
@@ -414,7 +439,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         var appraisalIds = adjustments.Select(a => a.PerformanceAppraisalId).Distinct().ToHashSet();
 
         var appraisals = await _appraisalRepository
-            .GetQueryable(a => appraisalIds.Contains(a.Id))
+            .GetQueryable(a => a.TenantId == session.TenantId && appraisalIds.Contains(a.Id))
             .Include(a => a.Employee)
                 .ThenInclude(e => e.Position)
             .ToListAsync(cancellationToken);
@@ -464,12 +489,11 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<AppraisalAttachmentDto> AddAttachmentAsync(Guid sessionId, CreateAppraisalAttachmentDto dto, CancellationToken cancellationToken = default)
     {
-        var exists = await _sessionRepository.ExistsAsync(s => s.Id == sessionId);
-        if (!exists)
-            throw new ArgumentException("Calibration session not found.");
+        var session = await GetOwnedSessionAsync(sessionId);
 
         var entity = dto.ToEntity();
         entity.CalibrationSessionId = sessionId;
+        entity.TenantId = session.TenantId;
         entity.EntityType = AppraisalAttachmentEntityType.CalibrationSession;
         entity.UploadDate = DateTime.UtcNow;
 
@@ -482,6 +506,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedSessionAsync(sessionId);
         var entities = await _attachmentRepository.GetQueryable(a => a.CalibrationSessionId == sessionId)
             .Include(a => a.UploadedBy)
             .OrderByDescending(a => a.UploadDate)
@@ -491,6 +516,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<bool> DeleteAttachmentAsync(Guid sessionId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedSessionAsync(sessionId);
         var entity = await _attachmentRepository.GetQueryable()
             .FirstOrDefaultAsync(a => a.Id == attachmentId && a.CalibrationSessionId == sessionId, cancellationToken);
 

@@ -30,6 +30,7 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
     private readonly IGenericRepository<SuccessionCandidate> _candidates;
     private readonly IGenericRepository<SuccessionPlan> _plans;
     private readonly ICompanyHrPolicyProvider _hrPolicy;
+    private readonly ICurrentUserProvider _currentUserProvider;
 
     public SuccessionCandidateSearchService(
         IGenericRepository<Employee> employees,
@@ -42,7 +43,8 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
         IGenericRepository<TalentPoolMember> poolMembers,
         IGenericRepository<SuccessionCandidate> candidates,
         IGenericRepository<SuccessionPlan> plans,
-        ICompanyHrPolicyProvider hrPolicy)
+        ICompanyHrPolicyProvider hrPolicy,
+        ICurrentUserProvider currentUserProvider)
     {
         _employees = employees;
         _employeeCompetencies = employeeCompetencies;
@@ -55,19 +57,33 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
         _candidates = candidates;
         _plans = plans;
         _hrPolicy = hrPolicy;
+        _currentUserProvider = currentUserProvider;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<IReadOnlyList<CandidateFitScoreDto>> ScorePlanCandidatesAsync(
         Guid planId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+
         var plan = await _plans.GetQueryable()
-            .FirstOrDefaultAsync(p => p.Id == planId && !p.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(p => p.Id == planId && p.TenantId == tenantId && !p.IsDeleted, cancellationToken);
         if (plan is null)
             return new List<CandidateFitScoreDto>();
 
         var candidates = await _candidates.GetQueryable()
             .Include(c => c.Employee)
-            .Where(c => c.SuccessionPlanId == planId && !c.IsDeleted)
+            .Where(c => c.TenantId == tenantId && c.SuccessionPlanId == planId && !c.IsDeleted)
             .ToListAsync(cancellationToken);
         if (candidates.Count == 0)
             return new List<CandidateFitScoreDto>();
@@ -76,28 +92,28 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
         var empIds = candidates.Select(c => c.EmployeeId).Distinct().ToList();
 
         var requiredCompetencies = await _positionCompetencies.GetQueryable()
-            .Where(pc => pc.PositionId == plan.PositionId && !pc.IsDeleted)
+            .Where(pc => pc.TenantId == tenantId && pc.PositionId == plan.PositionId && !pc.IsDeleted)
             .ToDictionaryAsync(pc => pc.CompetencyId, pc => pc.RequiredProficiencyLevel, cancellationToken);
         var requiredSkills = await _positionSkills.GetQueryable()
-            .Where(ps => ps.PositionId == plan.PositionId && !ps.IsDeleted)
+            .Where(ps => ps.TenantId == tenantId && ps.PositionId == plan.PositionId && !ps.IsDeleted)
             .ToDictionaryAsync(ps => ps.SkillId, ps => (int)ps.RequiredLevel, cancellationToken);
 
         var employeeCompetencies = (await _employeeCompetencies.GetQueryable()
-                .Where(ec => empIds.Contains(ec.EmployeeId) && !ec.IsDeleted)
+                .Where(ec => ec.TenantId == tenantId && empIds.Contains(ec.EmployeeId) && !ec.IsDeleted)
                 .Select(ec => new { ec.EmployeeId, ec.CompetencyId, ec.CurrentProficiencyLevel })
                 .ToListAsync(cancellationToken))
             .GroupBy(x => x.EmployeeId)
             .ToDictionary(g => g.Key, g => g.ToDictionary(x => x.CompetencyId, x => x.CurrentProficiencyLevel));
 
         var employeeSkills = (await _employeeSkills.GetQueryable()
-                .Where(es => empIds.Contains(es.EmployeeId) && !es.IsDeleted)
+                .Where(es => es.TenantId == tenantId && empIds.Contains(es.EmployeeId) && !es.IsDeleted)
                 .Select(es => new { es.EmployeeId, es.SkillId, es.SkillLevel })
                 .ToListAsync(cancellationToken))
             .GroupBy(x => x.EmployeeId)
             .ToDictionary(g => g.Key, g => g.ToDictionary(x => x.SkillId, x => (int)x.SkillLevel));
 
         var latestAppraisal = (await _appraisals.GetQueryable()
-                .Where(a => empIds.Contains(a.EmployeeId) && !a.IsDeleted && a.OverallScore != null)
+                .Where(a => a.TenantId == tenantId && empIds.Contains(a.EmployeeId) && !a.IsDeleted && a.OverallScore != null)
                 .Select(a => new { a.EmployeeId, a.Year, a.OverallScore })
                 .ToListAsync(cancellationToken))
             .GroupBy(a => a.EmployeeId)
@@ -149,6 +165,7 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
     public async Task<IReadOnlyList<SuccessionCandidateSearchResultDto>> SearchAsync(
         SuccessionCandidateSearchDto criteria, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var settings = await _hrPolicy.GetAsync(cancellationToken);
         var weights = WeightsFrom(settings);
         var today = DateOnly.FromDateTime(DateTime.Today);
@@ -156,7 +173,7 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
         // ── 1. Base employee query (SQL-side filters) ──────────────────────────────
         var query = _employees.GetQueryable()
             .Include(e => e.Position)
-            .Where(e => !e.IsDeleted && e.IsActive);
+            .Where(e => e.TenantId == tenantId && !e.IsDeleted && e.IsActive);
 
         if (!string.IsNullOrWhiteSpace(criteria.SearchTerm))
         {
@@ -190,14 +207,14 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
         if (criteria.ExcludePoolId.HasValue)
         {
             var memberIds = (await _poolMembers.GetQueryable()
-                .Where(m => m.TalentPoolId == criteria.ExcludePoolId && m.IsActive && !m.IsDeleted)
+                .Where(m => m.TenantId == tenantId && m.TalentPoolId == criteria.ExcludePoolId && m.IsActive && !m.IsDeleted)
                 .Select(m => m.EmployeeId).ToListAsync(cancellationToken)).ToHashSet();
             employees = employees.Where(e => !memberIds.Contains(e.Id)).ToList();
         }
         if (criteria.ExcludePlanId.HasValue)
         {
             var candidateIds = (await _candidates.GetQueryable()
-                .Where(c => c.SuccessionPlanId == criteria.ExcludePlanId && !c.IsDeleted)
+                .Where(c => c.TenantId == tenantId && c.SuccessionPlanId == criteria.ExcludePlanId && !c.IsDeleted)
                 .Select(c => c.EmployeeId).ToListAsync(cancellationToken)).ToHashSet();
             employees = employees.Where(e => !candidateIds.Contains(e.Id)).ToList();
         }
@@ -213,24 +230,24 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
         if (criteria.TargetPositionId.HasValue)
         {
             requiredCompetencies = await _positionCompetencies.GetQueryable()
-                .Where(pc => pc.PositionId == criteria.TargetPositionId && !pc.IsDeleted)
+                .Where(pc => pc.TenantId == tenantId && pc.PositionId == criteria.TargetPositionId && !pc.IsDeleted)
                 .ToDictionaryAsync(pc => pc.CompetencyId, pc => pc.RequiredProficiencyLevel, cancellationToken);
 
             requiredSkills = await _positionSkills.GetQueryable()
-                .Where(ps => ps.PositionId == criteria.TargetPositionId && !ps.IsDeleted)
+                .Where(ps => ps.TenantId == tenantId && ps.PositionId == criteria.TargetPositionId && !ps.IsDeleted)
                 .ToDictionaryAsync(ps => ps.SkillId, ps => (int)ps.RequiredLevel, cancellationToken);
         }
 
         // ── 4. Bulk-load employee competencies & skills ────────────────────────────
         var employeeCompetencies = (await _employeeCompetencies.GetQueryable()
-                .Where(ec => empIds.Contains(ec.EmployeeId) && !ec.IsDeleted)
+                .Where(ec => ec.TenantId == tenantId && empIds.Contains(ec.EmployeeId) && !ec.IsDeleted)
                 .Select(ec => new { ec.EmployeeId, ec.CompetencyId, ec.CurrentProficiencyLevel })
                 .ToListAsync(cancellationToken))
             .GroupBy(x => x.EmployeeId)
             .ToDictionary(g => g.Key, g => g.ToDictionary(x => x.CompetencyId, x => x.CurrentProficiencyLevel));
 
         var employeeSkills = (await _employeeSkills.GetQueryable()
-                .Where(es => empIds.Contains(es.EmployeeId) && !es.IsDeleted)
+                .Where(es => es.TenantId == tenantId && empIds.Contains(es.EmployeeId) && !es.IsDeleted)
                 .Select(es => new { es.EmployeeId, es.SkillId, es.SkillLevel })
                 .ToListAsync(cancellationToken))
             .GroupBy(x => x.EmployeeId)
@@ -238,7 +255,7 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
 
         // ── 5. Latest appraisal per employee ───────────────────────────────────────
         var latestAppraisal = (await _appraisals.GetQueryable()
-                .Where(a => empIds.Contains(a.EmployeeId) && !a.IsDeleted && a.OverallScore != null)
+                .Where(a => a.TenantId == tenantId && empIds.Contains(a.EmployeeId) && !a.IsDeleted && a.OverallScore != null)
                 .Select(a => new { a.EmployeeId, a.Year, a.OverallScore })
                 .ToListAsync(cancellationToken))
             .GroupBy(a => a.EmployeeId)
@@ -249,7 +266,8 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
             .Select(e => e.OrganizationUnitId!.Value).Distinct().ToList();
         var orgUnitNames = orgUnitIds.Count == 0
             ? new Dictionary<Guid, string>()
-            : await _orgUnits.GetQueryable().Where(o => orgUnitIds.Contains(o.Id))
+            : await _orgUnits.GetQueryable()
+                .Where(o => o.TenantId == tenantId && orgUnitIds.Contains(o.Id))
                 .ToDictionaryAsync(o => o.Id, o => o.Name, cancellationToken);
 
         // ── 7. Score each candidate ────────────────────────────────────────────────

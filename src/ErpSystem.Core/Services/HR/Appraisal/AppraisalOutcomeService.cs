@@ -19,6 +19,7 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
     private readonly IGenericRepository<AppraisalOutcomeRecommendation> _repository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IEnumerable<IOutcomeRecommendationHandler> _handlers;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalOutcomeService> _logger;
 
@@ -26,14 +27,37 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
         IGenericRepository<AppraisalOutcomeRecommendation> repository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IEnumerable<IOutcomeRecommendationHandler> handlers,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalOutcomeService> logger)
     {
         _repository = repository;
         _appraisalRepository = appraisalRepository;
         _handlers = handlers;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A recommendation owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<AppraisalOutcomeRecommendation> GetOwnedAsync(Guid id)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Recommendation with ID '{id}' not found.");
+        return entity;
     }
 
     public async Task<IEnumerable<AppraisalOutcomeRecommendationDto>> GetByAppraisalAsync(Guid performanceAppraisalId, CancellationToken cancellationToken = default)
@@ -62,8 +86,14 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
 
     public async Task<AppraisalOutcomeRecommendationDto> ProposeAsync(CreateAppraisalOutcomeRecommendationDto dto, Guid recommendedById, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+        var appraisal = await _appraisalRepository.GetByIdAsync(dto.PerformanceAppraisalId);
+        if (appraisal == null || appraisal.TenantId != tenantId)
+            throw new ArgumentException($"Performance appraisal with ID '{dto.PerformanceAppraisalId}' not found.");
+
         var entity = new AppraisalOutcomeRecommendation
         {
+            TenantId = tenantId,
             PerformanceAppraisalId = dto.PerformanceAppraisalId,
             RecommendationType = dto.RecommendationType,
             Status = RecommendationStatus.Proposed,
@@ -81,8 +111,7 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
 
     public async Task<AppraisalOutcomeRecommendationDto> ApproveAsync(Guid id, Guid approverId, CancellationToken cancellationToken = default)
     {
-        var entity = await _repository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Recommendation with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.Status is RecommendationStatus.Rejected or RecommendationStatus.Dismissed)
             throw new InvalidOperationException("This recommendation has already been closed.");
@@ -135,8 +164,7 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
 
     private async Task<AppraisalOutcomeRecommendationDto> CloseAsync(Guid id, RecommendationStatus status, Guid reviewerId, string? notes, CancellationToken cancellationToken)
     {
-        var entity = await _repository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Recommendation with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.Status == RecommendationStatus.Actioned)
             throw new InvalidOperationException("An actioned recommendation cannot be rejected or dismissed.");
@@ -156,9 +184,13 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private IQueryable<AppraisalOutcomeRecommendation> Query()
-        => _repository.GetQueryable()
+    {
+        var tenantId = GetTenantId();
+        return _repository.GetQueryable()
+            .Where(r => r.TenantId == tenantId)
             .Include(r => r.PerformanceAppraisal)
                 .ThenInclude(a => a.Employee);
+    }
 
     private async Task<AppraisalOutcomeRecommendation> GetEntityAsync(Guid id, CancellationToken cancellationToken)
         => await Query().FirstOrDefaultAsync(r => r.Id == id, cancellationToken)

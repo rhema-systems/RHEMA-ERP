@@ -12,37 +12,67 @@ namespace ErpSystem.Core.Services.HR;
 public class IdentificationTypeService : IIdentificationTypeService
 {
     private readonly IGenericRepository<IdentificationType> _identificationTypeRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<IdentificationTypeService> _logger;
 
     public IdentificationTypeService(
         IGenericRepository<IdentificationType> identificationTypeRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<IdentificationTypeService> logger)
     {
         _identificationTypeRepository = identificationTypeRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<IdentificationTypeDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<IdentificationType> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var identificationType = await _identificationTypeRepository.GetQueryable()
             .Include(it => it.IssuingCountry)
             .FirstOrDefaultAsync(it => it.Id == id, cancellationToken);
 
-        if (identificationType == null)
+        if (identificationType == null || identificationType.TenantId != GetTenantId())
         {
             throw new ArgumentException($"Identification type with ID '{id}' not found.");
         }
 
+        return identificationType;
+    }
+
+    public async Task<IdentificationTypeDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var identificationType = await GetOwnedAsync(id, cancellationToken);
         return identificationType.ToDto();
     }
 
     public async Task<IEnumerable<IdentificationTypeDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var identificationTypes = await _identificationTypeRepository.GetQueryable()
             .Include(it => it.IssuingCountry)
+            .Where(it => it.TenantId == tenantId)
             .OrderBy(it => it.Name)
             .ToListAsync(cancellationToken);
 
@@ -51,9 +81,10 @@ public class IdentificationTypeService : IIdentificationTypeService
 
     public async Task<IEnumerable<IdentificationTypeDto>> GetActiveAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var identificationTypes = await _identificationTypeRepository.GetQueryable()
             .Include(it => it.IssuingCountry)
-            .Where(it => it.IsActive)
+            .Where(it => it.TenantId == tenantId && it.IsActive)
             .OrderBy(it => it.Name)
             .ToListAsync(cancellationToken);
 
@@ -62,8 +93,10 @@ public class IdentificationTypeService : IIdentificationTypeService
 
     public async Task<PagedResult<IdentificationTypeDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var query = _identificationTypeRepository.GetQueryable()
             .Include(it => it.IssuingCountry)
+            .Where(it => it.TenantId == tenantId)
             .OrderBy(it => it.Name);
 
         var totalCount = await query.CountAsync(cancellationToken);
@@ -84,11 +117,13 @@ public class IdentificationTypeService : IIdentificationTypeService
 
     public async Task<IdentificationTypeDto> CreateAsync(CreateIdentificationTypeDto createDto, CancellationToken cancellationToken = default)
     {
-        // Validate uniqueness of code if provided
+        var tenantId = GetTenantId();
+
+        // Codes are unique per tenant: an unscoped check would let one tenant's codes block another's.
         if (!string.IsNullOrWhiteSpace(createDto.Code))
         {
             var existingWithCode = await _identificationTypeRepository.GetQueryable()
-                .AnyAsync(it => it.Code == createDto.Code, cancellationToken);
+                .AnyAsync(it => it.TenantId == tenantId && it.Code == createDto.Code, cancellationToken);
 
             if (existingWithCode)
             {
@@ -97,6 +132,7 @@ public class IdentificationTypeService : IIdentificationTypeService
         }
 
         var identificationType = createDto.ToEntity();
+        identificationType.TenantId = tenantId;
         await _identificationTypeRepository.AddAsync(identificationType);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -108,16 +144,16 @@ public class IdentificationTypeService : IIdentificationTypeService
         var identificationType = await _identificationTypeRepository.GetQueryable()
             .FirstOrDefaultAsync(it => it.Id == updateDto.Id, cancellationToken);
 
-        if (identificationType == null)
+        if (identificationType == null || identificationType.TenantId != GetTenantId())
         {
             throw new ArgumentException($"Identification type with ID '{updateDto.Id}' not found.");
         }
 
-        // Validate uniqueness of code if provided and changed
+        // Codes are unique per tenant: an unscoped check would let one tenant's codes block another's.
         if (!string.IsNullOrWhiteSpace(updateDto.Code) && updateDto.Code != identificationType.Code)
         {
             var existingWithCode = await _identificationTypeRepository.GetQueryable()
-                .AnyAsync(it => it.Code == updateDto.Code && it.Id != updateDto.Id, cancellationToken);
+                .AnyAsync(it => it.TenantId == identificationType.TenantId && it.Code == updateDto.Code && it.Id != updateDto.Id, cancellationToken);
 
             if (existingWithCode)
             {
@@ -138,7 +174,7 @@ public class IdentificationTypeService : IIdentificationTypeService
             .Include(it => it.EmployeeIdentificationCards)
             .FirstOrDefaultAsync(it => it.Id == id, cancellationToken);
 
-        if (identificationType == null)
+        if (identificationType == null || identificationType.TenantId != GetTenantId())
         {
             throw new ArgumentException($"Identification type with ID '{id}' not found.");
         }
@@ -157,12 +193,7 @@ public class IdentificationTypeService : IIdentificationTypeService
 
     public async Task<bool> ActivateAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var identificationType = await _identificationTypeRepository.GetByIdAsync(id);
-
-        if (identificationType == null)
-        {
-            throw new ArgumentException($"Identification type with ID '{id}' not found.");
-        }
+        var identificationType = await GetOwnedAsync(id, cancellationToken);
 
         identificationType.IsActive = true;
         await _identificationTypeRepository.UpdateAsync(identificationType);
@@ -173,12 +204,7 @@ public class IdentificationTypeService : IIdentificationTypeService
 
     public async Task<bool> DeactivateAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var identificationType = await _identificationTypeRepository.GetByIdAsync(id);
-
-        if (identificationType == null)
-        {
-            throw new ArgumentException($"Identification type with ID '{id}' not found.");
-        }
+        var identificationType = await GetOwnedAsync(id, cancellationToken);
 
         identificationType.IsActive = false;
         await _identificationTypeRepository.UpdateAsync(identificationType);

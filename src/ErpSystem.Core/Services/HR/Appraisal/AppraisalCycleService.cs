@@ -28,6 +28,7 @@ public class AppraisalCycleService : IAppraisalCycleService
     private readonly IGenericRepository<AppraisalReviewEvent> _reviewEventRepository;
     private readonly IGenericRepository<CheckIn> _checkInRepository;
     private readonly IEffectiveAppraisalConfigurationService _effectiveConfigService;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalCycleService> _logger;
 
@@ -45,6 +46,7 @@ public class AppraisalCycleService : IAppraisalCycleService
         IGenericRepository<AppraisalReviewEvent> reviewEventRepository,
         IGenericRepository<CheckIn> checkInRepository,
         IEffectiveAppraisalConfigurationService effectiveConfigService,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalCycleService> logger)
     {
@@ -61,15 +63,54 @@ public class AppraisalCycleService : IAppraisalCycleService
         _reviewEventRepository = reviewEventRepository;
         _checkInRepository = checkInRepository;
         _effectiveConfigService = effectiveConfigService;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An appraisal cycle owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<AppraisalCycle> GetOwnedCycleAsync(Guid id)
+    {
+        var entity = await _cycleRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Appraisal cycle with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<AppraisalSettings> GetOwnedSettingsAsync(Guid id)
+    {
+        var entity = await _settingsRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Appraisal settings with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<AppraisalCycleTarget> GetOwnedCycleTargetAsync(Guid cycleId, Guid targetId)
+    {
+        var entity = await _targetRepository.GetQueryable()
+            .FirstOrDefaultAsync(t => t.Id == targetId && t.AppraisalCycleId == cycleId);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Cycle target not found.");
+        return entity;
     }
 
     /// <inheritdoc />
     public async Task<IEnumerable<AppraisalCalendarEventDto>> GetCalendarAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
-        var cycle = await _cycleRepository.GetByIdAsync(cycleId)
-            ?? throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
+        var cycle = await GetOwnedCycleAsync(cycleId);
+        var tenantId = GetTenantId();
 
         var events = new List<AppraisalCalendarEventDto>();
 
@@ -119,7 +160,8 @@ public class AppraisalCycleService : IAppraisalCycleService
         Add(cycle.FinalConversationDeadline, "Final conversation deadline", "Deadline", "Final Conversation");
 
         // Review events (Custom frequency / generated)
-        var reviewEvents = await _reviewEventRepository.GetQueryable(r => r.AppraisalCycleId == cycleId)
+        var reviewEvents = await _reviewEventRepository.GetQueryable()
+            .Where(r => r.TenantId == tenantId && r.AppraisalCycleId == cycleId)
             .ToListAsync(cancellationToken);
         foreach (var re in reviewEvents)
             events.Add(new AppraisalCalendarEventDto
@@ -133,7 +175,8 @@ public class AppraisalCycleService : IAppraisalCycleService
             });
 
         // Check-ins
-        var checkIns = await _checkInRepository.GetQueryable(c => c.AppraisalCycleId == cycleId)
+        var checkIns = await _checkInRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId && c.AppraisalCycleId == cycleId)
             .ToListAsync(cancellationToken);
         foreach (var ci in checkIns)
             events.Add(new AppraisalCalendarEventDto
@@ -151,11 +194,12 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<AppraisalCycleDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _cycleRepository.GetQueryable()
             .Include(c => c.AppraisalSettings)
             .Include(c => c.OpenedBy)
             .Include(c => c.ClosedBy)
-            .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == id && c.TenantId == tenantId, cancellationToken);
         
         if (entity == null)
             throw new ArgumentException($"Appraisal cycle with ID '{id}' not found.");
@@ -165,7 +209,9 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<IEnumerable<AppraisalCycleDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _cycleRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
             .Include(c => c.AppraisalSettings)
             .Include(c => c.OpenedBy)
             .Include(c => c.ClosedBy)
@@ -178,7 +224,9 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<PagedResult<AppraisalCycleDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var query = _cycleRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
             .Include(c => c.AppraisalSettings)
             .Include(c => c.OpenedBy)
             .Include(c => c.ClosedBy);
@@ -202,11 +250,12 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<IEnumerable<AppraisalCycleDto>> GetByYearAsync(int year, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _cycleRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId && c.Year == year)
             .Include(c => c.AppraisalSettings)
             .Include(c => c.OpenedBy)
             .Include(c => c.ClosedBy)
-            .Where(c => c.Year == year)
             .OrderByDescending(c => c.StartDate)
             .ToListAsync(cancellationToken);
 
@@ -215,11 +264,12 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<IEnumerable<AppraisalCycleDto>> GetByTypeAsync(AppraisalType type, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _cycleRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId && c.AppraisalType == type)
             .Include(c => c.AppraisalSettings)
             .Include(c => c.OpenedBy)
             .Include(c => c.ClosedBy)
-            .Where(c => c.AppraisalType == type)
             .OrderByDescending(c => c.Year)
             .ThenByDescending(c => c.StartDate)
             .ToListAsync(cancellationToken);
@@ -230,11 +280,16 @@ public class AppraisalCycleService : IAppraisalCycleService
     public async Task<IEnumerable<AppraisalCycleDto>> GetActiveCyclesAsync(CancellationToken cancellationToken = default)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var tenantId = GetTenantId();
 
         var entities = await _cycleRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId
+                     && c.OpenedDate != null
+                     && c.ClosedDate == null
+                     && c.StartDate <= today
+                     && c.EndDate >= today)
             .Include(c => c.AppraisalSettings)
             .Include(c => c.OpenedBy)
-            .Where(c => c.OpenedDate != null && c.ClosedDate == null && c.StartDate <= today && c.EndDate >= today)
             .OrderByDescending(c => c.StartDate)
             .ToListAsync(cancellationToken);
 
@@ -249,7 +304,10 @@ public class AppraisalCycleService : IAppraisalCycleService
             throw new InvalidOperationException("End date must be after start date.");
         }
 
+        await GetOwnedSettingsAsync(createDto.AppraisalSettingsId);
+
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         await _cycleRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -259,18 +317,19 @@ public class AppraisalCycleService : IAppraisalCycleService
         // Reload with includes
         entity = await _cycleRepository.GetQueryable()
             .Include(c => c.AppraisalSettings)
-            .FirstOrDefaultAsync(c => c.Id == entity.Id, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == entity.Id && c.TenantId == entity.TenantId, cancellationToken);
 
         return entity!.ToDto();
     }
 
     public async Task<AppraisalCycleDto> UpdateAsync(UpdateAppraisalCycleDto updateDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _cycleRepository.GetQueryable()
             .Include(c => c.AppraisalSettings)
             .Include(c => c.OpenedBy)
             .Include(c => c.ClosedBy)
-            .FirstOrDefaultAsync(c => c.Id == updateDto.Id, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == updateDto.Id && c.TenantId == tenantId, cancellationToken);
         
         if (entity == null)
             throw new ArgumentException($"Appraisal cycle with ID '{updateDto.Id}' not found.");
@@ -299,10 +358,7 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _cycleRepository.GetByIdAsync(id);
-        
-        if (entity == null)
-            throw new ArgumentException($"Appraisal cycle with ID '{id}' not found.");
+        var entity = await GetOwnedCycleAsync(id);
 
         // Check if cycle has been opened
         if (entity.OpenedDate.HasValue)
@@ -320,10 +376,8 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<bool> OpenCycleAsync(OpenAppraisalCycleDto openDto, Guid openedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _cycleRepository.GetByIdAsync(openDto.CycleId);
-        
-        if (entity == null)
-            throw new ArgumentException($"Appraisal cycle with ID '{openDto.CycleId}' not found.");
+        var entity = await GetOwnedCycleAsync(openDto.CycleId);
+        var tenantId = GetTenantId();
 
         if (entity.OpenedDate.HasValue)
         {
@@ -333,7 +387,7 @@ public class AppraisalCycleService : IAppraisalCycleService
         // Scope-aware overlap check: block opening if any employee is already covered by another
         // non-closed cycle of the same type and year.  Skipped when no targets are configured yet.
         var thisTargets = await _targetRepository.GetQueryable()
-            .Where(t => t.AppraisalCycleId == entity.Id && t.IsActive && !t.IsDeleted)
+            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == entity.Id && t.IsActive && !t.IsDeleted)
             .Include(t => t.Exclusions)
             .ToListAsync(cancellationToken);
 
@@ -344,7 +398,8 @@ public class AppraisalCycleService : IAppraisalCycleService
             if (thisScopeEmployees.Any())
             {
                 var siblingsQuery = _cycleRepository.GetQueryable()
-                    .Where(c => c.Id != entity.Id &&
+                    .Where(c => c.TenantId == tenantId &&
+                                c.Id != entity.Id &&
                                 c.AppraisalType == entity.AppraisalType &&
                                 c.Year == entity.Year &&
                                 c.Status != AppraisalCycleStatus.Closed);
@@ -355,7 +410,7 @@ public class AppraisalCycleService : IAppraisalCycleService
                 foreach (var sibling in siblingCycles)
                 {
                     var siblingTargets = await _targetRepository.GetQueryable()
-                        .Where(t => t.AppraisalCycleId == sibling.Id && t.IsActive && !t.IsDeleted)
+                        .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == sibling.Id && t.IsActive && !t.IsDeleted)
                         .Include(t => t.Exclusions)
                         .ToListAsync(cancellationToken);
 
@@ -399,20 +454,17 @@ public class AppraisalCycleService : IAppraisalCycleService
     public async Task<(int Created, int EvaluationsCreated, int ReviewEventsCreated)> GenerateAppraisalsAsync(
         Guid cycleId, Guid generatedById, CancellationToken cancellationToken = default)
     {
-        var cycle = await _cycleRepository.GetByIdAsync(cycleId);
-        if (cycle == null)
-            throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
+        var cycle = await GetOwnedCycleAsync(cycleId);
+        var tenantId = GetTenantId();
 
         if (cycle.Status == AppraisalCycleStatus.Closed)
             throw new InvalidOperationException("Cannot generate appraisals for a closed cycle.");
 
-        var settings = await _settingsRepository.GetByIdAsync(cycle.AppraisalSettingsId);
-        if (settings == null)
-            throw new InvalidOperationException("Appraisal settings not found for this cycle.");
+        var settings = await GetOwnedSettingsAsync(cycle.AppraisalSettingsId);
 
         // ── 1. Load active template assignments with scope nav-props ──
         var activeTemplates = await _cycleTemplateRepository.GetQueryable()
-            .Where(ct => ct.AppraisalCycleId == cycleId && ct.IsActive && !ct.IsDeleted)
+            .Where(ct => ct.TenantId == tenantId && ct.AppraisalCycleId == cycleId && ct.IsActive && !ct.IsDeleted)
             .Include(ct => ct.AppraisalTemplate)
                 .ThenInclude(t => t.OrganizationLevel)
             .Include(ct => ct.AppraisalTemplate)
@@ -427,7 +479,7 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         // ── 2. Resolve employees from targets (target-only scope) ──
         var activeTargets = await _targetRepository.GetQueryable()
-            .Where(t => t.AppraisalCycleId == cycleId && t.IsActive && !t.IsDeleted)
+            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == cycleId && t.IsActive && !t.IsDeleted)
             .Include(t => t.Exclusions)
             .ToListAsync(cancellationToken);
 
@@ -440,7 +492,7 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         // ── 3. Filter out any already-generated employees ──
         var alreadyGenerated = await _appraisalRepository.GetQueryable()
-            .Where(a => a.AppraisalCycleId == cycleId)
+            .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == cycleId)
             .Select(a => a.EmployeeId)
             .ToListAsync(cancellationToken);
 
@@ -450,7 +502,7 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         // ── 4. Load employee details + resolve templates ──
         var employees = await _employeeRepository.GetQueryable()
-            .Where(e => pendingIds.Contains(e.Id) && !e.IsDeleted)
+            .Where(e => e.TenantId == tenantId && pendingIds.Contains(e.Id) && !e.IsDeleted)
             .Include(e => e.Position)
             .Include(e => e.OrganizationUnit)
             .Include(e => e.OrganizationLevel)
@@ -629,6 +681,7 @@ public class AppraisalCycleService : IAppraisalCycleService
     private async Task<HashSet<Guid>> ResolveEmployeesFromTargetsAsync(
         List<AppraisalCycleTarget> targets, CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
         var set = new HashSet<Guid>();
         foreach (var target in targets)
         {
@@ -638,7 +691,7 @@ public class AppraisalCycleService : IAppraisalCycleService
                     if (target.PositionId.HasValue)
                     {
                         var ids = await _employeeRepository.GetQueryable()
-                            .Where(e => e.PositionId == target.PositionId && !e.IsDeleted && e.IsActive)
+                            .Where(e => e.TenantId == tenantId && e.PositionId == target.PositionId && !e.IsDeleted && e.IsActive)
                             .Select(e => e.Id).ToListAsync(cancellationToken);
                         foreach (var id in ids) set.Add(id);
                     }
@@ -650,7 +703,11 @@ public class AppraisalCycleService : IAppraisalCycleService
                         var childIds = await GetChildUnitIdsForGenerationAsync(target.OrganizationUnitId.Value, cancellationToken);
                         childIds.Add(target.OrganizationUnitId.Value);
                         var ids = await _employeeRepository.GetQueryable()
-                            .Where(e => e.OrganizationUnitId.HasValue && childIds.Contains(e.OrganizationUnitId.Value) && !e.IsDeleted && e.IsActive)
+                            .Where(e => e.TenantId == tenantId
+                                     && e.OrganizationUnitId.HasValue
+                                     && childIds.Contains(e.OrganizationUnitId.Value)
+                                     && !e.IsDeleted
+                                     && e.IsActive)
                             .Select(e => e.Id).ToListAsync(cancellationToken);
                         foreach (var id in ids) set.Add(id);
                     }
@@ -660,7 +717,7 @@ public class AppraisalCycleService : IAppraisalCycleService
                     if (target.OrganizationLevelId.HasValue)
                     {
                         var ids = await _employeeRepository.GetQueryable()
-                            .Where(e => e.OrganizationLevelId == target.OrganizationLevelId && !e.IsDeleted && e.IsActive)
+                            .Where(e => e.TenantId == tenantId && e.OrganizationLevelId == target.OrganizationLevelId && !e.IsDeleted && e.IsActive)
                             .Select(e => e.Id).ToListAsync(cancellationToken);
                         foreach (var id in ids) set.Add(id);
                     }
@@ -682,6 +739,7 @@ public class AppraisalCycleService : IAppraisalCycleService
     private async Task<HashSet<Guid>> GetChildUnitIdsForGenerationAsync(
         Guid parentUnitId, CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
         var result = new HashSet<Guid>();
         var queue = new Queue<Guid>();
         queue.Enqueue(parentUnitId);
@@ -689,7 +747,7 @@ public class AppraisalCycleService : IAppraisalCycleService
         {
             var current = queue.Dequeue();
             var children = await _organizationUnitRepository.GetQueryable()
-                .Where(u => u.ParentUnitId == current && !u.IsDeleted)
+                .Where(u => u.TenantId == tenantId && u.ParentUnitId == current && !u.IsDeleted)
                 .Select(u => u.Id).ToListAsync(cancellationToken);
             foreach (var child in children)
                 if (result.Add(child)) queue.Enqueue(child);
@@ -781,10 +839,7 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<bool> CloseCycleAsync(CloseAppraisalCycleDto closeDto, Guid closedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _cycleRepository.GetByIdAsync(closeDto.CycleId);
-        
-        if (entity == null)
-            throw new ArgumentException($"Appraisal cycle with ID '{closeDto.CycleId}' not found.");
+        var entity = await GetOwnedCycleAsync(closeDto.CycleId);
 
         if (!entity.OpenedDate.HasValue)
         {
@@ -813,10 +868,12 @@ public class AppraisalCycleService : IAppraisalCycleService
     /// </summary>
     public async Task<AppraisalCycleProgressDto> GetCycleProgressAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+
         // Get cycle with settings
         var cycle = await _cycleRepository.GetQueryable()
             .Include(c => c.AppraisalSettings)
-            .FirstOrDefaultAsync(c => c.Id == cycleId, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == cycleId && c.TenantId == tenantId, cancellationToken);
 
         if (cycle == null)
             throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
@@ -825,13 +882,13 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         // Get all appraisals for this cycle with evaluations
         var appraisals = await _appraisalRepository.GetQueryable()
-            .Where(a => a.AppraisalCycleId == cycleId)
+            .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == cycleId)
             .ToListAsync(cancellationToken);
 
         var appraisalIds = appraisals.Select(a => a.Id).ToList();
 
         var evaluations = await _evaluatorEvaluationRepository.GetQueryable()
-            .Where(e => appraisalIds.Contains(e.AppraisalId))
+            .Where(e => e.TenantId == tenantId && appraisalIds.Contains(e.AppraisalId))
             .ToListAsync(cancellationToken);
 
         // Calculate progress metrics
@@ -935,8 +992,9 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     private async Task<TargetBreakdownDto> CalculateTargetBreakdown(Guid cycleId, CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
         var targets = await _targetRepository.GetQueryable()
-            .Where(t => t.AppraisalCycleId == cycleId)
+            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == cycleId)
             .ToListAsync(cancellationToken);
 
         return new TargetBreakdownDto
@@ -1061,8 +1119,11 @@ public class AppraisalCycleService : IAppraisalCycleService
         }
 
         // Employees without managers
+        var tenantId = GetTenantId();
         var withoutManagers = await _employeeRepository.GetQueryable()
-            .Where(e => appraisals.Select(a => a.EmployeeId).Contains(e.Id) && !e.ManagerId.HasValue)
+            .Where(e => e.TenantId == tenantId
+                     && appraisals.Select(a => a.EmployeeId).Contains(e.Id)
+                     && !e.ManagerId.HasValue)
             .CountAsync(cancellationToken);
 
         if (withoutManagers > 0)
@@ -1098,8 +1159,9 @@ public class AppraisalCycleService : IAppraisalCycleService
         _logger.LogInformation("Creating appraisal instances for {count} employees in cycle {cycleId}", employeeIds.Count, cycle.Id);
 
         // Check if any appraisals already exist for this cycle (shouldn't happen, but safety check)
+        var tenantId = cycle.TenantId;
         var existingAppraisals = await _appraisalRepository.GetQueryable()
-            .Where(a => a.AppraisalCycleId == cycle.Id)
+            .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == cycle.Id)
             .Select(a => a.EmployeeId)
             .ToListAsync(cancellationToken);
 
@@ -1126,7 +1188,7 @@ public class AppraisalCycleService : IAppraisalCycleService
             
             // Fetch employee details with manager info
             var employees = await _employeeRepository.GetQueryable()
-                .Where(e => batchEmployeeIds.Contains(e.Id))
+                .Where(e => e.TenantId == tenantId && batchEmployeeIds.Contains(e.Id))
                 .Select(e => new 
                 { 
                     e.Id, 
@@ -1274,9 +1336,7 @@ public class AppraisalCycleService : IAppraisalCycleService
     /// </summary>
     public async Task<IEnumerable<Guid>> GetEmployeesInScopeAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
-        var cycle = await _cycleRepository.GetByIdAsync(cycleId);
-        if (cycle == null)
-            throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
+        var cycle = await GetOwnedCycleAsync(cycleId);
 
         // Step 1: Auto-discover employees with criteria or KPI targets
         var autoDiscovered = await GetAutoDiscoveredEmployeesAsync(cycle, cancellationToken);
@@ -1285,8 +1345,9 @@ public class AppraisalCycleService : IAppraisalCycleService
         var finalEmployees = new HashSet<Guid>(autoDiscovered);
 
         // Step 2: Get manual targets with their exclusions
+        var tenantId = GetTenantId();
         var targets = await _targetRepository.GetQueryable()
-            .Where(t => t.AppraisalCycleId == cycleId)
+            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == cycleId)
             .Include(t => t.Exclusions)
             .ToListAsync(cancellationToken);
 
@@ -1322,18 +1383,19 @@ public class AppraisalCycleService : IAppraisalCycleService
     /// </summary>
     private async Task<HashSet<Guid>> GetAutoDiscoveredEmployeesAsync(AppraisalCycle cycle, CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
         var employeeIds = new HashSet<Guid>();
 
         // Find positions that have an active position-scoped appraisal template.
         var positionsWithTemplate = await _templateRepository.GetQueryable()
-            .Where(t => !t.IsDeleted && t.IsActive && t.PositionId.HasValue)
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.IsActive && t.PositionId.HasValue)
             .Select(t => t.PositionId!.Value)
             .Distinct()
             .ToListAsync(cancellationToken);
 
         // Get employees in those positions
         var employeesWithTemplate = await _employeeRepository.GetQueryable()
-            .Where(e => !e.IsDeleted && positionsWithTemplate.Contains(e.PositionId))
+            .Where(e => e.TenantId == tenantId && !e.IsDeleted && positionsWithTemplate.Contains(e.PositionId))
             .Select(e => e.Id)
             .ToListAsync(cancellationToken);
 
@@ -1347,6 +1409,8 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     private async Task<IEnumerable<Guid>> ResolveTargetEmployeesAsync(AppraisalCycleTarget target, CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
+
         switch (target.TargetType)
         {
             case AppraisalTargetType.Employee:
@@ -1357,7 +1421,7 @@ public class AppraisalCycleService : IAppraisalCycleService
                 if (target.PositionId.HasValue)
                 {
                     return await _employeeRepository.GetQueryable()
-                        .Where(e => e.PositionId == target.PositionId && !e.IsDeleted)
+                        .Where(e => e.TenantId == tenantId && e.PositionId == target.PositionId && !e.IsDeleted)
                         .Select(e => e.Id)
                         .ToListAsync(cancellationToken);
                 }
@@ -1373,7 +1437,10 @@ public class AppraisalCycleService : IAppraisalCycleService
                     unitIds.AddRange(childUnits);
 
                     return await _employeeRepository.GetQueryable()
-                        .Where(e => e.OrganizationUnitId.HasValue && unitIds.Contains(e.OrganizationUnitId.Value) && !e.IsDeleted)
+                        .Where(e => e.TenantId == tenantId
+                                 && e.OrganizationUnitId.HasValue
+                                 && unitIds.Contains(e.OrganizationUnitId.Value)
+                                 && !e.IsDeleted)
                         .Select(e => e.Id)
                         .ToListAsync(cancellationToken);
                 }
@@ -1383,12 +1450,15 @@ public class AppraisalCycleService : IAppraisalCycleService
                 if (target.OrganizationLevelId.HasValue)
                 {
                     var unitsInLevel = await _organizationUnitRepository.GetQueryable()
-                        .Where(u => u.OrganizationLevelId == target.OrganizationLevelId && !u.IsDeleted)
+                        .Where(u => u.TenantId == tenantId && u.OrganizationLevelId == target.OrganizationLevelId && !u.IsDeleted)
                         .Select(u => u.Id)
                         .ToListAsync(cancellationToken);
 
                     return await _employeeRepository.GetQueryable()
-                        .Where(e => e.OrganizationUnitId.HasValue && unitsInLevel.Contains(e.OrganizationUnitId.Value) && !e.IsDeleted)
+                        .Where(e => e.TenantId == tenantId
+                                 && e.OrganizationUnitId.HasValue
+                                 && unitsInLevel.Contains(e.OrganizationUnitId.Value)
+                                 && !e.IsDeleted)
                         .Select(e => e.Id)
                         .ToListAsync(cancellationToken);
                 }
@@ -1400,9 +1470,10 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     private async Task<List<Guid>> GetChildUnitsAsync(Guid parentUnitId, CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
         var childUnits = new List<Guid>();
         var directChildren = await _organizationUnitRepository.GetQueryable()
-            .Where(u => u.ParentUnitId == parentUnitId && !u.IsDeleted)
+            .Where(u => u.TenantId == tenantId && u.ParentUnitId == parentUnitId && !u.IsDeleted)
             .Select(u => u.Id)
             .ToListAsync(cancellationToken);
 
@@ -1429,6 +1500,7 @@ public class AppraisalCycleService : IAppraisalCycleService
         IEnumerable<AppraisalCycleTargetExclusion> exclusions,
         CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
         var active = exclusions.Where(e => e.IsActive && !e.IsDeleted).ToList();
         if (active.Count == 0) return;
 
@@ -1452,7 +1524,7 @@ public class AppraisalCycleService : IAppraisalCycleService
         if (excludedPositionIds.Count > 0)
         {
             var ids = await _employeeRepository.GetQueryable()
-                .Where(e => excludedPositionIds.Contains(e.PositionId) && !e.IsDeleted)
+                .Where(e => e.TenantId == tenantId && excludedPositionIds.Contains(e.PositionId) && !e.IsDeleted)
                 .Select(e => e.Id).ToListAsync(cancellationToken);
             foreach (var id in ids) employeeSet.Remove(id);
         }
@@ -1471,7 +1543,10 @@ public class AppraisalCycleService : IAppraisalCycleService
                 foreach (var child in children) allUnitIds.Add(child);
             }
             var ids = await _employeeRepository.GetQueryable()
-                .Where(e => e.OrganizationUnitId.HasValue && allUnitIds.Contains(e.OrganizationUnitId.Value) && !e.IsDeleted)
+                .Where(e => e.TenantId == tenantId
+                         && e.OrganizationUnitId.HasValue
+                         && allUnitIds.Contains(e.OrganizationUnitId.Value)
+                         && !e.IsDeleted)
                 .Select(e => e.Id).ToListAsync(cancellationToken);
             foreach (var id in ids) employeeSet.Remove(id);
         }
@@ -1487,7 +1562,10 @@ public class AppraisalCycleService : IAppraisalCycleService
         if (excludedLevelIds.Count > 0)
         {
             var ids = await _employeeRepository.GetQueryable()
-                .Where(e => e.OrganizationLevelId.HasValue && excludedLevelIds.Contains(e.OrganizationLevelId.Value) && !e.IsDeleted)
+                .Where(e => e.TenantId == tenantId
+                         && e.OrganizationLevelId.HasValue
+                         && excludedLevelIds.Contains(e.OrganizationLevelId.Value)
+                         && !e.IsDeleted)
                 .Select(e => e.Id).ToListAsync(cancellationToken);
             foreach (var id in ids) employeeSet.Remove(id);
         }
@@ -1497,9 +1575,8 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<AppraisalCycleTargetDto> AddCycleTargetAsync(Guid cycleId, CreateAppraisalCycleTargetDto createDto, CancellationToken cancellationToken = default)
     {
-        var cycle = await _cycleRepository.GetByIdAsync(cycleId);
-        if (cycle == null)
-            throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
+        await GetOwnedCycleAsync(cycleId);
+        var tenantId = GetTenantId();
 
         // Validate that exactly one target type is specified
         var targetCount = new[] { createDto.OrganizationLevelId, createDto.OrganizationUnitId, createDto.PositionId }
@@ -1512,6 +1589,7 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         var entity = createDto.ToEntity();
         entity.AppraisalCycleId = cycleId;
+        entity.TenantId = tenantId;
 
         await _targetRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1522,7 +1600,7 @@ public class AppraisalCycleService : IAppraisalCycleService
             .Include(t => t.OrganizationLevel)
             .Include(t => t.OrganizationUnit)
             .Include(t => t.Position)
-            .FirstOrDefaultAsync(t => t.Id == entity.Id, cancellationToken);
+            .FirstOrDefaultAsync(t => t.Id == entity.Id && t.TenantId == tenantId, cancellationToken);
 
         _logger.LogInformation("Cycle target added: {targetId} to cycle {cycleId}", entity!.Id, cycleId);
 
@@ -1531,12 +1609,15 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<IEnumerable<AppraisalCycleTargetDto>> GetCycleTargetsAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCycleAsync(cycleId);
+        var tenantId = GetTenantId();
+
         var entities = await _targetRepository.GetQueryable()
             .Include(t => t.AppraisalCycle)
             .Include(t => t.OrganizationLevel)
             .Include(t => t.OrganizationUnit)
             .Include(t => t.Position)
-            .Where(t => t.AppraisalCycleId == cycleId)
+            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == cycleId)
             .OrderBy(t => t.TargetType)
             .ToListAsync(cancellationToken);
 
@@ -1545,15 +1626,7 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<AppraisalCycleTargetDto> UpdateCycleTargetAsync(Guid cycleId, UpdateAppraisalCycleTargetDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _targetRepository.GetQueryable()
-            .Include(t => t.AppraisalCycle)
-            .Include(t => t.OrganizationLevel)
-            .Include(t => t.OrganizationUnit)
-            .Include(t => t.Position)
-            .FirstOrDefaultAsync(t => t.Id == updateDto.Id && t.AppraisalCycleId == cycleId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Cycle target not found.");
+        var entity = await GetOwnedCycleTargetAsync(cycleId, updateDto.Id);
 
         // Validate that exactly one target type is specified
         var targetCount = new[] { updateDto.OrganizationLevelId, updateDto.OrganizationUnitId, updateDto.PositionId }
@@ -1576,11 +1649,7 @@ public class AppraisalCycleService : IAppraisalCycleService
 
     public async Task<bool> RemoveCycleTargetAsync(Guid cycleId, Guid targetId, CancellationToken cancellationToken = default)
     {
-        var entity = await _targetRepository.GetQueryable()
-            .FirstOrDefaultAsync(t => t.Id == targetId && t.AppraisalCycleId == cycleId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Cycle target not found.");
+        var entity = await GetOwnedCycleTargetAsync(cycleId, targetId);
 
         await _targetRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

@@ -1,6 +1,8 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -14,6 +16,9 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
     private readonly ITrainingNeedsAssessmentRepository _assessmentRepository;
     private readonly ITrainingNeedsAssessmentProgramRepository _programRepository;
     private readonly ITrainingNeedsAssessmentSkillRepository _skillRepository;
+    private readonly IGenericRepository<TrainingProgram> _trainingProgramRepository;
+    private readonly IGenericRepository<Skill> _skillCatalogRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TrainingNeedsAssessmentService> _logger;
 
@@ -21,23 +26,71 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
         ITrainingNeedsAssessmentRepository assessmentRepository,
         ITrainingNeedsAssessmentProgramRepository programRepository,
         ITrainingNeedsAssessmentSkillRepository skillRepository,
+        IGenericRepository<TrainingProgram> trainingProgramRepository,
+        IGenericRepository<Skill> skillCatalogRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TrainingNeedsAssessmentService> logger)
     {
         _assessmentRepository = assessmentRepository;
         _programRepository = programRepository;
         _skillRepository = skillRepository;
+        _trainingProgramRepository = trainingProgramRepository;
+        _skillCatalogRepository = skillCatalogRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An assessment owned by another tenant is reported as missing rather than forbidden, so the endpoints
+    // do not confirm that the id exists elsewhere.
+    private async Task<TrainingNeedsAssessment> GetOwnedAssessmentAsync(Guid id)
+    {
+        var entity = await _assessmentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Training needs assessment with ID '{id}' not found.");
+        return entity;
+    }
+
+    // A recommendation owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<TrainingNeedsAssessmentProgram> GetOwnedRecommendedProgramAsync(Guid id)
+    {
+        var entity = await _programRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Recommended program with ID '{id}' not found.");
+        return entity;
+    }
+
+    // A skill gap owned by another tenant is reported as missing rather than forbidden, so the endpoints
+    // do not confirm that the id exists elsewhere.
+    private async Task<TrainingNeedsAssessmentSkill> GetOwnedSkillGapAsync(Guid id)
+    {
+        var entity = await _skillRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Skill gap with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Assessment queries ────────────────────────────────────────────────────
 
     public async Task<TrainingNeedsAssessmentDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _assessmentRepository.GetWithFullDetailsAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Training needs assessment with ID '{id}' not found.");
 
         return entity.ToDto();
@@ -45,19 +98,23 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
 
     public async Task<IEnumerable<TrainingNeedsAssessmentSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _assessmentRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingNeedsAssessmentSummaryDto>> GetByYearAsync(int year, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _assessmentRepository.GetByYearAsync(year);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<TrainingNeedsAssessmentSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _assessmentRepository.GetQueryable();
+        var tenantId = GetTenantId();
+
+        var query = _assessmentRepository.GetQueryable().Where(a => a.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query
             .OrderByDescending(a => a.IdentifiedDate)
@@ -75,35 +132,43 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
 
     public async Task<IEnumerable<TrainingNeedsAssessmentSummaryDto>> GetByDepartmentIdAsync(Guid departmentId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _assessmentRepository.GetQueryable()
-            .Where(a => a.Employee.OrganizationUnitId == departmentId)
+            .Where(a => a.TenantId == tenantId && a.Employee.OrganizationUnitId == departmentId)
             .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingNeedsAssessmentSummaryDto>> GetUnfulfilledAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _assessmentRepository.GetUnfulfilledAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingNeedsAssessmentSummaryDto>> GetByPriorityAsync(TrainingPriority priority, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _assessmentRepository.GetByPriorityAsync(priority);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingNeedsAssessmentSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _assessmentRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── Assessment CRUD ───────────────────────────────────────────────────────
 
     public async Task<TrainingNeedsAssessmentDto> CreateAsync(CreateTrainingNeedsAssessmentDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
 
         await _assessmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -115,6 +180,10 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
 
     public async Task<BulkNeedsAssessmentResultDto> BulkCreateAsync(BulkCreateTrainingNeedsAssessmentDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         var result = new BulkNeedsAssessmentResultDto { RequestedCount = dto.EmployeeIds.Count };
 
         foreach (var employeeId in dto.EmployeeIds.Distinct())
@@ -128,7 +197,7 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
                 Priority = dto.Priority,
                 IdentifiedById = createdByUserId,
                 AdditionalNotes = dto.AdditionalNotes
-            }.ToEntity(tenantId, createdByUserId);
+            }.ToEntity(current, createdByUserId);
 
             await _assessmentRepository.AddAsync(entity);
             result.CreatedCount++;
@@ -142,10 +211,7 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
 
     public async Task<TrainingNeedsAssessmentDto> UpdateAsync(UpdateTrainingNeedsAssessmentDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _assessmentRepository.GetByIdAsync(dto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training needs assessment with ID '{dto.Id}' not found.");
+        var entity = await GetOwnedAssessmentAsync(dto.Id);
 
         entity.UpdateEntity(dto, updatedByUserId);
         entity.UpdatedAt = DateTime.UtcNow;
@@ -159,10 +225,7 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _assessmentRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training needs assessment with ID '{id}' not found.");
+        var entity = await GetOwnedAssessmentAsync(id);
 
         await _assessmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -176,12 +239,17 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
 
     public async Task<TrainingNeedsAssessmentProgramDto> AddRecommendedProgramAsync(CreateTrainingNeedsAssessmentProgramDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var assessment = await _assessmentRepository.GetByIdAsync(dto.AssessmentId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        if (assessment == null)
-            throw new ArgumentException($"Training needs assessment with ID '{dto.AssessmentId}' not found.");
+        await GetOwnedAssessmentAsync(dto.AssessmentId);
 
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var program = await _trainingProgramRepository.GetByIdAsync(dto.ProgramId);
+        if (program == null || program.TenantId != current)
+            throw new ArgumentException($"Training program with ID '{dto.ProgramId}' not found.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
 
         await _programRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -191,16 +259,14 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
 
     public async Task<IEnumerable<TrainingNeedsAssessmentProgramDto>> GetRecommendedProgramsAsync(Guid assessmentId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _programRepository.GetByAssessmentIdAsync(assessmentId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<bool> DeleteRecommendedProgramAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _programRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Recommended program with ID '{id}' not found.");
+        var entity = await GetOwnedRecommendedProgramAsync(id);
 
         await _programRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -212,12 +278,17 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
 
     public async Task<TrainingNeedsAssessmentSkillDto> AddSkillGapAsync(CreateTrainingNeedsAssessmentSkillDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var assessment = await _assessmentRepository.GetByIdAsync(dto.AssessmentId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        if (assessment == null)
-            throw new ArgumentException($"Training needs assessment with ID '{dto.AssessmentId}' not found.");
+        await GetOwnedAssessmentAsync(dto.AssessmentId);
 
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var skill = await _skillCatalogRepository.GetByIdAsync(dto.SkillId);
+        if (skill == null || skill.TenantId != current)
+            throw new ArgumentException($"Skill with ID '{dto.SkillId}' not found.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
 
         await _skillRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -227,16 +298,14 @@ public class TrainingNeedsAssessmentService : ITrainingNeedsAssessmentService
 
     public async Task<IEnumerable<TrainingNeedsAssessmentSkillDto>> GetSkillGapsAsync(Guid assessmentId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _skillRepository.GetByAssessmentIdAsync(assessmentId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<bool> DeleteSkillGapAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _skillRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Skill gap with ID '{id}' not found.");
+        var entity = await GetOwnedSkillGapAsync(id);
 
         await _skillRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

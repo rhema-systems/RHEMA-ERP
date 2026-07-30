@@ -14,6 +14,7 @@ public class TrainingCompletionService : ITrainingCompletionService
 {
     private readonly ITrainingCompletionRepository _completionRepository;
     private readonly ITrainingCertificateRepository _certificateRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TrainingCompletionService> _logger;
 
@@ -29,6 +30,7 @@ public class TrainingCompletionService : ITrainingCompletionService
         IGenericRepository<TrainingNomination> nominationRepo,
         IGenericRepository<TrainingProgramSkill> programSkillRepo,
         IGenericRepository<EmployeeSkill> employeeSkillRepo,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         INumberSequenceService numberSequence,
         ILogger<TrainingCompletionService> logger)
@@ -38,9 +40,39 @@ public class TrainingCompletionService : ITrainingCompletionService
         _nominationRepo = nominationRepo;
         _programSkillRepo = programSkillRepo;
         _employeeSkillRepo = employeeSkillRepo;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _numberSequence = numberSequence;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A row owned by another tenant is reported as missing rather than forbidden, so the endpoints do not
+    // confirm that the id exists elsewhere.
+    private async Task<TrainingCompletion> GetOwnedCompletionAsync(Guid id)
+    {
+        var entity = await _completionRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Training completion with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<TrainingCertificate> GetOwnedCertificateAsync(Guid id)
+    {
+        var entity = await _certificateRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Training certificate with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Completion queries ────────────────────────────────────────────────────
@@ -49,7 +81,7 @@ public class TrainingCompletionService : ITrainingCompletionService
     {
         var entity = await _completionRepository.GetByIdAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Training completion record with ID '{id}' not found.");
 
         return entity.ToDto();
@@ -57,38 +89,48 @@ public class TrainingCompletionService : ITrainingCompletionService
 
     public async Task<TrainingCompletionDto?> GetByNominationIdAsync(Guid nominationId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _completionRepository.GetByNominationIdAsync(nominationId);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<TrainingCompletionDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _completionRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<TrainingCompletionDto>> GetByScheduleIdAsync(Guid scheduleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _completionRepository.GetByScheduleIdAsync(scheduleId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<TrainingCompletionDto>> GetPendingVerificationAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _completionRepository.GetPendingManagerVerificationAsync();
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     // ── Completion recording ──────────────────────────────────────────────────
 
     public async Task<TrainingCompletionDto> RecordCompletionAsync(RecordTrainingCompletionDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        // Completions are unique per nomination within a tenant: an unscoped check would block this tenant
+        // on the strength of another tenant's row, and would confirm that the row exists there.
         var existing = await _completionRepository.GetByNominationIdAsync(dto.NominationId);
 
-        if (existing != null)
+        if (existing != null && existing.TenantId == current)
             throw new InvalidOperationException($"A completion record already exists for nomination ID '{dto.NominationId}'.");
 
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var entity = dto.ToEntity(current, createdByUserId);
 
         await _completionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -100,10 +142,15 @@ public class TrainingCompletionService : ITrainingCompletionService
 
     public async Task<BulkCompletionResultDto> BulkRecordCompletionAsync(BulkRecordCompletionDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         var result = new BulkCompletionResultDto { RequestedCount = dto.Items.Count };
 
         // Nominations for this schedule that already have a completion, so we don't double-record.
         var existing = (await _completionRepository.GetByScheduleIdAsync(dto.ScheduleId))
+            .Where(c => c.TenantId == current)
             .Select(c => c.NominationId).ToHashSet();
 
         foreach (var item in dto.Items)
@@ -122,7 +169,7 @@ public class TrainingCompletionService : ITrainingCompletionService
                 Status = item.Status,
                 FinalScore = item.FinalScore,
                 IsPassed = item.IsPassed
-            }.ToEntity(tenantId, createdByUserId);
+            }.ToEntity(current, createdByUserId);
 
             await _completionRepository.AddAsync(entity);
             existing.Add(item.NominationId);
@@ -139,10 +186,7 @@ public class TrainingCompletionService : ITrainingCompletionService
 
     public async Task<TrainingCompletionDto> UpdateAsync(UpdateTrainingCompletionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _completionRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training completion with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedCompletionAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -156,17 +200,14 @@ public class TrainingCompletionService : ITrainingCompletionService
 
     public async Task<TrainingCompletionDto> VerifyCompletionAsync(VerifyTrainingCompletionDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _completionRepository.GetByIdAsync(dto.CompletionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training completion with ID '{dto.CompletionId}' not found.");
+        var entity = await GetOwnedCompletionAsync(dto.CompletionId);
 
         if (entity.IsVerifiedByManager)
             throw new InvalidOperationException("This completion record has already been verified.");
 
         entity.IsVerifiedByManager = true;
-        entity.VerifiedById = dto.VerifiedById;
-        entity.VerificationDate = dto.VerificationDate;
+        entity.VerifiedById = updatedByUserId;
+        entity.VerificationDate = DateTime.UtcNow;
         entity.VerificationNotes = dto.VerificationNotes;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = updatedByUserId.ToString();
@@ -180,7 +221,7 @@ public class TrainingCompletionService : ITrainingCompletionService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Training completion {CompletionId} verified by {VerifierId}", dto.CompletionId, dto.VerifiedById);
+        _logger.LogInformation("Training completion {CompletionId} verified by {VerifierId}", dto.CompletionId, updatedByUserId);
 
         return entity.ToDto();
     }
@@ -188,18 +229,24 @@ public class TrainingCompletionService : ITrainingCompletionService
     /// <summary>Upserts the training programme's target skills onto the employee's profile.</summary>
     private async Task WriteBackSkillsAsync(TrainingCompletion completion, Guid userId, CancellationToken ct)
     {
+        // The completion has already been tenant-checked, so its TenantId is the authenticated one. Scoping
+        // the profile read matters beyond the leak: an unscoped match would upgrade another tenant's skill
+        // row instead of creating this tenant's.
+        var tenantId = completion.TenantId;
+
         var nomination = await _nominationRepo.GetQueryable()
+            .Where(n => n.TenantId == tenantId)
             .Include(n => n.Schedule)
             .FirstOrDefaultAsync(n => n.Id == completion.NominationId, ct);
         if (nomination?.Schedule == null) return;
 
         var programSkills = await _programSkillRepo.GetQueryable()
-            .Where(ps => ps.ProgramId == nomination.Schedule.ProgramId)
+            .Where(ps => ps.TenantId == tenantId && ps.ProgramId == nomination.Schedule.ProgramId)
             .ToListAsync(ct);
         if (programSkills.Count == 0) return;
 
         var existing = await _employeeSkillRepo.GetQueryable()
-            .Where(es => es.EmployeeId == completion.EmployeeId)
+            .Where(es => es.TenantId == tenantId && es.EmployeeId == completion.EmployeeId)
             .ToListAsync(ct);
 
         var acquired = DateOnly.FromDateTime(completion.CompletionDate);
@@ -240,7 +287,11 @@ public class TrainingCompletionService : ITrainingCompletionService
 
     public async Task<TrainingCertificateDto> IssueCertificateAsync(IssueCertificateDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
         entity.CertificateNumber = await GenerateCertificateNumberAsync(cancellationToken);
         entity.VerificationCode = await GenerateUniqueVerificationCodeAsync(cancellationToken);
         entity.Status = CertificateStatus.Active;
@@ -255,18 +306,15 @@ public class TrainingCompletionService : ITrainingCompletionService
 
     public async Task<bool> RevokeCertificateAsync(RevokeCertificateDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _certificateRepository.GetByIdAsync(dto.CertificateId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training certificate with ID '{dto.CertificateId}' not found.");
+        var entity = await GetOwnedCertificateAsync(dto.CertificateId);
 
         if (entity.Status == CertificateStatus.Revoked)
             throw new InvalidOperationException("Certificate is already revoked.");
 
         entity.Status = CertificateStatus.Revoked;
-        entity.RevokedDate = dto.RevokedDate;
+        entity.RevokedDate = DateTime.UtcNow;
         entity.RevokedReason = dto.RevokedReason;
-        entity.RevokedById = dto.RevokedById;
+        entity.RevokedById = updatedByUserId;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = updatedByUserId.ToString();
 
@@ -280,14 +328,16 @@ public class TrainingCompletionService : ITrainingCompletionService
 
     public async Task<IEnumerable<TrainingCertificateSummaryDto>> GetCertificatesForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _certificateRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingCertificateSummaryDto>> GetExpiringCertificatesAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _certificateRepository.GetExpiringAsync(daysAhead);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -299,6 +349,8 @@ public class TrainingCompletionService : ITrainingCompletionService
     private const string CodeAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
     /// <summary>Generates a random 12-char verification code and retries until it is globally unique.</summary>
+    // Unlike the other uniqueness checks in this service, this one must stay cross-tenant: verification
+    // codes are resolved by an unauthenticated public lookup that has no tenant to scope by.
     private async Task<string> GenerateUniqueVerificationCodeAsync(CancellationToken ct)
     {
         for (var attempt = 0; attempt < 8; attempt++)

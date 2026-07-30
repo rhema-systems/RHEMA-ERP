@@ -1,5 +1,6 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -11,61 +12,89 @@ namespace ErpSystem.Core.Services.HR;
 public class TrainingWaitlistService : ITrainingWaitlistService
 {
     private readonly ITrainingWaitlistRepository _waitlistRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TrainingWaitlistService> _logger;
 
     public TrainingWaitlistService(
         ITrainingWaitlistRepository waitlistRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TrainingWaitlistService> logger)
     {
         _waitlistRepository = waitlistRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An entry owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<TrainingWaitlist> GetOwnedAsync(Guid id)
+    {
+        var entity = await _waitlistRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Waitlist entry with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
 
     public async Task<TrainingWaitlistDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _waitlistRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Waitlist entry with ID '{id}' not found.");
-
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<TrainingWaitlistDto>> GetByScheduleIdAsync(Guid scheduleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _waitlistRepository.GetByScheduleIdAsync(scheduleId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<TrainingWaitlistDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _waitlistRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<TrainingWaitlistDto>> GetActiveWaitlistAsync(Guid scheduleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _waitlistRepository.GetActiveWaitlistAsync(scheduleId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     // ── Waitlist workflow ─────────────────────────────────────────────────────
 
     public async Task<TrainingWaitlistDto> AddToWaitlistAsync(CreateTrainingWaitlistDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         // Use the max existing position (not a count of active rows): once entries are offered/accepted/
         // removed the active count drops and a count-based position would collide with existing rows.
+        // Positions are per tenant, so an unscoped max would skip numbers based on other tenants' rows.
         var maxPosition = await _waitlistRepository.GetQueryable()
-            .Where(w => w.ScheduleId == dto.ScheduleId)
+            .Where(w => w.TenantId == current && w.ScheduleId == dto.ScheduleId)
             .Select(w => (int?)w.Position)
             .MaxAsync(cancellationToken) ?? 0;
 
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var entity = dto.ToEntity(current, createdByUserId);
         entity.Position = maxPosition + 1;
         entity.AddedDate = DateTime.UtcNow;
         entity.Status = TrainingWaitlistStatus.Active;
@@ -80,10 +109,7 @@ public class TrainingWaitlistService : ITrainingWaitlistService
 
     public async Task<TrainingWaitlistDto> OfferSlotAsync(OfferWaitlistPositionDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _waitlistRepository.GetByIdAsync(dto.WaitlistId);
-
-        if (entity == null)
-            throw new ArgumentException($"Waitlist entry with ID '{dto.WaitlistId}' not found.");
+        var entity = await GetOwnedAsync(dto.WaitlistId);
 
         if (entity.Status != TrainingWaitlistStatus.Active)
             throw new InvalidOperationException($"Cannot offer position to waitlist entry with status '{entity.Status}'.");
@@ -104,10 +130,7 @@ public class TrainingWaitlistService : ITrainingWaitlistService
 
     public async Task<TrainingWaitlistDto> RecordOfferResponseAsync(RespondToWaitlistOfferDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _waitlistRepository.GetByIdAsync(dto.WaitlistId);
-
-        if (entity == null)
-            throw new ArgumentException($"Waitlist entry with ID '{dto.WaitlistId}' not found.");
+        var entity = await GetOwnedAsync(dto.WaitlistId);
 
         if (entity.Status != TrainingWaitlistStatus.Offered)
             throw new InvalidOperationException("Cannot respond to an offer that has not been made.");
@@ -128,10 +151,7 @@ public class TrainingWaitlistService : ITrainingWaitlistService
 
     public async Task<bool> RemoveFromWaitlistAsync(Guid waitlistId, CancellationToken cancellationToken = default)
     {
-        var entity = await _waitlistRepository.GetByIdAsync(waitlistId);
-
-        if (entity == null)
-            throw new ArgumentException($"Waitlist entry with ID '{waitlistId}' not found.");
+        var entity = await GetOwnedAsync(waitlistId);
 
         entity.Status = TrainingWaitlistStatus.Removed;
         entity.UpdatedAt = DateTime.UtcNow;

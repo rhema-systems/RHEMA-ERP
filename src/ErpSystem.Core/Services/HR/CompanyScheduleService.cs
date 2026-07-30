@@ -19,6 +19,7 @@ public class CompanyEventService : ICompanyEventService
     private readonly IEventAttendanceRepository _attendanceRepository;
     private readonly IEventAttachmentRepository _attachmentRepository;
     private readonly IEventTaskRepository _taskRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CompanyEventService> _logger;
 
@@ -28,6 +29,7 @@ public class CompanyEventService : ICompanyEventService
         IEventAttendanceRepository attendanceRepository,
         IEventAttachmentRepository attachmentRepository,
         IEventTaskRepository taskRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<CompanyEventService> logger)
     {
@@ -36,27 +38,54 @@ public class CompanyEventService : ICompanyEventService
         _attendanceRepository = attendanceRepository;
         _attachmentRepository = attachmentRepository;
         _taskRepository = taskRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<CompanyEventDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly.
+    private Guid GetTenantId()
     {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<CompanyEvent> GetOwnedEventAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
         var entity = await _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
             .Include(e => e.Department)
             .Include(e => e.Station)
             .Include(e => e.ApprovedBy)
-            .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(e => e.Id == id && e.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Company event with ID '{id}' not found.");
+        return entity;
+    }
 
+    public async Task<CompanyEventDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedEventAsync(id, cancellationToken);
         return entity.ToDto();
     }
 
     public async Task<CompanyEventDetailDto> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
             .Include(e => e.Department)
@@ -66,7 +95,7 @@ public class CompanyEventService : ICompanyEventService
             .Include(e => e.AttendanceRecords).ThenInclude(a => a.Employee)
             .Include(e => e.Attachments)
             .Include(e => e.Tasks).ThenInclude(t => t.AssignedTo)
-            .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(e => e.Id == id && e.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Company event with ID '{id}' not found.");
@@ -76,9 +105,11 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<IEnumerable<CompanyEventDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
             .Include(e => e.Department)
+            .Where(e => e.TenantId == tenantId)
             .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
@@ -86,9 +117,11 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<PagedResult<CompanyEventDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var query = _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
-            .Include(e => e.Department);
+            .Include(e => e.Department)
+            .Where(e => e.TenantId == tenantId);
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -109,45 +142,59 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<IEnumerable<CompanyEventSummaryDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
     {
-        var entities = await _eventRepository.GetByDateRangeAsync(startDate, endDate);
+        var tenantId = GetTenantId();
+        var entities = (await _eventRepository.GetByDateRangeAsync(startDate, endDate))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<CompanyEventSummaryDto>> GetByOrganizerAsync(Guid organizerId, CancellationToken cancellationToken = default)
     {
-        var entities = await _eventRepository.GetByOrganizerAsync(organizerId);
+        var tenantId = GetTenantId();
+        var entities = (await _eventRepository.GetByOrganizerAsync(organizerId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<CompanyEventSummaryDto>> GetByDepartmentAsync(Guid departmentId, CancellationToken cancellationToken = default)
     {
-        var entities = await _eventRepository.GetByDepartmentAsync(departmentId);
+        var tenantId = GetTenantId();
+        var entities = (await _eventRepository.GetByDepartmentAsync(departmentId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<CompanyEventSummaryDto>> GetByStatusAsync(EventStatus status, CancellationToken cancellationToken = default)
     {
-        var entities = await _eventRepository.GetByStatusAsync(status);
+        var tenantId = GetTenantId();
+        var entities = (await _eventRepository.GetByStatusAsync(status))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<CompanyEventSummaryDto>> GetByCategoryAsync(EventCategory category, CancellationToken cancellationToken = default)
     {
-        var entities = await _eventRepository.GetByCategoryAsync(category);
+        var tenantId = GetTenantId();
+        var entities = (await _eventRepository.GetByCategoryAsync(category))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<CompanyEventSummaryDto>> GetUpcomingEventsAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
-        var entities = await _eventRepository.GetUpcomingEventsAsync(daysAhead);
+        var tenantId = GetTenantId();
+        var entities = (await _eventRepository.GetUpcomingEventsAsync(daysAhead))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<CompanyEventDto> CreateAsync(CreateCompanyEventDto createDto, Guid organizerId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
         entity.OrganizerId = organizerId;
-        entity.EventNumber = await GenerateEventNumberAsync(cancellationToken);
+        entity.EventNumber = await GenerateEventNumberAsync(tenantId, cancellationToken);
         entity.Status = EventStatus.Scheduled;
 
         await _eventRepository.AddAsync(entity);
@@ -160,11 +207,12 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<CompanyEventDto> UpdateAsync(UpdateCompanyEventDto updateDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
             .Include(e => e.Department)
             .Include(e => e.Station)
-            .FirstOrDefaultAsync(e => e.Id == updateDto.Id, cancellationToken);
+            .FirstOrDefaultAsync(e => e.Id == updateDto.Id && e.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Company event with ID '{updateDto.Id}' not found.");
@@ -181,10 +229,7 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<bool> ApproveEventAsync(Guid eventId, Guid approvedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _eventRepository.GetByIdAsync(eventId);
-
-        if (entity == null)
-            throw new ArgumentException($"Company event with ID '{eventId}' not found.");
+        var entity = await GetOwnedEventAsync(eventId, cancellationToken);
 
         entity.ApprovedById = approvedById;
         entity.ApprovalDate = DateTime.UtcNow;
@@ -200,10 +245,7 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<bool> CancelEventAsync(CancelEventDto cancelDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _eventRepository.GetByIdAsync(cancelDto.EventId);
-
-        if (entity == null)
-            throw new ArgumentException($"Company event with ID '{cancelDto.EventId}' not found.");
+        var entity = await GetOwnedEventAsync(cancelDto.EventId, cancellationToken);
 
         entity.IsCancelled = true;
         entity.CancellationDate = DateTime.UtcNow;
@@ -220,10 +262,7 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<bool> RescheduleEventAsync(RescheduleEventDto rescheduleDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _eventRepository.GetByIdAsync(rescheduleDto.EventId);
-
-        if (entity == null)
-            throw new ArgumentException($"Company event with ID '{rescheduleDto.EventId}' not found.");
+        var entity = await GetOwnedEventAsync(rescheduleDto.EventId, cancellationToken);
 
         entity.IsRescheduled = true;
         entity.RescheduledDate = DateTime.UtcNow;
@@ -243,10 +282,7 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<bool> CompleteEventAsync(CompleteEventDto completeDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _eventRepository.GetByIdAsync(completeDto.EventId);
-
-        if (entity == null)
-            throw new ArgumentException($"Company event with ID '{completeDto.EventId}' not found.");
+        var entity = await GetOwnedEventAsync(completeDto.EventId, cancellationToken);
 
         entity.Status = EventStatus.Completed;
         entity.ActualStartTime = completeDto.ActualStartTime;
@@ -264,10 +300,7 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _eventRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Company event with ID '{id}' not found.");
+        var entity = await GetOwnedEventAsync(id, cancellationToken);
 
         await _eventRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -281,9 +314,8 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<EventParticipantDto> AddParticipantAsync(CreateEventParticipantDto createDto, CancellationToken cancellationToken = default)
     {
-        var eventExists = await _eventRepository.ExistsAsync(e => e.Id == createDto.EventId);
-        if (!eventExists)
-            throw new ArgumentException("Event not found");
+        var tenantId = GetTenantId();
+        await GetOwnedEventAsync(createDto.EventId, cancellationToken);
 
         if (createDto.EmployeeId.HasValue)
         {
@@ -293,6 +325,7 @@ public class CompanyEventService : ICompanyEventService
         }
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
         entity.InvitationStatus = InvitationStatus.Sent;
         entity.InvitationSentDate = DateTime.UtcNow;
 
@@ -301,7 +334,7 @@ public class CompanyEventService : ICompanyEventService
 
         entity = await _participantRepository.GetQueryable()
             .Include(p => p.Employee)
-            .FirstOrDefaultAsync(p => p.Id == entity.Id, cancellationToken);
+            .FirstOrDefaultAsync(p => p.Id == entity.Id && p.TenantId == tenantId, cancellationToken);
 
         _logger.LogInformation("Participant added to event: {EventId}", createDto.EventId);
 
@@ -310,15 +343,19 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<IEnumerable<EventParticipantDto>> GetParticipantsAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
-        var entities = await _participantRepository.GetByEventIdAsync(eventId);
+        var tenantId = GetTenantId();
+        await GetOwnedEventAsync(eventId, cancellationToken);
+        var entities = (await _participantRepository.GetByEventIdAsync(eventId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<bool> RespondToInvitationAsync(RespondToEventInvitationDto responseDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _participantRepository.GetByIdAsync(responseDto.ParticipantId);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException("Participant not found");
 
         entity.InvitationStatus = responseDto.Response;
@@ -335,9 +372,10 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<bool> RemoveParticipantAsync(Guid participantId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _participantRepository.GetByIdAsync(participantId);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException("Participant not found");
 
         await _participantRepository.DeleteAsync(entity);
@@ -354,10 +392,16 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<EventAttendanceDto> MarkAttendanceAsync(MarkEventAttendanceDto markDto, Guid markedById, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+        await GetOwnedEventAsync(markDto.EventId, cancellationToken);
+
         var existingAttendance = await _attendanceRepository.GetByEventAndEmployeeAsync(markDto.EventId, markDto.EmployeeId);
 
         if (existingAttendance != null)
         {
+            if (existingAttendance.TenantId != tenantId)
+                throw new ArgumentException("Attendance record not found");
+
             existingAttendance.Attended = markDto.Attended;
             existingAttendance.CheckInTime = markDto.CheckInTime ?? DateTime.UtcNow;
             existingAttendance.AbsenceReason = markDto.AbsenceReason;
@@ -371,6 +415,7 @@ public class CompanyEventService : ICompanyEventService
         }
 
         var entity = markDto.ToEntity();
+        entity.TenantId = tenantId;
         entity.MarkedById = markedById;
         entity.CheckInTime = markDto.CheckInTime ?? (markDto.Attended ? DateTime.UtcNow : null);
 
@@ -380,7 +425,7 @@ public class CompanyEventService : ICompanyEventService
         entity = await _attendanceRepository.GetQueryable()
             .Include(a => a.Employee)
             .Include(a => a.MarkedBy)
-            .FirstOrDefaultAsync(a => a.Id == entity.Id, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == entity.Id && a.TenantId == tenantId, cancellationToken);
 
         _logger.LogInformation("Attendance marked for event: {EventId}, Employee: {EmployeeId}", markDto.EventId, markDto.EmployeeId);
 
@@ -389,15 +434,19 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<IEnumerable<EventAttendanceDto>> GetAttendanceAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
-        var entities = await _attendanceRepository.GetByEventIdAsync(eventId);
+        var tenantId = GetTenantId();
+        await GetOwnedEventAsync(eventId, cancellationToken);
+        var entities = (await _attendanceRepository.GetByEventIdAsync(eventId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<bool> CheckOutAsync(CheckOutEventDto checkOutDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _attendanceRepository.GetByIdAsync(checkOutDto.AttendanceId);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException("Attendance record not found");
 
         entity.CheckOutTime = DateTime.UtcNow;
@@ -417,11 +466,11 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<EventAttachmentDto> AddAttachmentAsync(CreateEventAttachmentDto createDto, CancellationToken cancellationToken = default)
     {
-        var eventExists = await _eventRepository.ExistsAsync(e => e.Id == createDto.EventId);
-        if (!eventExists)
-            throw new ArgumentException("Event not found");
+        var tenantId = GetTenantId();
+        await GetOwnedEventAsync(createDto.EventId, cancellationToken);
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
         entity.UploadDate = DateTime.UtcNow;
 
         await _attachmentRepository.AddAsync(entity);
@@ -434,15 +483,19 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<IEnumerable<EventAttachmentDto>> GetAttachmentsAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
-        var entities = await _attachmentRepository.GetByEventIdAsync(eventId);
+        var tenantId = GetTenantId();
+        await GetOwnedEventAsync(eventId, cancellationToken);
+        var entities = (await _attachmentRepository.GetByEventIdAsync(eventId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _attachmentRepository.GetByIdAsync(attachmentId);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException("Attachment not found");
 
         await _attachmentRepository.DeleteAsync(entity);
@@ -459,11 +512,11 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<EventTaskDto> AddTaskAsync(CreateEventTaskDto createDto, CancellationToken cancellationToken = default)
     {
-        var eventExists = await _eventRepository.ExistsAsync(e => e.Id == createDto.EventId);
-        if (!eventExists)
-            throw new ArgumentException("Event not found");
+        var tenantId = GetTenantId();
+        await GetOwnedEventAsync(createDto.EventId, cancellationToken);
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
         entity.Status = EventTaskStatus.NotStarted;
 
         await _taskRepository.AddAsync(entity);
@@ -471,7 +524,7 @@ public class CompanyEventService : ICompanyEventService
 
         entity = await _taskRepository.GetQueryable()
             .Include(t => t.AssignedTo)
-            .FirstOrDefaultAsync(t => t.Id == entity.Id, cancellationToken);
+            .FirstOrDefaultAsync(t => t.Id == entity.Id && t.TenantId == tenantId, cancellationToken);
 
         _logger.LogInformation("Task added to event: {EventId}", createDto.EventId);
 
@@ -480,15 +533,19 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<IEnumerable<EventTaskDto>> GetTasksAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
-        var entities = await _taskRepository.GetByEventIdAsync(eventId);
+        var tenantId = GetTenantId();
+        await GetOwnedEventAsync(eventId, cancellationToken);
+        var entities = (await _taskRepository.GetByEventIdAsync(eventId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<EventTaskDto> UpdateTaskAsync(UpdateEventTaskDto updateDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _taskRepository.GetQueryable()
             .Include(t => t.AssignedTo)
-            .FirstOrDefaultAsync(t => t.Id == updateDto.Id, cancellationToken);
+            .FirstOrDefaultAsync(t => t.Id == updateDto.Id && t.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("Task not found");
@@ -505,9 +562,10 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<bool> CompleteTaskAsync(CompleteEventTaskDto completeDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _taskRepository.GetByIdAsync(completeDto.TaskId);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException("Task not found");
 
         entity.Status = EventTaskStatus.Completed;
@@ -524,9 +582,10 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<bool> DeleteTaskAsync(Guid taskId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _taskRepository.GetByIdAsync(taskId);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException("Task not found");
 
         await _taskRepository.DeleteAsync(entity);
@@ -541,11 +600,11 @@ public class CompanyEventService : ICompanyEventService
 
     #region Helper Methods
 
-    private async Task<string> GenerateEventNumberAsync(CancellationToken cancellationToken)
+    private async Task<string> GenerateEventNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var year = DateTime.UtcNow.Year;
         var count = await _eventRepository.GetQueryable()
-            .CountAsync(e => e.CreatedAt.Year == year, cancellationToken);
+            .CountAsync(e => e.TenantId == tenantId && e.CreatedAt.Year == year, cancellationToken);
 
         return $"EVT-{year}-{(count + 1):D5}";
     }
@@ -560,35 +619,65 @@ public class CompanyEventService : ICompanyEventService
 public class MeetingRoomService : IMeetingRoomService
 {
     private readonly IMeetingRoomRepository _roomRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<MeetingRoomService> _logger;
 
     public MeetingRoomService(
         IMeetingRoomRepository roomRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<MeetingRoomService> logger)
     {
         _roomRepository = roomRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<MeetingRoomDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly.
+    private Guid GetTenantId()
     {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<MeetingRoom> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
         var entity = await _roomRepository.GetQueryable()
             .Include(r => r.Station)
-            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(r => r.Id == id && r.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Meeting room with ID '{id}' not found.");
+        return entity;
+    }
 
+    public async Task<MeetingRoomDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id, cancellationToken);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<MeetingRoomDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _roomRepository.GetQueryable()
             .Include(r => r.Station)
+            .Where(r => r.TenantId == tenantId)
             .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
@@ -596,8 +685,10 @@ public class MeetingRoomService : IMeetingRoomService
 
     public async Task<PagedResult<MeetingRoomDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var query = _roomRepository.GetQueryable()
-            .Include(r => r.Station);
+            .Include(r => r.Station)
+            .Where(r => r.TenantId == tenantId);
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -618,29 +709,44 @@ public class MeetingRoomService : IMeetingRoomService
 
     public async Task<IEnumerable<MeetingRoomSummaryDto>> GetByStationAsync(Guid stationId, CancellationToken cancellationToken = default)
     {
-        var entities = await _roomRepository.GetByStationAsync(stationId);
+        var tenantId = GetTenantId();
+        var entities = (await _roomRepository.GetByStationAsync(stationId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MeetingRoomSummaryDto>> GetAvailableRoomsAsync(DateTime startDateTime, DateTime endDateTime, int? minCapacity = null, CancellationToken cancellationToken = default)
     {
-        var entities = await _roomRepository.GetAvailableRoomsAsync(startDateTime, endDateTime, minCapacity);
+        var tenantId = GetTenantId();
+        var entities = (await _roomRepository.GetAvailableRoomsAsync(startDateTime, endDateTime, minCapacity))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MeetingRoomSummaryDto>> GetActiveRoomsAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _roomRepository.GetActiveRoomsAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _roomRepository.GetActiveRoomsAsync())
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<MeetingRoomDto> CreateAsync(CreateMeetingRoomDto createDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
 
         if (string.IsNullOrEmpty(entity.RoomCode))
         {
-            entity.RoomCode = await GenerateRoomCodeAsync(cancellationToken);
+            entity.RoomCode = await GenerateRoomCodeAsync(tenantId, cancellationToken);
+        }
+        else
+        {
+            var codeExists = await _roomRepository.GetQueryable()
+                .AnyAsync(r => r.TenantId == tenantId && r.RoomCode == entity.RoomCode, cancellationToken);
+            if (codeExists)
+                throw new InvalidOperationException($"Room code '{entity.RoomCode}' already exists for this tenant.");
         }
 
         await _roomRepository.AddAsync(entity);
@@ -653,12 +759,7 @@ public class MeetingRoomService : IMeetingRoomService
 
     public async Task<MeetingRoomDto> UpdateAsync(UpdateMeetingRoomDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _roomRepository.GetQueryable()
-            .Include(r => r.Station)
-            .FirstOrDefaultAsync(r => r.Id == updateDto.Id, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException($"Meeting room with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
 
         updateDto.UpdateEntity(entity);
 
@@ -672,10 +773,7 @@ public class MeetingRoomService : IMeetingRoomService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _roomRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Meeting room with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id, cancellationToken);
 
         await _roomRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -685,9 +783,10 @@ public class MeetingRoomService : IMeetingRoomService
         return true;
     }
 
-    private async Task<string> GenerateRoomCodeAsync(CancellationToken cancellationToken)
+    private async Task<string> GenerateRoomCodeAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var count = await _roomRepository.GetQueryable().CountAsync(cancellationToken);
+        var count = await _roomRepository.GetQueryable()
+            .CountAsync(r => r.TenantId == tenantId, cancellationToken);
         return $"RM-{(count + 1):D4}";
     }
 }
@@ -700,41 +799,87 @@ public class RoomBookingService : IRoomBookingService
 {
     private readonly IRoomBookingRepository _bookingRepository;
     private readonly IMeetingRoomRepository _roomRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<RoomBookingService> _logger;
 
     public RoomBookingService(
         IRoomBookingRepository bookingRepository,
         IMeetingRoomRepository roomRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<RoomBookingService> logger)
     {
         _bookingRepository = bookingRepository;
         _roomRepository = roomRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<RoomBookingDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly.
+    private Guid GetTenantId()
     {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<RoomBooking> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
         var entity = await _bookingRepository.GetQueryable()
             .Include(b => b.Room)
             .Include(b => b.BookedBy)
             .Include(b => b.ApprovedBy)
             .Include(b => b.Event)
-            .FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(b => b.Id == id && b.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Room booking with ID '{id}' not found.");
+        return entity;
+    }
 
+    private async Task<bool> HasConflictingBookingAsync(Guid tenantId, Guid roomId, DateTime startDateTime, DateTime endDateTime, Guid? excludeBookingId = null, CancellationToken cancellationToken = default)
+    {
+        var query = _bookingRepository.GetQueryable()
+            .Where(b => b.TenantId == tenantId &&
+                        b.RoomId == roomId &&
+                        !b.IsCancelled &&
+                        b.Status != BookingStatus.Cancelled &&
+                        b.StartDateTime < endDateTime &&
+                        b.EndDateTime > startDateTime);
+
+        if (excludeBookingId.HasValue)
+            query = query.Where(b => b.Id != excludeBookingId.Value);
+
+        return await query.AnyAsync(cancellationToken);
+    }
+
+    public async Task<RoomBookingDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id, cancellationToken);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<RoomBookingDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _bookingRepository.GetQueryable()
             .Include(b => b.Room)
             .Include(b => b.BookedBy)
+            .Where(b => b.TenantId == tenantId)
             .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
@@ -742,9 +887,11 @@ public class RoomBookingService : IRoomBookingService
 
     public async Task<PagedResult<RoomBookingDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var query = _bookingRepository.GetQueryable()
             .Include(b => b.Room)
-            .Include(b => b.BookedBy);
+            .Include(b => b.BookedBy)
+            .Where(b => b.TenantId == tenantId);
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -765,53 +912,65 @@ public class RoomBookingService : IRoomBookingService
 
     public async Task<IEnumerable<RoomBookingSummaryDto>> GetByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default)
     {
-        var entities = await _bookingRepository.GetByRoomIdAsync(roomId);
+        var tenantId = GetTenantId();
+        var entities = (await _bookingRepository.GetByRoomIdAsync(roomId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<RoomBookingSummaryDto>> GetByBookerAsync(Guid bookedById, CancellationToken cancellationToken = default)
     {
-        var entities = await _bookingRepository.GetByBookerAsync(bookedById);
+        var tenantId = GetTenantId();
+        var entities = (await _bookingRepository.GetByBookerAsync(bookedById))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<RoomBookingSummaryDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
     {
-        var entities = await _bookingRepository.GetByDateRangeAsync(startDate, endDate);
+        var tenantId = GetTenantId();
+        var entities = (await _bookingRepository.GetByDateRangeAsync(startDate, endDate))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<RoomBookingSummaryDto>> GetByStatusAsync(BookingStatus status, CancellationToken cancellationToken = default)
     {
-        var entities = await _bookingRepository.GetByStatusAsync(status);
+        var tenantId = GetTenantId();
+        var entities = (await _bookingRepository.GetByStatusAsync(status))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<RoomBookingSummaryDto>> GetPendingApprovalsAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _bookingRepository.GetPendingApprovalsAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _bookingRepository.GetPendingApprovalsAsync())
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<RoomBookingDto> CreateAsync(CreateRoomBookingDto createDto, Guid bookedById, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var room = await _roomRepository.GetByIdAsync(createDto.RoomId);
-        if (room == null)
+        if (room == null || room.TenantId != tenantId)
             throw new ArgumentException("Meeting room not found");
 
         if (!room.IsBookable)
             throw new InvalidOperationException("This room is not available for booking");
 
-        var hasConflict = await _bookingRepository.HasConflictingBookingAsync(
-            createDto.RoomId, createDto.StartDateTime, createDto.EndDateTime);
+        var hasConflict = await HasConflictingBookingAsync(
+            tenantId, createDto.RoomId, createDto.StartDateTime, createDto.EndDateTime, cancellationToken: cancellationToken);
 
         if (hasConflict)
             throw new InvalidOperationException("There is a conflicting booking for this time slot");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
         entity.BookedById = bookedById;
         entity.BookingDate = DateTime.UtcNow;
-        entity.BookingNumber = await GenerateBookingNumberAsync(cancellationToken);
+        entity.BookingNumber = await GenerateBookingNumberAsync(tenantId, cancellationToken);
         entity.Status = room.RequiresApproval ? BookingStatus.Tentative : BookingStatus.Confirmed;
 
         await _bookingRepository.AddAsync(entity);
@@ -824,16 +983,17 @@ public class RoomBookingService : IRoomBookingService
 
     public async Task<RoomBookingDto> UpdateAsync(UpdateRoomBookingDto updateDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _bookingRepository.GetQueryable()
             .Include(b => b.Room)
             .Include(b => b.BookedBy)
-            .FirstOrDefaultAsync(b => b.Id == updateDto.Id, cancellationToken);
+            .FirstOrDefaultAsync(b => b.Id == updateDto.Id && b.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Room booking with ID '{updateDto.Id}' not found.");
 
-        var hasConflict = await _bookingRepository.HasConflictingBookingAsync(
-            entity.RoomId, updateDto.StartDateTime, updateDto.EndDateTime, updateDto.Id);
+        var hasConflict = await HasConflictingBookingAsync(
+            tenantId, entity.RoomId, updateDto.StartDateTime, updateDto.EndDateTime, updateDto.Id, cancellationToken);
 
         if (hasConflict)
             throw new InvalidOperationException("There is a conflicting booking for this time slot");
@@ -850,10 +1010,7 @@ public class RoomBookingService : IRoomBookingService
 
     public async Task<bool> ApproveBookingAsync(Guid bookingId, Guid approvedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _bookingRepository.GetByIdAsync(bookingId);
-
-        if (entity == null)
-            throw new ArgumentException($"Room booking with ID '{bookingId}' not found.");
+        var entity = await GetOwnedAsync(bookingId, cancellationToken);
 
         entity.ApprovedById = approvedById;
         entity.ApprovalDate = DateTime.UtcNow;
@@ -869,10 +1026,7 @@ public class RoomBookingService : IRoomBookingService
 
     public async Task<bool> CancelBookingAsync(CancelRoomBookingDto cancelDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _bookingRepository.GetByIdAsync(cancelDto.BookingId);
-
-        if (entity == null)
-            throw new ArgumentException($"Room booking with ID '{cancelDto.BookingId}' not found.");
+        var entity = await GetOwnedAsync(cancelDto.BookingId, cancellationToken);
 
         entity.IsCancelled = true;
         entity.CancellationDate = DateTime.UtcNow;
@@ -889,10 +1043,7 @@ public class RoomBookingService : IRoomBookingService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _bookingRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Room booking with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id, cancellationToken);
 
         await _bookingRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -902,11 +1053,11 @@ public class RoomBookingService : IRoomBookingService
         return true;
     }
 
-    private async Task<string> GenerateBookingNumberAsync(CancellationToken cancellationToken)
+    private async Task<string> GenerateBookingNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var year = DateTime.UtcNow.Year;
         var count = await _bookingRepository.GetQueryable()
-            .CountAsync(b => b.BookingDate.Year == year, cancellationToken);
+            .CountAsync(b => b.TenantId == tenantId && b.BookingDate.Year == year, cancellationToken);
 
         return $"BK-{year}-{(count + 1):D5}";
     }
@@ -919,38 +1070,66 @@ public class RoomBookingService : IRoomBookingService
 public class CompanyMilestoneService : ICompanyMilestoneService
 {
     private readonly ICompanyMilestoneRepository _milestoneRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CompanyMilestoneService> _logger;
 
     public CompanyMilestoneService(
         ICompanyMilestoneRepository milestoneRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<CompanyMilestoneService> logger)
     {
         _milestoneRepository = milestoneRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<CompanyMilestoneDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<CompanyMilestone> GetOwnedAsync(Guid id)
     {
         var entity = await _milestoneRepository.GetByIdAsync(id);
-
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Company milestone with ID '{id}' not found.");
+        return entity;
+    }
 
+    public async Task<CompanyMilestoneDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<CompanyMilestoneDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _milestoneRepository.GetAllAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _milestoneRepository.GetAllAsync()).Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<PagedResult<CompanyMilestoneDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _milestoneRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _milestoneRepository.GetQueryable().Where(m => m.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -970,25 +1149,33 @@ public class CompanyMilestoneService : ICompanyMilestoneService
 
     public async Task<IEnumerable<CompanyMilestoneDto>> GetByCategoryAsync(MilestoneCategory category, CancellationToken cancellationToken = default)
     {
-        var entities = await _milestoneRepository.GetByCategoryAsync(category);
+        var tenantId = GetTenantId();
+        var entities = (await _milestoneRepository.GetByCategoryAsync(category))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<IEnumerable<CompanyMilestoneDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
     {
-        var entities = await _milestoneRepository.GetByDateRangeAsync(startDate, endDate);
+        var tenantId = GetTenantId();
+        var entities = (await _milestoneRepository.GetByDateRangeAsync(startDate, endDate))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<IEnumerable<CompanyMilestoneDto>> GetUpcomingMilestonesAsync(int daysAhead = 90, CancellationToken cancellationToken = default)
     {
-        var entities = await _milestoneRepository.GetUpcomingMilestonesAsync(daysAhead);
+        var tenantId = GetTenantId();
+        var entities = (await _milestoneRepository.GetUpcomingMilestonesAsync(daysAhead))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<CompanyMilestoneDto> CreateAsync(CreateCompanyMilestoneDto createDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
 
         await _milestoneRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1000,10 +1187,7 @@ public class CompanyMilestoneService : ICompanyMilestoneService
 
     public async Task<CompanyMilestoneDto> UpdateAsync(UpdateCompanyMilestoneDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _milestoneRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Company milestone with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         updateDto.UpdateEntity(entity);
 
@@ -1017,10 +1201,7 @@ public class CompanyMilestoneService : ICompanyMilestoneService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _milestoneRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Company milestone with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _milestoneRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1038,39 +1219,69 @@ public class CompanyMilestoneService : ICompanyMilestoneService
 public class BusinessClosureService : IBusinessClosureService
 {
     private readonly IBusinessClosureRepository _closureRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<BusinessClosureService> _logger;
 
     public BusinessClosureService(
         IBusinessClosureRepository closureRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<BusinessClosureService> logger)
     {
         _closureRepository = closureRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<BusinessClosureDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly.
+    private Guid GetTenantId()
     {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<BusinessClosure> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
         var entity = await _closureRepository.GetQueryable()
             .Include(c => c.Station)
             .Include(c => c.Department)
             .Include(c => c.AnnouncedBy)
-            .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == id && c.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Business closure with ID '{id}' not found.");
+        return entity;
+    }
 
+    public async Task<BusinessClosureDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id, cancellationToken);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<BusinessClosureDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _closureRepository.GetQueryable()
             .Include(c => c.Station)
             .Include(c => c.Department)
             .Include(c => c.AnnouncedBy)
+            .Where(c => c.TenantId == tenantId)
             .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
@@ -1078,10 +1289,12 @@ public class BusinessClosureService : IBusinessClosureService
 
     public async Task<PagedResult<BusinessClosureDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var query = _closureRepository.GetQueryable()
             .Include(c => c.Station)
             .Include(c => c.Department)
-            .Include(c => c.AnnouncedBy);
+            .Include(c => c.AnnouncedBy)
+            .Where(c => c.TenantId == tenantId);
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -1102,36 +1315,56 @@ public class BusinessClosureService : IBusinessClosureService
 
     public async Task<IEnumerable<BusinessClosureDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
     {
-        var entities = await _closureRepository.GetByDateRangeAsync(startDate, endDate);
+        var tenantId = GetTenantId();
+        var entities = (await _closureRepository.GetByDateRangeAsync(startDate, endDate))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<IEnumerable<BusinessClosureDto>> GetByTypeAsync(ClosureType type, CancellationToken cancellationToken = default)
     {
-        var entities = await _closureRepository.GetByTypeAsync(type);
+        var tenantId = GetTenantId();
+        var entities = (await _closureRepository.GetByTypeAsync(type))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<IEnumerable<BusinessClosureDto>> GetByStationAsync(Guid stationId, CancellationToken cancellationToken = default)
     {
-        var entities = await _closureRepository.GetByStationAsync(stationId);
+        var tenantId = GetTenantId();
+        var entities = (await _closureRepository.GetByStationAsync(stationId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<IEnumerable<BusinessClosureDto>> GetUpcomingClosuresAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
-        var entities = await _closureRepository.GetUpcomingClosuresAsync(daysAhead);
+        var tenantId = GetTenantId();
+        var entities = (await _closureRepository.GetUpcomingClosuresAsync(daysAhead))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<bool> IsClosureDateAsync(DateTime date, Guid? stationId = null, Guid? departmentId = null, CancellationToken cancellationToken = default)
     {
-        return await _closureRepository.IsClosureDateAsync(date, stationId, departmentId);
+        var tenantId = GetTenantId();
+        var query = _closureRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId && c.StartDate <= date && c.EndDate >= date);
+
+        if (stationId.HasValue)
+            query = query.Where(c => c.AffectsAllStations || c.StationId == stationId.Value);
+
+        if (departmentId.HasValue)
+            query = query.Where(c => c.AffectsAllStations || c.DepartmentId == departmentId.Value);
+
+        return await query.AnyAsync(cancellationToken);
     }
 
     public async Task<BusinessClosureDto> CreateAsync(CreateBusinessClosureDto createDto, Guid announcedById, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
         entity.AnnouncedById = announcedById;
         entity.AnnouncementDate = DateTime.UtcNow;
 
@@ -1145,14 +1378,7 @@ public class BusinessClosureService : IBusinessClosureService
 
     public async Task<BusinessClosureDto> UpdateAsync(UpdateBusinessClosureDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _closureRepository.GetQueryable()
-            .Include(c => c.Station)
-            .Include(c => c.Department)
-            .Include(c => c.AnnouncedBy)
-            .FirstOrDefaultAsync(c => c.Id == updateDto.Id, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException($"Business closure with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
 
         updateDto.UpdateEntity(entity);
 
@@ -1166,10 +1392,7 @@ public class BusinessClosureService : IBusinessClosureService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _closureRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Business closure with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id, cancellationToken);
 
         await _closureRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1188,49 +1411,85 @@ public class FiscalYearService : IFiscalYearService
 {
     private readonly IFiscalYearRepository _fiscalYearRepository;
     private readonly IFiscalPeriodRepository _periodRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<FiscalYearService> _logger;
 
     public FiscalYearService(
         IFiscalYearRepository fiscalYearRepository,
         IFiscalPeriodRepository periodRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<FiscalYearService> logger)
     {
         _fiscalYearRepository = fiscalYearRepository;
         _periodRepository = periodRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<FiscalYearDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly.
+    private Guid GetTenantId()
     {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<FiscalYear> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
         var entity = await _fiscalYearRepository.GetQueryable()
             .Include(fy => fy.Periods)
-            .FirstOrDefaultAsync(fy => fy.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(fy => fy.Id == id && fy.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Fiscal year with ID '{id}' not found.");
+        return entity;
+    }
 
+    private async Task<FiscalPeriod> GetOwnedPeriodAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _periodRepository.GetQueryable()
+            .Include(p => p.FiscalYear)
+            .FirstOrDefaultAsync(p => p.Id == id && p.TenantId == tenantId, cancellationToken);
+
+        if (entity == null)
+            throw new ArgumentException("Fiscal period not found");
+        return entity;
+    }
+
+    public async Task<FiscalYearDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id, cancellationToken);
         return entity.ToDto();
     }
 
     public async Task<FiscalYearDetailDto> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _fiscalYearRepository.GetQueryable()
-            .Include(fy => fy.Periods)
-            .FirstOrDefaultAsync(fy => fy.Id == id, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException($"Fiscal year with ID '{id}' not found.");
-
+        var entity = await GetOwnedAsync(id, cancellationToken);
         return entity.ToDetailDto();
     }
 
     public async Task<IEnumerable<FiscalYearDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _fiscalYearRepository.GetQueryable()
             .Include(fy => fy.Periods)
+            .Where(fy => fy.TenantId == tenantId)
             .OrderByDescending(fy => fy.Year)
             .ToListAsync(cancellationToken);
 
@@ -1239,8 +1498,10 @@ public class FiscalYearService : IFiscalYearService
 
     public async Task<PagedResult<FiscalYearDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var query = _fiscalYearRepository.GetQueryable()
-            .Include(fy => fy.Periods);
+            .Include(fy => fy.Periods)
+            .Where(fy => fy.TenantId == tenantId);
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -1261,34 +1522,41 @@ public class FiscalYearService : IFiscalYearService
 
     public async Task<FiscalYearDto?> GetByYearAsync(int year, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _fiscalYearRepository.GetByYearAsync(year);
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<FiscalYearDto?> GetCurrentFiscalYearAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _fiscalYearRepository.GetCurrentFiscalYearAsync();
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<FiscalYearDto>> GetByStatusAsync(FiscalYearStatus status, CancellationToken cancellationToken = default)
     {
-        var entities = await _fiscalYearRepository.GetByStatusAsync(status);
+        var tenantId = GetTenantId();
+        var entities = (await _fiscalYearRepository.GetByStatusAsync(status))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<FiscalYearDto> CreateAsync(CreateFiscalYearDto createDto, CancellationToken cancellationToken = default)
     {
-        var existingYear = await _fiscalYearRepository.GetByYearAsync(createDto.Year);
+        var tenantId = GetTenantId();
+        var existingYear = await _fiscalYearRepository.GetQueryable()
+            .FirstOrDefaultAsync(fy => fy.TenantId == tenantId && fy.Year == createDto.Year, cancellationToken);
         if (existingYear != null)
             throw new InvalidOperationException($"Fiscal year {createDto.Year} already exists");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
         entity.Status = FiscalYearStatus.Active;
 
         if (createDto.IsCurrent)
         {
-            await ClearCurrentFiscalYearAsync(cancellationToken);
+            await ClearCurrentFiscalYearAsync(tenantId, cancellationToken);
         }
 
         await _fiscalYearRepository.AddAsync(entity);
@@ -1301,16 +1569,12 @@ public class FiscalYearService : IFiscalYearService
 
     public async Task<FiscalYearDto> UpdateAsync(UpdateFiscalYearDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _fiscalYearRepository.GetQueryable()
-            .Include(fy => fy.Periods)
-            .FirstOrDefaultAsync(fy => fy.Id == updateDto.Id, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException($"Fiscal year with ID '{updateDto.Id}' not found.");
+        var tenantId = GetTenantId();
+        var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
 
         if (updateDto.IsCurrent && !entity.IsCurrent)
         {
-            await ClearCurrentFiscalYearAsync(cancellationToken);
+            await ClearCurrentFiscalYearAsync(tenantId, cancellationToken);
         }
 
         updateDto.UpdateEntity(entity);
@@ -1325,12 +1589,10 @@ public class FiscalYearService : IFiscalYearService
 
     public async Task<bool> SetAsCurrentAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _fiscalYearRepository.GetByIdAsync(id);
+        var tenantId = GetTenantId();
+        var entity = await GetOwnedAsync(id, cancellationToken);
 
-        if (entity == null)
-            throw new ArgumentException($"Fiscal year with ID '{id}' not found.");
-
-        await ClearCurrentFiscalYearAsync(cancellationToken);
+        await ClearCurrentFiscalYearAsync(tenantId, cancellationToken);
 
         entity.IsCurrent = true;
 
@@ -1344,10 +1606,7 @@ public class FiscalYearService : IFiscalYearService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _fiscalYearRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Fiscal year with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id, cancellationToken);
 
         await _fiscalYearRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1361,22 +1620,22 @@ public class FiscalYearService : IFiscalYearService
 
     public async Task<FiscalPeriodDto> AddPeriodAsync(CreateFiscalPeriodDto createDto, CancellationToken cancellationToken = default)
     {
-        var fiscalYearExists = await _fiscalYearRepository.ExistsAsync(fy => fy.Id == createDto.FiscalYearId);
-        if (!fiscalYearExists)
-            throw new ArgumentException("Fiscal year not found");
+        var tenantId = GetTenantId();
+        await GetOwnedAsync(createDto.FiscalYearId, cancellationToken);
 
         var existingPeriod = await _periodRepository.GetByPeriodNumberAsync(createDto.FiscalYearId, createDto.PeriodNumber);
-        if (existingPeriod != null)
+        if (existingPeriod != null && existingPeriod.TenantId == tenantId)
             throw new InvalidOperationException($"Period number {createDto.PeriodNumber} already exists for this fiscal year");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
 
         await _periodRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         entity = await _periodRepository.GetQueryable()
             .Include(p => p.FiscalYear)
-            .FirstOrDefaultAsync(p => p.Id == entity.Id, cancellationToken);
+            .FirstOrDefaultAsync(p => p.Id == entity.Id && p.TenantId == tenantId, cancellationToken);
 
         _logger.LogInformation("Fiscal period added: {PeriodNumber}", createDto.PeriodNumber);
 
@@ -1385,18 +1644,16 @@ public class FiscalYearService : IFiscalYearService
 
     public async Task<IEnumerable<FiscalPeriodDto>> GetPeriodsAsync(Guid fiscalYearId, CancellationToken cancellationToken = default)
     {
-        var entities = await _periodRepository.GetByFiscalYearIdAsync(fiscalYearId);
+        var tenantId = GetTenantId();
+        await GetOwnedAsync(fiscalYearId, cancellationToken);
+        var entities = (await _periodRepository.GetByFiscalYearIdAsync(fiscalYearId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToDtoList();
     }
 
     public async Task<FiscalPeriodDto> UpdatePeriodAsync(UpdateFiscalPeriodDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _periodRepository.GetQueryable()
-            .Include(p => p.FiscalYear)
-            .FirstOrDefaultAsync(p => p.Id == updateDto.Id, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Fiscal period not found");
+        var entity = await GetOwnedPeriodAsync(updateDto.Id, cancellationToken);
 
         updateDto.UpdateEntity(entity);
 
@@ -1410,10 +1667,7 @@ public class FiscalYearService : IFiscalYearService
 
     public async Task<bool> ClosePeriodAsync(CloseFiscalPeriodDto closeDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _periodRepository.GetByIdAsync(closeDto.PeriodId);
-
-        if (entity == null)
-            throw new ArgumentException("Fiscal period not found");
+        var entity = await GetOwnedPeriodAsync(closeDto.PeriodId, cancellationToken);
 
         entity.IsClosed = true;
         entity.ClosedDate = DateTime.UtcNow;
@@ -1428,10 +1682,7 @@ public class FiscalYearService : IFiscalYearService
 
     public async Task<bool> DeletePeriodAsync(Guid periodId, CancellationToken cancellationToken = default)
     {
-        var entity = await _periodRepository.GetByIdAsync(periodId);
-
-        if (entity == null)
-            throw new ArgumentException("Fiscal period not found");
+        var entity = await GetOwnedPeriodAsync(periodId, cancellationToken);
 
         await _periodRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1445,10 +1696,13 @@ public class FiscalYearService : IFiscalYearService
 
     #region Helper Methods
 
-    private async Task ClearCurrentFiscalYearAsync(CancellationToken cancellationToken)
+    private async Task ClearCurrentFiscalYearAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var currentYear = await _fiscalYearRepository.GetCurrentFiscalYearAsync();
-        if (currentYear != null)
+        var currentYears = await _fiscalYearRepository.GetQueryable()
+            .Where(fy => fy.TenantId == tenantId && fy.IsCurrent)
+            .ToListAsync(cancellationToken);
+
+        foreach (var currentYear in currentYears)
         {
             currentYear.IsCurrent = false;
             await _fiscalYearRepository.UpdateAsync(currentYear);

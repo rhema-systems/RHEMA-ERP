@@ -15,6 +15,11 @@ public class TrainingScheduleService : ITrainingScheduleService
     private readonly ITrainingScheduleRepository _scheduleRepository;
     private readonly ITrainingSessionRepository _sessionRepository;
     private readonly ITrainerAvailabilityRepository _availabilityRepository;
+    private readonly IGenericRepository<TrainingProgram> _programRepository;
+    private readonly IGenericRepository<TrainerProfile> _trainerProfileRepository;
+    private readonly IGenericRepository<TrainingVendor> _vendorRepository;
+    private readonly IGenericRepository<TrainingBudget> _budgetRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TrainingScheduleService> _logger;
 
@@ -24,6 +29,11 @@ public class TrainingScheduleService : ITrainingScheduleService
         ITrainingScheduleRepository scheduleRepository,
         ITrainingSessionRepository sessionRepository,
         ITrainerAvailabilityRepository availabilityRepository,
+        IGenericRepository<TrainingProgram> programRepository,
+        IGenericRepository<TrainerProfile> trainerProfileRepository,
+        IGenericRepository<TrainingVendor> vendorRepository,
+        IGenericRepository<TrainingBudget> budgetRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         INumberSequenceService numberSequence,
         ILogger<TrainingScheduleService> logger)
@@ -31,9 +41,43 @@ public class TrainingScheduleService : ITrainingScheduleService
         _scheduleRepository = scheduleRepository;
         _sessionRepository = sessionRepository;
         _availabilityRepository = availabilityRepository;
+        _programRepository = programRepository;
+        _trainerProfileRepository = trainerProfileRepository;
+        _vendorRepository = vendorRepository;
+        _budgetRepository = budgetRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _numberSequence = numberSequence;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A row owned by another tenant is reported as missing rather than forbidden, so the endpoints do not
+    // confirm that the id exists elsewhere.
+    private async Task<TrainingSchedule> GetOwnedScheduleAsync(Guid id)
+    {
+        var entity = await _scheduleRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Training schedule with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<TrainingSession> GetOwnedSessionAsync(Guid id)
+    {
+        var entity = await _sessionRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Training session with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Trainer availability / conflict detection ─────────────────────────────
@@ -41,12 +85,15 @@ public class TrainingScheduleService : ITrainingScheduleService
     public async Task<TrainerAvailabilityCheckDto> CheckTrainerAvailabilityAsync(
         Guid trainerProfileId, DateTime from, DateTime to, Guid? excludeScheduleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var result = new TrainerAvailabilityCheckDto { TrainerProfileId = trainerProfileId };
 
         // Overlapping schedules already assigned to this trainer (excluding cancelled ones and self).
+        // Another tenant's rows must not count as conflicts, or the check reports phantom clashes.
         var schedules = await _scheduleRepository.GetByTrainerProfileIdAsync(trainerProfileId);
         result.ConflictingSchedules = schedules
-            .Where(s => s.Id != excludeScheduleId
+            .Where(s => s.TenantId == tenantId
+                && s.Id != excludeScheduleId
                 && s.Status != ScheduleStatus.Cancelled
                 && s.StartDate <= to && s.EndDate >= from)
             .OrderBy(s => s.StartDate)
@@ -65,7 +112,7 @@ public class TrainingScheduleService : ITrainingScheduleService
         // Blocked availability windows overlapping the requested range.
         var blocked = await _availabilityRepository.GetBlockedPeriodsAsync(trainerProfileId);
         result.BlockedPeriods = blocked
-            .Where(b => b.FromDate <= to && b.ToDate >= from)
+            .Where(b => b.TenantId == tenantId && b.FromDate <= to && b.ToDate >= from)
             .OrderBy(b => b.FromDate)
             .Select(b => new TrainerBlockedPeriodDto
             {
@@ -84,9 +131,10 @@ public class TrainingScheduleService : ITrainingScheduleService
 
     public async Task<TrainingScheduleDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _scheduleRepository.GetWithFullDetailsAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Training schedule with ID '{id}' not found.");
 
         return entity.ToDto();
@@ -94,19 +142,25 @@ public class TrainingScheduleService : ITrainingScheduleService
 
     public async Task<TrainingScheduleDto?> GetByScheduleNumberAsync(string scheduleNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _scheduleRepository.GetByScheduleNumberAsync(scheduleNumber);
-        return entity?.ToDto();
+
+        // Schedule numbers are unique per tenant, so a match owned by another tenant is reported as none.
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<TrainingScheduleSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _scheduleRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<TrainingScheduleSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _scheduleRepository.GetQueryable();
+        var tenantId = GetTenantId();
+
+        var query = _scheduleRepository.GetQueryable().Where(s => s.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         // Eager-load navigations the summary DTO reads (program/trainer/vendor names + confirmed count),
@@ -132,39 +186,55 @@ public class TrainingScheduleService : ITrainingScheduleService
 
     public async Task<IEnumerable<TrainingScheduleSummaryDto>> GetByProgramIdAsync(Guid programId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _scheduleRepository.GetByProgramIdAsync(programId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingScheduleSummaryDto>> GetByTrainerProfileIdAsync(Guid trainerProfileId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _scheduleRepository.GetByTrainerProfileIdAsync(trainerProfileId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingScheduleSummaryDto>> GetByStatusAsync(ScheduleStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _scheduleRepository.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingScheduleSummaryDto>> GetUpcomingAsync(int daysAhead = 90, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _scheduleRepository.GetUpcomingSchedulesAsync(daysAhead);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingScheduleSummaryDto>> GetOpenForRegistrationAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _scheduleRepository.GetWithRegistrationOpenAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── Schedule CRUD ─────────────────────────────────────────────────────────
 
     public async Task<TrainingScheduleDto> CreateAsync(CreateTrainingScheduleDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await ValidateScheduleForeignKeysAsync(
+            createDto.ProgramId,
+            createDto.TrainerProfileId,
+            createDto.VendorId,
+            createDto.TrainingBudgetId,
+            cancellationToken);
+
+        var entity = createDto.ToEntity(current, createdByUserId);
         ValidateScheduleDates(entity);
         entity.ScheduleNumber = await GenerateScheduleNumberAsync(cancellationToken);
         entity.Status = ScheduleStatus.Planned;
@@ -179,13 +249,17 @@ public class TrainingScheduleService : ITrainingScheduleService
 
     public async Task<TrainingScheduleDto> UpdateAsync(UpdateTrainingScheduleDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _scheduleRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training schedule with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedScheduleAsync(updateDto.Id);
 
         if (entity.Status == ScheduleStatus.Completed || entity.Status == ScheduleStatus.Cancelled)
             throw new InvalidOperationException($"A {entity.Status} training schedule cannot be edited.");
+
+        await ValidateScheduleForeignKeysAsync(
+            null,
+            updateDto.TrainerProfileId,
+            updateDto.VendorId,
+            updateDto.TrainingBudgetId,
+            cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         ValidateScheduleDates(entity);
@@ -200,10 +274,7 @@ public class TrainingScheduleService : ITrainingScheduleService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _scheduleRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training schedule with ID '{id}' not found.");
+        var entity = await GetOwnedScheduleAsync(id);
 
         if (entity.Status != ScheduleStatus.Planned)
             throw new InvalidOperationException("Only planned (not yet approved) schedules can be deleted.");
@@ -218,21 +289,18 @@ public class TrainingScheduleService : ITrainingScheduleService
 
     // ── Workflow ──────────────────────────────────────────────────────────────
 
-    public async Task<bool> ApproveAsync(ApproveTrainingScheduleDto dto, CancellationToken cancellationToken = default)
+    public async Task<bool> ApproveAsync(ApproveTrainingScheduleDto dto, Guid approvedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _scheduleRepository.GetByIdAsync(dto.ScheduleId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training schedule with ID '{dto.ScheduleId}' not found.");
+        var entity = await GetOwnedScheduleAsync(dto.ScheduleId);
 
         if (entity.Status != ScheduleStatus.Planned)
             throw new InvalidOperationException("Only planned schedules can be approved.");
 
         entity.Status = ScheduleStatus.RegistrationOpen;
-        entity.ApprovedById = dto.ApprovedById;
-        entity.ApprovalDate = dto.ApprovalDate;
+        entity.ApprovedById = approvedById;
+        entity.ApprovalDate = DateTime.UtcNow;
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = dto.ApprovedById.ToString();
+        entity.UpdatedBy = approvedById.ToString();
 
         await _scheduleRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -244,10 +312,7 @@ public class TrainingScheduleService : ITrainingScheduleService
 
     public async Task<bool> CancelAsync(CancelTrainingScheduleDto dto, CancellationToken cancellationToken = default)
     {
-        var entity = await _scheduleRepository.GetByIdAsync(dto.ScheduleId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training schedule with ID '{dto.ScheduleId}' not found.");
+        var entity = await GetOwnedScheduleAsync(dto.ScheduleId);
 
         if (entity.Status == ScheduleStatus.Completed || entity.Status == ScheduleStatus.Cancelled)
             throw new InvalidOperationException($"A {entity.Status} schedule cannot be cancelled.");
@@ -269,10 +334,7 @@ public class TrainingScheduleService : ITrainingScheduleService
 
     public async Task<bool> CompleteAsync(CompleteTrainingScheduleDto dto, CancellationToken cancellationToken = default)
     {
-        var entity = await _scheduleRepository.GetByIdAsync(dto.ScheduleId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training schedule with ID '{dto.ScheduleId}' not found.");
+        var entity = await GetOwnedScheduleAsync(dto.ScheduleId);
 
         if (entity.Status == ScheduleStatus.Cancelled || entity.Status == ScheduleStatus.Completed)
             throw new InvalidOperationException($"A {entity.Status} schedule cannot be marked as completed.");
@@ -294,12 +356,13 @@ public class TrainingScheduleService : ITrainingScheduleService
 
     public async Task<TrainingSessionDto> AddSessionAsync(CreateTrainingSessionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var schedule = await _scheduleRepository.GetByIdAsync(createDto.ScheduleId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        if (schedule == null)
-            throw new ArgumentException($"Training schedule with ID '{createDto.ScheduleId}' not found.");
+        await GetOwnedScheduleAsync(createDto.ScheduleId);
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var entity = createDto.ToEntity(current, createdByUserId);
 
         await _sessionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -311,16 +374,14 @@ public class TrainingScheduleService : ITrainingScheduleService
 
     public async Task<IEnumerable<TrainingSessionDto>> GetSessionsAsync(Guid scheduleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _sessionRepository.GetByScheduleIdAsync(scheduleId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<TrainingSessionDto> UpdateSessionAsync(UpdateTrainingSessionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _sessionRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training session with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedSessionAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -332,10 +393,7 @@ public class TrainingScheduleService : ITrainingScheduleService
 
     public async Task<bool> DeleteSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
-        var entity = await _sessionRepository.GetByIdAsync(sessionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training session with ID '{sessionId}' not found.");
+        var entity = await GetOwnedSessionAsync(sessionId);
 
         await _sessionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -344,6 +402,44 @@ public class TrainingScheduleService : ITrainingScheduleService
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    private async Task ValidateScheduleForeignKeysAsync(
+        Guid? programId,
+        Guid? trainerProfileId,
+        Guid? vendorId,
+        Guid? trainingBudgetId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        if (programId.HasValue)
+        {
+            var program = await _programRepository.GetByIdAsync(programId.Value);
+            if (program == null || program.TenantId != tenantId)
+                throw new ArgumentException($"Training program with ID '{programId.Value}' not found.");
+        }
+
+        if (trainerProfileId.HasValue)
+        {
+            var trainer = await _trainerProfileRepository.GetByIdAsync(trainerProfileId.Value);
+            if (trainer == null || trainer.TenantId != tenantId)
+                throw new ArgumentException($"Trainer profile with ID '{trainerProfileId.Value}' not found.");
+        }
+
+        if (vendorId.HasValue)
+        {
+            var vendor = await _vendorRepository.GetByIdAsync(vendorId.Value);
+            if (vendor == null || vendor.TenantId != tenantId)
+                throw new ArgumentException($"Training vendor with ID '{vendorId.Value}' not found.");
+        }
+
+        if (trainingBudgetId.HasValue)
+        {
+            var budget = await _budgetRepository.GetByIdAsync(trainingBudgetId.Value);
+            if (budget == null || budget.TenantId != tenantId)
+                throw new ArgumentException($"Training budget with ID '{trainingBudgetId.Value}' not found.");
+        }
+    }
 
     private Task<string> GenerateScheduleNumberAsync(CancellationToken ct)
         => _numberSequence.GenerateAsync("SCHED", ct);

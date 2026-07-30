@@ -460,31 +460,40 @@ public interface IEmployeeComplianceRecordRepository : IGenericRepository<Employ
 
 #region Training Budget
 
+// Every member takes the caller's tenant so it lands in the SQL predicate. The DI-created
+// ApplicationDbContext carries no tenant, so its global tenant filter is inert and the inherited
+// IGenericRepository members (GetByIdAsync, GetAllAsync, GetQueryable, ...) are cross-tenant.
 public interface ITrainingBudgetRepository : IGenericRepository<TrainingBudget>
 {
-    /// <summary>Gets a training budget by its unique budget code.</summary>
-    Task<TrainingBudget?> GetByBudgetCodeAsync(string budgetCode);
+    /// <summary>Gets a training budget owned by the tenant, or null when it belongs to another tenant.</summary>
+    Task<TrainingBudget?> GetForTenantAsync(Guid id, Guid tenantId);
 
-    /// <summary>Gets all training budgets for a given fiscal year.</summary>
-    Task<IEnumerable<TrainingBudget>> GetByYearAsync(int year);
+    /// <summary>Gets a training budget by its budget code within the tenant.</summary>
+    Task<TrainingBudget?> GetByBudgetCodeAsync(string budgetCode, Guid tenantId);
 
-    /// <summary>Gets training budgets filtered by fiscal year and optional quarter.</summary>
-    Task<IEnumerable<TrainingBudget>> GetByYearAndQuarterAsync(int year, int? quarter);
+    /// <summary>Gets all training budgets for the tenant.</summary>
+    Task<IEnumerable<TrainingBudget>> GetAllForTenantAsync(Guid tenantId);
 
-    /// <summary>Gets all training budgets assigned to a specific organization unit.</summary>
-    Task<IEnumerable<TrainingBudget>> GetByOrganizationUnitAsync(Guid orgUnitId);
+    /// <summary>Gets all training budgets for a given fiscal year within the tenant.</summary>
+    Task<IEnumerable<TrainingBudget>> GetByYearAsync(int year, Guid tenantId);
 
-    /// <summary>Gets all training budgets with the specified status.</summary>
-    Task<IEnumerable<TrainingBudget>> GetByStatusAsync(TrainingBudgetStatus status);
+    /// <summary>Gets training budgets filtered by fiscal year and optional quarter within the tenant.</summary>
+    Task<IEnumerable<TrainingBudget>> GetByYearAndQuarterAsync(int year, int? quarter, Guid tenantId);
 
-    /// <summary>Gets all approved training budgets.</summary>
-    Task<IEnumerable<TrainingBudget>> GetApprovedAsync();
+    /// <summary>Gets all training budgets assigned to a specific organization unit within the tenant.</summary>
+    Task<IEnumerable<TrainingBudget>> GetByOrganizationUnitAsync(Guid orgUnitId, Guid tenantId);
 
-    /// <summary>Gets budgets where the spent amount has exceeded the allocated amount.</summary>
-    Task<IEnumerable<TrainingBudget>> GetWithExceededBudgetAsync();
+    /// <summary>Gets all training budgets with the specified status within the tenant.</summary>
+    Task<IEnumerable<TrainingBudget>> GetByStatusAsync(TrainingBudgetStatus status, Guid tenantId);
 
-    /// <summary>Gets a budget with full details including organization level, unit, approver, transactions, and schedules.</summary>
-    Task<TrainingBudget?> GetWithFullDetailsAsync(Guid id);
+    /// <summary>Gets all approved training budgets for the tenant.</summary>
+    Task<IEnumerable<TrainingBudget>> GetApprovedAsync(Guid tenantId);
+
+    /// <summary>Gets budgets where the spent amount has exceeded the allocated amount within the tenant.</summary>
+    Task<IEnumerable<TrainingBudget>> GetWithExceededBudgetAsync(Guid tenantId);
+
+    /// <summary>Gets a tenant-owned budget with full details including organization level, unit, approver, transactions, and schedules.</summary>
+    Task<TrainingBudget?> GetWithFullDetailsAsync(Guid id, Guid tenantId);
 }
 
 #endregion
@@ -493,14 +502,14 @@ public interface ITrainingBudgetRepository : IGenericRepository<TrainingBudget>
 
 public interface ITrainingBudgetTransactionRepository : IGenericRepository<TrainingBudgetTransaction>
 {
-    /// <summary>Gets all transactions for a training budget, ordered by transaction date descending.</summary>
-    Task<IEnumerable<TrainingBudgetTransaction>> GetByBudgetIdAsync(Guid budgetId);
+    /// <summary>Gets all transactions for a training budget within the tenant, ordered by transaction date descending.</summary>
+    Task<IEnumerable<TrainingBudgetTransaction>> GetByBudgetIdAsync(Guid budgetId, Guid tenantId);
 
-    /// <summary>Gets all budget transactions linked to a specific training schedule.</summary>
-    Task<IEnumerable<TrainingBudgetTransaction>> GetByScheduleIdAsync(Guid scheduleId);
+    /// <summary>Gets all budget transactions linked to a specific training schedule within the tenant.</summary>
+    Task<IEnumerable<TrainingBudgetTransaction>> GetByScheduleIdAsync(Guid scheduleId, Guid tenantId);
 
-    /// <summary>Gets transactions for a budget within a date range.</summary>
-    Task<IEnumerable<TrainingBudgetTransaction>> GetByDateRangeAsync(Guid budgetId, DateTime from, DateTime to);
+    /// <summary>Gets transactions for a budget within a date range, scoped to the tenant.</summary>
+    Task<IEnumerable<TrainingBudgetTransaction>> GetByDateRangeAsync(Guid budgetId, DateTime from, DateTime to, Guid tenantId);
 }
 
 #endregion

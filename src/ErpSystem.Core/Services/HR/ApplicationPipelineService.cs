@@ -23,6 +23,7 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ApplicationPipelineService> _logger;
     private readonly IJobCandidateRepository _candidateRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IEmailService _email;
     private readonly ITemplatedEmailService _templatedEmail;
 
@@ -34,6 +35,7 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
         IUnitOfWork unitOfWork,
         ILogger<ApplicationPipelineService> logger,
         IJobCandidateRepository candidateRepository,
+        ICurrentUserProvider currentUserProvider,
         IEmailService email,
         ITemplatedEmailService templatedEmail)
     {
@@ -44,8 +46,44 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
         _unitOfWork = unitOfWork;
         _logger = logger;
         _candidateRepository = candidateRepository;
+        _currentUserProvider = currentUserProvider;
         _email = email;
         _templatedEmail = templatedEmail;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private async Task<JobApplication> GetOwnedApplicationAsync(Guid id)
+    {
+        var entity = await _applicationRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new KeyNotFoundException($"Application '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobVacancy> GetOwnedVacancyAsync(Guid id)
+    {
+        var entity = await _vacancyRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new KeyNotFoundException($"Vacancy '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<RecruitmentPipelineStage> GetOwnedStageAsync(Guid id)
+    {
+        var entity = await _pipelineStageRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new KeyNotFoundException($"Pipeline stage '{id}' not found.");
+        return entity;
     }
 
     // =========================================================================
@@ -60,9 +98,7 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
     {
         // ── 1. Load and validate application ─────────────────────────────────
 
-        var application = await _applicationRepository.GetByIdAsync(applicationId);
-        if (application is null)
-            throw new KeyNotFoundException($"Application '{applicationId}' not found.");
+        var application = await GetOwnedApplicationAsync(applicationId);
 
         if (application.Status is ApplicationStatus.Hired or ApplicationStatus.Withdrawn)
             throw new InvalidOperationException(
@@ -70,15 +106,11 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
 
         // ── 2. Load and validate target stage ────────────────────────────────
 
-        var targetStage = await _pipelineStageRepository.GetByIdAsync(targetStageId);
-        if (targetStage is null)
-            throw new KeyNotFoundException($"Pipeline stage '{targetStageId}' not found.");
+        var targetStage = await GetOwnedStageAsync(targetStageId);
 
         // ── 3. Validate pipeline membership ──────────────────────────────────
 
-        var vacancy = await _vacancyRepository.GetByIdAsync(application.JobVacancyId);
-        if (vacancy is null)
-            throw new InvalidOperationException("The associated vacancy could not be found.");
+        var vacancy = await GetOwnedVacancyAsync(application.JobVacancyId);
 
         if (vacancy.RecruitmentPipelineId is null)
             throw new InvalidOperationException(
@@ -99,7 +131,7 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
                 throw new InvalidOperationException(
                     "The application is already in the target stage.");
 
-            currentStage = await _pipelineStageRepository.GetByIdAsync(currentHistory.PipelineStageId);
+            currentStage = await GetOwnedStageAsync(currentHistory.PipelineStageId);
 
             // Moving backward or to the same order → requires CanRepeat on the target
             if (targetStage.Order <= currentStage!.Order && !targetStage.CanRepeat)
@@ -193,9 +225,7 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
         Guid vacancyId,
         CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(vacancyId);
-        if (vacancy is null)
-            throw new KeyNotFoundException($"Vacancy '{vacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
 
         // No pipeline assigned → return empty board
         if (vacancy.RecruitmentPipelineId is null)
@@ -207,7 +237,10 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
             .ToList();
 
         // Load all applications for this vacancy (includes JobCandidate navigation)
-        var applications = (await _applicationRepository.GetByVacancyIdAsync(vacancyId)).ToList();
+        var tenantId = GetTenantId();
+        var applications = (await _applicationRepository.GetByVacancyIdAsync(vacancyId))
+            .Where(a => a.TenantId == tenantId)
+            .ToList();
 
         if (applications.Count == 0)
             return stages.Select(BuildEmptyColumn).ToList();
@@ -289,9 +322,7 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
         {
             try
             {
-                var application = await _applicationRepository.GetByIdAsync(appId);
-                if (application is null)
-                    throw new KeyNotFoundException($"Application '{appId}' not found.");
+                var application = await GetOwnedApplicationAsync(appId);
 
                 if (application.Status is ApplicationStatus.Hired
                                        or ApplicationStatus.Withdrawn
@@ -424,15 +455,14 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
     {
         try
         {
-            var application = await _applicationRepository.GetByIdAsync(applicationId);
-            if (application is null) return;
+            var application = await GetOwnedApplicationAsync(applicationId);
 
             // Terminal states: already resolved — no further stage movement
             if (application.Status is ApplicationStatus.Hired or ApplicationStatus.Withdrawn)
                 return;
 
-            var vacancy = await _vacancyRepository.GetByIdAsync(application.JobVacancyId);
-            if (vacancy?.RecruitmentPipelineId is null) return; // no pipeline configured
+            var vacancy = await GetOwnedVacancyAsync(application.JobVacancyId);
+            if (vacancy.RecruitmentPipelineId is null) return; // no pipeline configured
 
             var stages = await _pipelineStageRepository.GetByPipelineIdAsync(vacancy.RecruitmentPipelineId.Value);
             var targetStage = stages.FirstOrDefault(s => s.StageType == stageType && s.IsActive);
@@ -465,6 +495,8 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
     {
         try
         {
+            await GetOwnedApplicationAsync(applicationId);
+
             var currentHistory = await _stageHistoryRepository.GetCurrentStageAsync(applicationId);
             if (currentHistory is null) return; // no open stage row — no-op
 

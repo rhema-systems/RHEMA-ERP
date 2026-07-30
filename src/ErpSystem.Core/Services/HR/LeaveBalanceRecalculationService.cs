@@ -19,6 +19,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
     private readonly IGenericRepository<LeaveEncashment> _leaveEncashmentRepository;
     private readonly IGenericRepository<LeaveType> _leaveTypeRepository;
     private readonly ILeaveEntitlementService _entitlementService;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<LeaveBalanceRecalculationService> _logger;
 
@@ -29,6 +30,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
         IGenericRepository<LeaveEncashment> leaveEncashmentRepository,
         IGenericRepository<LeaveType> leaveTypeRepository,
         ILeaveEntitlementService entitlementService,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<LeaveBalanceRecalculationService> logger)
     {
@@ -38,16 +40,35 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
         _leaveEncashmentRepository = leaveEncashmentRepository;
         _leaveTypeRepository = leaveTypeRepository;
         _entitlementService = entitlementService;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     /// <inheritdoc />
     public async Task RecalculateAsync(Guid employeeId, Guid leaveTypeId, int year)
     {
+        var tenantId = GetTenantId();
+
+        var leaveType = await _leaveTypeRepository.GetByIdAsync(leaveTypeId);
+        if (leaveType == null || leaveType.TenantId != tenantId)
+            throw new ArgumentException($"Leave type '{leaveTypeId}' not found.");
+
         var balance = await _leaveBalanceRepository
             .GetQueryable()
             .FirstOrDefaultAsync(lb =>
+                lb.TenantId == tenantId &&
                 lb.EmployeeId == employeeId &&
                 lb.LeaveTypeId == leaveTypeId &&
                 lb.Year == year);
@@ -61,6 +82,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
             var entitled = await _entitlementService.ResolveAnnualEntitlementAsync(employeeId, leaveTypeId, null, year);
             balance = new LeaveBalance
             {
+                TenantId        = tenantId,
                 EmployeeId      = employeeId,
                 LeaveTypeId     = leaveTypeId,
                 Year            = year,
@@ -77,6 +99,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
         balance.UsedDays = await _leaveRequestRepository
             .GetQueryable()
             .Where(r =>
+                r.TenantId == tenantId &&
                 r.EmployeeId  == employeeId &&
                 r.LeaveTypeId == leaveTypeId &&
                 r.StartDate.Year == year &&
@@ -87,6 +110,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
         balance.PendingDays = await _leaveRequestRepository
             .GetQueryable()
             .Where(r =>
+                r.TenantId == tenantId &&
                 r.EmployeeId  == employeeId &&
                 r.LeaveTypeId == leaveTypeId &&
                 r.StartDate.Year == year &&
@@ -97,6 +121,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
         balance.AdjustmentDays = await _leaveAdjustmentRepository
             .GetQueryable()
             .Where(a =>
+                a.TenantId == tenantId &&
                 a.EmployeeId  == employeeId &&
                 a.LeaveTypeId == leaveTypeId &&
                 a.Year        == year)
@@ -107,6 +132,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
         balance.EncashedDays = await _leaveEncashmentRepository
             .GetQueryable()
             .Where(e =>
+                e.TenantId == tenantId &&
                 e.EmployeeId  == employeeId &&
                 e.LeaveTypeId == leaveTypeId &&
                 e.Year        == year &&
@@ -130,9 +156,11 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
     /// <inheritdoc />
     public async Task RecalculateAllAsync(Guid employeeId, int year)
     {
+        var tenantId = GetTenantId();
+
         var leaveTypeIds = await _leaveBalanceRepository
             .GetQueryable()
-            .Where(lb => lb.EmployeeId == employeeId && lb.Year == year)
+            .Where(lb => lb.TenantId == tenantId && lb.EmployeeId == employeeId && lb.Year == year)
             .Select(lb => lb.LeaveTypeId)
             .Distinct()
             .ToListAsync();

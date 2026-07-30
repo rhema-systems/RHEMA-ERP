@@ -36,15 +36,75 @@ public class LeavePlanService : ILeavePlanService
         _currentUserService = currentUserService;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserService.TenantId;
+        if (tenantId is null || tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId.Value;
+    }
+
+    // A leave plan owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<LeavePlan> GetOwnedLeavePlanAsync(Guid id)
+    {
+        var entity = await _leavePlanRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave plan '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<bool> HasConflictingPlanAsync(
+        Guid employeeId, DateOnly startDate, DateOnly endDate, Guid? excludePlanId = null)
+    {
+        var tenantId = GetTenantId();
+        var query = _leavePlanRepository.GetQueryable().Where(p =>
+            p.TenantId == tenantId &&
+            p.EmployeeId == employeeId &&
+            p.Status != LeavePlanStatus.Cancelled &&
+            p.Status != LeavePlanStatus.Rejected &&
+            p.StartDate <= endDate &&
+            p.EndDate >= startDate);
+
+        if (excludePlanId.HasValue)
+            query = query.Where(p => p.Id != excludePlanId.Value);
+
+        return await query.AnyAsync();
+    }
+
     public async Task<IEnumerable<LeavePlanDto>> GetByEmployeeAndYearAsync(Guid employeeId, int year)
     {
-        var items = await _leavePlanRepository.GetByEmployeeAndYearAsync(employeeId, year);
+        var tenantId = GetTenantId();
+        var items = await _leavePlanRepository
+            .GetQueryable()
+            .Include(p => p.Employee)
+            .Include(p => p.LeaveType)
+            .Include(p => p.LeaveSubType)
+            .Include(p => p.RelieverEmployee)
+            .Include(p => p.PlannedByEmployee)
+            .Where(p => p.TenantId == tenantId && p.EmployeeId == employeeId && p.Year == year)
+            .OrderBy(p => p.StartDate)
+            .ToListAsync();
         return items.ToDtoList();
     }
 
     public async Task<IEnumerable<LeavePlanDto>> GetByYearAsync(int year)
     {
-        var items = await _leavePlanRepository.GetByYearAsync(year);
+        var tenantId = GetTenantId();
+        var items = await _leavePlanRepository
+            .GetQueryable()
+            .Include(p => p.Employee)
+            .Include(p => p.LeaveType)
+            .Include(p => p.LeaveSubType)
+            .Include(p => p.RelieverEmployee)
+            .Include(p => p.PlannedByEmployee)
+            .Include(p => p.OrganizationUnit)
+            .Where(p => p.TenantId == tenantId && p.Year == year)
+            .OrderBy(p => p.StartDate)
+            .ToListAsync();
         return items.ToDtoList();
     }
 
@@ -61,11 +121,12 @@ public class LeavePlanService : ILeavePlanService
         if (dto.EndDate < dto.StartDate)
             throw new InvalidOperationException("End date must be after or equal to start date.");
 
-        var hasConflict = await _leavePlanRepository.HasConflictingPlanAsync(dto.EmployeeId, dto.StartDate, dto.EndDate);
+        var hasConflict = await HasConflictingPlanAsync(dto.EmployeeId, dto.StartDate, dto.EndDate);
         if (hasConflict)
             throw new InvalidOperationException("Employee already has a leave plan for this period.");
 
         var entity = dto.ToEntity();
+        entity.TenantId = GetTenantId();
         await _leavePlanRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Leave plan created for employee {employeeId}", dto.EmployeeId);
@@ -74,16 +135,14 @@ public class LeavePlanService : ILeavePlanService
 
     public async Task<LeavePlanDto> UpdateLeavePlanAsync(Guid id, CreateLeavePlanDto dto)
     {
-        var entity = await _leavePlanRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave plan '{id}' not found.");
+        var entity = await GetOwnedLeavePlanAsync(id);
         if (entity.Status != LeavePlanStatus.Draft)
             throw new InvalidOperationException("Only draft leave plans can be edited.");
 
         if (dto.EndDate < dto.StartDate)
             throw new InvalidOperationException("End date must be after or equal to start date.");
 
-        var hasConflict = await _leavePlanRepository.HasConflictingPlanAsync(dto.EmployeeId, dto.StartDate, dto.EndDate, id);
+        var hasConflict = await HasConflictingPlanAsync(dto.EmployeeId, dto.StartDate, dto.EndDate, id);
         if (hasConflict)
             throw new InvalidOperationException("Employee already has a leave plan for this period.");
 
@@ -108,9 +167,7 @@ public class LeavePlanService : ILeavePlanService
 
     public async Task<LeavePlanDto> SubmitLeavePlanAsync(Guid id)
     {
-        var entity = await _leavePlanRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave plan '{id}' not found.");
+        var entity = await GetOwnedLeavePlanAsync(id);
         if (entity.Status != LeavePlanStatus.Draft)
             throw new InvalidOperationException("Only draft leave plans can be submitted.");
 
@@ -131,9 +188,7 @@ public class LeavePlanService : ILeavePlanService
 
     public async Task<LeavePlanDto> ApproveLeavePlanAsync(Guid id)
     {
-        var entity = await _leavePlanRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave plan '{id}' not found.");
+        var entity = await GetOwnedLeavePlanAsync(id);
 
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty)
@@ -160,9 +215,7 @@ public class LeavePlanService : ILeavePlanService
 
     public async Task<LeavePlanDto> RejectLeavePlanAsync(Guid id, string reason)
     {
-        var entity = await _leavePlanRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave plan '{id}' not found.");
+        var entity = await GetOwnedLeavePlanAsync(id);
 
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty)
@@ -190,9 +243,7 @@ public class LeavePlanService : ILeavePlanService
 
     public async Task<LeavePlanDto> SuggestChangesAsync(Guid id, SuggestLeavePlanChangesDto dto)
     {
-        var entity = await _leavePlanRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave plan '{id}' not found.");
+        var entity = await GetOwnedLeavePlanAsync(id);
         if (entity.Status != LeavePlanStatus.Submitted)
             throw new InvalidOperationException("Only submitted leave plans can have changes suggested.");
         if (dto.SuggestedEndDate < dto.SuggestedStartDate)
@@ -230,9 +281,7 @@ public class LeavePlanService : ILeavePlanService
 
     public async Task<LeavePlanDto> RespondToSuggestionAsync(Guid id, RespondToLeaveSuggestionDto dto)
     {
-        var entity = await _leavePlanRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave plan '{id}' not found.");
+        var entity = await GetOwnedLeavePlanAsync(id);
         if (entity.Status != LeavePlanStatus.ChangesSuggested)
             throw new InvalidOperationException("This leave plan has no suggested changes to respond to.");
 
@@ -255,7 +304,7 @@ public class LeavePlanService : ILeavePlanService
         if (newEnd < newStart)
             throw new InvalidOperationException("End date must be after or equal to start date.");
 
-        var hasConflict = await _leavePlanRepository.HasConflictingPlanAsync(entity.EmployeeId, newStart, newEnd, id);
+        var hasConflict = await HasConflictingPlanAsync(entity.EmployeeId, newStart, newEnd, id);
         if (hasConflict)
             throw new InvalidOperationException("Employee already has a leave plan for this period.");
 
@@ -287,9 +336,7 @@ public class LeavePlanService : ILeavePlanService
 
     public async Task CancelLeavePlanAsync(Guid id)
     {
-        var entity = await _leavePlanRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave plan '{id}' not found.");
+        var entity = await GetOwnedLeavePlanAsync(id);
         if (entity.Status == LeavePlanStatus.Cancelled)
             throw new InvalidOperationException("Leave plan is already cancelled.");
 
@@ -302,7 +349,9 @@ public class LeavePlanService : ILeavePlanService
         => Guid.TryParse(_currentUserService.UserId, out var id) ? id : Guid.Empty;
 
     private async Task<LeavePlan?> GetWithIncludes(Guid id)
-        => await _leavePlanRepository
+    {
+        var tenantId = GetTenantId();
+        return await _leavePlanRepository
             .GetQueryable()
             .Include(p => p.Employee)
             .Include(p => p.LeaveType)
@@ -313,5 +362,6 @@ public class LeavePlanService : ILeavePlanService
             .Include(p => p.RelieverEmployee)
             .Include(p => p.SecondRelieverEmployee)
             .Include(p => p.PlannedByEmployee)
-            .FirstOrDefaultAsync(p => p.Id == id);
+            .FirstOrDefaultAsync(p => p.Id == id && p.TenantId == tenantId);
+    }
 }

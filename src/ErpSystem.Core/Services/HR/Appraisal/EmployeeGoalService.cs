@@ -19,6 +19,7 @@ public class EmployeeGoalService : IEmployeeGoalService
     private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<EmployeeGoalAppraisalAssessment> _assessmentRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<EmployeeGoalService> _logger;
 
@@ -29,6 +30,7 @@ public class EmployeeGoalService : IEmployeeGoalService
         IGenericRepository<AppraisalCycle> cycleRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IGenericRepository<EmployeeGoalAppraisalAssessment> assessmentRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<EmployeeGoalService> logger)
     {
@@ -38,31 +40,61 @@ public class EmployeeGoalService : IEmployeeGoalService
         _cycleRepository = cycleRepository;
         _appraisalRepository = appraisalRepository;
         _assessmentRepository = assessmentRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    private IQueryable<EmployeeGoal> BaseQuery => _goalRepository.GetQueryable()
-        .Include(g => g.Employee)
-        .Include(g => g.AppraisalCycle)
-        .Include(g => g.ParentCompanyGoal)
-        .Include(g => g.ParentUnitGoal)
-        .Include(g => g.ParentGoal)
-        .Include(g => g.LibraryItem)
-        .Include(g => g.KpiDefinition)
-        .Include(g => g.Manager);
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A goal owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<EmployeeGoal> GetOwnedGoalAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _goalRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee goal with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<EmployeeGoal> BaseQuery()
+    {
+        var tenantId = GetTenantId();
+        return _goalRepository.GetQueryable()
+            .Where(g => g.TenantId == tenantId)
+            .Include(g => g.Employee)
+            .Include(g => g.AppraisalCycle)
+            .Include(g => g.ParentCompanyGoal)
+            .Include(g => g.ParentUnitGoal)
+            .Include(g => g.ParentGoal)
+            .Include(g => g.LibraryItem)
+            .Include(g => g.KpiDefinition)
+            .Include(g => g.Manager);
+    }
 
     /// <summary>Loads the AppraisalSettings for a cycle (1:1), or null if none is configured.</summary>
-    private async Task<AppraisalSettings?> GetSettingsForCycleAsync(Guid cycleId, CancellationToken cancellationToken) =>
-        (await _cycleRepository.GetQueryable(c => c.Id == cycleId)
+    private async Task<AppraisalSettings?> GetSettingsForCycleAsync(Guid cycleId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        return (await _cycleRepository.GetQueryable(c => c.Id == cycleId && c.TenantId == tenantId)
             .Include(c => c.AppraisalSettings)
             .FirstOrDefaultAsync(cancellationToken))?.AppraisalSettings;
+    }
 
     // ─── CRUD ────────────────────────────────────────────────────────────────
 
     public async Task<EmployeeGoalDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await BaseQuery.FirstOrDefaultAsync(g => g.Id == id, cancellationToken);
+        var entity = await BaseQuery().FirstOrDefaultAsync(g => g.Id == id, cancellationToken);
         if (entity == null)
             throw new ArgumentException($"Employee goal with ID '{id}' not found.");
         return entity.ToDto();
@@ -70,7 +102,7 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<IEnumerable<EmployeeGoalDto>> GetByEmployeeIdAsync(Guid employeeId, Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery.Where(g => g.EmployeeId == employeeId);
+        var query = BaseQuery().Where(g => g.EmployeeId == employeeId);
         if (cycleId.HasValue)
             query = query.Where(g => g.AppraisalCycleId == cycleId.Value);
         var entities = await query.OrderBy(g => g.Status).ThenBy(g => g.DueDate).ToListAsync(cancellationToken);
@@ -79,15 +111,16 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<IEnumerable<EmployeeGoalDto>> GetByAppraisalIdAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var appraisal = await _appraisalRepository.GetQueryable()
-            .Where(a => a.Id == appraisalId)
+            .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
             .Select(a => new { a.EmployeeId, a.AppraisalCycleId })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (appraisal == null)
             return Enumerable.Empty<EmployeeGoalDto>();
 
-        var entities = await BaseQuery
+        var entities = await BaseQuery()
             .Where(g => g.EmployeeId == appraisal.EmployeeId
                      && g.AppraisalCycleId == appraisal.AppraisalCycleId)
             .OrderBy(g => g.DueDate)
@@ -97,7 +130,7 @@ public class EmployeeGoalService : IEmployeeGoalService
 
         // Merge in the persisted appraisal-scoped assessments
         var assessments = await _assessmentRepository.GetQueryable()
-            .Where(a => a.PerformanceAppraisalId == appraisalId)
+            .Where(a => a.PerformanceAppraisalId == appraisalId && a.TenantId == tenantId)
             .ToListAsync(cancellationToken);
 
         if (assessments.Count > 0)
@@ -124,7 +157,7 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<IEnumerable<EmployeeGoalDto>> GetPendingApprovalAsync(Guid managerId, Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery.Where(g => g.SubmittedToManagerId == managerId && g.Status == GoalStatus.PendingApproval);
+        var query = BaseQuery().Where(g => g.SubmittedToManagerId == managerId && g.Status == GoalStatus.PendingApproval);
         if (cycleId.HasValue)
             query = query.Where(g => g.AppraisalCycleId == cycleId.Value);
         var entities = await query.OrderBy(g => g.SubmittedDate).ToListAsync(cancellationToken);
@@ -136,7 +169,7 @@ public class EmployeeGoalService : IEmployeeGoalService
         Guid? employeeId = null, Guid? cycleId = null,
         CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery.AsQueryable();
+        var query = BaseQuery().AsQueryable();
         if (employeeId.HasValue)
             query = query.Where(g => g.EmployeeId == employeeId.Value);
         if (cycleId.HasValue)
@@ -157,11 +190,13 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<EmployeeGoalDto> CreateAsync(CreateEmployeeGoalDto createDto, CancellationToken cancellationToken = default)
     {
-        var employeeExists = await _employeeRepository.ExistsAsync(e => e.Id == createDto.EmployeeId);
+        var tenantId = GetTenantId();
+
+        var employeeExists = await _employeeRepository.ExistsAsync(e => e.Id == createDto.EmployeeId && e.TenantId == tenantId);
         if (!employeeExists)
             throw new ArgumentException("Employee not found.");
 
-        var cycleExists = await _cycleRepository.ExistsAsync(c => c.Id == createDto.AppraisalCycleId);
+        var cycleExists = await _cycleRepository.ExistsAsync(c => c.Id == createDto.AppraisalCycleId && c.TenantId == tenantId);
         if (!cycleExists)
             throw new ArgumentException("Appraisal cycle not found.");
 
@@ -170,7 +205,8 @@ public class EmployeeGoalService : IEmployeeGoalService
         if (settings?.MaxGoalsPerEmployee is int maxGoals && maxGoals > 0)
         {
             var existingGoalCount = await _goalRepository.GetQueryable(g =>
-                    g.EmployeeId == createDto.EmployeeId
+                    g.TenantId == tenantId
+                    && g.EmployeeId == createDto.EmployeeId
                     && g.AppraisalCycleId == createDto.AppraisalCycleId
                     && g.Status != GoalStatus.Rejected)
                 .CountAsync(cancellationToken);
@@ -180,12 +216,15 @@ public class EmployeeGoalService : IEmployeeGoalService
         }
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
 
         // Auto-link to the appraisal if one already exists for this employee + cycle.
         if (entity.PerformanceAppraisalId == null)
         {
             var appraisal = await _appraisalRepository.FirstOrDefaultAsync(
-                a => a.EmployeeId == entity.EmployeeId && a.AppraisalCycleId == entity.AppraisalCycleId);
+                a => a.TenantId == tenantId
+                  && a.EmployeeId == entity.EmployeeId
+                  && a.AppraisalCycleId == entity.AppraisalCycleId);
             if (appraisal != null)
                 entity.PerformanceAppraisalId = appraisal.Id;
         }
@@ -199,9 +238,7 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<EmployeeGoalDto> UpdateAsync(UpdateEmployeeGoalDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Employee goal with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedGoalAsync(updateDto.Id, cancellationToken);
 
         if (entity.IsLocked)
             throw new InvalidOperationException("This goal is locked and cannot be edited.");
@@ -216,9 +253,7 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Employee goal with ID '{id}' not found.");
+        var entity = await GetOwnedGoalAsync(id, cancellationToken);
 
         if (entity.IsLocked)
             throw new InvalidOperationException("Locked goals cannot be deleted.");
@@ -234,9 +269,8 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<EmployeeGoalDto> SubmitForApprovalAsync(Guid goalId, Guid managerId, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalRepository.GetByIdAsync(goalId);
-        if (entity == null)
-            throw new ArgumentException($"Employee goal with ID '{goalId}' not found.");
+        var tenantId = GetTenantId();
+        var entity = await GetOwnedGoalAsync(goalId, cancellationToken);
 
         if (entity.Status != GoalStatus.Draft)
             throw new InvalidOperationException($"Only draft goals can be submitted. Current status: {entity.Status}");
@@ -244,7 +278,7 @@ public class EmployeeGoalService : IEmployeeGoalService
         // Guard: total weights of all non-rejected goals in the cycle must equal 100
         await ValidateGoalWeightTotalAsync(entity.EmployeeId, entity.AppraisalCycleId, cancellationToken);
 
-        var managerExists = await _employeeRepository.ExistsAsync(e => e.Id == managerId);
+        var managerExists = await _employeeRepository.ExistsAsync(e => e.Id == managerId && e.TenantId == tenantId);
         if (!managerExists)
             throw new ArgumentException("Manager not found.");
 
@@ -261,9 +295,7 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<EmployeeGoalDto> ApproveGoalAsync(Guid goalId, Guid managerId, string? feedback = null, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalRepository.GetByIdAsync(goalId);
-        if (entity == null)
-            throw new ArgumentException($"Employee goal with ID '{goalId}' not found.");
+        var entity = await GetOwnedGoalAsync(goalId, cancellationToken);
 
         if (entity.Status != GoalStatus.PendingApproval)
             throw new InvalidOperationException("Only goals pending approval can be approved.");
@@ -287,9 +319,7 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<EmployeeGoalDto> RejectGoalAsync(Guid goalId, Guid managerId, string? feedback = null, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalRepository.GetByIdAsync(goalId);
-        if (entity == null)
-            throw new ArgumentException($"Employee goal with ID '{goalId}' not found.");
+        var entity = await GetOwnedGoalAsync(goalId, cancellationToken);
 
         if (entity.Status != GoalStatus.PendingApproval)
             throw new InvalidOperationException("Only goals pending approval can be rejected.");
@@ -311,14 +341,14 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<GoalProgressEntryDto> AddProgressEntryAsync(Guid goalId, CreateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
     {
-        var goal = await _goalRepository.GetByIdAsync(goalId);
-        if (goal == null)
-            throw new ArgumentException($"Employee goal with ID '{goalId}' not found.");
+        var tenantId = GetTenantId();
+        var goal = await GetOwnedGoalAsync(goalId, cancellationToken);
 
         if (goal.Status != GoalStatus.Approved && goal.Status != GoalStatus.AtRisk && goal.Status != GoalStatus.InProgress)
             throw new InvalidOperationException("Progress entries can only be added to approved, in-progress, or at-risk goals.");
 
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         entity.EmployeeGoalId = goalId;
         entity.EntryDate = DateTime.UtcNow;
 
@@ -340,6 +370,7 @@ public class EmployeeGoalService : IEmployeeGoalService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         entity = await _progressRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
             .Include(p => p.RecordedBy)
             .FirstOrDefaultAsync(p => p.Id == entity.Id, cancellationToken);
 
@@ -349,7 +380,9 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<IEnumerable<GoalProgressEntryDto>> GetProgressEntriesAsync(Guid goalId, CancellationToken cancellationToken = default)
     {
-        var entities = await _progressRepository.GetQueryable(p => p.EmployeeGoalId == goalId)
+        await GetOwnedGoalAsync(goalId, cancellationToken);
+        var tenantId = GetTenantId();
+        var entities = await _progressRepository.GetQueryable(p => p.EmployeeGoalId == goalId && p.TenantId == tenantId)
             .Include(p => p.RecordedBy)
             .OrderByDescending(p => p.EntryDate)
             .ToListAsync(cancellationToken);
@@ -358,9 +391,11 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<GoalProgressEntryDto> UpdateProgressEntryAsync(Guid goalId, UpdateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
     {
+        await GetOwnedGoalAsync(goalId, cancellationToken);
+        var tenantId = GetTenantId();
         var entity = await _progressRepository.GetQueryable()
             .Include(p => p.RecordedBy)
-            .FirstOrDefaultAsync(p => p.Id == dto.Id && p.EmployeeGoalId == goalId, cancellationToken);
+            .FirstOrDefaultAsync(p => p.Id == dto.Id && p.EmployeeGoalId == goalId && p.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("Progress entry not found.");
@@ -375,8 +410,10 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<bool> DeleteProgressEntryAsync(Guid goalId, Guid entryId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedGoalAsync(goalId, cancellationToken);
+        var tenantId = GetTenantId();
         var entity = await _progressRepository.GetQueryable()
-            .FirstOrDefaultAsync(p => p.Id == entryId && p.EmployeeGoalId == goalId, cancellationToken);
+            .FirstOrDefaultAsync(p => p.Id == entryId && p.EmployeeGoalId == goalId && p.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("Progress entry not found.");
@@ -392,9 +429,7 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<bool> LockGoalAsync(Guid goalId, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalRepository.GetByIdAsync(goalId);
-        if (entity == null)
-            throw new ArgumentException($"Employee goal with ID '{goalId}' not found.");
+        var entity = await GetOwnedGoalAsync(goalId, cancellationToken);
 
         entity.IsLocked = true;
         entity.LockedDate = DateTime.UtcNow;
@@ -407,9 +442,7 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<bool> UnlockGoalAsync(Guid goalId, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalRepository.GetByIdAsync(goalId);
-        if (entity == null)
-            throw new ArgumentException($"Employee goal with ID '{goalId}' not found.");
+        var entity = await GetOwnedGoalAsync(goalId, cancellationToken);
 
         entity.IsLocked = false;
         entity.LockedDate = null;
@@ -424,18 +457,21 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<EmployeeGoalSummaryDto> GetGoalSummaryAsync(Guid employeeId, Guid cycleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var employee = await _employeeRepository.GetQueryable()
             .Include(e => e.Department)
-            .FirstOrDefaultAsync(e => e.Id == employeeId, cancellationToken);
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == tenantId, cancellationToken);
 
         if (employee == null)
             throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
 
-        var cycle = await _cycleRepository.GetByIdAsync(cycleId);
+        var cycle = await _cycleRepository.GetQueryable()
+            .FirstOrDefaultAsync(c => c.Id == cycleId && c.TenantId == tenantId, cancellationToken);
         if (cycle == null)
             throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
 
-        var goals = await _goalRepository.GetQueryable(g => g.EmployeeId == employeeId && g.AppraisalCycleId == cycleId)
+        var goals = await _goalRepository.GetQueryable(g =>
+                g.TenantId == tenantId && g.EmployeeId == employeeId && g.AppraisalCycleId == cycleId)
             .ToListAsync(cancellationToken);
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -467,8 +503,10 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<IEnumerable<TeamGoalSummaryDto>> GetTeamGoalSummaryAsync(Guid managerId, Guid cycleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+
         // Get all direct reports' employee IDs from goals submitted to this manager
-        var teamEmployeeIds = await _employeeRepository.GetQueryable(e => e.ManagerId == managerId)
+        var teamEmployeeIds = await _employeeRepository.GetQueryable(e => e.ManagerId == managerId && e.TenantId == tenantId)
             .Select(e => e.Id)
             .ToListAsync(cancellationToken);
 
@@ -476,7 +514,7 @@ public class EmployeeGoalService : IEmployeeGoalService
             return Enumerable.Empty<TeamGoalSummaryDto>();
 
         var allGoals = await _goalRepository.GetQueryable(
-            g => teamEmployeeIds.Contains(g.EmployeeId) && g.AppraisalCycleId == cycleId)
+            g => g.TenantId == tenantId && teamEmployeeIds.Contains(g.EmployeeId) && g.AppraisalCycleId == cycleId)
             .Include(g => g.Employee)
                 .ThenInclude(e => e.Position)
             .Include(g => g.Employee)
@@ -496,7 +534,7 @@ public class EmployeeGoalService : IEmployeeGoalService
                 emp = await _employeeRepository.GetQueryable()
                     .Include(e => e.Position)
                     .Include(e => e.Department)
-                    .FirstOrDefaultAsync(e => e.Id == empId, cancellationToken);
+                    .FirstOrDefaultAsync(e => e.Id == empId && e.TenantId == tenantId, cancellationToken);
             }
 
             if (emp == null) continue;
@@ -536,8 +574,10 @@ public class EmployeeGoalService : IEmployeeGoalService
     private async Task ValidateGoalWeightTotalAsync(
         Guid employeeId, Guid cycleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var totalWeight = await _goalRepository
-            .GetQueryable(g => g.EmployeeId == employeeId
+            .GetQueryable(g => g.TenantId == tenantId
+                            && g.EmployeeId == employeeId
                             && g.AppraisalCycleId == cycleId
                             && g.Status != GoalStatus.Rejected)
             .SumAsync(g => (int?)g.Weight, cancellationToken) ?? 0;

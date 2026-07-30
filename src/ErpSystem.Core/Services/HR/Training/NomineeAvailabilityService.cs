@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -24,18 +25,32 @@ public class NomineeAvailabilityService : INomineeAvailabilityService
     private readonly ILeaveRepository _leaveRepository;
     private readonly IStaffTravelRequestRepository _travelRepository;
     private readonly ITrainingNominationRepository _nominationRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<NomineeAvailabilityService> _logger;
 
     public NomineeAvailabilityService(
         ILeaveRepository leaveRepository,
         IStaffTravelRequestRepository travelRepository,
         ITrainingNominationRepository nominationRepository,
+        ICurrentUserProvider currentUserProvider,
         ILogger<NomineeAvailabilityService> logger)
     {
         _leaveRepository = leaveRepository;
         _travelRepository = travelRepository;
         _nominationRepository = nominationRepository;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<List<NomineeConflictDto>> CheckAsync(
@@ -45,13 +60,17 @@ public class NomineeAvailabilityService : INomineeAvailabilityService
         var conflicts = new List<NomineeConflictDto>();
         if (ids.Count == 0) return conflicts;
 
+        // Resolved outside the guarded blocks below so a missing tenant surfaces instead of being logged away.
+        var tenantId = GetTenantId();
+
         var fromDate = DateOnly.FromDateTime(from);
         var toDate = DateOnly.FromDateTime(to);
 
         // ── Leave (pending / approved / in-progress overlapping the window) ──
         try
         {
-            var leaves = await _leaveRepository.GetQueryable(l => ids.Contains(l.EmployeeId)
+            var leaves = await _leaveRepository.GetQueryable(l => l.TenantId == tenantId
+                    && ids.Contains(l.EmployeeId)
                     && (l.Status == LeaveStatus.Pending || l.Status == LeaveStatus.Approved || l.Status == LeaveStatus.InProgress)
                     && l.StartDate <= toDate && l.EndDate >= fromDate)
                 .Select(l => new { l.EmployeeId, l.StartDate, l.EndDate })
@@ -71,7 +90,8 @@ public class NomineeAvailabilityService : INomineeAvailabilityService
         // ── Staff travel (submitted / approved / in-progress overlapping the window) ──
         try
         {
-            var travels = await _travelRepository.GetQueryable(t => ids.Contains(t.EmployeeId)
+            var travels = await _travelRepository.GetQueryable(t => t.TenantId == tenantId
+                    && ids.Contains(t.EmployeeId)
                     && (t.Status == StaffTravelRequestStatus.Submitted || t.Status == StaffTravelRequestStatus.Approved || t.Status == StaffTravelRequestStatus.InProgress)
                     && t.TravelStartDate <= toDate && t.TravelEndDate >= fromDate)
                 .Select(t => new { t.EmployeeId, t.TravelStartDate, t.TravelEndDate })
@@ -91,7 +111,8 @@ public class NomineeAvailabilityService : INomineeAvailabilityService
         // ── Other training (live nomination to another overlapping schedule) ──
         try
         {
-            var trainings = await _nominationRepository.GetQueryable(n => ids.Contains(n.EmployeeId)
+            var trainings = await _nominationRepository.GetQueryable(n => n.TenantId == tenantId
+                    && ids.Contains(n.EmployeeId)
                     && (excludeScheduleId == null || n.ScheduleId != excludeScheduleId)
                     && n.Status != NominationStatus.Draft
                     && n.Status != NominationStatus.Rejected

@@ -25,6 +25,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     private readonly IGenericRepository<BenefitUtilization> _utilizationRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IEmolumentService _emolumentService;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<EmployeeBenefitEnrollmentService> _logger;
 
@@ -38,6 +39,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         IGenericRepository<BenefitUtilization> utilizationRepository,
         IGenericRepository<Employee> employeeRepository,
         IEmolumentService emolumentService,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<EmployeeBenefitEnrollmentService> logger)
     {
@@ -50,8 +52,72 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         _utilizationRepository = utilizationRepository ?? throw new ArgumentNullException(nameof(utilizationRepository));
         _employeeRepository = employeeRepository ?? throw new ArgumentNullException(nameof(employeeRepository));
         _emolumentService = emolumentService ?? throw new ArgumentNullException(nameof(emolumentService));
+        _currentUserProvider = currentUserProvider ?? throw new ArgumentNullException(nameof(currentUserProvider));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    /// <summary>
+    /// Loads an enrollment owned by the current tenant. Wrong-tenant ids are reported as missing
+    /// rather than forbidden so callers do not confirm the id exists elsewhere.
+    /// </summary>
+    private async Task<EmployeeBenefitEnrollment?> FindOwnedEnrollmentAsync(
+        Guid id,
+        Func<IQueryable<EmployeeBenefitEnrollment>, IQueryable<EmployeeBenefitEnrollment>>? shape = null)
+    {
+        var tenantId = GetTenantId();
+        IQueryable<EmployeeBenefitEnrollment> query = _enrollmentRepository
+            .GetQueryable(e => e.Id == id && e.TenantId == tenantId);
+
+        if (shape is not null)
+        {
+            query = shape(query);
+        }
+
+        return await query.FirstOrDefaultAsync();
+    }
+
+    private async Task<EmployeeBenefitEnrollment> GetOwnedEnrollmentAsync(
+        Guid id,
+        Func<IQueryable<EmployeeBenefitEnrollment>, IQueryable<EmployeeBenefitEnrollment>>? shape = null)
+    {
+        var entity = await FindOwnedEnrollmentAsync(id, shape);
+        if (entity is null)
+            throw new ArgumentException($"Enrollment '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<BenefitUtilization> GetOwnedUtilizationAsync(Guid claimId)
+    {
+        var tenantId = GetTenantId();
+        var claim = await _utilizationRepository
+            .GetQueryable(u => u.Id == claimId && u.TenantId == tenantId)
+            .Include(u => u.EmployeeDependent)
+            .FirstOrDefaultAsync();
+
+        if (claim is null)
+            throw new ArgumentException($"Claim '{claimId}' not found.");
+
+        return claim;
     }
 
     /// <inheritdoc />
@@ -79,8 +145,9 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     /// <inheritdoc />
     public async Task<IReadOnlyList<EmployeeBenefitEnrollmentListDto>> GetByEmployeeAsync(Guid employeeId)
     {
+        var tenantId = GetTenantId();
         var rows = await _enrollmentRepository
-            .GetQueryable(e => e.EmployeeId == employeeId)
+            .GetQueryable(e => e.TenantId == tenantId && e.EmployeeId == employeeId)
             .AsNoTracking()
             .Include(e => e.BenefitPolicy)
             .Include(e => e.Employee).ThenInclude(emp => emp.Position)
@@ -107,8 +174,9 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     /// <inheritdoc />
     public async Task<IReadOnlyList<EmployeeBenefitEnrollmentListDto>> GetByPolicyAsync(Guid benefitPolicyId)
     {
+        var tenantId = GetTenantId();
         var rows = await _enrollmentRepository
-            .GetQueryable(e => e.BenefitPolicyId == benefitPolicyId)
+            .GetQueryable(e => e.TenantId == tenantId && e.BenefitPolicyId == benefitPolicyId)
             .AsNoTracking()
             .Include(e => e.BenefitPolicy)
             .Include(e => e.Employee)
@@ -123,13 +191,15 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     {
         ArgumentNullException.ThrowIfNull(dto);
 
+        var tenantId = GetTenantId();
+
         var policy = await _benefitPolicyRepository
-            .GetQueryable(p => p.Id == dto.BenefitPolicyId)
+            .GetQueryable(p => p.Id == dto.BenefitPolicyId && p.TenantId == tenantId)
             .FirstOrDefaultAsync()
             ?? throw new ArgumentException($"Benefit policy '{dto.BenefitPolicyId}' not found.");
 
         var employee = await _employeeRepository
-            .GetQueryable(e => e.Id == dto.EmployeeId)
+            .GetQueryable(e => e.Id == dto.EmployeeId && e.TenantId == tenantId)
             .Include(e => e.Position)
             .FirstOrDefaultAsync()
             ?? throw new ArgumentException($"Employee '{dto.EmployeeId}' not found.");
@@ -157,7 +227,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
             Currency = policy.Currency,
             IsValueOverridden = dto.AssessedValueOverride.HasValue,
             Notes = dto.Notes,
-            TenantId = policy.TenantId
+            TenantId = tenantId
         };
 
         await _enrollmentRepository.AddAsync(entity);
@@ -177,12 +247,9 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     {
         ArgumentNullException.ThrowIfNull(dto);
 
-        var entity = await _enrollmentRepository
-            .GetQueryable(e => e.Id == id)
+        var entity = await GetOwnedEnrollmentAsync(id, q => q
             .Include(e => e.BenefitPolicy)
-            .Include(e => e.Employee).ThenInclude(e => e.Position)
-            .FirstOrDefaultAsync()
-            ?? throw new ArgumentException($"Enrollment '{id}' not found.");
+            .Include(e => e.Employee).ThenInclude(e => e.Position));
 
         entity.EffectiveFrom = dto.EffectiveFrom;
         entity.EffectiveTo = dto.EffectiveTo;
@@ -218,10 +285,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     {
         ArgumentNullException.ThrowIfNull(dto);
 
-        var entity = await _enrollmentRepository
-            .GetQueryable(e => e.Id == id)
-            .FirstOrDefaultAsync()
-            ?? throw new ArgumentException($"Enrollment '{id}' not found.");
+        var entity = await GetOwnedEnrollmentAsync(id);
 
         entity.Status = dto.Status;
 
@@ -244,19 +308,21 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     /// <inheritdoc />
     public async Task<int> ReconcilePositionEnrollmentsAsync(Guid employeeId)
     {
+        var tenantId = GetTenantId();
+
         var employee = await _employeeRepository
-            .GetQueryable(e => e.Id == employeeId)
+            .GetQueryable(e => e.Id == employeeId && e.TenantId == tenantId)
             .Include(e => e.Position)
             .FirstOrDefaultAsync()
             ?? throw new ArgumentException($"Employee '{employeeId}' not found.");
 
         var positionBenefits = await _positionBenefitRepository
-            .GetQueryable(pb => pb.PositionId == employee.PositionId)
+            .GetQueryable(pb => pb.TenantId == tenantId && pb.PositionId == employee.PositionId)
             .Include(pb => pb.BenefitPolicy)
             .ToListAsync();
 
         var existing = await _enrollmentRepository
-            .GetQueryable(e => e.EmployeeId == employeeId)
+            .GetQueryable(e => e.TenantId == tenantId && e.EmployeeId == employeeId)
             .ToListAsync();
 
         var created = 0;
@@ -264,7 +330,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         foreach (var positionBenefit in positionBenefits)
         {
             var policy = positionBenefit.BenefitPolicy;
-            if (policy is null || !policy.IsActive)
+            if (policy is null || !policy.IsActive || policy.TenantId != tenantId)
             {
                 continue;
             }
@@ -315,7 +381,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
                 EmployerContribution = employer,
                 EmployeeContribution = employeeContribution,
                 Currency = policy.Currency,
-                TenantId = policy.TenantId
+                TenantId = tenantId
             };
 
             await _enrollmentRepository.AddAsync(enrollment);
@@ -332,8 +398,10 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     /// <inheritdoc />
     public async Task<IReadOnlyList<EmployeeBenefitPayrollLineDto>> GetEmployeeBenefitPayrollLinesAsync(Guid employeeId, DateTime asOf)
     {
+        var tenantId = GetTenantId();
         var enrollments = await _enrollmentRepository
-            .GetQueryable(e => e.EmployeeId == employeeId
+            .GetQueryable(e => e.TenantId == tenantId
+                && e.EmployeeId == employeeId
                 && e.Status == EmployeeBenefitEnrollmentStatus.Active
                 && e.EffectiveFrom <= asOf
                 && (e.EffectiveTo == null || e.EffectiveTo >= asOf))
@@ -370,8 +438,20 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     /// <inheritdoc />
     public async Task<IReadOnlyList<BenefitUtilizationDto>> GetUtilizationsAsync(Guid enrollmentId)
     {
+        var tenantId = GetTenantId();
+
+        // Wrong-tenant enrollment ids yield an empty list (list convention; no existence leak).
+        var enrollmentExists = await _enrollmentRepository
+            .GetQueryable(e => e.Id == enrollmentId && e.TenantId == tenantId)
+            .AnyAsync();
+
+        if (!enrollmentExists)
+        {
+            return Array.Empty<BenefitUtilizationDto>();
+        }
+
         var rows = await _utilizationRepository
-            .GetQueryable(u => u.EnrollmentId == enrollmentId)
+            .GetQueryable(u => u.TenantId == tenantId && u.EnrollmentId == enrollmentId)
             .AsNoTracking()
             .Include(u => u.EmployeeDependent)
             .OrderByDescending(u => u.ClaimDate)
@@ -384,14 +464,11 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     /// <inheritdoc />
     public async Task<EnrollmentBalanceDto> GetBalanceAsync(Guid enrollmentId)
     {
-        var enrollment = await _enrollmentRepository
-            .GetQueryable(e => e.Id == enrollmentId)
+        var enrollment = await GetOwnedEnrollmentAsync(enrollmentId, q => q
             .Include(e => e.BenefitPolicy)
             .Include(e => e.Employee).ThenInclude(emp => emp.Position)
             .Include(e => e.Dependents)
-            .Include(e => e.Utilizations)
-            .FirstOrDefaultAsync()
-            ?? throw new ArgumentException($"Enrollment '{enrollmentId}' not found.");
+            .Include(e => e.Utilizations));
 
         var (limit, used, remaining, start, end) = await ApplyPeriodAndRecomputeAsync(enrollment, persist: true);
         await _unitOfWork.SaveChangesAsync();
@@ -414,11 +491,8 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     {
         ArgumentNullException.ThrowIfNull(dto);
 
-        var enrollment = await _enrollmentRepository
-            .GetQueryable(e => e.Id == dto.EnrollmentId)
-            .Include(e => e.Dependents)
-            .FirstOrDefaultAsync()
-            ?? throw new ArgumentException($"Enrollment '{dto.EnrollmentId}' not found.");
+        var enrollment = await GetOwnedEnrollmentAsync(dto.EnrollmentId, q => q
+            .Include(e => e.Dependents));
 
         if (enrollment.Status != EmployeeBenefitEnrollmentStatus.Active)
         {
@@ -455,20 +529,13 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     {
         ArgumentNullException.ThrowIfNull(dto);
 
-        var claim = await _utilizationRepository
-            .GetQueryable(u => u.Id == claimId)
-            .Include(u => u.EmployeeDependent)
-            .FirstOrDefaultAsync()
-            ?? throw new ArgumentException($"Claim '{claimId}' not found.");
+        var claim = await GetOwnedUtilizationAsync(claimId);
 
-        var enrollment = await _enrollmentRepository
-            .GetQueryable(e => e.Id == claim.EnrollmentId)
+        var enrollment = await GetOwnedEnrollmentAsync(claim.EnrollmentId, q => q
             .Include(e => e.BenefitPolicy)
             .Include(e => e.Employee).ThenInclude(emp => emp.Position)
             .Include(e => e.Dependents)
-            .Include(e => e.Utilizations)
-            .FirstOrDefaultAsync()
-            ?? throw new ArgumentException($"Enrollment '{claim.EnrollmentId}' not found.");
+            .Include(e => e.Utilizations));
 
         // Apply the transition on the tracked claim instance from the enrollment graph.
         var tracked = enrollment.Utilizations.First(u => u.Id == claim.Id);
@@ -501,7 +568,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     // ─────────────────────────── helpers ───────────────────────────
 
     private IQueryable<EmployeeBenefitEnrollment> QueryWithGraph()
-        => _enrollmentRepository.GetQueryable()
+        => _enrollmentRepository.GetQueryable(e => e.TenantId == GetTenantId())
             .Include(e => e.BenefitPolicy)
             .Include(e => e.Employee).ThenInclude(emp => emp.Position)
             .Include(e => e.Dependents)
@@ -528,8 +595,9 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
 
     private async Task<BenefitGradeValue?> ResolveGradeValueAsync(Guid policyId, Employee employee)
     {
+        var tenantId = GetTenantId();
         var rows = await _gradeValueRepository
-            .GetQueryable(g => g.BenefitPolicyId == policyId && g.IsActive)
+            .GetQueryable(g => g.TenantId == tenantId && g.BenefitPolicyId == policyId && g.IsActive)
             .ToListAsync();
 
         var salaryGradeId = employee.Position?.SalaryGradeId;
@@ -568,9 +636,10 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
             return (0m, e.UtilizedAmount, 0m, e.CurrentPeriodStart, null);
         }
 
+        var tenantId = GetTenantId();
         var anchor = e.CurrentPeriodStart ?? e.EffectiveFrom;
         var (start, end) = ResolvePeriodWindow(policy.LimitPeriod, anchor, DateTime.UtcNow);
-        var used = SumUtilized(e.Utilizations, ToDateOnly(start), ToDateOnly(end));
+        var used = SumUtilized(e.Utilizations, tenantId, ToDateOnly(start), ToDateOnly(end));
         var limit = await ResolveCoverageLimitAsync(policy, e.Employee);
         return (limit, used, Math.Max(0m, limit - used), start, end);
     }
@@ -584,12 +653,13 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         var policy = e.BenefitPolicy
             ?? throw new InvalidOperationException("Enrollment policy must be loaded to compute balance.");
 
+        var tenantId = GetTenantId();
         var anchor = e.CurrentPeriodStart ?? e.EffectiveFrom;
         var (start, end) = ResolvePeriodWindow(policy.LimitPeriod, anchor, DateTime.UtcNow);
         var startDate = ToDateOnly(start);
         var endDate = ToDateOnly(end);
 
-        var used = SumUtilized(e.Utilizations, startDate, endDate);
+        var used = SumUtilized(e.Utilizations, tenantId, startDate, endDate);
         var limit = await ResolveCoverageLimitAsync(policy, e.Employee);
 
         if (persist)
@@ -597,17 +667,17 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
             e.CurrentPeriodStart = start ?? e.CurrentPeriodStart;
             e.UtilizedAmount = used;
 
-            foreach (var dependent in e.Dependents)
+            foreach (var dependent in e.Dependents.Where(d => d.TenantId == tenantId))
             {
-                dependent.BenefitAmountUsed = SumUtilized(e.Utilizations, startDate, endDate, dependent.EmployeeDependentId);
+                dependent.BenefitAmountUsed = SumUtilized(e.Utilizations, tenantId, startDate, endDate, dependent.EmployeeDependentId);
             }
         }
 
         return (limit, used, Math.Max(0m, limit - used), start, end);
     }
 
-    /// <summary>Sums Approved/Paid claims within the period window (Reversal returns amount).</summary>
-    private static decimal SumUtilized(IEnumerable<BenefitUtilization>? claims, DateOnly? start, DateOnly? end, Guid? dependentId = null)
+    /// <summary>Sums Approved/Paid claims within the period window (Reversal returns amount), same-tenant only.</summary>
+    private static decimal SumUtilized(IEnumerable<BenefitUtilization>? claims, Guid tenantId, DateOnly? start, DateOnly? end, Guid? dependentId = null)
     {
         if (claims is null)
         {
@@ -615,6 +685,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         }
 
         var sum = claims
+            .Where(u => u.TenantId == tenantId)
             .Where(u => u.Status is BenefitClaimStatus.Approved or BenefitClaimStatus.Paid)
             .Where(u => !dependentId.HasValue || u.EmployeeDependentId == dependentId)
             .Where(u => (!start.HasValue || u.ClaimDate >= start.Value) && (!end.HasValue || u.ClaimDate < end.Value))
@@ -872,6 +943,7 @@ internal static class EmployeeBenefitEnrollmentMappingExtensions
         TerminationReason = e.TerminationReason,
         Notes = e.Notes,
         Dependents = (e.Dependents ?? new List<EmployeeDependentBenefit>())
+            .Where(d => d.TenantId == e.TenantId)
             .Select(d => new EnrollmentDependentDto
             {
                 Id = d.Id,
@@ -884,6 +956,7 @@ internal static class EmployeeBenefitEnrollmentMappingExtensions
                 BenefitAmountUsed = d.BenefitAmountUsed
             }).ToList(),
         Beneficiaries = (e.Beneficiaries ?? new List<BenefitBeneficiary>())
+            .Where(b => b.TenantId == e.TenantId)
             .Select(b => new BenefitBeneficiaryDto
             {
                 Id = b.Id,

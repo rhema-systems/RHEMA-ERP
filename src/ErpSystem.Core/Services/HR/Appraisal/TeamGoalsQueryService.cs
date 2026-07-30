@@ -42,6 +42,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
     private readonly IGenericRepository<EmployeeGoal> _goalRepo;
     private readonly IGenericRepository<Employee> _employeeRepo;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IDateTimeProvider _clock;
     private readonly IGoalRiskSettingsProvider _riskSettingsProvider;
     private readonly IGoalRiskEvaluator _riskEvaluator;
@@ -51,6 +52,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         IGenericRepository<EmployeeGoal> goalRepo,
         IGenericRepository<Employee> employeeRepo,
         ICurrentUserService currentUserService,
+        ICurrentUserProvider currentUserProvider,
         IDateTimeProvider clock,
         IGoalRiskSettingsProvider riskSettingsProvider,
         IGoalRiskEvaluator riskEvaluator,
@@ -59,10 +61,22 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         _goalRepo             = goalRepo;
         _employeeRepo         = employeeRepo;
         _currentUserService   = currentUserService;
+        _currentUserProvider  = currentUserProvider;
         _clock                = clock;
         _riskSettingsProvider = riskSettingsProvider;
         _riskEvaluator        = riskEvaluator;
         _logger               = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     // =========================================================================
@@ -76,6 +90,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
     {
         // ── Security: resolve current manager ─────────────────────────────────
         var managerId = ResolveCurrentManagerId();
+        var tenantId  = GetTenantId();
         var today = _clock.TodayUtc;
 
         _logger.LogDebug(
@@ -88,12 +103,12 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         // SECURITY BOUNDARY: employees whose ManagerId matches the current manager.
         var directReports = _employeeRepo.GetQueryable()
             .AsNoTracking()
-            .Where(e => e.ManagerId == managerId && e.IsActive);
+            .Where(e => e.TenantId == tenantId && e.ManagerId == managerId && e.IsActive);
 
         // Cycle goals — used as correlated subquery inside the Select below.
         var cycleGoals = _goalRepo.GetQueryable()
             .AsNoTracking()
-            .Where(g => g.AppraisalCycleId == appraisalCycleId);
+            .Where(g => g.TenantId == tenantId && g.AppraisalCycleId == appraisalCycleId);
 
         // ── Projection: one row per direct report, aggregates computed in SQL ──
         // Employees with zero goals are included — TotalGoals == 0 → NotStarted.
@@ -176,6 +191,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         CancellationToken cancellationToken = default)
     {
         var managerId    = ResolveCurrentManagerId();
+        var tenantId     = GetTenantId();
         var utcNow       = _clock.UtcNow;
         var riskSettings = await _riskSettingsProvider.GetActiveAsync(cancellationToken);
 
@@ -184,7 +200,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
             managerId, appraisalCycleId);
 
         // SECURITY: BuildBaseGoalQuery enforces direct-report restriction
-        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId)
+        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId, tenantId)
             .Where(r => r.Status == GoalStatus.PendingApproval)
             .ToListAsync(cancellationToken);
 
@@ -201,6 +217,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         CancellationToken cancellationToken = default)
     {
         var managerId    = ResolveCurrentManagerId();
+        var tenantId     = GetTenantId();
         var utcNow       = _clock.UtcNow;
         var today        = DateOnly.FromDateTime(utcNow);
         var riskSettings = await _riskSettingsProvider.GetActiveAsync(cancellationToken);
@@ -216,7 +233,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         // (b) Status is InProgress/OnTrack
         //     AND DueDate <= today + DaysRemainingThreshold      — approaching deadline
         //     AND ProgressPercent < MinimumProgressPercent       — insufficient progress
-        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId)
+        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId, tenantId)
             .Where(r =>
                 r.Status == GoalStatus.AtRisk
                 || (
@@ -239,6 +256,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         CancellationToken cancellationToken = default)
     {
         var managerId    = ResolveCurrentManagerId();
+        var tenantId     = GetTenantId();
         var utcNow       = _clock.UtcNow;
         var today        = DateOnly.FromDateTime(utcNow);
         var riskSettings = await _riskSettingsProvider.GetActiveAsync(cancellationToken);
@@ -254,7 +272,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         //   • Rejected: goal was rejected in workflow — work item terminated; not overdue.
         // Status field is the single source of truth.
         // The legacy IsLocked boolean flag is intentionally NOT consulted.
-        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId)
+        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId, tenantId)
             .Where(r =>
                 r.DueDate < today
                 && r.Status != GoalStatus.Completed
@@ -281,6 +299,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         CancellationToken cancellationToken = default)
     {
         var managerId    = ResolveCurrentManagerId();
+        var tenantId     = GetTenantId();
         var utcNow       = _clock.UtcNow;
         var riskSettings = await _riskSettingsProvider.GetActiveAsync(cancellationToken);
 
@@ -288,7 +307,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
             "TeamGoalsQueryService.GetLockedGoalsAsync: managerId={ManagerId}, cycleId={CycleId}",
             managerId, appraisalCycleId);
 
-        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId)
+        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId, tenantId)
             .Where(r => r.Status == GoalStatus.Locked)
             .ToListAsync(cancellationToken);
 
@@ -310,6 +329,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         CancellationToken cancellationToken = default)
     {
         var managerId    = ResolveCurrentManagerId();
+        var tenantId     = GetTenantId();
         var utcNow       = _clock.UtcNow;
         var riskSettings = await _riskSettingsProvider.GetActiveAsync(cancellationToken);
 
@@ -323,7 +343,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         // the result will simply be empty (the security invariant is preserved
         // without a separate round-trip), but we surface it as an
         // UnauthorizedAccessException so the UI can display a clear denial.
-        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId)
+        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId, tenantId)
             .Where(r => r.EmployeeId == employeeId)
             .ToListAsync(cancellationToken);
 
@@ -334,7 +354,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
             // a non-direct-report or non-existent employee throws Unauthorized.
             var isDirect = await _employeeRepo.GetQueryable()
                 .AsNoTracking()
-                .AnyAsync(e => e.Id == employeeId && e.ManagerId == managerId, cancellationToken);
+                .AnyAsync(e => e.Id == employeeId && e.TenantId == tenantId && e.ManagerId == managerId, cancellationToken);
 
             if (!isDirect)
             {
@@ -359,6 +379,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         CancellationToken cancellationToken = default)
     {
         var managerId = ResolveCurrentManagerId();
+        var tenantId  = GetTenantId();
         var today     = _clock.TodayUtc;
 
         _logger.LogDebug(
@@ -370,7 +391,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         // in-execution view. Draft / Rejected goals are excluded intentionally:
         //   • Draft     → not yet submitted; nothing to track.
         //   • Rejected  → workflow terminated; no execution progress.
-        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId)
+        var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId, tenantId)
             .Where(r => r.Status != GoalStatus.Draft && r.Status != GoalStatus.Rejected)
             .ToListAsync(cancellationToken);
 
@@ -378,7 +399,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         //    with zero qualifying goals still appear in the list. ──────────────
         var directReports = await _employeeRepo.GetQueryable()
             .AsNoTracking()
-            .Where(e => e.ManagerId == managerId && e.IsActive)
+            .Where(e => e.TenantId == tenantId && e.ManagerId == managerId && e.IsActive)
             .Select(e => new { EmployeeId = e.Id, EmployeeName = e.FirstName + " " + e.LastName })
             .ToListAsync(cancellationToken);
 
@@ -479,13 +500,15 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
     /// • Projection to RawGoalRow (all scalar) avoids loading entity graphs.
     /// • ProgressEntries / JournalEntries are never referenced.
     /// </summary>
-    private IQueryable<RawGoalRow> BuildBaseGoalQuery(Guid cycleId, Guid managerId)
+    private IQueryable<RawGoalRow> BuildBaseGoalQuery(Guid cycleId, Guid managerId, Guid tenantId)
     {
         return
             from g in _goalRepo.GetQueryable().AsNoTracking()
             join e in _employeeRepo.GetQueryable().AsNoTracking()
                 on g.EmployeeId equals e.Id
-            where g.AppraisalCycleId == cycleId    // cycle scope
+            where g.TenantId == tenantId
+               && e.TenantId == tenantId
+               && g.AppraisalCycleId == cycleId    // cycle scope
                && e.ManagerId == managerId           // ← SECURITY: direct reports only
             select new RawGoalRow
             {

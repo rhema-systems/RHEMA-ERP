@@ -12,6 +12,7 @@ public class OrientationDashboardService : IOrientationDashboardService
     private readonly IEmployeeOrientationRepository _enrollmentRepository;
     private readonly IOrientationSessionRepository _sessionRepository;
     private readonly IOrientationCertificateRepository _certificateRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
 
     public OrientationDashboardService(
@@ -19,22 +20,37 @@ public class OrientationDashboardService : IOrientationDashboardService
         IEmployeeOrientationRepository enrollmentRepository,
         IOrientationSessionRepository sessionRepository,
         IOrientationCertificateRepository certificateRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork)
     {
         _programRepository = programRepository;
         _enrollmentRepository = enrollmentRepository;
         _sessionRepository = sessionRepository;
         _certificateRepository = certificateRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<OrientationDashboardDto> GetDashboardAsync(CancellationToken cancellationToken = default)
     {
-        var programs = (await _programRepository.GetAllAsync()).ToList();
-        var enrollments = (await _enrollmentRepository.GetAllAsync()).ToList();
-        var overdue = (await _enrollmentRepository.GetOverdueAsync()).ToList();
-        var upcoming = (await _sessionRepository.GetUpcomingAsync(30)).ToList();
-        var expiring = (await _certificateRepository.GetExpiringAsync(30)).ToList();
+        var tenantId = GetTenantId();
+
+        var programs = (await _programRepository.GetAllAsync()).Where(p => p.TenantId == tenantId).ToList();
+        var enrollments = (await _enrollmentRepository.GetAllAsync()).Where(e => e.TenantId == tenantId).ToList();
+        var overdue = (await _enrollmentRepository.GetOverdueAsync()).Where(e => e.TenantId == tenantId).ToList();
+        var upcoming = (await _sessionRepository.GetUpcomingAsync(30)).Where(s => s.TenantId == tenantId).ToList();
+        var expiring = (await _certificateRepository.GetExpiringAsync(30)).Where(c => c.TenantId == tenantId).ToList();
 
         var completed = enrollments.Count(e => e.CompletionStatus == OrientationCompletionStatus.Completed);
 
@@ -73,6 +89,7 @@ public class OrientationDashboardService : IOrientationDashboardService
 
         // Hydrate employee display names (entities reference employees by id only).
         var map = await _unitOfWork.ResolveEmployeesAsync(
+            tenantId,
             dto.OverdueList.EmployeeIds().Concat(dto.ExpiringCertificateList.EmployeeIds()));
         dto.OverdueList.FillNames(map);
         dto.ExpiringCertificateList.FillNames(map);

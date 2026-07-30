@@ -18,6 +18,7 @@ public class CheckInService : ICheckInService
     private readonly IGenericRepository<AppraisalAttachment> _attachmentRepository;
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CheckInService> _logger;
 
@@ -27,6 +28,7 @@ public class CheckInService : ICheckInService
         IGenericRepository<AppraisalAttachment> attachmentRepository,
         IGenericRepository<EmployeeGoal> goalRepository,
         IGenericRepository<AppraisalCycle> cycleRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<CheckInService> logger)
     {
@@ -35,18 +37,45 @@ public class CheckInService : ICheckInService
         _attachmentRepository = attachmentRepository;
         _goalRepository = goalRepository;
         _cycleRepository = cycleRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    private IQueryable<CheckIn> BaseQuery => _checkInRepository.GetQueryable()
-        .Include(c => c.Employee)
-        .Include(c => c.ConductedBy)
-        .Include(c => c.Cycle);
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A check-in owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<CheckIn> GetOwnedCheckInAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _checkInRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Check-in with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<CheckIn> BaseQuery()
+    {
+        var tenantId = GetTenantId();
+        return _checkInRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
+            .Include(c => c.Employee)
+            .Include(c => c.ConductedBy)
+            .Include(c => c.Cycle);
+    }
 
     public async Task<CheckInDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await BaseQuery.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+        var entity = await BaseQuery().FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
         if (entity == null)
             throw new ArgumentException($"Check-in with ID '{id}' not found.");
         return entity.ToDto();
@@ -54,7 +83,7 @@ public class CheckInService : ICheckInService
 
     public async Task<IEnumerable<CheckInDto>> GetByEmployeeIdAsync(Guid employeeId, Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery.Where(c => c.EmployeeId == employeeId);
+        var query = BaseQuery().Where(c => c.EmployeeId == employeeId);
         if (cycleId.HasValue)
             query = query.Where(c => c.AppraisalCycleId == cycleId.Value);
         var entities = await query.OrderByDescending(c => c.ScheduledDate).ToListAsync(cancellationToken);
@@ -63,7 +92,7 @@ public class CheckInService : ICheckInService
 
     public async Task<IEnumerable<CheckInDto>> GetByConductedByIdAsync(Guid conductedById, Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery.Where(c => c.ConductedById == conductedById);
+        var query = BaseQuery().Where(c => c.ConductedById == conductedById);
         if (cycleId.HasValue)
             query = query.Where(c => c.AppraisalCycleId == cycleId.Value);
         var entities = await query.OrderByDescending(c => c.ScheduledDate).ToListAsync(cancellationToken);
@@ -72,7 +101,7 @@ public class CheckInService : ICheckInService
 
     public async Task<PagedResult<CheckInDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery.OrderByDescending(c => c.ScheduledDate);
+        var query = BaseQuery().OrderByDescending(c => c.ScheduledDate);
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);
         return new PagedResult<CheckInDto>
@@ -87,7 +116,7 @@ public class CheckInService : ICheckInService
     public async Task<IEnumerable<CheckInDto>> GetUpcomingAsync(Guid employeeId, int daysAhead = 30, CancellationToken cancellationToken = default)
     {
         var cutoff = DateTime.UtcNow.AddDays(daysAhead);
-        var entities = await BaseQuery
+        var entities = await BaseQuery()
             .Where(c => c.EmployeeId == employeeId &&
                         c.ScheduledDate >= DateTime.UtcNow &&
                         c.ScheduledDate <= cutoff &&
@@ -99,8 +128,9 @@ public class CheckInService : ICheckInService
 
     public async Task<CheckInDto> CreateAsync(CreateCheckInDto createDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         // Gate: check-ins must be enabled for this cycle.
-        var settings = await _cycleRepository.GetQueryable(c => c.Id == createDto.AppraisalCycleId)
+        var settings = await _cycleRepository.GetQueryable(c => c.Id == createDto.AppraisalCycleId && c.TenantId == tenantId)
             .Include(c => c.AppraisalSettings)
             .Select(c => c.AppraisalSettings)
             .FirstOrDefaultAsync(cancellationToken);
@@ -108,6 +138,7 @@ public class CheckInService : ICheckInService
             throw new InvalidOperationException("Check-ins are not enabled for this appraisal cycle.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
         await _checkInRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Check-in created: {Id}", entity.Id);
@@ -116,9 +147,7 @@ public class CheckInService : ICheckInService
 
     public async Task<CheckInDto> UpdateAsync(UpdateCheckInDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _checkInRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Check-in with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedCheckInAsync(updateDto.Id, cancellationToken);
         updateDto.UpdateEntity(entity);
         await _checkInRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -128,9 +157,7 @@ public class CheckInService : ICheckInService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _checkInRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Check-in with ID '{id}' not found.");
+        var entity = await GetOwnedCheckInAsync(id, cancellationToken);
         await _checkInRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Check-in deleted: {Id}", id);
@@ -141,9 +168,7 @@ public class CheckInService : ICheckInService
         Guid checkInId, string? sharedNotes, string? privateNotes, string? actionItems,
         CancellationToken cancellationToken = default)
     {
-        var entity = await _checkInRepository.GetByIdAsync(checkInId);
-        if (entity == null)
-            throw new ArgumentException($"Check-in with ID '{checkInId}' not found.");
+        var entity = await GetOwnedCheckInAsync(checkInId, cancellationToken);
 
         entity.ConductedDate = DateTime.UtcNow;
         entity.SharedNotes = sharedNotes;
@@ -161,15 +186,15 @@ public class CheckInService : ICheckInService
 
     public async Task<CheckInGoalUpdateDto> AddGoalUpdateAsync(Guid checkInId, CreateCheckInGoalUpdateDto dto, CancellationToken cancellationToken = default)
     {
-        var checkInExists = await _checkInRepository.ExistsAsync(c => c.Id == checkInId);
-        if (!checkInExists)
-            throw new ArgumentException("Check-in not found.");
+        await GetOwnedCheckInAsync(checkInId, cancellationToken);
+        var tenantId = GetTenantId();
 
         var goal = await _goalRepository.GetByIdAsync(dto.EmployeeGoalId);
-        if (goal == null)
+        if (goal == null || goal.TenantId != tenantId)
             throw new ArgumentException("Employee goal not found.");
 
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         entity.CheckInId = checkInId;
 
         await _goalUpdateRepository.AddAsync(entity);
@@ -193,7 +218,9 @@ public class CheckInService : ICheckInService
 
     public async Task<IEnumerable<CheckInGoalUpdateDto>> GetGoalUpdatesAsync(Guid checkInId, CancellationToken cancellationToken = default)
     {
-        var entities = await _goalUpdateRepository.GetQueryable(u => u.CheckInId == checkInId)
+        await GetOwnedCheckInAsync(checkInId, cancellationToken);
+        var tenantId = GetTenantId();
+        var entities = await _goalUpdateRepository.GetQueryable(u => u.CheckInId == checkInId && u.TenantId == tenantId)
             .Include(u => u.EmployeeGoal)
             .OrderBy(u => u.EmployeeGoal.Title)
             .ToListAsync(cancellationToken);
@@ -202,9 +229,11 @@ public class CheckInService : ICheckInService
 
     public async Task<CheckInGoalUpdateDto> UpdateGoalUpdateAsync(Guid checkInId, UpdateCheckInGoalUpdateDto dto, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCheckInAsync(checkInId, cancellationToken);
+        var tenantId = GetTenantId();
         var entity = await _goalUpdateRepository.GetQueryable()
             .Include(u => u.EmployeeGoal)
-            .FirstOrDefaultAsync(u => u.Id == dto.Id && u.CheckInId == checkInId, cancellationToken);
+            .FirstOrDefaultAsync(u => u.Id == dto.Id && u.CheckInId == checkInId && u.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("Goal update not found.");
@@ -219,8 +248,10 @@ public class CheckInService : ICheckInService
 
     public async Task<bool> DeleteGoalUpdateAsync(Guid checkInId, Guid updateId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCheckInAsync(checkInId, cancellationToken);
+        var tenantId = GetTenantId();
         var entity = await _goalUpdateRepository.GetQueryable()
-            .FirstOrDefaultAsync(u => u.Id == updateId && u.CheckInId == checkInId, cancellationToken);
+            .FirstOrDefaultAsync(u => u.Id == updateId && u.CheckInId == checkInId && u.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("Goal update not found.");
@@ -234,11 +265,11 @@ public class CheckInService : ICheckInService
 
     public async Task<AppraisalAttachmentDto> AddAttachmentAsync(Guid checkInId, CreateAppraisalAttachmentDto dto, CancellationToken cancellationToken = default)
     {
-        var exists = await _checkInRepository.ExistsAsync(c => c.Id == checkInId);
-        if (!exists)
-            throw new ArgumentException("Check-in not found.");
+        await GetOwnedCheckInAsync(checkInId, cancellationToken);
+        var tenantId = GetTenantId();
 
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         entity.CheckInId = checkInId;
         entity.EntityType = AppraisalAttachmentEntityType.CheckIn;
         entity.UploadDate = DateTime.UtcNow;
@@ -252,7 +283,9 @@ public class CheckInService : ICheckInService
 
     public async Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid checkInId, CancellationToken cancellationToken = default)
     {
-        var entities = await _attachmentRepository.GetQueryable(a => a.CheckInId == checkInId)
+        await GetOwnedCheckInAsync(checkInId, cancellationToken);
+        var tenantId = GetTenantId();
+        var entities = await _attachmentRepository.GetQueryable(a => a.CheckInId == checkInId && a.TenantId == tenantId)
             .Include(a => a.UploadedBy)
             .OrderByDescending(a => a.UploadDate)
             .ToListAsync(cancellationToken);
@@ -261,8 +294,10 @@ public class CheckInService : ICheckInService
 
     public async Task<bool> DeleteAttachmentAsync(Guid checkInId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCheckInAsync(checkInId, cancellationToken);
+        var tenantId = GetTenantId();
         var entity = await _attachmentRepository.GetQueryable()
-            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.CheckInId == checkInId, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.CheckInId == checkInId && a.TenantId == tenantId, cancellationToken);
         if (entity == null)
             throw new ArgumentException("Attachment not found.");
         await _attachmentRepository.DeleteAsync(entity);

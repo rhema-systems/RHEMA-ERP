@@ -20,6 +20,7 @@ public class PerformanceAnalyticsService : IPerformanceAnalyticsService
     private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IPerformanceRatingResolver _ratingResolver;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<PerformanceAnalyticsService> _logger;
 
     public PerformanceAnalyticsService(
@@ -27,21 +28,37 @@ public class PerformanceAnalyticsService : IPerformanceAnalyticsService
         IGenericRepository<AppraisalCycle> cycleRepository,
         IGenericRepository<Employee> employeeRepository,
         IPerformanceRatingResolver ratingResolver,
+        ICurrentUserProvider currentUserProvider,
         ILogger<PerformanceAnalyticsService> logger)
     {
         _appraisalRepository = appraisalRepository;
         _cycleRepository = cycleRepository;
         _employeeRepository = employeeRepository;
         _ratingResolver = ratingResolver;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<CalibrationDistributionDto> GetCycleRatingDistributionAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var cycle = await _cycleRepository.GetByIdAsync(cycleId);
+        if (cycle == null || cycle.TenantId != tenantId)
+            throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
 
         var scores = await _appraisalRepository.GetQueryable()
-            .Where(a => a.AppraisalCycleId == cycleId && a.OverallScore != null)
+            .Where(a => a.AppraisalCycleId == cycleId && a.TenantId == tenantId && a.OverallScore != null)
             .Select(a => a.OverallScore!.Value)
             .ToListAsync(cancellationToken);
 
@@ -79,10 +96,13 @@ public class PerformanceAnalyticsService : IPerformanceAnalyticsService
 
     public async Task<EmployeePerformanceTrendDto> GetEmployeeTrendAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
+        if (employee == null || employee.TenantId != tenantId)
+            throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
 
         var appraisals = await _appraisalRepository.GetQueryable()
-            .Where(a => a.EmployeeId == employeeId)
+            .Where(a => a.EmployeeId == employeeId && a.TenantId == tenantId)
             .Include(a => a.AppraisalCycle)
             .ToListAsync(cancellationToken);
 

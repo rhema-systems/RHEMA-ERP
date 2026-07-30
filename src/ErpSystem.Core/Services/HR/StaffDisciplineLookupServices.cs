@@ -1,5 +1,6 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.Extensions.Logging;
@@ -16,53 +17,101 @@ public class StaffOffenseService : IStaffOffenseService
 {
     private readonly IStaffOffenseRepository _offenseRepository;
     private readonly IStaffOffenseProcedureRepository _procedureRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffOffenseService> _logger;
 
     public StaffOffenseService(
         IStaffOffenseRepository offenseRepository,
         IStaffOffenseProcedureRepository procedureRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffOffenseService> logger)
     {
         _offenseRepository = offenseRepository;
         _procedureRepository = procedureRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<StaffOffenseDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<StaffOffense> GetOwnedOffenseAsync(Guid id)
     {
         var entity = await _offenseRepository.GetByIdAsync(id);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Staff offense with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffOffenseProcedure> GetOwnedProcedureAsync(Guid id)
+    {
+        var entity = await _procedureRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Offense procedure with ID '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<StaffOffenseDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _offenseRepository.GetByIdAsync(id);
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<StaffOffenseDto?> GetByCodeAsync(string code, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _offenseRepository.GetByCodeAsync(code);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<StaffOffenseDto?> GetWithProceduresAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _offenseRepository.GetWithProceduresAsync(id);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffOffenseSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _offenseRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffOffenseSummaryDto>> GetActiveAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _offenseRepository.GetActiveOffensesAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<StaffOffenseDto> CreateAsync(CreateStaffOffenseDto createDto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+
+        if (await _offenseRepository.CodeExistsAsync(createDto.OffenseCode, tenantId))
+            throw new InvalidOperationException($"A staff offense with code '{createDto.OffenseCode}' already exists.");
+
         var entity = createDto.ToEntity(tenantId, userId);
 
         await _offenseRepository.AddAsync(entity);
@@ -75,10 +124,12 @@ public class StaffOffenseService : IStaffOffenseService
 
     public async Task<StaffOffenseDto> UpdateAsync(UpdateStaffOffenseDto updateDto, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _offenseRepository.GetByIdAsync(updateDto.Id);
+        var entity = await GetOwnedOffenseAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Staff offense with ID '{updateDto.Id}' not found.");
+        if (!string.IsNullOrWhiteSpace(updateDto.OffenseCode)
+            && !string.Equals(updateDto.OffenseCode, entity.OffenseCode, StringComparison.OrdinalIgnoreCase)
+            && await _offenseRepository.CodeExistsAsync(updateDto.OffenseCode, entity.TenantId))
+            throw new InvalidOperationException($"A staff offense with code '{updateDto.OffenseCode}' already exists.");
 
         entity.UpdateEntity(updateDto, userId);
 
@@ -90,10 +141,7 @@ public class StaffOffenseService : IStaffOffenseService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _offenseRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff offense with ID '{id}' not found.");
+        var entity = await GetOwnedOffenseAsync(id);
 
         await _offenseRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -107,22 +155,23 @@ public class StaffOffenseService : IStaffOffenseService
 
     public async Task<StaffOffenseProcedureDto?> GetProcedureByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _procedureRepository.GetByIdAsync(id);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffOffenseProcedureDto>> GetProceduresByOffenseAsync(Guid offenseId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedOffenseAsync(offenseId);
+        var tenantId = GetTenantId();
         var entities = await _procedureRepository.GetByOffenseIdAsync(offenseId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffOffenseProcedureDto> AddProcedureAsync(CreateStaffOffenseProcedureDto createDto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
-        var offense = await _offenseRepository.GetByIdAsync(createDto.OffenseId);
-
-        if (offense == null)
-            throw new ArgumentException($"Staff offense with ID '{createDto.OffenseId}' not found.");
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedOffenseAsync(createDto.OffenseId);
 
         var entity = createDto.ToEntity(tenantId, userId);
 
@@ -134,10 +183,7 @@ public class StaffOffenseService : IStaffOffenseService
 
     public async Task<StaffOffenseProcedureDto> UpdateProcedureAsync(UpdateStaffOffenseProcedureDto updateDto, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _procedureRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Offense procedure with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedProcedureAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, userId);
 
@@ -149,10 +195,7 @@ public class StaffOffenseService : IStaffOffenseService
 
     public async Task<bool> DeleteProcedureAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _procedureRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Offense procedure with ID '{id}' not found.");
+        var entity = await GetOwnedProcedureAsync(id);
 
         await _procedureRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -169,7 +212,11 @@ public class StaffOffenseService : IStaffOffenseService
         if (orderedProcedureIds.Count == 0)
             throw new ArgumentException("At least one procedure id is required.");
 
-        var procedures = (await _procedureRepository.GetByOffenseIdAsync(offenseId)).ToList();
+        await GetOwnedOffenseAsync(offenseId);
+        var tenantId = GetTenantId();
+        var procedures = (await _procedureRepository.GetByOffenseIdAsync(offenseId))
+            .Where(p => p.TenantId == tenantId)
+            .ToList();
 
         if (procedures.Count == 0)
             throw new ArgumentException($"No procedures found for offense '{offenseId}'.");
@@ -227,45 +274,84 @@ public class StaffOffenseService : IStaffOffenseService
 public class StaffDisciplinaryActionTypeService : IStaffDisciplinaryActionTypeService
 {
     private readonly IStaffDisciplinaryActionTypeRepository _actionTypeRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplinaryActionTypeService> _logger;
 
     public StaffDisciplinaryActionTypeService(
         IStaffDisciplinaryActionTypeRepository actionTypeRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplinaryActionTypeService> logger)
     {
         _actionTypeRepository = actionTypeRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<StaffDisciplinaryActionTypeDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<StaffDisciplinaryActionType> GetOwnedActionTypeAsync(Guid id)
     {
         var entity = await _actionTypeRepository.GetByIdAsync(id);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Disciplinary action type with ID '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<StaffDisciplinaryActionTypeDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _actionTypeRepository.GetByIdAsync(id);
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<StaffDisciplinaryActionTypeDto?> GetByCodeAsync(string code, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _actionTypeRepository.GetByCodeAsync(code);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionTypeSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _actionTypeRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionTypeSummaryDto>> GetActiveAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _actionTypeRepository.GetActiveTypesAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<StaffDisciplinaryActionTypeDto> CreateAsync(CreateStaffDisciplinaryActionTypeDto createDto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+
+        if (await _actionTypeRepository.CodeExistsAsync(createDto.Code, tenantId))
+            throw new InvalidOperationException($"A disciplinary action type with code '{createDto.Code}' already exists.");
+
         var entity = createDto.ToEntity(tenantId, userId);
 
         await _actionTypeRepository.AddAsync(entity);
@@ -278,10 +364,12 @@ public class StaffDisciplinaryActionTypeService : IStaffDisciplinaryActionTypeSe
 
     public async Task<StaffDisciplinaryActionTypeDto> UpdateAsync(UpdateStaffDisciplinaryActionTypeDto updateDto, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _actionTypeRepository.GetByIdAsync(updateDto.Id);
+        var entity = await GetOwnedActionTypeAsync(updateDto.Id);
 
-        if (entity == null)
-            throw new ArgumentException($"Disciplinary action type with ID '{updateDto.Id}' not found.");
+        if (!string.IsNullOrWhiteSpace(updateDto.Code)
+            && !string.Equals(updateDto.Code, entity.Code, StringComparison.OrdinalIgnoreCase)
+            && await _actionTypeRepository.CodeExistsAsync(updateDto.Code, entity.TenantId))
+            throw new InvalidOperationException($"A disciplinary action type with code '{updateDto.Code}' already exists.");
 
         entity.UpdateEntity(updateDto, userId);
 
@@ -293,10 +381,7 @@ public class StaffDisciplinaryActionTypeService : IStaffDisciplinaryActionTypeSe
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _actionTypeRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Disciplinary action type with ID '{id}' not found.");
+        var entity = await GetOwnedActionTypeAsync(id);
 
         await _actionTypeRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

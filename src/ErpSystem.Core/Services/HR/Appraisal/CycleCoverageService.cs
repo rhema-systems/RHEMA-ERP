@@ -20,6 +20,7 @@ public class CycleCoverageService : ICycleCoverageService
     private readonly IGenericRepository<AppraisalCycleTemplate> _cycleTemplateRepo;
     private readonly IGenericRepository<Employee> _employeeRepo;
     private readonly IGenericRepository<OrganizationUnit> _orgUnitRepo;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<CycleCoverageService> _logger;
 
     public CycleCoverageService(
@@ -28,6 +29,7 @@ public class CycleCoverageService : ICycleCoverageService
         IGenericRepository<AppraisalCycleTemplate> cycleTemplateRepo,
         IGenericRepository<Employee> employeeRepo,
         IGenericRepository<OrganizationUnit> orgUnitRepo,
+        ICurrentUserProvider currentUserProvider,
         ILogger<CycleCoverageService> logger)
     {
         _cycleRepo = cycleRepo;
@@ -35,7 +37,19 @@ public class CycleCoverageService : ICycleCoverageService
         _cycleTemplateRepo = cycleTemplateRepo;
         _employeeRepo = employeeRepo;
         _orgUnitRepo = orgUnitRepo;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<CoveragePreviewDto> GetCoveragePreviewAsync(
@@ -44,8 +58,9 @@ public class CycleCoverageService : ICycleCoverageService
         int pageSize = 200,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var cycle = await _cycleRepo.GetQueryable()
-            .FirstOrDefaultAsync(c => c.Id == cycleId, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == cycleId && c.TenantId == tenantId, cancellationToken);
 
         if (cycle == null)
             throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
@@ -54,7 +69,7 @@ public class CycleCoverageService : ICycleCoverageService
         // 1. Load active template assignments (with scope nav properties)
         // ──────────────────────────────────────────────────────────────
         var activeTemplates = await _cycleTemplateRepo.GetQueryable()
-            .Where(ct => ct.AppraisalCycleId == cycleId && ct.IsActive && !ct.IsDeleted)
+            .Where(ct => ct.AppraisalCycleId == cycleId && ct.TenantId == tenantId && ct.IsActive && !ct.IsDeleted)
             .Include(ct => ct.AppraisalTemplate)
                 .ThenInclude(t => t.OrganizationLevel)
             .Include(ct => ct.AppraisalTemplate)
@@ -68,7 +83,7 @@ public class CycleCoverageService : ICycleCoverageService
         // 2. Load active target groups
         // ──────────────────────────────────────────────────────────────
         var activeTargets = await _targetRepo.GetQueryable()
-            .Where(t => t.AppraisalCycleId == cycleId && t.IsActive && !t.IsDeleted)
+            .Where(t => t.AppraisalCycleId == cycleId && t.TenantId == tenantId && t.IsActive && !t.IsDeleted)
             .Include(t => t.Exclusions)
             .ToListAsync(cancellationToken);
 
@@ -93,8 +108,8 @@ public class CycleCoverageService : ICycleCoverageService
         // ──────────────────────────────────────────────────────────────
         // 3. Resolve employee population from targets (inclusions then exclusions)
         // ──────────────────────────────────────────────────────────────
-        var rawIds = await ResolveEmployeesInScopeAsync(activeTargets, cancellationToken);
-        var excludedWithReasons = await ApplyExclusionsAsync(activeTargets, rawIds, cancellationToken);
+        var rawIds = await ResolveEmployeesInScopeAsync(activeTargets, tenantId, cancellationToken);
+        var excludedWithReasons = await ApplyExclusionsAsync(activeTargets, rawIds, tenantId, cancellationToken);
         var includedIds = rawIds.Where(id => !excludedWithReasons.ContainsKey(id)).ToHashSet();
         var excludedIds = rawIds.Where(id => excludedWithReasons.ContainsKey(id)).ToHashSet();
 
@@ -116,7 +131,7 @@ public class CycleCoverageService : ICycleCoverageService
         // 4. Load employee details in a single batch query
         // ──────────────────────────────────────────────────────────────
         var employees = await _employeeRepo.GetQueryable()
-            .Where(e => includedIds.Contains(e.Id) && !e.IsDeleted)
+            .Where(e => e.TenantId == tenantId && includedIds.Contains(e.Id) && !e.IsDeleted)
             .Include(e => e.Position)
             .Include(e => e.OrganizationUnit)
             .Include(e => e.OrganizationLevel)
@@ -135,7 +150,7 @@ public class CycleCoverageService : ICycleCoverageService
         if (excludedIds.Count > 0)
         {
             var excludedEmployees = await _employeeRepo.GetQueryable()
-                .Where(e => excludedIds.Contains(e.Id) && !e.IsDeleted)
+                .Where(e => e.TenantId == tenantId && excludedIds.Contains(e.Id) && !e.IsDeleted)
                 .Include(e => e.Position)
                 .Include(e => e.OrganizationUnit)
                 .AsNoTracking()
@@ -304,6 +319,7 @@ public class CycleCoverageService : ICycleCoverageService
 
     private async Task<HashSet<Guid>> ResolveEmployeesInScopeAsync(
         List<AppraisalCycleTarget> targets,
+        Guid tenantId,
         CancellationToken cancellationToken)
     {
         var set = new HashSet<Guid>();
@@ -316,7 +332,8 @@ public class CycleCoverageService : ICycleCoverageService
                     if (target.PositionId.HasValue)
                     {
                         var ids = await _employeeRepo.GetQueryable()
-                            .Where(e => e.PositionId == target.PositionId
+                            .Where(e => e.TenantId == tenantId
+                                     && e.PositionId == target.PositionId
                                      && !e.IsDeleted
                                      && e.IsActive)
                             .Select(e => e.Id)
@@ -329,11 +346,12 @@ public class CycleCoverageService : ICycleCoverageService
                     if (target.OrganizationUnitId.HasValue)
                     {
                         var childIds = await GetChildUnitIdsAsync(
-                            target.OrganizationUnitId.Value, cancellationToken);
+                            target.OrganizationUnitId.Value, tenantId, cancellationToken);
                         childIds.Add(target.OrganizationUnitId.Value);
 
                         var ids = await _employeeRepo.GetQueryable()
-                            .Where(e => e.OrganizationUnitId.HasValue
+                            .Where(e => e.TenantId == tenantId
+                                     && e.OrganizationUnitId.HasValue
                                      && childIds.Contains(e.OrganizationUnitId.Value)
                                      && !e.IsDeleted
                                      && e.IsActive)
@@ -347,7 +365,8 @@ public class CycleCoverageService : ICycleCoverageService
                     if (target.OrganizationLevelId.HasValue)
                     {
                         var ids = await _employeeRepo.GetQueryable()
-                            .Where(e => e.OrganizationLevelId == target.OrganizationLevelId
+                            .Where(e => e.TenantId == tenantId
+                                     && e.OrganizationLevelId == target.OrganizationLevelId
                                      && !e.IsDeleted
                                      && e.IsActive)
                             .Select(e => e.Id)
@@ -368,6 +387,7 @@ public class CycleCoverageService : ICycleCoverageService
     private async Task<Dictionary<Guid, string>> ApplyExclusionsAsync(
         List<AppraisalCycleTarget> targets,
         HashSet<Guid> rawSet,
+        Guid tenantId,
         CancellationToken cancellationToken)
     {
         if (rawSet.Count == 0)
@@ -398,7 +418,7 @@ public class CycleCoverageService : ICycleCoverageService
         {
             var posIds = posExclusions.Select(e => e.PositionId!.Value).Distinct().ToHashSet();
             var matched = await _employeeRepo.GetQueryable()
-                .Where(e => posIds.Contains(e.PositionId) && rawSet.Contains(e.Id) && !e.IsDeleted)
+                .Where(e => e.TenantId == tenantId && posIds.Contains(e.PositionId) && rawSet.Contains(e.Id) && !e.IsDeleted)
                 .Select(e => new { e.Id, e.PositionId })
                 .ToListAsync(cancellationToken);
             foreach (var emp in matched)
@@ -419,13 +439,14 @@ public class CycleCoverageService : ICycleCoverageService
             {
                 var rootId = ex.OrganizationUnitId!.Value;
                 unitIdToReason.TryAdd(rootId, ex.Reason);
-                var childIds = await GetChildUnitIdsAsync(rootId, cancellationToken);
+                var childIds = await GetChildUnitIdsAsync(rootId, tenantId, cancellationToken);
                 foreach (var childId in childIds)
                     unitIdToReason.TryAdd(childId, ex.Reason);
             }
             var allExcludedUnitIds = unitIdToReason.Keys.ToHashSet();
             var matched = await _employeeRepo.GetQueryable()
-                .Where(e => e.OrganizationUnitId.HasValue
+                .Where(e => e.TenantId == tenantId
+                         && e.OrganizationUnitId.HasValue
                          && allExcludedUnitIds.Contains(e.OrganizationUnitId.Value)
                          && rawSet.Contains(e.Id)
                          && !e.IsDeleted)
@@ -450,7 +471,8 @@ public class CycleCoverageService : ICycleCoverageService
         {
             var levelIds = levelExclusions.Select(e => e.OrganizationLevelId!.Value).Distinct().ToHashSet();
             var matched = await _employeeRepo.GetQueryable()
-                .Where(e => e.OrganizationLevelId.HasValue
+                .Where(e => e.TenantId == tenantId
+                         && e.OrganizationLevelId.HasValue
                          && levelIds.Contains(e.OrganizationLevelId.Value)
                          && rawSet.Contains(e.Id)
                          && !e.IsDeleted)
@@ -467,7 +489,7 @@ public class CycleCoverageService : ICycleCoverageService
     }
 
     private async Task<HashSet<Guid>> GetChildUnitIdsAsync(
-        Guid parentUnitId, CancellationToken cancellationToken)
+        Guid parentUnitId, Guid tenantId, CancellationToken cancellationToken)
     {
         var result = new HashSet<Guid>();
         var queue = new Queue<Guid>();
@@ -477,7 +499,7 @@ public class CycleCoverageService : ICycleCoverageService
         {
             var current = queue.Dequeue();
             var children = await _orgUnitRepo.GetQueryable()
-                .Where(u => u.ParentUnitId == current && !u.IsDeleted)
+                .Where(u => u.TenantId == tenantId && u.ParentUnitId == current && !u.IsDeleted)
                 .Select(u => u.Id)
                 .ToListAsync(cancellationToken);
 

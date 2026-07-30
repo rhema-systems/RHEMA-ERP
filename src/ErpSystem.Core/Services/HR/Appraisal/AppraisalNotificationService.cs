@@ -10,14 +10,28 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 public class AppraisalNotificationService : IAppraisalNotificationService
 {
     private readonly IGenericRepository<AppraisalNotification> _repository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<AppraisalNotificationService> _logger;
 
     public AppraisalNotificationService(
         IGenericRepository<AppraisalNotification> repository,
+        ICurrentUserProvider currentUserProvider,
         ILogger<AppraisalNotificationService> logger)
     {
         _repository = repository;
+        _currentUserProvider = currentUserProvider;
         _logger     = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<AppraisalNotificationSummaryDto> GetNotificationSummaryAsync(
@@ -25,8 +39,9 @@ public class AppraisalNotificationService : IAppraisalNotificationService
     {
         try
         {
+            var tenantId = GetTenantId();
             var query = _repository.GetQueryable()
-                .Where(n => n.RecipientEmployeeId == employeeId)
+                .Where(n => n.TenantId == tenantId && n.RecipientEmployeeId == employeeId)
                 .OrderByDescending(n => n.CreatedDate);
 
             var unreadCount = await query.CountAsync(n => !n.IsRead, ct);
@@ -53,8 +68,9 @@ public class AppraisalNotificationService : IAppraisalNotificationService
     {
         try
         {
+            var tenantId = GetTenantId();
             var items = await _repository.GetQueryable()
-                .Where(n => n.RecipientEmployeeId == employeeId)
+                .Where(n => n.TenantId == tenantId && n.RecipientEmployeeId == employeeId)
                 .OrderByDescending(n => n.CreatedDate)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
@@ -73,8 +89,9 @@ public class AppraisalNotificationService : IAppraisalNotificationService
     {
         try
         {
+            var tenantId = GetTenantId();
             var notification = await _repository.GetQueryable()
-                .FirstOrDefaultAsync(n => n.Id == notificationId, ct);
+                .FirstOrDefaultAsync(n => n.Id == notificationId && n.TenantId == tenantId, ct);
 
             if (notification == null || notification.IsRead) return;
 
@@ -92,8 +109,9 @@ public class AppraisalNotificationService : IAppraisalNotificationService
     {
         try
         {
+            var tenantId = GetTenantId();
             var unread = await _repository.GetQueryable()
-                .Where(n => n.RecipientEmployeeId == employeeId && !n.IsRead)
+                .Where(n => n.TenantId == tenantId && n.RecipientEmployeeId == employeeId && !n.IsRead)
                 .ToListAsync(ct);
 
             if (!unread.Any()) return;
@@ -117,8 +135,9 @@ public class AppraisalNotificationService : IAppraisalNotificationService
     {
         try
         {
+            var tenantId = GetTenantId();
             return await _repository.GetQueryable()
-                .CountAsync(n => n.RecipientEmployeeId == employeeId && !n.IsRead, ct);
+                .CountAsync(n => n.TenantId == tenantId && n.RecipientEmployeeId == employeeId && !n.IsRead, ct);
         }
         catch (Exception ex)
         {

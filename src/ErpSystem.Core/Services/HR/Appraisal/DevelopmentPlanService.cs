@@ -15,25 +15,57 @@ public class DevelopmentPlanService : IDevelopmentPlanService
 {
     private readonly IGenericRepository<EmployeeDevelopmentPlan> _planRepository;
     private readonly IGenericRepository<EmployeeDevelopmentObjective> _objectiveRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<DevelopmentPlanService> _logger;
 
     public DevelopmentPlanService(
         IGenericRepository<EmployeeDevelopmentPlan> planRepository,
         IGenericRepository<EmployeeDevelopmentObjective> objectiveRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<DevelopmentPlanService> logger)
     {
         _planRepository = planRepository;
         _objectiveRepository = objectiveRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    private IQueryable<EmployeeDevelopmentPlan> BaseQuery => _planRepository.GetQueryable()
-        .Include(p => p.Employee)
-        .Include(p => p.Cycle)
-        .Include(p => p.Objectives);
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A development plan owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<EmployeeDevelopmentPlan> GetOwnedPlanAsync(Guid id)
+    {
+        var entity = await _planRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Development plan with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<EmployeeDevelopmentPlan> BaseQuery
+    {
+        get
+        {
+            var tenantId = GetTenantId();
+            return _planRepository.GetQueryable()
+                .Where(p => p.TenantId == tenantId)
+                .Include(p => p.Employee)
+                .Include(p => p.Cycle)
+                .Include(p => p.Objectives);
+        }
+    }
 
     public async Task<EmployeeDevelopmentPlanDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -93,6 +125,7 @@ public class DevelopmentPlanService : IDevelopmentPlanService
     public async Task<EmployeeDevelopmentPlanDto> CreateAsync(CreateEmployeeDevelopmentPlanDto createDto, CancellationToken cancellationToken = default)
     {
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
         entity.PlanStatus = DevelopmentPlanStatus.Active;
 
         await _planRepository.AddAsync(entity);
@@ -104,9 +137,7 @@ public class DevelopmentPlanService : IDevelopmentPlanService
 
     public async Task<EmployeeDevelopmentPlanDto> UpdateAsync(UpdateEmployeeDevelopmentPlanDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _planRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Development plan with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedPlanAsync(updateDto.Id);
 
         if (entity.PlanStatus == DevelopmentPlanStatus.Completed)
             throw new InvalidOperationException("Cannot update a completed development plan.");
@@ -121,9 +152,7 @@ public class DevelopmentPlanService : IDevelopmentPlanService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _planRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Development plan with ID '{id}' not found.");
+        var entity = await GetOwnedPlanAsync(id);
 
         await _planRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -133,9 +162,7 @@ public class DevelopmentPlanService : IDevelopmentPlanService
 
     public async Task<bool> UpdateStatusAsync(Guid id, DevelopmentPlanStatus status, CancellationToken cancellationToken = default)
     {
-        var entity = await _planRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Development plan with ID '{id}' not found.");
+        var entity = await GetOwnedPlanAsync(id);
 
         entity.PlanStatus = status;
         await _planRepository.UpdateAsync(entity);
@@ -149,12 +176,11 @@ public class DevelopmentPlanService : IDevelopmentPlanService
 
     public async Task<EmployeeDevelopmentObjectiveDto> AddObjectiveAsync(Guid planId, CreateEmployeeDevelopmentObjectiveDto dto, CancellationToken cancellationToken = default)
     {
-        var planExists = await _planRepository.ExistsAsync(p => p.Id == planId);
-        if (!planExists)
-            throw new ArgumentException("Development plan not found.");
+        var plan = await GetOwnedPlanAsync(planId);
 
         var entity = dto.ToEntity();
         entity.DevelopmentPlanId = planId;
+        entity.TenantId = plan.TenantId;
         entity.ObjectiveStatus = DevelopmentObjectiveStatus.NotStarted;
 
         await _objectiveRepository.AddAsync(entity);
@@ -168,6 +194,7 @@ public class DevelopmentPlanService : IDevelopmentPlanService
 
     public async Task<IEnumerable<EmployeeDevelopmentObjectiveDto>> GetObjectivesAsync(Guid planId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPlanAsync(planId);
         var entities = await _objectiveRepository
             .GetQueryable(o => o.DevelopmentPlanId == planId)
             .OrderBy(o => o.Title)
@@ -177,6 +204,7 @@ public class DevelopmentPlanService : IDevelopmentPlanService
 
     public async Task<EmployeeDevelopmentObjectiveDto> UpdateObjectiveAsync(Guid planId, UpdateEmployeeDevelopmentObjectiveDto dto, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPlanAsync(planId);
         var entity = await _objectiveRepository.GetQueryable()
             .FirstOrDefaultAsync(o => o.Id == dto.Id && o.DevelopmentPlanId == planId, cancellationToken);
 
@@ -193,6 +221,7 @@ public class DevelopmentPlanService : IDevelopmentPlanService
 
     public async Task<bool> DeleteObjectiveAsync(Guid planId, Guid objectiveId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPlanAsync(planId);
         var entity = await _objectiveRepository.GetQueryable()
             .FirstOrDefaultAsync(o => o.Id == objectiveId && o.DevelopmentPlanId == planId, cancellationToken);
 
@@ -208,6 +237,7 @@ public class DevelopmentPlanService : IDevelopmentPlanService
         Guid planId, Guid objectiveId, decimal progressPercent, string? notes,
         DevelopmentObjectiveStatus status, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPlanAsync(planId);
         var entity = await _objectiveRepository.GetQueryable()
             .FirstOrDefaultAsync(o => o.Id == objectiveId && o.DevelopmentPlanId == planId, cancellationToken);
 

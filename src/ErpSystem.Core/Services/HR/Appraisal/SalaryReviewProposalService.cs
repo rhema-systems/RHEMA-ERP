@@ -13,22 +13,48 @@ namespace ErpSystem.Core.Services.HR;
 public class SalaryReviewProposalService : ISalaryReviewProposalService
 {
     private readonly IGenericRepository<SalaryReviewProposal> _repository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SalaryReviewProposalService> _logger;
 
     public SalaryReviewProposalService(
         IGenericRepository<SalaryReviewProposal> repository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<SalaryReviewProposalService> logger)
     {
         _repository = repository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A proposal owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<SalaryReviewProposal> GetOwnedAsync(Guid id)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Salary review proposal '{id}' not found.");
+        return entity;
+    }
+
     public async Task<IEnumerable<SalaryReviewProposalDto>> GetAllAsync(SalaryReviewProposalStatus? status = null, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var query = _repository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
             .Include(p => p.Employee)
             .Include(p => p.SourceAppraisal)
             .AsQueryable();
@@ -42,8 +68,7 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
 
     public async Task<SalaryReviewProposalDto> SetStatusAsync(Guid id, SalaryReviewProposalStatus status, CancellationToken cancellationToken = default)
     {
-        var entity = await _repository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Salary review proposal '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         entity.Status = status;
         await _repository.UpdateAsync(entity);
@@ -52,6 +77,7 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
         _logger.LogInformation("Salary review proposal {Id} set to {Status}", id, status);
 
         var reloaded = await _repository.GetQueryable()
+            .Where(p => p.TenantId == entity.TenantId)
             .Include(p => p.Employee)
             .Include(p => p.SourceAppraisal)
             .FirstAsync(p => p.Id == id, cancellationToken);

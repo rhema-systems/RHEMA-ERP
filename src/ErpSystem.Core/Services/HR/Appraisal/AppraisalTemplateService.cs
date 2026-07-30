@@ -19,6 +19,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     private readonly IGenericRepository<TemplateItemGradeRange> _gradeRangeRepository;
     private readonly IGenericRepository<AppraisalGradeDefinition> _gradeDefinitionRepository;
     private readonly IGenericRepository<AppraisalCompetency> _competencyRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalTemplateService> _logger;
 
@@ -29,6 +30,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         IGenericRepository<TemplateItemGradeRange> gradeRangeRepository,
         IGenericRepository<AppraisalGradeDefinition> gradeDefinitionRepository,
         IGenericRepository<AppraisalCompetency> competencyRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalTemplateService> logger)
     {
@@ -38,14 +40,56 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         _gradeRangeRepository = gradeRangeRepository;
         _gradeDefinitionRepository = gradeDefinitionRepository;
         _competencyRepository = competencyRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An appraisal template owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<AppraisalTemplate> GetOwnedAsync(Guid id)
+    {
+        var entity = await _templateRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Appraisal template with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<AppraisalTemplateSection> GetOwnedSectionAsync(Guid templateId, Guid sectionId)
+    {
+        var entity = await _sectionRepository.GetQueryable()
+            .FirstOrDefaultAsync(s => s.Id == sectionId && s.AppraisalTemplateId == templateId);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Template section not found.");
+        return entity;
+    }
+
+    private async Task<AppraisalTemplateItem> GetOwnedItemAsync(Guid sectionId, Guid itemId)
+    {
+        var entity = await _itemRepository.GetQueryable()
+            .Include(i => i.Section)
+            .FirstOrDefaultAsync(i => i.Id == itemId && i.AppraisalTemplateSectionId == sectionId);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Template item not found.");
+        return entity;
     }
 
     // ─── CRUD ────────────────────────────────────────────────────────────────
 
     public async Task<AppraisalTemplateDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _templateRepository.GetQueryable()
             .Include(t => t.OrganizationLevel)
             .Include(t => t.OrganizationUnit)
@@ -56,7 +100,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             .Include(t => t.Sections)
                 .ThenInclude(s => s.TemplateItems)
                     .ThenInclude(i => i.KpiDefinition)
-            .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Appraisal template with ID '{id}' not found.");
@@ -66,7 +110,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<IEnumerable<AppraisalTemplateDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _templateRepository.GetQueryable()
+            .Where(t => t.TenantId == tenantId)
             .Include(t => t.OrganizationLevel)
             .Include(t => t.OrganizationUnit)
             .Include(t => t.Position)
@@ -78,7 +124,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<IEnumerable<AppraisalTemplateSummaryDto>> GetSummariesAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _templateRepository.GetQueryable()
+            .Where(t => t.TenantId == tenantId)
             .Include(t => t.OrganizationLevel)
             .Include(t => t.OrganizationUnit)
             .Include(t => t.Position)
@@ -109,7 +157,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<PagedResult<AppraisalTemplateDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var query = _templateRepository.GetQueryable()
+            .Where(t => t.TenantId == tenantId)
             .Include(t => t.OrganizationLevel)
             .Include(t => t.OrganizationUnit)
             .Include(t => t.Position)
@@ -129,7 +179,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<IEnumerable<AppraisalTemplateDto>> GetByPositionIdAsync(Guid positionId, CancellationToken cancellationToken = default)
     {
-        var entities = await _templateRepository.GetQueryable(t => t.PositionId == positionId)
+        var tenantId = GetTenantId();
+        var entities = await _templateRepository.GetQueryable()
+            .Where(t => t.TenantId == tenantId && t.PositionId == positionId)
             .Include(t => t.Position)
             .OrderBy(t => t.TemplateName)
             .ToListAsync(cancellationToken);
@@ -139,7 +191,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<IEnumerable<AppraisalTemplateDto>> GetByOrganizationUnitIdAsync(Guid orgUnitId, CancellationToken cancellationToken = default)
     {
-        var entities = await _templateRepository.GetQueryable(t => t.OrganizationUnitId == orgUnitId)
+        var tenantId = GetTenantId();
+        var entities = await _templateRepository.GetQueryable()
+            .Where(t => t.TenantId == tenantId && t.OrganizationUnitId == orgUnitId)
             .Include(t => t.OrganizationUnit)
             .OrderBy(t => t.TemplateName)
             .ToListAsync(cancellationToken);
@@ -149,7 +203,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<IEnumerable<AppraisalTemplateDto>> GetByOrganizationLevelIdAsync(Guid orgLevelId, CancellationToken cancellationToken = default)
     {
-        var entities = await _templateRepository.GetQueryable(t => t.OrganizationLevelId == orgLevelId)
+        var tenantId = GetTenantId();
+        var entities = await _templateRepository.GetQueryable()
+            .Where(t => t.TenantId == tenantId && t.OrganizationLevelId == orgLevelId)
             .Include(t => t.OrganizationLevel)
             .OrderBy(t => t.TemplateName)
             .ToListAsync(cancellationToken);
@@ -159,7 +215,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<IEnumerable<AppraisalTemplateDto>> GetActiveTemplatesAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _templateRepository.GetQueryable(t => t.IsActive)
+        var tenantId = GetTenantId();
+        var entities = await _templateRepository.GetQueryable()
+            .Where(t => t.TenantId == tenantId && t.IsActive)
             .Include(t => t.OrganizationLevel)
             .Include(t => t.OrganizationUnit)
             .Include(t => t.Position)
@@ -172,6 +230,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     public async Task<AppraisalTemplateDto> CreateAsync(CreateAppraisalTemplateDto createDto, CancellationToken cancellationToken = default)
     {
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         await _templateRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -183,9 +242,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<AppraisalTemplateDto> UpdateAsync(UpdateAppraisalTemplateDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _templateRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Appraisal template with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         await AssertTemplateNotInActiveCycleAsync(updateDto.Id, cancellationToken);
 
@@ -201,9 +258,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _templateRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Appraisal template with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await AssertTemplateNotInActiveCycleAsync(id, cancellationToken);
 
@@ -216,9 +271,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<bool> SetActiveStatusAsync(Guid id, bool isActive, CancellationToken cancellationToken = default)
     {
-        var entity = await _templateRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Appraisal template with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         // Validate weight integrity before activation
         if (isActive)
@@ -236,8 +289,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<AppraisalTemplateDto> SubmitForApprovalAsync(Guid id, Guid submittedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _templateRepository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Appraisal template with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.ApprovalStatus == TemplateApprovalStatus.PendingApproval)
             throw new InvalidOperationException("This template is already awaiting approval.");
@@ -263,8 +315,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<AppraisalTemplateDto> ApproveAsync(Guid id, Guid approvedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _templateRepository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Appraisal template with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.ApprovalStatus != TemplateApprovalStatus.PendingApproval)
             throw new InvalidOperationException("Only templates pending approval can be approved.");
@@ -283,8 +334,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<AppraisalTemplateDto> RejectAsync(Guid id, Guid rejectedById, string? reason, CancellationToken cancellationToken = default)
     {
-        var entity = await _templateRepository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Appraisal template with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.ApprovalStatus != TemplateApprovalStatus.PendingApproval)
             throw new InvalidOperationException("Only templates pending approval can be rejected.");
@@ -306,7 +356,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         if (string.IsNullOrWhiteSpace(dto.NewTemplateName))
             throw new ArgumentException("A name is required for the copied template.");
 
+        var tenantId = GetTenantId();
         var source = await _templateRepository.GetQueryable()
+            .Where(t => t.Id == sourceTemplateId && t.TenantId == tenantId)
             .Include(t => t.Sections.OrderBy(s => s.DisplayOrder))
                 .ThenInclude(s => s.TemplateItems.OrderBy(i => i.DisplayOrder))
                     .ThenInclude(i => i.GradeRanges)
@@ -323,7 +375,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             OrganizationLevelId = dto.OrganizationLevelId,
             OrganizationUnitId = dto.OrganizationUnitId,
             PositionId = dto.PositionId,
-            IsActive = false // New copies are inactive until explicitly activated
+            IsActive = false, // New copies are inactive until explicitly activated
+            TenantId = tenantId
         };
 
         foreach (var srcSection in source.Sections)
@@ -333,7 +386,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
                 SectionName = srcSection.SectionName,
                 Description = srcSection.Description,
                 DisplayOrder = srcSection.DisplayOrder,
-                Weight = srcSection.Weight
+                Weight = srcSection.Weight,
+                TenantId = tenantId
             };
 
             foreach (var srcItem in srcSection.TemplateItems)
@@ -347,7 +401,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
                     KpiMaxValue = srcItem.KpiMaxValue,
                     CustomQuestion = srcItem.CustomQuestion,
                     DisplayOrder = srcItem.DisplayOrder,
-                    Weight = srcItem.Weight
+                    Weight = srcItem.Weight,
+                    TenantId = tenantId
                 };
 
                 foreach (var srcRange in srcItem.GradeRanges)
@@ -356,7 +411,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
                     {
                         GradeDefinitionId = srcRange.GradeDefinitionId,
                         LowScore = srcRange.LowScore,
-                        HighScore = srcRange.HighScore
+                        HighScore = srcRange.HighScore,
+                        TenantId = tenantId
                     });
                 }
 
@@ -378,19 +434,20 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<AppraisalTemplateSectionDto> AddSectionAsync(Guid templateId, CreateAppraisalTemplateSectionDto dto, CancellationToken cancellationToken = default)
     {
-        var templateExists = await _templateRepository.ExistsAsync(t => t.Id == templateId);
-        if (!templateExists)
-            throw new ArgumentException($"Appraisal template with ID '{templateId}' not found.");
+        await GetOwnedAsync(templateId);
 
         await AssertTemplateNotInActiveCycleAsync(templateId, cancellationToken);
 
+        var tenantId = GetTenantId();
         var entity = dto.ToEntity();
         entity.AppraisalTemplateId = templateId;
+        entity.TenantId = tenantId;
 
         // Auto-assign display order if not provided
         if (entity.DisplayOrder == 0)
         {
-            var maxOrder = await _sectionRepository.GetQueryable(s => s.AppraisalTemplateId == templateId)
+            var maxOrder = await _sectionRepository.GetQueryable()
+                .Where(s => s.TenantId == tenantId && s.AppraisalTemplateId == templateId)
                 .MaxAsync(s => (int?)s.DisplayOrder, cancellationToken) ?? 0;
             entity.DisplayOrder = maxOrder + 1;
         }
@@ -408,7 +465,11 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<IEnumerable<AppraisalTemplateSectionDto>> GetSectionsAsync(Guid templateId, CancellationToken cancellationToken = default)
     {
-        var entities = await _sectionRepository.GetQueryable(s => s.AppraisalTemplateId == templateId)
+        await GetOwnedAsync(templateId);
+        var tenantId = GetTenantId();
+
+        var entities = await _sectionRepository.GetQueryable()
+            .Where(s => s.TenantId == tenantId && s.AppraisalTemplateId == templateId)
             .Include(s => s.TemplateItems.OrderBy(i => i.DisplayOrder))
                 .ThenInclude(i => i.Competency)
             .Include(s => s.TemplateItems)
@@ -421,11 +482,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<AppraisalTemplateSectionDto> UpdateSectionAsync(Guid templateId, UpdateAppraisalTemplateSectionDto dto, CancellationToken cancellationToken = default)
     {
-        var entity = await _sectionRepository.GetQueryable()
-            .FirstOrDefaultAsync(s => s.Id == dto.Id && s.AppraisalTemplateId == templateId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Template section not found.");
+        var entity = await GetOwnedSectionAsync(templateId, dto.Id);
 
         await AssertTemplateNotInActiveCycleAsync(templateId, cancellationToken);
 
@@ -439,11 +496,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<bool> DeleteSectionAsync(Guid templateId, Guid sectionId, CancellationToken cancellationToken = default)
     {
-        var entity = await _sectionRepository.GetQueryable()
-            .FirstOrDefaultAsync(s => s.Id == sectionId && s.AppraisalTemplateId == templateId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Template section not found.");
+        var entity = await GetOwnedSectionAsync(templateId, sectionId);
 
         await AssertTemplateNotInActiveCycleAsync(templateId, cancellationToken);
 
@@ -456,7 +509,11 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<bool> ReorderSectionsAsync(Guid templateId, IEnumerable<Guid> orderedSectionIds, CancellationToken cancellationToken = default)
     {
-        var sections = await _sectionRepository.GetQueryable(s => s.AppraisalTemplateId == templateId)
+        await GetOwnedAsync(templateId);
+        var tenantId = GetTenantId();
+
+        var sections = await _sectionRepository.GetQueryable()
+            .Where(s => s.TenantId == tenantId && s.AppraisalTemplateId == templateId)
             .ToListAsync(cancellationToken);
 
         var order = orderedSectionIds.ToList();
@@ -480,7 +537,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<AppraisalTemplateItemDto> AddItemAsync(Guid sectionId, CreateAppraisalTemplateItemDto dto, CancellationToken cancellationToken = default)
     {
-        var section = await _sectionRepository.GetByIdAsync(sectionId);
+        var tenantId = GetTenantId();
+        var section = await _sectionRepository.GetQueryable()
+            .FirstOrDefaultAsync(s => s.Id == sectionId && s.TenantId == tenantId, cancellationToken);
         if (section == null)
             throw new ArgumentException($"Template section with ID '{sectionId}' not found.");
 
@@ -491,7 +550,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         {
             var duplicate = await _itemRepository.GetQueryable()
                 .Include(i => i.Section)
-                .AnyAsync(i => i.Section.AppraisalTemplateId == section.AppraisalTemplateId
+                .AnyAsync(i => i.TenantId == tenantId
+                            && i.Section.AppraisalTemplateId == section.AppraisalTemplateId
                             && i.CompetencyId == dto.CompetencyId, cancellationToken);
             if (duplicate)
                 throw new InvalidOperationException("This soft skill has already been added to this template.");
@@ -500,7 +560,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         {
             var duplicate = await _itemRepository.GetQueryable()
                 .Include(i => i.Section)
-                .AnyAsync(i => i.Section.AppraisalTemplateId == section.AppraisalTemplateId
+                .AnyAsync(i => i.TenantId == tenantId
+                            && i.Section.AppraisalTemplateId == section.AppraisalTemplateId
                             && i.KpiDefinitionId == dto.KpiDefinitionId, cancellationToken);
             if (duplicate)
                 throw new InvalidOperationException("This KPI definition has already been added to this template.");
@@ -508,10 +569,12 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
         var entity = dto.ToEntity();
         entity.AppraisalTemplateSectionId = sectionId;
+        entity.TenantId = tenantId;
 
         if (entity.DisplayOrder == 0)
         {
-            var maxOrder = await _itemRepository.GetQueryable(i => i.AppraisalTemplateSectionId == sectionId)
+            var maxOrder = await _itemRepository.GetQueryable()
+                .Where(i => i.TenantId == tenantId && i.AppraisalTemplateSectionId == sectionId)
                 .MaxAsync(i => (int?)i.DisplayOrder, cancellationToken) ?? 0;
             entity.DisplayOrder = maxOrder + 1;
         }
@@ -531,7 +594,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<IEnumerable<AppraisalTemplateItemDto>> GetItemsAsync(Guid sectionId, CancellationToken cancellationToken = default)
     {
-        var entities = await _itemRepository.GetQueryable(i => i.AppraisalTemplateSectionId == sectionId)
+        var tenantId = GetTenantId();
+        var entities = await _itemRepository.GetQueryable()
+            .Where(i => i.TenantId == tenantId && i.AppraisalTemplateSectionId == sectionId)
             .Include(i => i.Competency)
             .Include(i => i.KpiDefinition)
             .Include(i => i.GradeRanges)
@@ -543,12 +608,13 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<AppraisalTemplateItemDto> UpdateItemAsync(Guid sectionId, UpdateAppraisalTemplateItemDto dto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _itemRepository.GetQueryable()
             .Include(i => i.Section)
             .Include(i => i.Competency)
             .Include(i => i.KpiDefinition)
             .Include(i => i.GradeRanges)
-            .FirstOrDefaultAsync(i => i.Id == dto.Id && i.AppraisalTemplateSectionId == sectionId, cancellationToken);
+            .FirstOrDefaultAsync(i => i.Id == dto.Id && i.AppraisalTemplateSectionId == sectionId && i.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("Template item not found.");
@@ -560,7 +626,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         {
             var duplicate = await _itemRepository.GetQueryable()
                 .Include(i => i.Section)
-                .AnyAsync(i => i.Section.AppraisalTemplateId == entity.Section.AppraisalTemplateId
+                .AnyAsync(i => i.TenantId == tenantId
+                            && i.Section.AppraisalTemplateId == entity.Section.AppraisalTemplateId
                             && i.CompetencyId == dto.CompetencyId
                             && i.Id != entity.Id, cancellationToken);
             if (duplicate)
@@ -570,7 +637,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         {
             var duplicate = await _itemRepository.GetQueryable()
                 .Include(i => i.Section)
-                .AnyAsync(i => i.Section.AppraisalTemplateId == entity.Section.AppraisalTemplateId
+                .AnyAsync(i => i.TenantId == tenantId
+                            && i.Section.AppraisalTemplateId == entity.Section.AppraisalTemplateId
                             && i.KpiDefinitionId == dto.KpiDefinitionId
                             && i.Id != entity.Id, cancellationToken);
             if (duplicate)
@@ -587,12 +655,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<bool> DeleteItemAsync(Guid sectionId, Guid itemId, CancellationToken cancellationToken = default)
     {
-        var entity = await _itemRepository.GetQueryable()
-            .Include(i => i.Section)
-            .FirstOrDefaultAsync(i => i.Id == itemId && i.AppraisalTemplateSectionId == sectionId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Template item not found.");
+        var entity = await GetOwnedItemAsync(sectionId, itemId);
 
         await AssertTemplateNotInActiveCycleAsync(entity.Section.AppraisalTemplateId, cancellationToken);
 
@@ -605,7 +668,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<bool> ReorderItemsAsync(Guid sectionId, IEnumerable<Guid> orderedItemIds, CancellationToken cancellationToken = default)
     {
-        var items = await _itemRepository.GetQueryable(i => i.AppraisalTemplateSectionId == sectionId)
+        var tenantId = GetTenantId();
+        var items = await _itemRepository.GetQueryable()
+            .Where(i => i.TenantId == tenantId && i.AppraisalTemplateSectionId == sectionId)
             .ToListAsync(cancellationToken);
 
         var order = orderedItemIds.ToList();
@@ -629,7 +694,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<IEnumerable<TemplateItemGradeRangeDto>> GetItemGradeRangesAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
-        var ranges = await _gradeRangeRepository.GetQueryable(r => r.AppraisalTemplateItemId == itemId)
+        var tenantId = GetTenantId();
+        var ranges = await _gradeRangeRepository.GetQueryable()
+            .Where(r => r.TenantId == tenantId && r.AppraisalTemplateItemId == itemId)
             .Include(r => r.GradeDefinition)
             .OrderBy(r => r.LowScore)
             .ToListAsync(cancellationToken);
@@ -639,9 +706,10 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<IEnumerable<TemplateItemGradeRangeDto>> UpdateItemGradeRangesAsync(Guid itemId, UpsertTemplateItemGradeRangesDto dto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var item = await _itemRepository.GetQueryable()
             .Include(i => i.Section)
-            .FirstOrDefaultAsync(i => i.Id == itemId, cancellationToken);
+            .FirstOrDefaultAsync(i => i.Id == itemId && i.TenantId == tenantId, cancellationToken);
 
         if (item == null)
             throw new ArgumentException($"Template item with ID '{itemId}' not found.");
@@ -680,7 +748,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             throw new InvalidOperationException("Grade range validation failed:\n" + string.Join("\n", errors.Select(e => $"  • {e}")));
 
         // ── Replace all existing ranges ────────────────────────────────────
-        var existing = await _gradeRangeRepository.GetQueryable(r => r.AppraisalTemplateItemId == itemId)
+        var existing = await _gradeRangeRepository.GetQueryable()
+            .Where(r => r.TenantId == tenantId && r.AppraisalTemplateItemId == itemId)
             .ToListAsync(cancellationToken);
 
         foreach (var old in existing)
@@ -691,7 +760,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             AppraisalTemplateItemId = itemId,
             GradeDefinitionId = r.GradeDefinitionId,
             LowScore = r.LowScore,
-            HighScore = r.HighScore
+            HighScore = r.HighScore,
+            TenantId = tenantId
         }).ToList();
 
         foreach (var newRange in newRanges)
@@ -707,7 +777,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<IEnumerable<AppraisalGradeDefinitionDto>> GetActiveGradeDefinitionsAsync(CancellationToken cancellationToken = default)
     {
-        var defs = await _gradeDefinitionRepository.GetQueryable(d => d.IsActive)
+        var tenantId = GetTenantId();
+        var defs = await _gradeDefinitionRepository.GetQueryable()
+            .Where(d => d.TenantId == tenantId && d.IsActive)
             .OrderBy(d => d.GradeName)
             .ToListAsync(cancellationToken);
 
@@ -722,7 +794,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     /// </summary>
     private async Task AssertTemplateNotInActiveCycleAsync(Guid templateId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var template = await _templateRepository.GetQueryable()
+            .Where(t => t.Id == templateId && t.TenantId == tenantId)
             .Include(t => t.CycleAssignments)
                 .ThenInclude(ct => ct.AppraisalCycle)
             .FirstOrDefaultAsync(t => t.Id == templateId, cancellationToken);
@@ -745,7 +819,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     /// </summary>
     private async Task ValidateTemplateWeightsAsync(Guid templateId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var template = await _templateRepository.GetQueryable()
+            .Where(t => t.Id == templateId && t.TenantId == tenantId)
             .Include(t => t.Sections)
                 .ThenInclude(s => s.TemplateItems)
                     .ThenInclude(i => i.GradeRanges)

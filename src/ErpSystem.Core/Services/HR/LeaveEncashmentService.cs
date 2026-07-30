@@ -55,23 +55,59 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         _clock = clock;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserService.TenantId;
+        if (tenantId is null || tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId.Value;
+    }
+
+    // An encashment owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<LeaveEncashment> GetOwnedEncashmentAsync(Guid id)
+    {
+        var entity = await _encashmentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave encashment '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LeaveRequest> GetOwnedLeaveRequestAsync(Guid id)
+    {
+        var entity = await _leaveRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave request '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LeaveType> GetOwnedLeaveTypeAsync(Guid id)
+    {
+        var entity = await _leaveTypeRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave type '{id}' not found.");
+        return entity;
+    }
+
     public async Task<LeaveEncashmentDto> RequestEncashmentAsync(CreateLeaveEncashmentDto dto)
     {
-        var leaveRequest = await _leaveRepository.GetByIdAsync(dto.LeaveRequestId);
-        if (leaveRequest == null)
-            throw new ArgumentException($"Leave request '{dto.LeaveRequestId}' not found.");
+        var leaveRequest = await GetOwnedLeaveRequestAsync(dto.LeaveRequestId);
 
         if (leaveRequest.Encashment != null)
             throw new InvalidOperationException("This leave request has already been encashed.");
 
         // The leave type must permit cash conversion before any encashment can be requested.
-        var leaveType = await _leaveTypeRepository.GetByIdAsync(dto.LeaveTypeId)
-            ?? throw new ArgumentException($"Leave type '{dto.LeaveTypeId}' not found.");
+        var leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         if (!leaveType.AllowCashConversion)
             throw new InvalidOperationException("This leave type does not allow cash conversion (encashment).");
 
+        var tenantId = GetTenantId();
         var balance = await _balanceRepository.FirstOrDefaultAsync(
-            b => b.EmployeeId == dto.EmployeeId &&
+            b => b.TenantId == tenantId &&
+                 b.EmployeeId == dto.EmployeeId &&
                  b.LeaveTypeId == dto.LeaveTypeId &&
                  b.Year == dto.Year);
 
@@ -92,6 +128,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
 
         var entity = new LeaveEncashment
         {
+            TenantId = tenantId,
             LeaveRequestId = dto.LeaveRequestId,
             EmployeeId = dto.EmployeeId,
             LeaveTypeId = dto.LeaveTypeId,
@@ -124,9 +161,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
 
     public async Task<LeaveEncashmentDto> ApproveEncashmentAsync(Guid id)
     {
-        var entity = await _encashmentRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave encashment '{id}' not found.");
+        var entity = await GetOwnedEncashmentAsync(id);
 
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty)
@@ -153,9 +188,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
 
     public async Task<LeaveEncashmentDto> RejectEncashmentAsync(Guid id, string reason)
     {
-        var entity = await _encashmentRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave encashment '{id}' not found.");
+        var entity = await GetOwnedEncashmentAsync(id);
 
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty)
@@ -183,9 +216,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
 
     public async Task<LeaveEncashmentDto> MarkAsProcessedAsync(Guid id, ProcessLeaveEncashmentDto dto)
     {
-        var entity = await _encashmentRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave encashment '{id}' not found.");
+        var entity = await GetOwnedEncashmentAsync(id);
 
         if (entity.Status != LeaveEncashmentStatus.Approved)
             throw new InvalidOperationException("Only approved encashments can be marked as processed.");
@@ -213,12 +244,13 @@ public class LeaveEncashmentService : ILeaveEncashmentService
 
     public async Task<IEnumerable<LeaveEncashmentDto>> GetEmployeeEncashmentsAsync(Guid employeeId, int year)
     {
+        var tenantId = GetTenantId();
         var items = await _encashmentRepository
             .GetQueryable()
             .Include(e => e.Employee)
             .Include(e => e.ProcessedByEmployee)
             .Include(e => e.LeaveRequest).ThenInclude(r => r!.LeaveType)
-            .Where(e => e.EmployeeId == employeeId && e.Year == year)
+            .Where(e => e.TenantId == tenantId && e.EmployeeId == employeeId && e.Year == year)
             .OrderByDescending(e => e.ProcessedDate)
             .ToListAsync();
         return items.ToDtoList();
@@ -232,12 +264,13 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         DateTime? to          = null,
         string?   search      = null)
     {
+        var tenantId = GetTenantId();
         var query = _encashmentRepository
             .GetQueryable()
             .Include(e => e.Employee)
             .Include(e => e.ProcessedByEmployee)
             .Include(e => e.LeaveRequest).ThenInclude(r => r!.LeaveType)
-            .Where(e => e.Year == year);
+            .Where(e => e.TenantId == tenantId && e.Year == year);
 
         if (employeeId.HasValue)  query = query.Where(e => e.EmployeeId  == employeeId.Value);
         if (leaveTypeId.HasValue) query = query.Where(e => e.LeaveTypeId == leaveTypeId.Value);
@@ -269,10 +302,13 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         => Guid.TryParse(_currentUserService.UserId, out var id) ? id : Guid.Empty;
 
     private async Task<LeaveEncashment?> GetWithIncludes(Guid id)
-        => await _encashmentRepository
+    {
+        var tenantId = GetTenantId();
+        return await _encashmentRepository
             .GetQueryable()
             .Include(e => e.Employee)
             .Include(e => e.ProcessedByEmployee)
             .Include(e => e.LeaveRequest).ThenInclude(r => r!.LeaveType)
-            .FirstOrDefaultAsync(e => e.Id == id);
+            .FirstOrDefaultAsync(e => e.Id == id && e.TenantId == tenantId);
+    }
 }

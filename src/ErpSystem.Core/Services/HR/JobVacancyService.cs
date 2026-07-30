@@ -20,6 +20,7 @@ public class JobVacancyService : IJobVacancyService
     private readonly IStaffRequisitionRepository _requisitionRepository;
     private readonly IJobPostingRepository _postingRepository;
     private readonly IVacancyPipelineStageAssignmentRepository _stageAssignmentRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobVacancyService> _logger;
 
@@ -32,6 +33,7 @@ public class JobVacancyService : IJobVacancyService
         IStaffRequisitionRepository requisitionRepository,
         IJobPostingRepository postingRepository,
         IVacancyPipelineStageAssignmentRepository stageAssignmentRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<JobVacancyService> logger)
     {
@@ -43,47 +45,98 @@ public class JobVacancyService : IJobVacancyService
         _requisitionRepository = requisitionRepository;
         _postingRepository = postingRepository;
         _stageAssignmentRepository = stageAssignmentRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A vacancy owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<JobVacancy> GetOwnedAsync(Guid id)
+    {
+        var entity = await _vacancyRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Job vacancy with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobVacancy> GetOwnedWithFullDetailsAsync(Guid id)
+    {
+        var entity = await _vacancyRepository.GetWithFullDetailsAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Job vacancy with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobVacancyAttachment> GetOwnedAttachmentAsync(Guid id)
+    {
+        var entity = await _attachmentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Attachment with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobShortlistingCriteria> GetOwnedCriteriaAsync(Guid id)
+    {
+        var entity = await _criteriaRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Shortlisting criteria with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<VacancyPipelineStageAssignment> GetOwnedStageAssignmentAsync(Guid id)
+    {
+        var entity = await _stageAssignmentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Stage assignment '{id}' not found.");
+        return entity;
     }
 
     // ── Queries ─────────────────────────────────────────────────────────────
 
     public async Task<JobVacancyDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _vacancyRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Job vacancy with ID '{id}' not found.");
-
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<JobVacancyDto?> GetByVacancyNumberAsync(string vacancyNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _vacancyRepository.GetByVacancyNumberAsync(vacancyNumber);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
     public async Task<JobVacancyDetailDto> GetWithFullDetailsAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _vacancyRepository.GetWithFullDetailsAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Job vacancy with ID '{id}' not found.");
-
+        var entity = await GetOwnedWithFullDetailsAsync(id);
         return entity.ToDetailDto();
     }
 
     public async Task<IEnumerable<JobVacancySummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _vacancyRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<JobVacancySummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
         (pageNumber, pageSize) = PagingGuard.Clamp(pageNumber, pageSize);
 
-        var query = _vacancyRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _vacancyRepository.GetQueryable().Where(v => v.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -106,14 +159,16 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<IEnumerable<JobVacancySummaryDto>> GetByStatusAsync(JobVacancyStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _vacancyRepository.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobVacancySummaryDto>> GetActiveVacanciesAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _vacancyRepository.GetActiveVacanciesAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobVacancyDto>> GetPublishedForJobBoardAsync(Guid tenantId, CancellationToken cancellationToken = default)
@@ -128,42 +183,52 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<IEnumerable<JobVacancySummaryDto>> GetByPositionAsync(Guid positionId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _vacancyRepository.GetByPositionAsync(positionId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobVacancySummaryDto>> GetByHiringManagerAsync(Guid hiringManagerId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _vacancyRepository.GetByHiringManagerAsync(hiringManagerId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobVacancySummaryDto>> GetByRecruiterAsync(Guid recruiterId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _vacancyRepository.GetByRecruiterAsync(recruiterId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobVacancySummaryDto>> GetByRequisitionAsync(Guid requisitionId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _vacancyRepository.GetByRequisitionAsync(requisitionId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobVacancySummaryDto>> GetWithDeadlineApproachingAsync(int daysAhead = 7, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _vacancyRepository.GetWithDeadlineApproachingAsync(daysAhead);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── CRUD ─────────────────────────────────────────────────────────────────
 
     public async Task<JobVacancyDto> CreateAsync(CreateJobVacancyDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var requisition = await _requisitionRepository.GetByIdAsync(createDto.StaffRequisitionId)
-            ?? throw new ArgumentException($"Staff requisition with ID '{createDto.StaffRequisitionId}' not found.");
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var requisition = await _requisitionRepository.GetByIdAsync(createDto.StaffRequisitionId);
+        if (requisition == null || requisition.TenantId != current)
+            throw new ArgumentException($"Staff requisition with ID '{createDto.StaffRequisitionId}' not found.");
+
+        var entity = createDto.ToEntity(current, createdByUserId);
         entity.PositionId = requisition.PositionId;
         entity.VacancyNumber = await _vacancyRepository.GetNextVacancyNumberAsync();
         entity.VacancyStatus = JobVacancyStatus.Draft;
@@ -181,9 +246,7 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<JobVacancyDto> UpdateAsync(UpdateJobVacancyDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _vacancyRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Job vacancy with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         if (entity.VacancyStatus == JobVacancyStatus.Cancelled || entity.VacancyStatus == JobVacancyStatus.Filled)
             throw new InvalidOperationException("A closed or filled vacancy cannot be edited.");
@@ -225,9 +288,7 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _vacancyRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Job vacancy with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.VacancyStatus != JobVacancyStatus.Draft)
             throw new InvalidOperationException("Only draft vacancies can be deleted.");
@@ -251,9 +312,11 @@ public class JobVacancyService : IJobVacancyService
         TransitionJobVacancyDto dto, Guid tenantId, Guid userId,
         CancellationToken cancellationToken = default)
     {
-        var entity = await _vacancyRepository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Job vacancy with ID '{dto.Id}' not found.");
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = await GetOwnedAsync(dto.Id);
 
         if (entity.VacancyStatus == JobVacancyStatus.Cancelled || entity.VacancyStatus == JobVacancyStatus.Filled)
             throw new InvalidOperationException("A closed or filled vacancy cannot be edited.");
@@ -302,9 +365,7 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<bool> ChangeStatusAsync(ChangeJobVacancyStatusDto dto, Guid changedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _vacancyRepository.GetByIdAsync(dto.VacancyId);
-        if (entity == null)
-            throw new ArgumentException($"Job vacancy with ID '{dto.VacancyId}' not found.");
+        var entity = await GetOwnedAsync(dto.VacancyId);
 
         var from = entity.VacancyStatus;
         entity.VacancyStatus = dto.NewStatus;
@@ -349,7 +410,8 @@ public class JobVacancyService : IJobVacancyService
         if (toStatus != JobVacancyStatus.Published || fromStatus == JobVacancyStatus.Published)
             return;
 
-        var existingPostings = await _postingRepository.GetByVacancyIdAsync(entity.Id);
+        var existingPostings = (await _postingRepository.GetByVacancyIdAsync(entity.Id))
+            .Where(p => p.TenantId == entity.TenantId);
         var hasInternalPosting = existingPostings.Any(p => p.Channel == JobPostingChannel.InternalPortal);
         var hasExternalPosting = existingPostings.Any(p => p.Channel == JobPostingChannel.CompanyWebsite);
 
@@ -413,9 +475,7 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<bool> CloseAsync(CloseJobVacancyDto dto, Guid closedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _vacancyRepository.GetByIdAsync(dto.VacancyId);
-        if (entity == null)
-            throw new ArgumentException($"Job vacancy with ID '{dto.VacancyId}' not found.");
+        var entity = await GetOwnedAsync(dto.VacancyId);
 
         if (entity.VacancyStatus == JobVacancyStatus.Cancelled)
             throw new InvalidOperationException("Vacancy is already closed.");
@@ -451,9 +511,7 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<bool> CloseForApplicationsAsync(CloseForApplicationsDto dto, Guid closedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _vacancyRepository.GetByIdAsync(dto.VacancyId);
-        if (entity == null)
-            throw new ArgumentException($"Job vacancy with ID '{dto.VacancyId}' not found.");
+        var entity = await GetOwnedAsync(dto.VacancyId);
 
         if (entity.VacancyStatus != JobVacancyStatus.Published)
             throw new InvalidOperationException("Only published vacancies can be closed for applications.");
@@ -491,7 +549,13 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<JobVacancyAttachmentDto> AddAttachmentAsync(CreateJobVacancyAttachmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedAsync(createDto.JobVacancyId);
+
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -499,15 +563,15 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<IEnumerable<JobVacancyAttachmentDto>> GetAttachmentsAsync(Guid vacancyId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(vacancyId);
+        var tenantId = GetTenantId();
         var entities = await _attachmentRepository.GetByVacancyIdAsync(vacancyId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _attachmentRepository.GetByIdAsync(attachmentId);
-        if (entity == null)
-            throw new ArgumentException($"Attachment with ID '{attachmentId}' not found.");
+        var entity = await GetOwnedAttachmentAsync(attachmentId);
 
         await _attachmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -518,15 +582,23 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<IEnumerable<JobVacancyStatusHistoryDto>> GetStatusHistoryAsync(Guid vacancyId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(vacancyId);
+        var tenantId = GetTenantId();
         var entities = await _statusHistoryRepository.GetByVacancyIdAsync(vacancyId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     // ── Shortlisting criteria ─────────────────────────────────────────────────
 
     public async Task<JobShortlistingCriteriaDto> AddCriteriaAsync(CreateJobShortlistingCriteriaDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedAsync(createDto.JobVacancyId);
+
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _criteriaRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await MarkApplicationScoresStaleAsync(createDto.JobVacancyId, cancellationToken);
@@ -535,15 +607,15 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<IEnumerable<JobShortlistingCriteriaDto>> GetCriteriaAsync(Guid vacancyId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(vacancyId);
+        var tenantId = GetTenantId();
         var entities = await _criteriaRepository.GetByVacancyIdAsync(vacancyId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<JobShortlistingCriteriaDto> UpdateCriteriaAsync(UpdateJobShortlistingCriteriaDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _criteriaRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Shortlisting criteria with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedCriteriaAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _criteriaRepository.UpdateAsync(entity);
@@ -554,9 +626,7 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<bool> DeleteCriteriaAsync(Guid criteriaId, CancellationToken cancellationToken = default)
     {
-        var entity = await _criteriaRepository.GetByIdAsync(criteriaId);
-        if (entity == null)
-            throw new ArgumentException($"Shortlisting criteria with ID '{criteriaId}' not found.");
+        var entity = await GetOwnedCriteriaAsync(criteriaId);
 
         var vacancyId = entity.JobVacancyId;
         await _criteriaRepository.DeleteAsync(entity);
@@ -567,7 +637,9 @@ public class JobVacancyService : IJobVacancyService
 
     private async Task MarkApplicationScoresStaleAsync(Guid vacancyId, CancellationToken cancellationToken)
     {
-        var applications = await _applicationRepository.GetByVacancyIdAsync(vacancyId);
+        var tenantId = GetTenantId();
+        var applications = (await _applicationRepository.GetByVacancyIdAsync(vacancyId))
+            .Where(a => a.TenantId == tenantId);
         var toUpdate = applications
             .Where(a => a.ScoredAt.HasValue
                      && a.Status != ApplicationStatus.Withdrawn
@@ -586,22 +658,24 @@ public class JobVacancyService : IJobVacancyService
 
     public async Task<JobVacancyStatusHistoryDto?> GetLatestStatusHistoryAsync(Guid vacancyId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(vacancyId);
+        var tenantId = GetTenantId();
         var entity = await _statusHistoryRepository.GetLatestForVacancyAsync(vacancyId);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<JobShortlistingCriteriaDto>> GetMandatoryCriteriaAsync(Guid vacancyId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(vacancyId);
+        var tenantId = GetTenantId();
         var entities = await _criteriaRepository.GetMandatoryCriteriaAsync(vacancyId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<bool> SubmitShortlistForApprovalAsync(
         SubmitShortlistForApprovalDto dto, Guid submittedByUserId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(dto.VacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{dto.VacancyId}' not found.");
+        var vacancy = await GetOwnedAsync(dto.VacancyId);
 
         if (vacancy.ShortlistApprovalStatus == ShortlistApprovalStatus.PendingApproval)
             throw new InvalidOperationException("Shortlist is already pending approval.");
@@ -622,9 +696,7 @@ public class JobVacancyService : IJobVacancyService
     public async Task<bool> ReviewShortlistApprovalAsync(
         ReviewShortlistApprovalDto dto, Guid reviewedByUserId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(dto.VacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{dto.VacancyId}' not found.");
+        var vacancy = await GetOwnedAsync(dto.VacancyId);
 
         if (vacancy.ShortlistApprovalStatus != ShortlistApprovalStatus.PendingApproval)
             throw new InvalidOperationException("Shortlist is not currently pending approval.");
@@ -686,14 +758,24 @@ public class JobVacancyService : IJobVacancyService
     public async Task<IEnumerable<VacancyPipelineStageAssignmentDto>> GetStageAssignmentsAsync(
         Guid vacancyId, CancellationToken ct = default)
     {
+        await GetOwnedAsync(vacancyId);
+        var tenantId = GetTenantId();
         var entities = await _stageAssignmentRepository.GetByVacancyIdAsync(vacancyId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<VacancyPipelineStageAssignmentDto> UpsertStageAssignmentAsync(
         CreateVacancyPipelineStageAssignmentDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedAsync(dto.JobVacancyId);
+
         var existing = await _stageAssignmentRepository.GetByVacancyAndStageAsync(dto.JobVacancyId, dto.PipelineStageId);
+        if (existing != null && existing.TenantId != current)
+            existing = null;
         if (existing != null)
         {
             existing.AssignedToId             = dto.AssignedToId;
@@ -712,7 +794,7 @@ public class JobVacancyService : IJobVacancyService
         var entity = new VacancyPipelineStageAssignment
         {
             Id                      = Guid.NewGuid(),
-            TenantId                = tenantId,
+            TenantId                = current,
             CreatedBy               = userId.ToString(),
             CreatedById             = userId,
             CreatedAt               = DateTime.UtcNow,
@@ -736,8 +818,7 @@ public class JobVacancyService : IJobVacancyService
     public async Task<VacancyPipelineStageAssignmentDto> UpdateStageAssignmentAsync(
         UpdateVacancyPipelineStageAssignmentDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _stageAssignmentRepository.GetByIdAsync(dto.Id)
-            ?? throw new ArgumentException($"Stage assignment '{dto.Id}' not found.");
+        var entity = await GetOwnedStageAssignmentAsync(dto.Id);
 
         entity.AssignedToId           = dto.AssignedToId;
         entity.DueDate                = dto.DueDate;
@@ -755,8 +836,7 @@ public class JobVacancyService : IJobVacancyService
     public async Task<VacancyPipelineStageAssignmentDto> CompleteStageAssignmentAsync(
         CompleteVacancyPipelineStageAssignmentDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _stageAssignmentRepository.GetByIdAsync(dto.Id)
-            ?? throw new ArgumentException($"Stage assignment '{dto.Id}' not found.");
+        var entity = await GetOwnedStageAssignmentAsync(dto.Id);
 
         entity.Status          = VacancyStageAssignmentStatus.Completed;
         entity.CompletedAt     = DateTime.UtcNow;
@@ -773,8 +853,7 @@ public class JobVacancyService : IJobVacancyService
     public async Task<VacancyPipelineStageAssignmentDto> SkipStageAssignmentAsync(
         SkipVacancyPipelineStageAssignmentDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _stageAssignmentRepository.GetByIdAsync(dto.Id)
-            ?? throw new ArgumentException($"Stage assignment '{dto.Id}' not found.");
+        var entity = await GetOwnedStageAssignmentAsync(dto.Id);
 
         entity.Status          = VacancyStageAssignmentStatus.Skipped;
         entity.CompletionNotes = dto.Reason;
@@ -789,7 +868,7 @@ public class JobVacancyService : IJobVacancyService
     public async Task<bool> DeleteStageAssignmentAsync(Guid id, CancellationToken ct = default)
     {
         var entity = await _stageAssignmentRepository.GetByIdAsync(id);
-        if (entity == null) return false;
+        if (entity == null || entity.TenantId != GetTenantId()) return false;
         await _stageAssignmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
         return true;

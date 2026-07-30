@@ -15,26 +15,58 @@ public class PerformanceJournalService : IPerformanceJournalService
 {
     private readonly IGenericRepository<PerformanceJournalEntry> _journalRepository;
     private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<PerformanceJournalService> _logger;
 
     public PerformanceJournalService(
         IGenericRepository<PerformanceJournalEntry> journalRepository,
         IGenericRepository<AppraisalCycle> cycleRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<PerformanceJournalService> logger)
     {
         _journalRepository = journalRepository;
         _cycleRepository = cycleRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    private IQueryable<PerformanceJournalEntry> BaseQuery => _journalRepository.GetQueryable()
-        .Include(j => j.Owner)
-        .Include(j => j.SubjectEmployee)
-        .Include(j => j.AppraisalCycle)
-        .Include(j => j.RelatedGoal);
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A journal entry owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<PerformanceJournalEntry> GetOwnedAsync(Guid id)
+    {
+        var entity = await _journalRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Journal entry with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<PerformanceJournalEntry> BaseQuery
+    {
+        get
+        {
+            var tenantId = GetTenantId();
+            return _journalRepository.GetQueryable()
+                .Where(j => j.TenantId == tenantId)
+                .Include(j => j.Owner)
+                .Include(j => j.SubjectEmployee)
+                .Include(j => j.AppraisalCycle)
+                .Include(j => j.RelatedGoal);
+        }
+    }
 
     public async Task<PerformanceJournalEntryDto> GetByIdAsync(
         Guid id, Guid requestingEmployeeId, CancellationToken cancellationToken = default)
@@ -111,7 +143,8 @@ public class PerformanceJournalService : IPerformanceJournalService
         // Gate: private journaling must be enabled for this cycle.
         if (createDto.IsPrivate)
         {
-            var settings = await _cycleRepository.GetQueryable(c => c.Id == createDto.AppraisalCycleId)
+            var tenantId = GetTenantId();
+            var settings = await _cycleRepository.GetQueryable(c => c.Id == createDto.AppraisalCycleId && c.TenantId == tenantId)
                 .Include(c => c.AppraisalSettings)
                 .Select(c => c.AppraisalSettings)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -120,6 +153,7 @@ public class PerformanceJournalService : IPerformanceJournalService
         }
 
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
         entity.EntryDate = DateTime.UtcNow;
 
         await _journalRepository.AddAsync(entity);
@@ -132,9 +166,7 @@ public class PerformanceJournalService : IPerformanceJournalService
     public async Task<PerformanceJournalEntryDto> UpdateAsync(
         UpdatePerformanceJournalEntryDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _journalRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Journal entry with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         updateDto.UpdateEntity(entity);
         await _journalRepository.UpdateAsync(entity);
@@ -146,9 +178,7 @@ public class PerformanceJournalService : IPerformanceJournalService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _journalRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Journal entry with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _journalRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -159,9 +189,7 @@ public class PerformanceJournalService : IPerformanceJournalService
     public async Task<bool> SetPrivacyAsync(
         Guid id, bool isPrivate, CancellationToken cancellationToken = default)
     {
-        var entity = await _journalRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Journal entry with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         entity.IsPrivate = isPrivate;
         // No IsSharedWithManager field — IsPrivate controls visibility
@@ -182,8 +210,10 @@ public class PerformanceJournalService : IPerformanceJournalService
         CancellationToken cancellationToken = default)
     {
         var drList = directReportIds.ToList();
+        var tenantId = GetTenantId();
 
         var query = _journalRepository.GetQueryable()
+            .Where(j => j.TenantId == tenantId)
             .Include(j => j.Owner)
             .Include(j => j.SubjectEmployee)
             .Include(j => j.RelatedGoal)

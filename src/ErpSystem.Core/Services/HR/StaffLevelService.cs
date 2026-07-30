@@ -22,35 +22,60 @@ public class StaffLevelService : IStaffLevelService
 {
     private readonly IStaffLevelRepository _staffLevelRepository;
     private readonly IGenericRepository<EmployeePosition> _employeePositionRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffLevelService> _logger;
 
     public StaffLevelService(
         IStaffLevelRepository staffLevelRepository,
         IGenericRepository<EmployeePosition> employeePositionRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffLevelService> logger)
     {
         _staffLevelRepository = staffLevelRepository;
         _employeePositionRepository = employeePositionRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
     public async Task<IReadOnlyList<StaffLevelListDto>> GetAllAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var items = await _staffLevelRepository.GetAllOrderedByRankAsync(tenantId, cancellationToken);
         return items.Select(sl => sl.ToListDto()).ToList();
     }
 
     public async Task<IReadOnlyList<StaffLevelListDto>> GetActiveAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var items = await _staffLevelRepository.GetActiveOrderedByRankAsync(tenantId, cancellationToken);
         return items.Select(sl => sl.ToListDto()).ToList();
     }
 
     public async Task<StaffLevelDto> GetByIdAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = await _staffLevelRepository
             .GetQueryable(sl => sl.TenantId == tenantId && sl.Id == id)
             .AsNoTracking()
@@ -66,6 +91,7 @@ public class StaffLevelService : IStaffLevelService
 
     public async Task<StaffLevelDto> GetByCodeAsync(Guid tenantId, string code, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var normalized = NormalizeCode(code);
         if (string.IsNullOrWhiteSpace(normalized))
         {
@@ -83,6 +109,7 @@ public class StaffLevelService : IStaffLevelService
 
     public async Task<StaffLevelDetailDto> GetDetailAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = await _staffLevelRepository
             .GetQueryable(sl => sl.TenantId == tenantId && sl.Id == id)
             .AsNoTracking()
@@ -106,6 +133,7 @@ public class StaffLevelService : IStaffLevelService
     public async Task<StaffLevelDto> CreateAsync(Guid tenantId, CreateStaffLevelDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        tenantId = RequireCurrentTenant(tenantId);
 
         var normalizedCode = NormalizeCode(dto.Code);
         var normalizedName = NormalizeName(dto.Name);
@@ -134,6 +162,7 @@ public class StaffLevelService : IStaffLevelService
     public async Task<StaffLevelDto> UpdateAsync(Guid tenantId, UpdateStaffLevelDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        tenantId = RequireCurrentTenant(tenantId);
 
         var entity = await _staffLevelRepository
             .GetQueryable(sl => sl.TenantId == tenantId && sl.Id == dto.Id)
@@ -175,6 +204,7 @@ public class StaffLevelService : IStaffLevelService
 
     public async Task<bool> DeleteAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = await _staffLevelRepository
             .GetQueryable(sl => sl.TenantId == tenantId && sl.Id == id)
             .FirstOrDefaultAsync(cancellationToken);
@@ -200,6 +230,7 @@ public class StaffLevelService : IStaffLevelService
 
     private async Task<StaffLevelDto> SetActiveAsync(Guid tenantId, Guid id, bool isActive, CancellationToken cancellationToken)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = await _staffLevelRepository
             .GetQueryable(sl => sl.TenantId == tenantId && sl.Id == id)
             .FirstOrDefaultAsync(cancellationToken);

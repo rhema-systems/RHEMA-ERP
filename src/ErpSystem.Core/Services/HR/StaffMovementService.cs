@@ -23,6 +23,7 @@ public class StaffMovementService : IStaffMovementService
     private readonly IStaffMovementStatusHistoryRepository _historyRepo;
     private readonly IStaffMovementAttachmentRepository _attachmentRepo;
     private readonly IStaffMovementChecklistItemRepository _checklistRepo;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffMovementService> _logger;
 
@@ -32,6 +33,7 @@ public class StaffMovementService : IStaffMovementService
         IStaffMovementStatusHistoryRepository historyRepo,
         IStaffMovementAttachmentRepository attachmentRepo,
         IStaffMovementChecklistItemRepository checklistRepo,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffMovementService> logger)
     {
@@ -40,17 +42,72 @@ public class StaffMovementService : IStaffMovementService
         _historyRepo    = historyRepo;
         _attachmentRepo = attachmentRepo;
         _checklistRepo  = checklistRepo;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork     = unitOfWork;
         _logger         = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    // A movement owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<StaffMovement> GetOwnedMovementAsync(Guid id)
+    {
+        var entity = await _movementRepo.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Staff movement with ID '{id}' was not found.");
+        return entity;
+    }
+
+    private async Task<StaffMovementApprovalLevel> GetOwnedApprovalLevelAsync(Guid id)
+    {
+        var entity = await _approvalRepo.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Approval level with ID '{id}' was not found.");
+        return entity;
+    }
+
+    private async Task<StaffMovementAttachment> GetOwnedAttachmentAsync(Guid id)
+    {
+        var entity = await _attachmentRepo.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Attachment with ID '{id}' was not found.");
+        return entity;
+    }
+
+    private async Task<StaffMovementChecklistItem> GetOwnedChecklistItemAsync(Guid id)
+    {
+        var entity = await _checklistRepo.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Checklist item with ID '{id}' was not found.");
+        return entity;
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
 
     public async Task<StaffMovementDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _movementRepo.GetWithFullDetailsAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Staff movement with ID '{id}' was not found.");
 
         return entity.ToDetailDto();
@@ -58,19 +115,21 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<StaffMovementDto?> GetByMovementNumberAsync(string movementNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _movementRepo.GetByMovementNumberAsync(movementNumber);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetAllAsync(
             m => m.Employee,
             m => m.CurrentPosition,
             m => m.CurrentOrganizationUnit,
             m => m.NewPosition,
             m => m.NewOrganizationUnit);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public const int MaxSummariesByIdsBatchSize = 500;
@@ -88,8 +147,9 @@ public class StaffMovementService : IStaffMovementService
                 $"At most {MaxSummariesByIdsBatchSize} movement IDs may be requested per call.",
                 nameof(ids));
 
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetSummariesByIdsAsync(idList);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     private static readonly StaffMovementStatus[] _pendingApprovalStatuses =
@@ -110,6 +170,8 @@ public class StaffMovementService : IStaffMovementService
         bool isPendingApproval = false,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+
         IQueryable<StaffMovement> query = _movementRepo.GetQueryable()
             .Include(m => m.Employee)
             .Include(m => m.CurrentPosition)
@@ -118,7 +180,7 @@ public class StaffMovementService : IStaffMovementService
             .Include(m => m.NewOrganizationUnit)
             .Include(m => m.Promotion)
             .Include(m => m.Transfer)
-            .Where(m => !m.IsDeleted);
+            .Where(m => m.TenantId == tenantId && !m.IsDeleted);
 
         if (isPendingApproval)
             query = query.Where(m => _pendingApprovalStatuses.Contains(m.Status));
@@ -146,102 +208,118 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetByEmployeeAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByStatusAsync(StaffMovementStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByTypeAsync(
         StaffMovementType type, DateTime? from = null, DateTime? to = null,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetByTypeAsync(type, from, to);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByTypeAndStatusAsync(
         StaffMovementType type, StaffMovementStatus status,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetByTypeAndStatusAsync(type, status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByCurrentOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetByCurrentOrganizationUnitAsync(organizationUnitId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByNewOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetByNewOrganizationUnitAsync(organizationUnitId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetPendingApprovalAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetPendingApprovalAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetPendingEmployeeAcceptanceAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetPendingEmployeeAcceptanceAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetPendingHandoverAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetPendingHandoverAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetActiveTemporaryAssignmentsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetActiveTemporaryAssignmentsAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetExpiringTemporaryAssignmentsAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetExpiringTemporaryAssignmentsAsync(daysAhead);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByEffectiveDateRangeAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetByEffectiveDateRangeAsync(from, to);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByRequestedByAsync(Guid requestedByEmployeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetByRequestedByAsync(requestedByEmployeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetLatestMovementsForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetLatestMovementsForEmployeeAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetBySuccessionPlanAsync(Guid successionPlanId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _movementRepo.GetBySuccessionPlanAsync(successionPlanId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
     public async Task<StaffMovementDto> CreateAsync(CreateStaffMovementDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.MovementNumber          = await GenerateMovementNumberAsync(cancellationToken);
         entity.Status                  = StaffMovementStatus.Draft;
@@ -255,15 +333,14 @@ public class StaffMovementService : IStaffMovementService
 
         // Reload with all nav-prop includes so the returned DTO has display names populated
         var loaded = await _movementRepo.GetWithFullDetailsAsync(entity.Id);
+        if (loaded != null && loaded.TenantId != tenantId)
+            loaded = null;
         return (loaded ?? entity).ToDetailDto();
     }
 
     public async Task<StaffMovementDto> UpdateAsync(UpdateStaffMovementDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _movementRepo.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff movement with ID '{updateDto.Id}' was not found.");
+        var entity = await GetOwnedMovementAsync(updateDto.Id);
 
         if (entity.Status == StaffMovementStatus.Approved || entity.Status == StaffMovementStatus.Implemented)
             throw new InvalidOperationException("An authorised or completed movement cannot be edited.");
@@ -280,10 +357,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _movementRepo.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff movement with ID '{id}' was not found.");
+        var entity = await GetOwnedMovementAsync(id);
 
         if (entity.Status == StaffMovementStatus.Approved || entity.Status == StaffMovementStatus.Implemented)
             throw new InvalidOperationException("An authorised or completed movement cannot be deleted.");
@@ -300,10 +374,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> SubmitAsync(SubmitStaffMovementDto dto, Guid submittedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _movementRepo.GetByIdAsync(dto.MovementId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff movement with ID '{dto.MovementId}' was not found.");
+        var entity = await GetOwnedMovementAsync(dto.MovementId);
 
         if (entity.Status != StaffMovementStatus.Draft)
             throw new InvalidOperationException("Only Draft movements can be submitted for approval.");
@@ -323,10 +394,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> AuthorizeAsync(AuthorizeStaffMovementDto dto, Guid authorizedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _movementRepo.GetByIdAsync(dto.MovementId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff movement with ID '{dto.MovementId}' was not found.");
+        var entity = await GetOwnedMovementAsync(dto.MovementId);
 
         var approvalStatuses = new[]
         {
@@ -362,10 +430,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> RecordEmployeeResponseAsync(RespondToStaffMovementDto dto, CancellationToken cancellationToken = default)
     {
-        var entity = await _movementRepo.GetByIdAsync(dto.MovementId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff movement with ID '{dto.MovementId}' was not found.");
+        var entity = await GetOwnedMovementAsync(dto.MovementId);
 
         if (!entity.RequiresEmployeeAcceptance)
             throw new InvalidOperationException("This movement does not require employee acceptance.");
@@ -398,10 +463,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> CompleteHandoverAsync(CompleteHandoverDto dto, Guid completedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _movementRepo.GetByIdAsync(dto.MovementId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff movement with ID '{dto.MovementId}' was not found.");
+        var entity = await GetOwnedMovementAsync(dto.MovementId);
 
         if (!entity.RequiresHandover)
             throw new InvalidOperationException("This movement does not require a handover.");
@@ -422,10 +484,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> RejectAsync(RejectStaffMovementDto dto, Guid rejectedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _movementRepo.GetByIdAsync(dto.MovementId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff movement with ID '{dto.MovementId}' was not found.");
+        var entity = await GetOwnedMovementAsync(dto.MovementId);
 
         if (entity.Status == StaffMovementStatus.Approved || entity.Status == StaffMovementStatus.Implemented)
             throw new InvalidOperationException("An authorised or completed movement cannot be rejected.");
@@ -447,10 +506,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> CancelAsync(CancelStaffMovementDto dto, Guid cancelledByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _movementRepo.GetByIdAsync(dto.MovementId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff movement with ID '{dto.MovementId}' was not found.");
+        var entity = await GetOwnedMovementAsync(dto.MovementId);
 
         if (entity.Status == StaffMovementStatus.Implemented)
             throw new InvalidOperationException("A completed movement cannot be cancelled.");
@@ -472,10 +528,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> ProcessReturnFromTemporaryAsync(ProcessReturnFromTemporaryDto dto, Guid processedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _movementRepo.GetByIdAsync(dto.MovementId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff movement with ID '{dto.MovementId}' was not found.");
+        var entity = await GetOwnedMovementAsync(dto.MovementId);
 
         if (!entity.IsTemporary)
             throw new InvalidOperationException("This movement is not a temporary assignment.");
@@ -500,10 +553,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> ImplementAsync(Guid movementId, Guid implementedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _movementRepo.GetByIdAsync(movementId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff movement with ID '{movementId}' was not found.");
+        var entity = await GetOwnedMovementAsync(movementId);
 
         if (entity.Status != StaffMovementStatus.Approved)
             throw new InvalidOperationException($"Only approved movements can be implemented. Current status: {entity.Status}.");
@@ -524,18 +574,24 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<IEnumerable<StaffMovementApprovalLevelDto>> GetApprovalLevelsAsync(Guid movementId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedMovementAsync(movementId);
+        var tenantId = GetTenantId();
         var entities = await _approvalRepo.GetByMovementIdAsync(movementId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffMovementApprovalLevelDto?> GetCurrentPendingApprovalLevelAsync(Guid movementId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedMovementAsync(movementId);
+        var tenantId = GetTenantId();
         var entity = await _approvalRepo.GetCurrentPendingLevelAsync(movementId);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<StaffMovementApprovalLevelDto> AddApprovalLevelAsync(CreateStaffMovementApprovalLevelDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedMovementAsync(createDto.MovementId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.Status = ApprovalStatus.Pending;
 
@@ -547,10 +603,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> ActionApprovalLevelAsync(ActionApprovalLevelDto dto, Guid actionedByUserId, CancellationToken cancellationToken = default)
     {
-        var level = await _approvalRepo.GetByIdAsync(dto.ApprovalLevelId);
-
-        if (level == null)
-            throw new ArgumentException($"Approval level with ID '{dto.ApprovalLevelId}' was not found.");
+        var level = await GetOwnedApprovalLevelAsync(dto.ApprovalLevelId);
 
         if (level.Status != ApprovalStatus.Pending)
             throw new InvalidOperationException("This approval level has already been actioned.");
@@ -567,35 +620,29 @@ public class StaffMovementService : IStaffMovementService
             var allApproved = await _approvalRepo.AllLevelsApprovedAsync(level.MovementId);
             if (allApproved)
             {
-                var movement = await _movementRepo.GetByIdAsync(level.MovementId);
-                if (movement != null)
-                {
-                    var previousStatus      = movement.Status;
-                    movement.Status         = StaffMovementStatus.Approved;
-                    movement.AuthorizedById = actionedByUserId;
-                    movement.AuthorizationDate = DateTime.UtcNow;
+                var movement = await GetOwnedMovementAsync(level.MovementId);
+                var previousStatus      = movement.Status;
+                movement.Status         = StaffMovementStatus.Approved;
+                movement.AuthorizedById = actionedByUserId;
+                movement.AuthorizationDate = DateTime.UtcNow;
 
-                    await _movementRepo.UpdateAsync(movement);
-                    await RecordStatusHistoryAsync(movement.TenantId, movement.Id, previousStatus, movement.Status,
-                        "All approval levels cleared — movement authorised", actionedByUserId, cancellationToken);
-                }
+                await _movementRepo.UpdateAsync(movement);
+                await RecordStatusHistoryAsync(movement.TenantId, movement.Id, previousStatus, movement.Status,
+                    "All approval levels cleared — movement authorised", actionedByUserId, cancellationToken);
             }
         }
         else if (dto.Decision == ApprovalStatus.Rejected)
         {
-            var movement = await _movementRepo.GetByIdAsync(level.MovementId);
-            if (movement != null)
-            {
-                var previousStatus     = movement.Status;
-                movement.Status        = StaffMovementStatus.Rejected;
-                movement.RejectedById  = actionedByUserId;
-                movement.RejectionDate = DateTime.UtcNow;
-                movement.RejectionReason = dto.Comments;
+            var movement = await GetOwnedMovementAsync(level.MovementId);
+            var previousStatus     = movement.Status;
+            movement.Status        = StaffMovementStatus.Rejected;
+            movement.RejectedById  = actionedByUserId;
+            movement.RejectionDate = DateTime.UtcNow;
+            movement.RejectionReason = dto.Comments;
 
-                await _movementRepo.UpdateAsync(movement);
-                await RecordStatusHistoryAsync(movement.TenantId, movement.Id, previousStatus, movement.Status,
-                    dto.Comments ?? "Rejected at approval level", actionedByUserId, cancellationToken);
-            }
+            await _movementRepo.UpdateAsync(movement);
+            await RecordStatusHistoryAsync(movement.TenantId, movement.Id, previousStatus, movement.Status,
+                dto.Comments ?? "Rejected at approval level", actionedByUserId, cancellationToken);
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -605,10 +652,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> DelegateApprovalLevelAsync(DelegateApprovalLevelDto dto, CancellationToken cancellationToken = default)
     {
-        var level = await _approvalRepo.GetByIdAsync(dto.ApprovalLevelId);
-
-        if (level == null)
-            throw new ArgumentException($"Approval level with ID '{dto.ApprovalLevelId}' was not found.");
+        var level = await GetOwnedApprovalLevelAsync(dto.ApprovalLevelId);
 
         if (level.Status != ApprovalStatus.Pending)
             throw new InvalidOperationException("Only pending approval levels can be delegated.");
@@ -625,6 +669,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> AllLevelsApprovedAsync(Guid movementId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedMovementAsync(movementId);
         return await _approvalRepo.AllLevelsApprovedAsync(movementId);
     }
 
@@ -632,20 +677,26 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<IEnumerable<StaffMovementStatusHistoryDto>> GetStatusHistoryAsync(Guid movementId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedMovementAsync(movementId);
+        var tenantId = GetTenantId();
         var entities = await _historyRepo.GetByMovementIdAsync(movementId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffMovementStatusHistoryDto?> GetLatestStatusAsync(Guid movementId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedMovementAsync(movementId);
+        var tenantId = GetTenantId();
         var entity = await _historyRepo.GetLatestAsync(movementId);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     // ── Attachment Operations ─────────────────────────────────────────────────
 
     public async Task<StaffMovementAttachmentDto> AddAttachmentAsync(CreateStaffMovementAttachmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedMovementAsync(createDto.MovementId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.UploadDate     = DateTime.UtcNow;
         entity.UploadedById   = createdByUserId;
@@ -658,22 +709,23 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<IEnumerable<StaffMovementAttachmentDto>> GetAttachmentsAsync(Guid movementId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedMovementAsync(movementId);
+        var tenantId = GetTenantId();
         var entities = await _attachmentRepo.GetByMovementIdAsync(movementId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffMovementAttachmentDto>> GetAttachmentsByTypeAsync(Guid movementId, StaffMovementAttachmentType type, CancellationToken cancellationToken = default)
     {
+        await GetOwnedMovementAsync(movementId);
+        var tenantId = GetTenantId();
         var entities = await _attachmentRepo.GetByTypeAsync(movementId, type);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _attachmentRepo.GetByIdAsync(attachmentId);
-
-        if (entity == null)
-            throw new ArgumentException($"Attachment with ID '{attachmentId}' was not found.");
+        var entity = await GetOwnedAttachmentAsync(attachmentId);
 
         await _attachmentRepo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -685,30 +737,41 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<IEnumerable<StaffMovementChecklistItemDto>> GetChecklistItemsAsync(Guid movementId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedMovementAsync(movementId);
+        var tenantId = GetTenantId();
         var entities = await _checklistRepo.GetByMovementIdAsync(movementId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffMovementChecklistItemDto>> GetPendingChecklistItemsAsync(Guid movementId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedMovementAsync(movementId);
+        var tenantId = GetTenantId();
         var entities = await _checklistRepo.GetPendingItemsAsync(movementId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffMovementChecklistItemDto>> GetOverdueChecklistItemsAsync(Guid? movementId = null, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+        if (movementId.HasValue)
+            await GetOwnedMovementAsync(movementId.Value);
+
         var entities = await _checklistRepo.GetOverdueItemsAsync(movementId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffMovementChecklistItemDto>> GetChecklistItemsByResponsiblePersonAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _checklistRepo.GetByResponsiblePersonAsync(employeeId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffMovementChecklistItemDto> AddChecklistItemAsync(CreateStaffMovementChecklistItemDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedMovementAsync(createDto.MovementId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _checklistRepo.AddAsync(entity);
@@ -719,10 +782,7 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> CompleteChecklistItemAsync(CompleteChecklistItemDto dto, Guid completedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _checklistRepo.GetByIdAsync(dto.ItemId);
-
-        if (entity == null)
-            throw new ArgumentException($"Checklist item with ID '{dto.ItemId}' was not found.");
+        var entity = await GetOwnedChecklistItemAsync(dto.ItemId);
 
         entity.IsCompleted      = true;
         entity.CompletionDate   = DateTime.UtcNow;
@@ -736,15 +796,13 @@ public class StaffMovementService : IStaffMovementService
 
     public async Task<bool> AllRequiredItemsCompletedAsync(Guid movementId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedMovementAsync(movementId);
         return await _checklistRepo.AllRequiredItemsCompletedAsync(movementId);
     }
 
     public async Task<bool> DeleteChecklistItemAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
-        var entity = await _checklistRepo.GetByIdAsync(itemId);
-
-        if (entity == null)
-            throw new ArgumentException($"Checklist item with ID '{itemId}' was not found.");
+        var entity = await GetOwnedChecklistItemAsync(itemId);
 
         await _checklistRepo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -760,6 +818,7 @@ public class StaffMovementService : IStaffMovementService
         DateTime? toDate     = null,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var now = DateTime.UtcNow;
 
         var yearStart = filterYear.HasValue
@@ -770,7 +829,7 @@ public class StaffMovementService : IStaffMovementService
         var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
         var monthEnd   = monthStart.AddMonths(1).AddTicks(-1);
 
-        var query     = _movementRepo.GetQueryable().Where(m => !m.IsDeleted);
+        var query     = _movementRepo.GetQueryable().Where(m => m.TenantId == tenantId && !m.IsDeleted);
         var ytdQuery  = query.Where(m => m.RequestDate >= yearStart && m.RequestDate <= yearEnd);
         var dateQuery = (fromDate.HasValue || toDate.HasValue)
             ? query.Where(m =>
@@ -796,9 +855,9 @@ public class StaffMovementService : IStaffMovementService
             StaffMovementStatus.Cancelled
         };
 
-        var pendingApprovals    = (await _movementRepo.GetPendingApprovalAsync()).ToList();
-        var pendingHandover     = (await _movementRepo.GetPendingHandoverAsync()).ToList();
-        var expiringAssignments = (await _movementRepo.GetExpiringTemporaryAssignmentsAsync(60)).ToList();
+        var pendingApprovals    = (await _movementRepo.GetPendingApprovalAsync()).Where(m => m.TenantId == tenantId).ToList();
+        var pendingHandover     = (await _movementRepo.GetPendingHandoverAsync()).Where(m => m.TenantId == tenantId).ToList();
+        var expiringAssignments = (await _movementRepo.GetExpiringTemporaryAssignmentsAsync(60)).Where(m => m.TenantId == tenantId).ToList();
 
         // ── Scalar KPIs ───────────────────────────────────────────────────────
 
@@ -978,9 +1037,10 @@ public class StaffMovementService : IStaffMovementService
 
     private async Task<string> GenerateMovementNumberAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var prefix  = $"MOV-{DateTime.UtcNow:yyyyMMdd}";
         var countToday = await _movementRepo.GetQueryable()
-            .Where(m => m.MovementNumber.StartsWith(prefix))
+            .Where(m => m.TenantId == tenantId && m.MovementNumber.StartsWith(prefix))
             .CountAsync(cancellationToken);
 
         return $"{prefix}-{(countToday + 1):D4}";
@@ -995,6 +1055,7 @@ public class StaffMovementService : IStaffMovementService
         Guid changedById,
         CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var history = new StaffMovementStatusHistory
         {
             TenantId    = tenantId,

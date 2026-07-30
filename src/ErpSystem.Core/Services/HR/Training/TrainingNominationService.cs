@@ -1,6 +1,7 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -23,6 +24,7 @@ public class TrainingNominationService : ITrainingNominationService
     private readonly IWorkflowIntegrationService _workflowIntegration;
     private readonly IWorkflowStatusAdapterRegistry _adapterRegistry;
     private readonly ICurrentUserService _currentUser;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly INumberSequenceService _numberSequence;
     private readonly ILogger<TrainingNominationService> _logger;
@@ -37,6 +39,7 @@ public class TrainingNominationService : ITrainingNominationService
         IWorkflowIntegrationService workflowIntegration,
         IWorkflowStatusAdapterRegistry adapterRegistry,
         ICurrentUserService currentUser,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         INumberSequenceService numberSequence,
         ILogger<TrainingNominationService> logger)
@@ -50,18 +53,50 @@ public class TrainingNominationService : ITrainingNominationService
         _workflowIntegration = workflowIntegration;
         _adapterRegistry = adapterRegistry;
         _currentUser = currentUser;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _numberSequence = numberSequence;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A nomination owned by another tenant is reported as missing rather than forbidden, so the endpoints
+    // do not confirm that the id exists elsewhere.
+    private async Task<TrainingNomination> GetOwnedNominationAsync(Guid id)
+    {
+        var entity = await _nominationRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Training nomination with ID '{id}' not found.");
+        return entity;
+    }
+
+    // Same "missing, not forbidden" rule as above, for the follow-up assessments this service mutates.
+    private async Task<TrainingFollowUpAssessment> GetOwnedFollowUpAsync(Guid id)
+    {
+        var entity = await _followUpRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Follow-up assessment with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Nomination queries ────────────────────────────────────────────────────
 
     public async Task<TrainingNominationDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _nominationRepository.GetWithFullDetailsAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Training nomination with ID '{id}' not found.");
 
         return entity.ToDto();
@@ -69,13 +104,18 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<TrainingNominationDto?> GetByNominationNumberAsync(string nominationNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _nominationRepository.GetByNominationNumberAsync(nominationNumber);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<PagedResult<TrainingNominationSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _nominationRepository.GetQueryable();
+        var tenantId = GetTenantId();
+
+        // Scoping the query before the count matters: an unscoped CountAsync reports other tenants' rows
+        // in TotalCount and breaks the pager.
+        var query = _nominationRepository.GetQueryable().Where(n => n.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         // Eager-load the navigations the summary DTO reads, otherwise the list shows blank
@@ -99,42 +139,53 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<IEnumerable<TrainingNominationSummaryDto>> GetByScheduleIdAsync(Guid scheduleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _nominationRepository.GetByScheduleIdAsync(scheduleId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(n => n.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingNominationSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _nominationRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(n => n.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingNominationSummaryDto>> GetByStatusAsync(NominationStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _nominationRepository.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(n => n.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingNominationSummaryDto>> GetPendingSupervisorApprovalAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _nominationRepository.GetPendingSupervisorApprovalAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(n => n.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingNominationSummaryDto>> GetPendingHrApprovalAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _nominationRepository.GetPendingHrApprovalAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(n => n.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── Nomination CRUD ───────────────────────────────────────────────────────
 
     public async Task<TrainingNominationDto> CreateAsync(CreateTrainingNominationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         // Block duplicate nominations of the same employee to the same schedule while an earlier
         // nomination is still live (rejected/withdrawn ones don't count, so re-nomination stays possible).
+        // Scoped to the tenant: unscoped, another tenant's row would block a legitimate nomination.
         var alreadyNominated = await _nominationRepository.GetQueryable()
-            .AnyAsync(n => n.ScheduleId == createDto.ScheduleId
+            .AnyAsync(n => n.TenantId == current
+                && n.ScheduleId == createDto.ScheduleId
                 && n.EmployeeId == createDto.EmployeeId
                 && n.Status != NominationStatus.Rejected
                 && n.Status != NominationStatus.Withdrawn,
@@ -143,7 +194,7 @@ public class TrainingNominationService : ITrainingNominationService
         if (alreadyNominated)
             throw new InvalidOperationException("This employee already has an active nomination for the selected schedule.");
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         entity.NominationNumber = await GenerateNominationNumberAsync(cancellationToken);
         entity.NominationDate = DateTime.UtcNow;
         entity.Status = createDto.SaveAsDraft ? NominationStatus.Draft : NominationStatus.Submitted;
@@ -158,15 +209,20 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<BulkNominationResultDto> BulkCreateAsync(BulkCreateTrainingNominationDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         var result = new BulkNominationResultDto { RequestedCount = dto.EmployeeIds.Count };
 
         var schedule = await _scheduleRepository.GetByIdAsync(dto.ScheduleId);
-        if (schedule == null)
+        if (schedule == null || schedule.TenantId != current)
             throw new ArgumentException($"Training schedule with ID '{dto.ScheduleId}' not found.");
 
         // Existing live nominations for this schedule (for both dup checks and capacity).
         var existing = await _nominationRepository.GetQueryable()
-            .Where(n => n.ScheduleId == dto.ScheduleId
+            .Where(n => n.TenantId == current
+                && n.ScheduleId == dto.ScheduleId
                 && n.Status != NominationStatus.Rejected
                 && n.Status != NominationStatus.Withdrawn)
             .Select(n => new { n.EmployeeId, n.Status })
@@ -188,10 +244,9 @@ public class TrainingNominationService : ITrainingNominationService
                 ScheduleId = dto.ScheduleId,
                 EmployeeId = employeeId,
                 Type = dto.Type,
-                NominatedById = dto.NominatedById,
                 Justification = dto.Justification,
                 SaveAsDraft = dto.SaveAsDraft
-            }.ToEntity(tenantId, createdByUserId);
+            }.ToEntity(current, createdByUserId);
 
             entity.NominationNumber = await GenerateNominationNumberAsync(cancellationToken);
             entity.NominationDate = DateTime.UtcNow;
@@ -212,10 +267,7 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<TrainingNominationDto> UpdateAsync(Guid id, UpdateTrainingNominationDto dto, CancellationToken cancellationToken = default)
     {
-        var entity = await _nominationRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training nomination with ID '{id}' not found.");
+        var entity = await GetOwnedNominationAsync(id);
 
         if (entity.Status == NominationStatus.Approved ||
             entity.Status == NominationStatus.Confirmed ||
@@ -241,10 +293,7 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<TrainingNominationDto> SubmitAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _nominationRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training nomination with ID '{id}' not found.");
+        var entity = await GetOwnedNominationAsync(id);
 
         if (entity.Status != NominationStatus.Draft)
             throw new InvalidOperationException($"Only Draft nominations can be submitted. Current status is '{entity.Status}'.");
@@ -283,10 +332,7 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _nominationRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training nomination with ID '{id}' not found.");
+        var entity = await GetOwnedNominationAsync(id);
 
         if (entity.Status != NominationStatus.Draft && entity.Status != NominationStatus.Submitted)
             throw new InvalidOperationException("Only draft or submitted (not yet approved) nominations can be deleted.");
@@ -301,12 +347,9 @@ public class TrainingNominationService : ITrainingNominationService
 
     // ── Workflow ──────────────────────────────────────────────────────────────
 
-    public async Task<bool> ApproveAsync(ApproveNominationDto dto, CancellationToken cancellationToken = default)
+    public async Task<bool> ApproveAsync(ApproveNominationDto dto, Guid approvedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _nominationRepository.GetByIdAsync(dto.NominationId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training nomination with ID '{dto.NominationId}' not found.");
+        var entity = await GetOwnedNominationAsync(dto.NominationId);
 
         // ── Configurable-workflow path ────────────────────────────────────────
         if (entity.WorkflowInstanceId.HasValue)
@@ -326,10 +369,10 @@ public class TrainingNominationService : ITrainingNominationService
                 throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process approval.");
 
             var adapter = _adapterRegistry.GetAdapter(WorkflowEntityType);
-            adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, dto.ApprovedById);
+            adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, approvedById);
             entity.HrComments = dto.Comments;
             entity.UpdatedAt = DateTime.UtcNow;
-            entity.UpdatedBy = dto.ApprovedById.ToString();
+            entity.UpdatedBy = approvedById.ToString();
 
             await _nominationRepository.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -337,7 +380,7 @@ public class TrainingNominationService : ITrainingNominationService
             _logger.LogInformation("Training nomination {NominationNumber} approval processed via workflow → {Status}", entity.NominationNumber, entity.Status);
 
             if (entity.Status == NominationStatus.Approved)
-                await _bondService.EnsureBondForNominationAsync(entity.Id, entity.TenantId, dto.ApprovedById, cancellationToken);
+                await _bondService.EnsureBondForNominationAsync(entity.Id, entity.TenantId, approvedById, cancellationToken);
 
             return true;
         }
@@ -348,8 +391,8 @@ public class TrainingNominationService : ITrainingNominationService
             if (entity.Status != NominationStatus.Submitted && entity.Status != NominationStatus.SupervisorReview)
                 throw new InvalidOperationException("Nomination is not in a state that allows supervisor approval.");
 
-            entity.SupervisorApprovedById = dto.ApprovedById;
-            entity.SupervisorApprovalDate = DateTime.UtcNow; // action timestamp — server UTC, not client-supplied
+            entity.SupervisorApprovedById = approvedById;
+            entity.SupervisorApprovalDate = DateTime.UtcNow;
             entity.SupervisorComments = dto.Comments;
             entity.Status = NominationStatus.HrReview;
         }
@@ -361,8 +404,8 @@ public class TrainingNominationService : ITrainingNominationService
             // Capacity enforcement: final HR approval takes a seat, so block it once the schedule is full.
             await EnforceScheduleCapacityAsync(entity, cancellationToken);
 
-            entity.HrApprovedById = dto.ApprovedById;
-            entity.HrApprovalDate = DateTime.UtcNow; // action timestamp — server UTC, not client-supplied
+            entity.HrApprovedById = approvedById;
+            entity.HrApprovalDate = DateTime.UtcNow;
             entity.HrComments = dto.Comments;
             entity.Status = NominationStatus.Approved;
         }
@@ -372,7 +415,7 @@ public class TrainingNominationService : ITrainingNominationService
         }
 
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = dto.ApprovedById.ToString();
+        entity.UpdatedBy = approvedById.ToString();
 
         await _nominationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -381,7 +424,7 @@ public class TrainingNominationService : ITrainingNominationService
 
         // On final HR approval, auto-create a pending service bond if the program requires one (idempotent).
         if (entity.Status == NominationStatus.Approved)
-            await _bondService.EnsureBondForNominationAsync(entity.Id, entity.TenantId, dto.ApprovedById, cancellationToken);
+            await _bondService.EnsureBondForNominationAsync(entity.Id, entity.TenantId, approvedById, cancellationToken);
 
         return true;
     }
@@ -391,13 +434,16 @@ public class TrainingNominationService : ITrainingNominationService
         => Guid.TryParse(_currentUser.UserId, out var uid) ? uid : Guid.Empty;
 
     /// <summary>Blocks approval when the schedule has no remaining seats (confirmed/approved ≥ capacity).</summary>
-    private async Task EnforceScheduleCapacityAsync(Core.Entities.HR.Training.TrainingNomination entity, CancellationToken cancellationToken)
+    private async Task EnforceScheduleCapacityAsync(TrainingNomination entity, CancellationToken cancellationToken)
     {
         var schedule = await _scheduleRepository.GetByIdAsync(entity.ScheduleId);
-        if (schedule == null || schedule.MaxParticipants <= 0) return;
+        if (schedule == null || schedule.TenantId != entity.TenantId || schedule.MaxParticipants <= 0) return;
 
+        // Seats must be counted within the nomination's tenant: an unscoped count sums other tenants'
+        // nominations and reports the schedule as full when it is not.
         var seatsTaken = await _nominationRepository.GetQueryable()
-            .CountAsync(n => n.ScheduleId == entity.ScheduleId
+            .CountAsync(n => n.TenantId == entity.TenantId
+                && n.ScheduleId == entity.ScheduleId
                 && n.Id != entity.Id
                 && (n.Status == NominationStatus.Approved || n.Status == NominationStatus.Confirmed),
                 cancellationToken);
@@ -407,12 +453,9 @@ public class TrainingNominationService : ITrainingNominationService
                 $"Cannot approve: this schedule is full ({schedule.MaxParticipants} seats taken). Add the employee to the waitlist instead.");
     }
 
-    public async Task<bool> RejectAsync(RejectNominationDto dto, CancellationToken cancellationToken = default)
+    public async Task<bool> RejectAsync(RejectNominationDto dto, Guid rejectedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _nominationRepository.GetByIdAsync(dto.NominationId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training nomination with ID '{dto.NominationId}' not found.");
+        var entity = await GetOwnedNominationAsync(dto.NominationId);
 
         if (entity.Status == NominationStatus.Rejected || entity.Status == NominationStatus.Withdrawn)
             throw new InvalidOperationException($"Nomination is already {entity.Status}.");
@@ -431,25 +474,25 @@ public class TrainingNominationService : ITrainingNominationService
                 throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process rejection.");
 
             var adapter = _adapterRegistry.GetAdapter(WorkflowEntityType);
-            adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, dto.RejectedById, reason);
+            adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, rejectedById, reason);
             entity.UpdatedAt = DateTime.UtcNow;
-            entity.UpdatedBy = dto.RejectedById.ToString();
+            entity.UpdatedBy = rejectedById.ToString();
 
             await _nominationRepository.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Training nomination {NominationNumber} rejection processed via workflow", entity.NominationNumber);
 
-            await _bondService.CancelForNominationAsync(entity.Id, dto.RejectedById, cancellationToken);
+            await _bondService.CancelForNominationAsync(entity.Id, rejectedById, cancellationToken);
             return true;
         }
 
         // ── Legacy path ───────────────────────────────────────────────────────
         entity.Status = NominationStatus.Rejected;
         entity.RejectionReason = dto.RejectionReason;
-        entity.RejectedDate = DateTime.UtcNow; // action timestamp — server UTC, not client-supplied
+        entity.RejectedDate = DateTime.UtcNow;
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = dto.RejectedById.ToString();
+        entity.UpdatedBy = rejectedById.ToString();
 
         await _nominationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -457,17 +500,14 @@ public class TrainingNominationService : ITrainingNominationService
         _logger.LogInformation("Training nomination rejected: {NominationNumber}", entity.NominationNumber);
 
         // A rejected nomination cancels any still-pending service bond.
-        await _bondService.CancelForNominationAsync(entity.Id, dto.RejectedById, cancellationToken);
+        await _bondService.CancelForNominationAsync(entity.Id, rejectedById, cancellationToken);
 
         return true;
     }
 
     public async Task<bool> WithdrawAsync(WithdrawNominationDto dto, CancellationToken cancellationToken = default)
     {
-        var entity = await _nominationRepository.GetByIdAsync(dto.NominationId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training nomination with ID '{dto.NominationId}' not found.");
+        var entity = await GetOwnedNominationAsync(dto.NominationId);
 
         if (entity.Status == NominationStatus.Withdrawn || entity.Status == NominationStatus.Rejected)
             throw new InvalidOperationException($"Nomination cannot be withdrawn because it is already {entity.Status}.");
@@ -490,7 +530,11 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<TrainingAttendanceDto> MarkAttendanceAsync(MarkAttendanceDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
 
         await _attendanceRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -500,7 +544,11 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<IEnumerable<TrainingAttendanceDto>> BulkMarkAttendanceAsync(BulkMarkAttendanceDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var records = new List<ErpSystem.Core.Entities.HR.Training.TrainingAttendance>();
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var records = new List<TrainingAttendance>();
 
         foreach (var entry in dto.Entries)
         {
@@ -512,11 +560,10 @@ public class TrainingNominationService : ITrainingNominationService
                 IsPresent = entry.IsPresent,
                 CheckInTime = entry.CheckInTime,
                 CheckOutTime = entry.CheckOutTime,
-                MarkedById = dto.MarkedById,
-                MarkedAt = dto.AttendanceDate
+                AbsenceReason = entry.AbsenceReason
             };
 
-            var entity = markDto.ToEntity(tenantId, createdByUserId);
+            var entity = markDto.ToEntity(current, createdByUserId);
             records.Add(entity);
         }
 
@@ -532,21 +579,27 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<IEnumerable<TrainingAttendanceDto>> GetAttendanceForScheduleAsync(Guid scheduleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _attendanceRepository.GetByScheduleIdAsync(scheduleId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<TrainingAttendanceDto>> GetAttendanceByDateAsync(Guid scheduleId, DateTime date, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _attendanceRepository.GetByScheduleAndDateAsync(scheduleId, date);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     // ── Feedback sub-operations ───────────────────────────────────────────────
 
     public async Task<TrainingFeedbackDto> SubmitFeedbackAsync(SubmitTrainingFeedbackDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
 
         await _feedbackRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -558,15 +611,20 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<IEnumerable<TrainingFeedbackDto>> GetFeedbackForScheduleAsync(Guid scheduleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _feedbackRepository.GetByScheduleIdAsync(scheduleId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     // ── Follow-up assessment sub-operations ───────────────────────────────────
 
     public async Task<TrainingFollowUpAssessmentDto> SubmitFollowUpAssessmentAsync(SubmitFollowUpAssessmentDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
 
         await _followUpRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -578,14 +636,11 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<TrainingFollowUpAssessmentDto> SubmitManagerObservationAsync(SubmitManagerObservationDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _followUpRepository.GetByIdAsync(dto.AssessmentId);
+        var entity = await GetOwnedFollowUpAsync(dto.AssessmentId);
 
-        if (entity == null)
-            throw new ArgumentException($"Follow-up assessment with ID '{dto.AssessmentId}' not found.");
-
-        entity.ManagerId = dto.ManagerId;
+        entity.ManagerId = updatedByUserId;
         entity.ManagerObservationNotes = dto.ManagerObservationNotes;
-        entity.ManagerSubmittedDate = dto.ManagerSubmittedDate;
+        entity.ManagerSubmittedDate = DateTime.UtcNow;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = updatedByUserId.ToString();
 
@@ -599,8 +654,9 @@ public class TrainingNominationService : ITrainingNominationService
 
     public async Task<IEnumerable<TrainingFollowUpAssessmentDto>> GetFollowUpAssessmentsAsync(Guid scheduleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _followUpRepository.GetByScheduleIdAsync(scheduleId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

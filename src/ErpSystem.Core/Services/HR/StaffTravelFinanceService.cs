@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
@@ -20,6 +21,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     private readonly IStaffTravelExpenseClaimLineRepository _lineRepository;
     private readonly IStaffTravelAdvanceRepository _advanceRepository;
     private readonly IStaffTravelPerDiemRateRepository _perDiemRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffTravelFinanceService> _logger;
 
@@ -29,6 +31,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         IStaffTravelExpenseClaimLineRepository lineRepository,
         IStaffTravelAdvanceRepository advanceRepository,
         IStaffTravelPerDiemRateRepository perDiemRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffTravelFinanceService> logger)
     {
@@ -37,8 +40,68 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         _lineRepository = lineRepository;
         _advanceRepository = advanceRepository;
         _perDiemRepository = perDiemRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<StaffTravelBudget> GetOwnedBudgetAsync(Guid id)
+    {
+        var entity = await _budgetRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Budget with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffTravelExpenseClaim> GetOwnedClaimAsync(Guid id)
+    {
+        var entity = await _claimRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Expense claim with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffTravelExpenseClaimLine> GetOwnedClaimLineAsync(Guid id)
+    {
+        var entity = await _lineRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Expense claim line with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffTravelAdvance> GetOwnedAdvanceAsync(Guid id)
+    {
+        var entity = await _advanceRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Advance with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffTravelPerDiemRate> GetOwnedPerDiemRateAsync(Guid id)
+    {
+        var entity = await _perDiemRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Per-diem rate with ID '{id}' not found.");
+        return entity;
     }
 
     // ---- Budget ------------------------------------------------------------
@@ -46,13 +109,17 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     public async Task<StaffTravelBudgetDto?> GetBudgetByRequestAsync(Guid requestId, CancellationToken cancellationToken = default)
     {
         var entity = await _budgetRepository.GetByRequestIdAsync(requestId);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != GetTenantId())
+            return null;
+        return entity.ToDto();
     }
 
     public async Task<StaffTravelBudgetDto> CreateBudgetAsync(CreateStaffTravelBudgetDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+
         var existing = await _budgetRepository.GetByRequestIdAsync(createDto.StaffTravelRequestId);
-        if (existing != null)
+        if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A budget already exists for this request.");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
@@ -63,9 +130,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<StaffTravelBudgetDto> UpdateBudgetAsync(UpdateStaffTravelBudgetDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _budgetRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Budget with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedBudgetAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _budgetRepository.UpdateAsync(entity);
@@ -77,8 +142,9 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<StaffTravelExpenseClaimDto> GetClaimByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _claimRepository.GetWithLinesAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Expense claim with ID '{id}' not found.");
         return entity.ToDto();
     }
@@ -86,26 +152,60 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     public async Task<StaffTravelExpenseClaimDto?> GetClaimByNumberAsync(string claimNumber, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByClaimNumberAsync(claimNumber);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != GetTenantId())
+            return null;
+        return entity.ToDto();
     }
 
     public async Task<IEnumerable<StaffTravelExpenseClaimSummaryDto>> GetAllClaimsAsync(CancellationToken cancellationToken = default)
-        => (await _claimRepository.GetAllWithDetailsAsync()).Select(c => c.ToSummaryDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _claimRepository.GetAllWithDetailsAsync())
+            .Where(c => c.TenantId == tenantId)
+            .Select(c => c.ToSummaryDto())
+            .ToList();
+    }
 
     public async Task<IEnumerable<StaffTravelExpenseClaimSummaryDto>> GetClaimsByRequestAsync(Guid requestId, CancellationToken cancellationToken = default)
-        => (await _claimRepository.GetByRequestIdAsync(requestId)).Select(c => c.ToSummaryDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _claimRepository.GetByRequestIdAsync(requestId))
+            .Where(c => c.TenantId == tenantId)
+            .Select(c => c.ToSummaryDto())
+            .ToList();
+    }
 
     public async Task<IEnumerable<StaffTravelExpenseClaimSummaryDto>> GetClaimsByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
-        => (await _claimRepository.GetByEmployeeIdAsync(employeeId)).Select(c => c.ToSummaryDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _claimRepository.GetByEmployeeIdAsync(employeeId))
+            .Where(c => c.TenantId == tenantId)
+            .Select(c => c.ToSummaryDto())
+            .ToList();
+    }
 
     public async Task<IEnumerable<StaffTravelExpenseClaimSummaryDto>> GetClaimsByStatusAsync(TravelClaimStatus status, CancellationToken cancellationToken = default)
-        => (await _claimRepository.GetByStatusAsync(status)).Select(c => c.ToSummaryDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _claimRepository.GetByStatusAsync(status))
+            .Where(c => c.TenantId == tenantId)
+            .Select(c => c.ToSummaryDto())
+            .ToList();
+    }
 
     public async Task<IEnumerable<StaffTravelExpenseClaimSummaryDto>> GetUnpaidApprovedClaimsAsync(CancellationToken cancellationToken = default)
-        => (await _claimRepository.GetUnpaidApprovedClaimsAsync()).Select(c => c.ToSummaryDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _claimRepository.GetUnpaidApprovedClaimsAsync())
+            .Where(c => c.TenantId == tenantId)
+            .Select(c => c.ToSummaryDto())
+            .ToList();
+    }
 
     public async Task<StaffTravelExpenseClaimDto> CreateClaimAsync(CreateStaffTravelExpenseClaimDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.ClaimNumber = await GenerateClaimNumberAsync(cancellationToken);
         entity.Status = TravelClaimStatus.Draft;
@@ -116,14 +216,16 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Expense claim created: {ClaimNumber}", entity.ClaimNumber);
-        return (await _claimRepository.GetWithLinesAsync(entity.Id))!.ToDto();
+
+        var refreshed = await _claimRepository.GetWithLinesAsync(entity.Id);
+        if (refreshed == null || refreshed.TenantId != GetTenantId())
+            throw new ArgumentException($"Expense claim with ID '{entity.Id}' not found.");
+        return refreshed.ToDto();
     }
 
     public async Task<StaffTravelExpenseClaimDto> UpdateClaimAsync(UpdateStaffTravelExpenseClaimDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _claimRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Expense claim with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedClaimAsync(updateDto.Id);
 
         if (entity.Status is TravelClaimStatus.Paid or TravelClaimStatus.Approved)
             throw new InvalidOperationException($"A claim in status '{entity.Status}' cannot be edited.");
@@ -131,14 +233,16 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return (await _claimRepository.GetWithLinesAsync(entity.Id))!.ToDto();
+
+        var refreshed = await _claimRepository.GetWithLinesAsync(entity.Id);
+        if (refreshed == null || refreshed.TenantId != GetTenantId())
+            throw new ArgumentException($"Expense claim with ID '{entity.Id}' not found.");
+        return refreshed.ToDto();
     }
 
     public async Task<bool> DeleteClaimAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _claimRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Expense claim with ID '{id}' not found.");
+        var entity = await GetOwnedClaimAsync(id);
 
         if (entity.Status != TravelClaimStatus.Draft)
             throw new InvalidOperationException("Only draft claims can be deleted.");
@@ -150,9 +254,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<bool> SubmitClaimAsync(Guid claimId, Guid submittedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _claimRepository.GetByIdAsync(claimId);
-        if (entity == null)
-            throw new ArgumentException($"Expense claim with ID '{claimId}' not found.");
+        var entity = await GetOwnedClaimAsync(claimId);
 
         if (entity.Status is not (TravelClaimStatus.Draft or TravelClaimStatus.Returned))
             throw new InvalidOperationException("Only draft or returned claims can be submitted.");
@@ -169,9 +271,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<bool> ReviewClaimAsync(ReviewStaffTravelExpenseClaimDto reviewDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _claimRepository.GetByIdAsync(reviewDto.ClaimId);
-        if (entity == null)
-            throw new ArgumentException($"Expense claim with ID '{reviewDto.ClaimId}' not found.");
+        var entity = await GetOwnedClaimAsync(reviewDto.ClaimId);
 
         entity.Status = reviewDto.NewStatus;
         entity.FinanceReviewedById = reviewDto.FinanceReviewedById;
@@ -188,9 +288,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<bool> PayClaimAsync(PayStaffTravelExpenseClaimDto payDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _claimRepository.GetByIdAsync(payDto.ClaimId);
-        if (entity == null)
-            throw new ArgumentException($"Expense claim with ID '{payDto.ClaimId}' not found.");
+        var entity = await GetOwnedClaimAsync(payDto.ClaimId);
 
         if (entity.Status is not (TravelClaimStatus.Approved or TravelClaimStatus.PartiallyApproved))
             throw new InvalidOperationException("Only approved claims can be paid.");
@@ -212,6 +310,9 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<StaffTravelExpenseClaimLineDto> AddClaimLineAsync(CreateStaffTravelExpenseClaimLineDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedClaimAsync(createDto.StaffTravelExpenseClaimId);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _lineRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -221,13 +322,18 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     }
 
     public async Task<IEnumerable<StaffTravelExpenseClaimLineDto>> GetClaimLinesAsync(Guid claimId, CancellationToken cancellationToken = default)
-        => (await _lineRepository.GetByClaimIdAsync(claimId)).Select(l => l.ToDto()).ToList();
+    {
+        await GetOwnedClaimAsync(claimId);
+        var tenantId = GetTenantId();
+        return (await _lineRepository.GetByClaimIdAsync(claimId))
+            .Where(l => l.TenantId == tenantId)
+            .Select(l => l.ToDto())
+            .ToList();
+    }
 
     public async Task<StaffTravelExpenseClaimLineDto> UpdateClaimLineAsync(UpdateStaffTravelExpenseClaimLineDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _lineRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Expense claim line with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedClaimLineAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _lineRepository.UpdateAsync(entity);
@@ -239,9 +345,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<bool> ReviewClaimLineAsync(ReviewStaffTravelExpenseClaimLineDto reviewDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _lineRepository.GetByIdAsync(reviewDto.LineId);
-        if (entity == null)
-            throw new ArgumentException($"Expense claim line with ID '{reviewDto.LineId}' not found.");
+        var entity = await GetOwnedClaimLineAsync(reviewDto.LineId);
 
         entity.Status = reviewDto.Status;
         entity.AmountApproved = reviewDto.AmountApproved;
@@ -261,9 +365,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<bool> DeleteClaimLineAsync(Guid lineId, CancellationToken cancellationToken = default)
     {
-        var entity = await _lineRepository.GetByIdAsync(lineId);
-        if (entity == null)
-            throw new ArgumentException($"Expense claim line with ID '{lineId}' not found.");
+        var entity = await GetOwnedClaimLineAsync(lineId);
 
         var claimId = entity.StaffTravelExpenseClaimId;
         await _lineRepository.DeleteAsync(entity);
@@ -277,38 +379,76 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<StaffTravelAdvanceDto> GetAdvanceByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _advanceRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Advance with ID '{id}' not found.");
+        var entity = await GetOwnedAdvanceAsync(id);
         return entity.ToDto();
     }
 
     public async Task<StaffTravelAdvanceDto?> GetAdvanceByNumberAsync(string advanceNumber, CancellationToken cancellationToken = default)
     {
         var entity = await _advanceRepository.GetByAdvanceNumberAsync(advanceNumber);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != GetTenantId())
+            return null;
+        return entity.ToDto();
     }
 
     public async Task<IEnumerable<StaffTravelAdvanceSummaryDto>> GetAllAdvancesAsync(CancellationToken cancellationToken = default)
-        => (await _advanceRepository.GetAllWithDetailsAsync()).Select(a => a.ToSummaryDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _advanceRepository.GetAllWithDetailsAsync())
+            .Where(a => a.TenantId == tenantId)
+            .Select(a => a.ToSummaryDto())
+            .ToList();
+    }
 
     public async Task<IEnumerable<StaffTravelAdvanceSummaryDto>> GetAdvancesByStatusAsync(TravelAdvanceStatus status, CancellationToken cancellationToken = default)
-        => (await _advanceRepository.GetByStatusAsync(status)).Select(a => a.ToSummaryDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _advanceRepository.GetByStatusAsync(status))
+            .Where(a => a.TenantId == tenantId)
+            .Select(a => a.ToSummaryDto())
+            .ToList();
+    }
 
     public async Task<IEnumerable<StaffTravelAdvanceSummaryDto>> GetAdvancesByRequestAsync(Guid requestId, CancellationToken cancellationToken = default)
-        => (await _advanceRepository.GetByRequestIdAsync(requestId)).Select(a => a.ToSummaryDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _advanceRepository.GetByRequestIdAsync(requestId))
+            .Where(a => a.TenantId == tenantId)
+            .Select(a => a.ToSummaryDto())
+            .ToList();
+    }
 
     public async Task<IEnumerable<StaffTravelAdvanceSummaryDto>> GetAdvancesByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
-        => (await _advanceRepository.GetByEmployeeIdAsync(employeeId)).Select(a => a.ToSummaryDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _advanceRepository.GetByEmployeeIdAsync(employeeId))
+            .Where(a => a.TenantId == tenantId)
+            .Select(a => a.ToSummaryDto())
+            .ToList();
+    }
 
     public async Task<IEnumerable<StaffTravelAdvanceSummaryDto>> GetOutstandingAdvancesByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
-        => (await _advanceRepository.GetOutstandingByEmployeeAsync(employeeId)).Select(a => a.ToSummaryDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _advanceRepository.GetOutstandingByEmployeeAsync(employeeId))
+            .Where(a => a.TenantId == tenantId)
+            .Select(a => a.ToSummaryDto())
+            .ToList();
+    }
 
     public async Task<IEnumerable<StaffTravelAdvanceSummaryDto>> GetOverdueSettlementsAsync(CancellationToken cancellationToken = default)
-        => (await _advanceRepository.GetOverdueSettlementsAsync()).Select(a => a.ToSummaryDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _advanceRepository.GetOverdueSettlementsAsync())
+            .Where(a => a.TenantId == tenantId)
+            .Select(a => a.ToSummaryDto())
+            .ToList();
+    }
 
     public async Task<StaffTravelAdvanceDto> CreateAdvanceAsync(CreateStaffTravelAdvanceDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.AdvanceNumber = await GenerateAdvanceNumberAsync(cancellationToken);
         entity.Status = TravelAdvanceStatus.Requested;
@@ -322,9 +462,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<StaffTravelAdvanceDto> UpdateAdvanceAsync(UpdateStaffTravelAdvanceDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _advanceRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Advance with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAdvanceAsync(updateDto.Id);
 
         if (entity.Status is TravelAdvanceStatus.Disbursed)
             throw new InvalidOperationException("A disbursed advance cannot be edited.");
@@ -338,9 +476,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<bool> DeleteAdvanceAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _advanceRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Advance with ID '{id}' not found.");
+        var entity = await GetOwnedAdvanceAsync(id);
 
         if (entity.Status != TravelAdvanceStatus.Requested)
             throw new InvalidOperationException("Only requested advances can be deleted.");
@@ -352,9 +488,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<bool> ApproveAdvanceAsync(ApproveStaffTravelAdvanceDto approveDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _advanceRepository.GetByIdAsync(approveDto.AdvanceId);
-        if (entity == null)
-            throw new ArgumentException($"Advance with ID '{approveDto.AdvanceId}' not found.");
+        var entity = await GetOwnedAdvanceAsync(approveDto.AdvanceId);
 
         if (entity.Status != TravelAdvanceStatus.Requested)
             throw new InvalidOperationException("Only requested advances can be approved.");
@@ -375,9 +509,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<bool> DisburseAdvanceAsync(DisburseStaffTravelAdvanceDto disburseDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _advanceRepository.GetByIdAsync(disburseDto.AdvanceId);
-        if (entity == null)
-            throw new ArgumentException($"Advance with ID '{disburseDto.AdvanceId}' not found.");
+        var entity = await GetOwnedAdvanceAsync(disburseDto.AdvanceId);
 
         if (entity.Status != TravelAdvanceStatus.Approved)
             throw new InvalidOperationException("Only approved advances can be disbursed.");
@@ -399,26 +531,39 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<StaffTravelPerDiemRateDto> GetPerDiemRateByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _perDiemRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Per-diem rate with ID '{id}' not found.");
+        var entity = await GetOwnedPerDiemRateAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<StaffTravelPerDiemRateDto>> GetActivePerDiemRatesAsync(CancellationToken cancellationToken = default)
-        => (await _perDiemRepository.GetActiveRatesAsync()).Select(r => r.ToDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _perDiemRepository.GetActiveRatesAsync())
+            .Where(r => r.TenantId == tenantId)
+            .Select(r => r.ToDto())
+            .ToList();
+    }
 
     public async Task<IEnumerable<StaffTravelPerDiemRateDto>> GetPerDiemRatesByCountryAsync(Guid countryId, CancellationToken cancellationToken = default)
-        => (await _perDiemRepository.GetByCountryAsync(countryId)).Select(r => r.ToDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _perDiemRepository.GetByCountryAsync(countryId))
+            .Where(r => r.TenantId == tenantId)
+            .Select(r => r.ToDto())
+            .ToList();
+    }
 
     public async Task<StaffTravelPerDiemRateDto?> GetEffectivePerDiemRateAsync(Guid countryId, string? city, Guid? staffLevelId, DateOnly onDate, CancellationToken cancellationToken = default)
     {
         var entity = await _perDiemRepository.GetEffectiveRateAsync(countryId, city, staffLevelId, onDate);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != GetTenantId())
+            return null;
+        return entity.ToDto();
     }
 
     public async Task<StaffTravelPerDiemRateDto> CreatePerDiemRateAsync(CreateStaffTravelPerDiemRateDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _perDiemRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -427,9 +572,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<StaffTravelPerDiemRateDto> UpdatePerDiemRateAsync(UpdateStaffTravelPerDiemRateDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _perDiemRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Per-diem rate with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedPerDiemRateAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _perDiemRepository.UpdateAsync(entity);
@@ -439,9 +582,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<bool> DeletePerDiemRateAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _perDiemRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Per-diem rate with ID '{id}' not found.");
+        var entity = await GetOwnedPerDiemRateAsync(id);
 
         await _perDiemRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -452,8 +593,9 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     private async Task RecomputeClaimTotalsAsync(Guid claimId, CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
         var claim = await _claimRepository.GetWithLinesAsync(claimId);
-        if (claim == null) return;
+        if (claim == null || claim.TenantId != tenantId) return;
 
         claim.TotalClaimed = claim.Lines.Sum(l => l.AmountBaseCurrency);
         claim.TotalApproved = claim.Lines.Sum(l => l.AmountApproved ?? 0m);

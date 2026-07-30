@@ -20,6 +20,7 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
     private readonly IEmailService _email;
     private readonly IConsultantClientPortalJwtService _jwtService;
     private readonly IPasswordHasher<ConsultantClientPortalAccount> _hasher;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<ConsultantClientPortalAuthService> _logger;
     private readonly string _portalUrl;
 
@@ -36,6 +37,7 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         IEmailService email,
         IConsultantClientPortalJwtService jwtService,
         IPasswordHasher<ConsultantClientPortalAccount> hasher,
+        ICurrentUserProvider currentUserProvider,
         ILogger<ConsultantClientPortalAuthService> logger,
         IOptions<CandidatePortalOptions> portalOptions)
     {
@@ -45,10 +47,25 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         _email = email;
         _jwtService = jwtService;
         _hasher = hasher;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
         _portalUrl = (portalOptions.Value.PortalUrl ?? string.Empty).TrimEnd('/');
         if (string.IsNullOrWhiteSpace(_portalUrl))
             _portalUrl = "http://localhost:5085";
+    }
+
+    // Portal callers pass tenantId from X-Tenant-Id / JWT. Anonymous register/login may have an empty
+    // CurrentUser TenantId — trust the explicit param then. When CurrentUser has a tenant, it must match.
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant id is required.", nameof(tenantId));
+
+        var current = _currentUserProvider.TenantId;
+        if (current != Guid.Empty && current != tenantId)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        return tenantId;
     }
 
     public async Task<ConsultantClientPortalAuthResultDto> RegisterAsync(
@@ -56,11 +73,14 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         Guid tenantId,
         CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var email = dto.Email.Trim().ToLowerInvariant();
         var clientCode = dto.ClientCode.Trim();
 
-        var client = await _clientRepo.GetByClientCodeAsync(clientCode);
-        if (client == null || client.TenantId != tenantId || !client.IsActive)
+        // Scope by tenant+code so a code belonging to another tenant is indistinguishable from missing.
+        var client = await _clientRepo.FirstOrDefaultAsync(
+            c => c.TenantId == tenantId && c.ClientCode == clientCode);
+        if (client == null || !client.IsActive)
             throw new InvalidOperationException("Invalid client code. Please check the code provided by your HR contact.");
 
         var existing = await _accountRepo.FirstOrDefaultAsync(
@@ -101,6 +121,7 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         Guid tenantId,
         CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var email = dto.Email.Trim().ToLowerInvariant();
 
         var account = await _accountRepo.FirstOrDefaultAsync(
@@ -137,7 +158,8 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         await _accountRepo.UpdateAsync(account);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        var client = await _clientRepo.GetByIdAsync(account.ConsultantClientId)
+        var client = await _clientRepo.FirstOrDefaultAsync(
+            c => c.Id == account.ConsultantClientId && c.TenantId == tenantId)
             ?? throw new InvalidOperationException("Linked client organisation not found.");
 
         _logger.LogInformation("Consultant client portal login: {Email} (tenant {TenantId})", email, tenantId);
@@ -166,17 +188,20 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
 
         _logger.LogInformation("Email verified for client portal account {AccountId}", account.Id);
 
-        var client = await _clientRepo.GetByIdAsync(account.ConsultantClientId);
+        var client = await _clientRepo.FirstOrDefaultAsync(
+            c => c.Id == account.ConsultantClientId && c.TenantId == account.TenantId);
         if (client != null)
             await SendAccountActivatedEmailAsync(account, client, ct);
     }
 
     public async Task RequestPasswordResetAsync(string email, Guid tenantId, CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var normalised = email.Trim().ToLowerInvariant();
         var account = await _accountRepo.FirstOrDefaultAsync(
             a => a.TenantId == tenantId && a.Email == normalised);
 
+        // Same silent return whether the email is unknown or belongs to another tenant.
         if (account == null || !account.IsActive)
             return;
 
@@ -240,7 +265,8 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
 
         _logger.LogInformation("Account setup completed for client portal account {AccountId}", account.Id);
 
-        var client = await _clientRepo.GetByIdAsync(account.ConsultantClientId)
+        var client = await _clientRepo.FirstOrDefaultAsync(
+            c => c.Id == account.ConsultantClientId && c.TenantId == account.TenantId)
             ?? throw new InvalidOperationException("Linked client organisation not found.");
 
         await SendVerificationEmailAsync(account, client, ct);
@@ -253,12 +279,14 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         Guid invitedByEmployeeId,
         CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var email = dto.Email.Trim().ToLowerInvariant();
 
-        var client = await _clientRepo.GetByIdAsync(consultantClientId)
+        var client = await _clientRepo.FirstOrDefaultAsync(
+            c => c.Id == consultantClientId && c.TenantId == tenantId)
             ?? throw new InvalidOperationException("Client organisation not found.");
 
-        if (client.TenantId != tenantId || !client.IsActive)
+        if (!client.IsActive)
             throw new InvalidOperationException("Client organisation is not available for portal invites.");
 
         var existing = await _accountRepo.FirstOrDefaultAsync(
@@ -316,6 +344,7 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         Guid tenantId,
         CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var normalised = email.Trim().ToLowerInvariant();
 
         var account = await _accountRepo.FirstOrDefaultAsync(
@@ -327,7 +356,8 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         if (!account.IsActive)
             throw new InvalidOperationException("This portal account has been deactivated.");
 
-        var client = await _clientRepo.GetByIdAsync(consultantClientId)
+        var client = await _clientRepo.FirstOrDefaultAsync(
+            c => c.Id == consultantClientId && c.TenantId == tenantId)
             ?? throw new InvalidOperationException("Client organisation not found.");
 
         if (account.AccountSetupToken != null || !account.IsEmailVerified && account.LastLoginAt == null)
@@ -358,8 +388,14 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         Guid tenantId,
         CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+
+        var client = await _clientRepo.FirstOrDefaultAsync(
+            c => c.Id == consultantClientId && c.TenantId == tenantId)
+            ?? throw new InvalidOperationException("Client organisation not found.");
+
         var accounts = await _accountRepo.FindAsync(
-            a => a.TenantId == tenantId && a.ConsultantClientId == consultantClientId);
+            a => a.TenantId == tenantId && a.ConsultantClientId == client.Id);
 
         return accounts
             .OrderByDescending(a => a.CreatedAt)
@@ -373,11 +409,10 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         Guid tenantId,
         CancellationToken ct = default)
     {
-        var account = await _accountRepo.GetByIdAsync(accountId)
+        tenantId = RequireCurrentTenant(tenantId);
+        var account = await _accountRepo.FirstOrDefaultAsync(
+            a => a.Id == accountId && a.TenantId == tenantId)
             ?? throw new InvalidOperationException("Account not found.");
-
-        if (account.TenantId != tenantId)
-            throw new UnauthorizedAccessException();
 
         var verify = _hasher.VerifyHashedPassword(account, account.PasswordHash, dto.CurrentPassword);
         if (verify == PasswordVerificationResult.Failed)

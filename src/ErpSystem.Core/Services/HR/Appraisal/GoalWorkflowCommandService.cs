@@ -69,6 +69,7 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
     private readonly IGenericRepository<EmployeeGoal> _goalRepo;
     private readonly IUnitOfWork                      _unitOfWork;
     private readonly ICurrentUserService              _currentUserService;
+    private readonly ICurrentUserProvider             _currentUserProvider;
     private readonly IDateTimeProvider                _clock;
     private readonly ILogger<GoalWorkflowCommandService> _logger;
 
@@ -76,14 +77,27 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
         IGenericRepository<EmployeeGoal>      goalRepo,
         IUnitOfWork                           unitOfWork,
         ICurrentUserService                   currentUserService,
+        ICurrentUserProvider                  currentUserProvider,
         IDateTimeProvider                     clock,
         ILogger<GoalWorkflowCommandService>   logger)
     {
         _goalRepo           = goalRepo;
         _unitOfWork         = unitOfWork;
         _currentUserService = currentUserService;
+        _currentUserProvider = currentUserProvider;
         _clock              = clock;
         _logger             = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -423,11 +437,14 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
     private Task<EmployeeGoal?> LoadGoalWithEmployeeAsync(
         Guid              goalId,
         CancellationToken cancellationToken)
-        => _goalRepo.GetQueryable()
+    {
+        var tenantId = GetTenantId();
+        return _goalRepo.GetQueryable()
                .Include(g => g.Employee)
                .FirstOrDefaultAsync(
-                   g => g.Id == goalId && !g.IsDeleted,
+                   g => g.Id == goalId && !g.IsDeleted && g.TenantId == tenantId,
                    cancellationToken);
+    }
 
     // ── Current-user resolution ───────────────────────────────────────────────
 

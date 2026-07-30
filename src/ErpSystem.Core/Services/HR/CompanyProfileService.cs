@@ -36,9 +36,28 @@ public class CompanyProfileService : ICompanyProfileService
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUser.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
     public async Task<CompanyProfileDto> GetAsync(CancellationToken cancellationToken = default)
     {
-        // Provider returns the saved row or a Tenant/config-resolved defaults instance.
+        // Provider returns the saved row (tenant-filtered) or Tenant/config-resolved defaults.
         var profile = await _provider.GetAsync(cancellationToken);
         return profile.ToDto();
     }
@@ -48,13 +67,14 @@ public class CompanyProfileService : ICompanyProfileService
         if (string.IsNullOrWhiteSpace(dto.LegalName))
             throw new InvalidOperationException("Legal name is required.");
 
+        var tenantId = GetTenantId();
         var entity = await _repository.GetQueryable()
-            .Where(p => !p.IsDeleted)
+            .Where(p => !p.IsDeleted && p.TenantId == tenantId)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (entity is null)
         {
-            entity = new CompanyProfile { TenantId = _currentUser.TenantId };
+            entity = new CompanyProfile { TenantId = tenantId };
             entity.ApplyUpdate(dto);
             await _repository.AddAsync(entity);
             _logger.LogInformation("Company profile created for tenant {TenantId}", entity.TenantId);

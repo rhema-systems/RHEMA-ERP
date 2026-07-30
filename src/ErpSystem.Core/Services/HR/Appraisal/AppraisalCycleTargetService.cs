@@ -17,30 +17,78 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
 {
     private readonly IGenericRepository<AppraisalCycleTarget> _targetRepository;
     private readonly IGenericRepository<AppraisalCycleTargetExclusion> _exclusionRepository;
+    private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalCycleTargetService> _logger;
 
     public AppraisalCycleTargetService(
         IGenericRepository<AppraisalCycleTarget> targetRepository,
         IGenericRepository<AppraisalCycleTargetExclusion> exclusionRepository,
+        IGenericRepository<AppraisalCycle> cycleRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalCycleTargetService> logger)
     {
         _targetRepository = targetRepository;
         _exclusionRepository = exclusionRepository;
+        _cycleRepository = cycleRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An appraisal cycle owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<AppraisalCycle> GetOwnedCycleAsync(Guid cycleId)
+    {
+        var entity = await _cycleRepository.GetByIdAsync(cycleId);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
+        return entity;
+    }
+
+    // A cycle target owned by another tenant is reported as missing rather than forbidden, so the endpoints
+    // do not confirm that the id exists elsewhere.
+    private async Task<AppraisalCycleTarget> GetOwnedAsync(Guid id)
+    {
+        var entity = await _targetRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Appraisal cycle target with ID '{id}' not found.");
+        return entity;
+    }
+
+    // An exclusion owned by another tenant is reported as missing rather than forbidden.
+    private async Task<AppraisalCycleTargetExclusion> GetOwnedExclusionAsync(Guid targetId, Guid exclusionId)
+    {
+        var entity = await _exclusionRepository.GetQueryable()
+            .FirstOrDefaultAsync(e => e.Id == exclusionId && e.AppraisalCycleTargetId == targetId);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Exclusion not found for this cycle target.");
+        return entity;
+    }
+
     public async Task<AppraisalCycleTargetDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _targetRepository.GetQueryable()
             .Include(t => t.AppraisalCycle)
             .Include(t => t.OrganizationLevel)
             .Include(t => t.OrganizationUnit)
             .Include(t => t.Position)
-            .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
-        
+            .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == tenantId, cancellationToken);
+
         if (entity == null)
             throw new ArgumentException($"Appraisal cycle target with ID '{id}' not found.");
 
@@ -49,12 +97,15 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
 
     public async Task<IEnumerable<AppraisalCycleTargetDto>> GetByCycleIdAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCycleAsync(cycleId);
+        var tenantId = GetTenantId();
+
         var entities = await _targetRepository.GetQueryable()
             .Include(t => t.AppraisalCycle)
             .Include(t => t.OrganizationLevel)
             .Include(t => t.OrganizationUnit)
             .Include(t => t.Position)
-            .Where(t => t.AppraisalCycleId == cycleId)
+            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == cycleId)
             .OrderBy(t => t.TargetType)
             .ToListAsync(cancellationToken);
 
@@ -63,12 +114,13 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
 
     public async Task<IEnumerable<AppraisalCycleTargetDto>> GetByTargetTypeAsync(AppraisalTargetType targetType, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _targetRepository.GetQueryable()
             .Include(t => t.AppraisalCycle)
             .Include(t => t.OrganizationLevel)
             .Include(t => t.OrganizationUnit)
             .Include(t => t.Position)
-            .Where(t => t.TargetType == targetType)
+            .Where(t => t.TenantId == tenantId && t.TargetType == targetType)
             .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
@@ -76,6 +128,9 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
 
     public async Task<AppraisalCycleTargetDto> CreateAsync(CreateAppraisalCycleTargetDto createDto, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCycleAsync(createDto.AppraisalCycleId);
+        var tenantId = GetTenantId();
+
         // Validate that exactly one target type is specified
         var targetCount = new[] { createDto.OrganizationLevelId, createDto.OrganizationUnitId, createDto.PositionId }
             .Count(id => id.HasValue);
@@ -85,21 +140,24 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
             throw new InvalidOperationException("Exactly one target type must be specified (OrganizationLevel, OrganizationUnit, or Position).");
         }
 
-        // ── Data integrity: no duplicate scope for the same cycle ──────────────
+        // ── Data integrity: no duplicate scope for the same cycle (per tenant) ──────────────
         bool duplicate = createDto.TargetType switch
         {
             AppraisalTargetType.OrganizationLevel =>
-                await _targetRepository.ExistsAsync(
-                    t => t.AppraisalCycleId == createDto.AppraisalCycleId
-                      && t.OrganizationLevelId == createDto.OrganizationLevelId),
+                await _targetRepository.GetQueryable()
+                    .AnyAsync(t => t.TenantId == tenantId
+                                && t.AppraisalCycleId == createDto.AppraisalCycleId
+                                && t.OrganizationLevelId == createDto.OrganizationLevelId, cancellationToken),
             AppraisalTargetType.OrganizationUnit =>
-                await _targetRepository.ExistsAsync(
-                    t => t.AppraisalCycleId == createDto.AppraisalCycleId
-                      && t.OrganizationUnitId == createDto.OrganizationUnitId),
+                await _targetRepository.GetQueryable()
+                    .AnyAsync(t => t.TenantId == tenantId
+                                && t.AppraisalCycleId == createDto.AppraisalCycleId
+                                && t.OrganizationUnitId == createDto.OrganizationUnitId, cancellationToken),
             AppraisalTargetType.Position =>
-                await _targetRepository.ExistsAsync(
-                    t => t.AppraisalCycleId == createDto.AppraisalCycleId
-                      && t.PositionId == createDto.PositionId),
+                await _targetRepository.GetQueryable()
+                    .AnyAsync(t => t.TenantId == tenantId
+                                && t.AppraisalCycleId == createDto.AppraisalCycleId
+                                && t.PositionId == createDto.PositionId, cancellationToken),
             _ => false
         };
 
@@ -108,6 +166,7 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
                 $"A cycle target of type '{createDto.TargetType}' already exists for this scope in the specified appraisal cycle.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
 
         await _targetRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -118,7 +177,7 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
             .Include(t => t.OrganizationLevel)
             .Include(t => t.OrganizationUnit)
             .Include(t => t.Position)
-            .FirstOrDefaultAsync(t => t.Id == entity.Id, cancellationToken);
+            .FirstOrDefaultAsync(t => t.Id == entity.Id && t.TenantId == tenantId, cancellationToken);
 
         _logger.LogInformation("Appraisal cycle target created successfully: {targetId}", entity!.Id);
 
@@ -127,15 +186,7 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
 
     public async Task<AppraisalCycleTargetDto> UpdateAsync(UpdateAppraisalCycleTargetDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _targetRepository.GetQueryable()
-            .Include(t => t.AppraisalCycle)
-            .Include(t => t.OrganizationLevel)
-            .Include(t => t.OrganizationUnit)
-            .Include(t => t.Position)
-            .FirstOrDefaultAsync(t => t.Id == updateDto.Id, cancellationToken);
-        
-        if (entity == null)
-            throw new ArgumentException($"Appraisal cycle target with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         // Validate that exactly one target type is specified
         var targetCount = new[] { updateDto.OrganizationLevelId, updateDto.OrganizationUnitId, updateDto.PositionId }
@@ -158,10 +209,7 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _targetRepository.GetByIdAsync(id);
-        
-        if (entity == null)
-            throw new ArgumentException($"Appraisal cycle target with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _targetRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -173,14 +221,11 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
 
     public async Task<bool> ValidateTargetAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _targetRepository.GetByIdAsync(id);
-        
-        if (entity == null)
-            throw new ArgumentException($"Appraisal cycle target with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         // Validate that exactly one target type is specified
         var targetCount = new[] { entity.OrganizationLevelId, entity.OrganizationUnitId, entity.PositionId }
-            .Count(id => id.HasValue);
+            .Count(x => x.HasValue);
 
         var isValid = targetCount == 1;
 
@@ -197,13 +242,13 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
     public async Task<AppraisalCycleTargetExclusionDto> AddExclusionAsync(
         Guid targetId, CreateAppraisalCycleTargetExclusionDto dto, CancellationToken cancellationToken = default)
     {
-        var targetExists = await _targetRepository.ExistsAsync(t => t.Id == targetId);
-        if (!targetExists)
-            throw new ArgumentException($"Appraisal cycle target with ID '{targetId}' not found.");
+        await GetOwnedAsync(targetId);
+        var tenantId = GetTenantId();
 
         var entity = dto.ToEntity();
         entity.AppraisalCycleTargetId = targetId;
         entity.IsActive = true;
+        entity.TenantId = tenantId;
 
         await _exclusionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -215,7 +260,7 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
             .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .Include(e => e.Employee)
-            .FirstOrDefaultAsync(e => e.Id == entity.Id, cancellationToken);
+            .FirstOrDefaultAsync(e => e.Id == entity.Id && e.TenantId == tenantId, cancellationToken);
 
         return entity!.ToDto();
     }
@@ -223,7 +268,11 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
     public async Task<IEnumerable<AppraisalCycleTargetExclusionDto>> GetExclusionsAsync(
         Guid targetId, CancellationToken cancellationToken = default)
     {
-        var entities = await _exclusionRepository.GetQueryable(e => e.AppraisalCycleTargetId == targetId)
+        await GetOwnedAsync(targetId);
+        var tenantId = GetTenantId();
+
+        var entities = await _exclusionRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId && e.AppraisalCycleTargetId == targetId)
             .Include(e => e.OrganizationLevel)
             .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
@@ -237,15 +286,7 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
     public async Task<AppraisalCycleTargetExclusionDto> UpdateExclusionAsync(
         Guid targetId, UpdateAppraisalCycleTargetExclusionDto dto, CancellationToken cancellationToken = default)
     {
-        var entity = await _exclusionRepository.GetQueryable()
-            .Include(e => e.OrganizationLevel)
-            .Include(e => e.OrganizationUnit)
-            .Include(e => e.Position)
-            .Include(e => e.Employee)
-            .FirstOrDefaultAsync(e => e.Id == dto.Id && e.AppraisalCycleTargetId == targetId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Exclusion not found for this cycle target.");
+        var entity = await GetOwnedExclusionAsync(targetId, dto.Id);
 
         dto.UpdateEntity(entity);
         await _exclusionRepository.UpdateAsync(entity);
@@ -258,11 +299,7 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
     public async Task<bool> RemoveExclusionAsync(
         Guid targetId, Guid exclusionId, CancellationToken cancellationToken = default)
     {
-        var entity = await _exclusionRepository.GetQueryable()
-            .FirstOrDefaultAsync(e => e.Id == exclusionId && e.AppraisalCycleTargetId == targetId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Exclusion not found for this cycle target.");
+        var entity = await GetOwnedExclusionAsync(targetId, exclusionId);
 
         await _exclusionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -272,4 +309,3 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
 }
 
 #endregion Appraisal Cycle Target
-

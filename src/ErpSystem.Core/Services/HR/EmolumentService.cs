@@ -20,6 +20,7 @@ public class EmolumentService : IEmolumentService
     private readonly IGenericRepository<Employee> _employeeRepo;
     private readonly IGenericRepository<EmployeeSalaryAssignment> _salaryAssignmentRepo;
     private readonly IGenericRepository<LeaveType> _leaveTypeRepo;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<EmolumentService> _logger;
@@ -31,6 +32,7 @@ public class EmolumentService : IEmolumentService
         IGenericRepository<Employee> employeeRepo,
         IGenericRepository<EmployeeSalaryAssignment> salaryAssignmentRepo,
         IGenericRepository<LeaveType> leaveTypeRepo,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IDateTimeProvider clock,
         ILogger<EmolumentService> logger)
@@ -41,16 +43,55 @@ public class EmolumentService : IEmolumentService
         _employeeRepo = employeeRepo;
         _salaryAssignmentRepo = salaryAssignmentRepo;
         _leaveTypeRepo = leaveTypeRepo;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _clock = clock;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // Aggregates owned by another tenant are reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<PayComponent> GetOwnedPayComponentAsync(Guid id)
+    {
+        var entity = await _componentRepo.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Pay component '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<PositionPayComponent> GetOwnedPositionPayComponentAsync(Guid id)
+    {
+        var entity = await _positionCompRepo.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Position pay component '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<EmployeePayComponent> GetOwnedEmployeePayComponentAsync(Guid id)
+    {
+        var entity = await _employeeCompRepo.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee pay component '{id}' not found.");
+        return entity;
     }
 
     // ─── Pay Component master ──────────────────────────────────────────────────
 
     public async Task<IEnumerable<PayComponentDto>> GetPayComponentsAsync(bool activeOnly = true)
     {
-        var query = _componentRepo.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _componentRepo.GetQueryable().Where(c => c.TenantId == tenantId);
         if (activeOnly) query = query.Where(c => c.IsActive);
         var items = await query.OrderBy(c => c.ComponentType).ThenBy(c => c.Name).ToListAsync();
         return items.Select(ToDto).ToList();
@@ -58,8 +99,7 @@ public class EmolumentService : IEmolumentService
 
     public async Task<PayComponentDto> GetPayComponentByIdAsync(Guid id)
     {
-        var entity = await _componentRepo.GetByIdAsync(id);
-        if (entity == null) throw new ArgumentException($"Pay component '{id}' not found.");
+        var entity = await GetOwnedPayComponentAsync(id);
         return ToDto(entity);
     }
 
@@ -68,12 +108,15 @@ public class EmolumentService : IEmolumentService
         if (string.IsNullOrWhiteSpace(dto.Code))
             throw new InvalidOperationException("A code is required.");
 
-        var exists = await _componentRepo.GetQueryable().AnyAsync(c => c.Code == dto.Code);
+        var tenantId = GetTenantId();
+        var exists = await _componentRepo.GetQueryable()
+            .AnyAsync(c => c.TenantId == tenantId && c.Code == dto.Code);
         if (exists)
             throw new InvalidOperationException($"A pay component with code '{dto.Code}' already exists.");
 
         var entity = new PayComponent
         {
+            TenantId = tenantId,
             Code = dto.Code.Trim(),
             Name = dto.Name.Trim(),
             Description = dto.Description,
@@ -93,12 +136,13 @@ public class EmolumentService : IEmolumentService
 
     public async Task<PayComponentDto> UpdatePayComponentAsync(Guid id, UpdatePayComponentDto dto)
     {
-        var entity = await _componentRepo.GetByIdAsync(id);
-        if (entity == null) throw new ArgumentException($"Pay component '{id}' not found.");
+        var entity = await GetOwnedPayComponentAsync(id);
+        var tenantId = GetTenantId();
 
         if (!string.IsNullOrWhiteSpace(dto.Code) && dto.Code != entity.Code)
         {
-            var clash = await _componentRepo.GetQueryable().AnyAsync(c => c.Code == dto.Code && c.Id != id);
+            var clash = await _componentRepo.GetQueryable()
+                .AnyAsync(c => c.TenantId == tenantId && c.Code == dto.Code && c.Id != id);
             if (clash)
                 throw new InvalidOperationException($"A pay component with code '{dto.Code}' already exists.");
             entity.Code = dto.Code.Trim();
@@ -121,8 +165,7 @@ public class EmolumentService : IEmolumentService
 
     public async Task DeactivatePayComponentAsync(Guid id)
     {
-        var entity = await _componentRepo.GetByIdAsync(id);
-        if (entity == null) throw new ArgumentException($"Pay component '{id}' not found.");
+        var entity = await GetOwnedPayComponentAsync(id);
         entity.IsActive = false;
         await _componentRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -132,23 +175,33 @@ public class EmolumentService : IEmolumentService
 
     public async Task<IEnumerable<PositionPayComponentDto>> GetPositionComponentsAsync(Guid positionId)
     {
+        var tenantId = GetTenantId();
         var items = await _positionCompRepo.GetQueryable()
             .Include(pc => pc.PayComponent)
             .Include(pc => pc.Position)
-            .Where(pc => pc.PositionId == positionId)
+            .Where(pc => pc.TenantId == tenantId && pc.PositionId == positionId)
             .ToListAsync();
         return items.Select(ToDto).ToList();
     }
 
     public async Task<PositionPayComponentDto> AssignPositionComponentAsync(CreatePositionPayComponentDto dto)
     {
+        var tenantId = GetTenantId();
+
+        var component = await _componentRepo.GetByIdAsync(dto.PayComponentId);
+        if (component == null || component.TenantId != tenantId)
+            throw new ArgumentException($"Pay component '{dto.PayComponentId}' not found.");
+
         var clash = await _positionCompRepo.GetQueryable()
-            .AnyAsync(pc => pc.PositionId == dto.PositionId && pc.PayComponentId == dto.PayComponentId);
+            .AnyAsync(pc => pc.TenantId == tenantId
+                && pc.PositionId == dto.PositionId
+                && pc.PayComponentId == dto.PayComponentId);
         if (clash)
             throw new InvalidOperationException("This component is already assigned to the position.");
 
         var entity = new PositionPayComponent
         {
+            TenantId = tenantId,
             PositionId = dto.PositionId,
             PayComponentId = dto.PayComponentId,
             Amount = dto.Amount,
@@ -158,26 +211,25 @@ public class EmolumentService : IEmolumentService
         await _unitOfWork.SaveChangesAsync();
         return ToDto(await _positionCompRepo.GetQueryable()
             .Include(pc => pc.PayComponent).Include(pc => pc.Position)
-            .FirstAsync(pc => pc.Id == entity.Id));
+            .FirstAsync(pc => pc.TenantId == tenantId && pc.Id == entity.Id));
     }
 
     public async Task<PositionPayComponentDto> UpdatePositionComponentAsync(Guid id, decimal? amount, bool isActive)
     {
-        var entity = await _positionCompRepo.GetByIdAsync(id);
-        if (entity == null) throw new ArgumentException($"Position pay component '{id}' not found.");
+        var entity = await GetOwnedPositionPayComponentAsync(id);
+        var tenantId = GetTenantId();
         entity.Amount = amount;
         entity.IsActive = isActive;
         await _positionCompRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return ToDto(await _positionCompRepo.GetQueryable()
             .Include(pc => pc.PayComponent).Include(pc => pc.Position)
-            .FirstAsync(pc => pc.Id == id));
+            .FirstAsync(pc => pc.TenantId == tenantId && pc.Id == id));
     }
 
     public async Task RemovePositionComponentAsync(Guid id)
     {
-        var entity = await _positionCompRepo.GetByIdAsync(id);
-        if (entity == null) throw new ArgumentException($"Position pay component '{id}' not found.");
+        var entity = await GetOwnedPositionPayComponentAsync(id);
         await _positionCompRepo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
     }
@@ -186,10 +238,11 @@ public class EmolumentService : IEmolumentService
 
     public async Task<IEnumerable<EmployeePayComponentDto>> GetEmployeeComponentsAsync(Guid employeeId)
     {
+        var tenantId = GetTenantId();
         var items = await _employeeCompRepo.GetQueryable()
             .Include(ec => ec.PayComponent)
             .Include(ec => ec.Employee)
-            .Where(ec => ec.EmployeeId == employeeId)
+            .Where(ec => ec.TenantId == tenantId && ec.EmployeeId == employeeId)
             .OrderByDescending(ec => ec.EffectiveFrom)
             .ToListAsync();
         return items.Select(ToDto).ToList();
@@ -197,8 +250,19 @@ public class EmolumentService : IEmolumentService
 
     public async Task<EmployeePayComponentDto> AssignEmployeeComponentAsync(CreateEmployeePayComponentDto dto)
     {
+        var tenantId = GetTenantId();
+
+        var employee = await _employeeRepo.GetByIdAsync(dto.EmployeeId);
+        if (employee == null || employee.TenantId != tenantId)
+            throw new ArgumentException($"Employee '{dto.EmployeeId}' not found.");
+
+        var component = await _componentRepo.GetByIdAsync(dto.PayComponentId);
+        if (component == null || component.TenantId != tenantId)
+            throw new ArgumentException($"Pay component '{dto.PayComponentId}' not found.");
+
         var entity = new EmployeePayComponent
         {
+            TenantId = tenantId,
             EmployeeId = dto.EmployeeId,
             PayComponentId = dto.PayComponentId,
             Amount = dto.Amount,
@@ -210,13 +274,18 @@ public class EmolumentService : IEmolumentService
         await _unitOfWork.SaveChangesAsync();
         return ToDto(await _employeeCompRepo.GetQueryable()
             .Include(ec => ec.PayComponent).Include(ec => ec.Employee)
-            .FirstAsync(ec => ec.Id == entity.Id));
+            .FirstAsync(ec => ec.TenantId == tenantId && ec.Id == entity.Id));
     }
 
     public async Task<EmployeePayComponentDto> UpdateEmployeeComponentAsync(Guid id, UpdateEmployeePayComponentDto dto)
     {
-        var entity = await _employeeCompRepo.GetByIdAsync(id);
-        if (entity == null) throw new ArgumentException($"Employee pay component '{id}' not found.");
+        var entity = await GetOwnedEmployeePayComponentAsync(id);
+        var tenantId = GetTenantId();
+
+        var component = await _componentRepo.GetByIdAsync(dto.PayComponentId);
+        if (component == null || component.TenantId != tenantId)
+            throw new ArgumentException($"Pay component '{dto.PayComponentId}' not found.");
+
         entity.PayComponentId = dto.PayComponentId;
         entity.Amount = dto.Amount;
         if (dto.EffectiveFrom != default) entity.EffectiveFrom = dto.EffectiveFrom;
@@ -226,13 +295,12 @@ public class EmolumentService : IEmolumentService
         await _unitOfWork.SaveChangesAsync();
         return ToDto(await _employeeCompRepo.GetQueryable()
             .Include(ec => ec.PayComponent).Include(ec => ec.Employee)
-            .FirstAsync(ec => ec.Id == id));
+            .FirstAsync(ec => ec.TenantId == tenantId && ec.Id == id));
     }
 
     public async Task RemoveEmployeeComponentAsync(Guid id)
     {
-        var entity = await _employeeCompRepo.GetByIdAsync(id);
-        if (entity == null) throw new ArgumentException($"Employee pay component '{id}' not found.");
+        var entity = await GetOwnedEmployeePayComponentAsync(id);
         await _employeeCompRepo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
     }
@@ -242,10 +310,11 @@ public class EmolumentService : IEmolumentService
     public async Task<EmployeeEmolumentSummaryDto> GetEmployeeEmolumentSummaryAsync(Guid employeeId, DateOnly? asOf = null)
     {
         var asOfDate = asOf ?? _clock.TodayUtc;
+        var tenantId = GetTenantId();
 
         var employee = await _employeeRepo.GetQueryable()
             .Include(e => e.Position)
-            .FirstOrDefaultAsync(e => e.Id == employeeId);
+            .FirstOrDefaultAsync(e => e.TenantId == tenantId && e.Id == employeeId);
         if (employee == null) throw new ArgumentException($"Employee '{employeeId}' not found.");
 
         var basic = await GetMonthlyBasicPayAsync(employeeId, asOfDate);
@@ -272,10 +341,12 @@ public class EmolumentService : IEmolumentService
     public async Task<decimal> GetMonthlyBasicPayAsync(Guid employeeId, DateOnly asOf)
     {
         var asOfDt = asOf.ToDateTime(TimeOnly.MinValue);
+        var tenantId = GetTenantId();
 
         var assignment = await _salaryAssignmentRepo.GetQueryable()
             .Include(a => a.Notch)
-            .Where(a => a.EmployeeId == employeeId
+            .Where(a => a.TenantId == tenantId
+                && a.EmployeeId == employeeId
                 && a.EffectiveDate <= asOfDt
                 && (a.EffectiveTo == null || a.EffectiveTo >= asOfDt))
             .OrderByDescending(a => a.EffectiveDate)
@@ -285,14 +356,18 @@ public class EmolumentService : IEmolumentService
             return assignment.Notch.SalaryAmount;
 
         var employee = await _employeeRepo.GetByIdAsync(employeeId);
-        return employee?.Salary ?? 0m;
+        if (employee == null || employee.TenantId != tenantId)
+            return 0m;
+        return employee.Salary ?? 0m;
     }
 
     public async Task<decimal> GetEncashmentDailyRateAsync(Guid employeeId, Guid leaveTypeId, DateOnly asOf)
     {
+        var tenantId = GetTenantId();
+
         var leaveType = await _leaveTypeRepo.GetQueryable()
             .Include(lt => lt.LeaveTypeAllowances)
-            .FirstOrDefaultAsync(lt => lt.Id == leaveTypeId);
+            .FirstOrDefaultAsync(lt => lt.TenantId == tenantId && lt.Id == leaveTypeId);
         if (leaveType == null) throw new ArgumentException($"Leave type '{leaveTypeId}' not found.");
 
         if (leaveType.EncashmentRateBasis == EncashmentRateBasis.Manual)
@@ -300,7 +375,7 @@ public class EmolumentService : IEmolumentService
 
         var employee = await _employeeRepo.GetQueryable()
             .Include(e => e.Position)
-            .FirstOrDefaultAsync(e => e.Id == employeeId);
+            .FirstOrDefaultAsync(e => e.TenantId == tenantId && e.Id == employeeId);
         if (employee == null) throw new ArgumentException($"Employee '{employeeId}' not found.");
 
         var basic = await GetMonthlyBasicPayAsync(employeeId, asOf);
@@ -329,12 +404,14 @@ public class EmolumentService : IEmolumentService
         Employee employee, decimal basic, DateOnly asOf)
     {
         var asOfDt = asOf.ToDateTime(TimeOnly.MinValue);
+        var tenantId = GetTenantId();
         var byComponent = new Dictionary<Guid, EffectivePayComponentDto>();
 
         // Position-level defaults
         var positionComps = await _positionCompRepo.GetQueryable()
             .Include(pc => pc.PayComponent)
-            .Where(pc => pc.PositionId == employee.PositionId
+            .Where(pc => pc.TenantId == tenantId
+                && pc.PositionId == employee.PositionId
                 && pc.IsActive
                 && pc.PayComponent.IsActive
                 && pc.PayComponent.EffectiveFrom <= asOfDt
@@ -350,7 +427,8 @@ public class EmolumentService : IEmolumentService
         // Employee-level overrides / additions
         var employeeComps = await _employeeCompRepo.GetQueryable()
             .Include(ec => ec.PayComponent)
-            .Where(ec => ec.EmployeeId == employee.Id
+            .Where(ec => ec.TenantId == tenantId
+                && ec.EmployeeId == employee.Id
                 && ec.IsActive
                 && ec.PayComponent.IsActive
                 && ec.EffectiveFrom <= asOfDt

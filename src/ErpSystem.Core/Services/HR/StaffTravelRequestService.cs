@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
@@ -21,6 +22,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     private readonly IStaffTravelRequestCommentRepository _commentRepository;
     private readonly IStaffTravelRequestAttachmentRepository _attachmentRepository;
     private readonly IStaffGroupTravelRepository _groupTravelRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffTravelRequestService> _logger;
 
@@ -29,6 +31,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         IStaffTravelRequestCommentRepository commentRepository,
         IStaffTravelRequestAttachmentRepository attachmentRepository,
         IStaffGroupTravelRepository groupTravelRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffTravelRequestService> logger)
     {
@@ -36,35 +39,95 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _commentRepository = commentRepository;
         _attachmentRepository = attachmentRepository;
         _groupTravelRepository = groupTravelRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<StaffTravelRequest> GetOwnedRequestAsync(Guid id)
+    {
+        var entity = await _requestRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Staff travel request with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffTravelRequestComment> GetOwnedCommentAsync(Guid id)
+    {
+        var entity = await _commentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Comment with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffTravelRequestAttachment> GetOwnedAttachmentAsync(Guid id)
+    {
+        var entity = await _attachmentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Attachment with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffGroupTravel> GetOwnedGroupTravelAsync(Guid id)
+    {
+        var entity = await _groupTravelRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Group travel with ID '{id}' not found.");
+        return entity;
     }
 
     // ---- Queries -----------------------------------------------------------
 
     public async Task<StaffTravelRequestDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _requestRepository.GetWithFullDetailsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Staff travel request with ID '{id}' not found.");
         return entity.ToDto();
     }
 
     public async Task<StaffTravelRequestDto?> GetByRequestNumberAsync(string requestNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _requestRepository.GetByRequestNumberAsync(requestNumber);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != tenantId)
+            return null;
+        return entity.ToDto();
     }
 
     public async Task<IEnumerable<StaffTravelRequestSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _requestRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _requestRepository.GetAllAsync())
+            .Where(r => r.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<PagedResult<StaffTravelRequestSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _requestRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _requestRepository.GetQueryable()
+            .Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -83,32 +146,70 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     }
 
     public async Task<IEnumerable<StaffTravelRequestSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
-        => (await _requestRepository.GetByEmployeeIdAsync(employeeId)).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _requestRepository.GetByEmployeeIdAsync(employeeId))
+            .Where(r => r.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<IEnumerable<StaffTravelRequestSummaryDto>> GetByStatusAsync(StaffTravelRequestStatus status, CancellationToken cancellationToken = default)
-        => (await _requestRepository.GetByStatusAsync(status)).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _requestRepository.GetByStatusAsync(status))
+            .Where(r => r.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<IEnumerable<StaffTravelRequestSummaryDto>> GetByDateRangeAsync(DateOnly start, DateOnly end, CancellationToken cancellationToken = default)
-        => (await _requestRepository.GetByDateRangeAsync(start, end)).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _requestRepository.GetByDateRangeAsync(start, end))
+            .Where(r => r.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<IEnumerable<StaffTravelRequestSummaryDto>> GetByOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
-        => (await _requestRepository.GetByOrganizationUnitAsync(organizationUnitId)).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _requestRepository.GetByOrganizationUnitAsync(organizationUnitId))
+            .Where(r => r.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<IEnumerable<StaffTravelRequestSummaryDto>> GetPendingApprovalAsync(CancellationToken cancellationToken = default)
-        => (await _requestRepository.GetPendingApprovalAsync()).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _requestRepository.GetPendingApprovalAsync())
+            .Where(r => r.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<IEnumerable<StaffTravelRequestSummaryDto>> GetUpcomingTripsAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
-        => (await _requestRepository.GetUpcomingTripsAsync(daysAhead)).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _requestRepository.GetUpcomingTripsAsync(daysAhead))
+            .Where(r => r.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<IEnumerable<StaffTravelRequestSummaryDto>> GetChildRequestsAsync(Guid parentRequestId, CancellationToken cancellationToken = default)
-        => (await _requestRepository.GetChildRequestsAsync(parentRequestId)).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _requestRepository.GetChildRequestsAsync(parentRequestId))
+            .Where(r => r.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     // ---- Dashboard ---------------------------------------------------------
 
     public async Task<StaffTravelDashboardDto> GetDashboardAsync(int upcomingDays = 30, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+
         // Lightweight scalar projection of every request for in-memory aggregation.
         var rows = await _requestRepository.GetQueryable()
+            .Where(r => r.TenantId == tenantId)
             .Select(r => new DashboardRow
             {
                 Status = r.Status,
@@ -170,14 +271,18 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         }
 
         // Spotlight lists (lightweight navigation already loaded by these queries).
-        var upcoming = (await _requestRepository.GetUpcomingTripsAsync(upcomingDays)).ToList();
+        var upcoming = (await _requestRepository.GetUpcomingTripsAsync(upcomingDays))
+            .Where(r => r.TenantId == tenantId)
+            .ToList();
         dto.UpcomingTripCount = upcoming.Count;
         dto.UpcomingTrips = upcoming.Take(5).ToSummaryDtoList().ToList();
 
         dto.PendingApprovals = (await _requestRepository.GetPendingApprovalAsync())
+            .Where(r => r.TenantId == tenantId)
             .Take(5).ToSummaryDtoList().ToList();
 
         var recent = await _requestRepository.GetQueryable()
+            .Where(r => r.TenantId == tenantId)
             .Include(r => r.Employee)
             .Include(r => r.DestinationCountry)
             .OrderByDescending(r => r.CreatedAt)
@@ -203,8 +308,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<StaffTravelRequestDto> CreateAsync(CreateStaffTravelRequestDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
-        entity.RequestNumber = await GenerateRequestNumberAsync(cancellationToken);
+        entity.RequestNumber = await GenerateRequestNumberAsync(tenantId, cancellationToken);
         entity.Status = StaffTravelRequestStatus.Draft;
 
         await _requestRepository.AddAsync(entity);
@@ -212,14 +318,15 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         _logger.LogInformation("Staff travel request created: {RequestNumber}", entity.RequestNumber);
 
-        return (await _requestRepository.GetWithFullDetailsAsync(entity.Id))!.ToDto();
+        var refreshed = await _requestRepository.GetWithFullDetailsAsync(entity.Id);
+        if (refreshed == null || refreshed.TenantId != GetTenantId())
+            throw new ArgumentException($"Staff travel request with ID '{entity.Id}' not found.");
+        return refreshed.ToDto();
     }
 
     public async Task<StaffTravelRequestDto> UpdateAsync(UpdateStaffTravelRequestDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Staff travel request with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedRequestAsync(updateDto.Id);
 
         if (entity.Status is StaffTravelRequestStatus.Approved or StaffTravelRequestStatus.Completed or StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Closed)
             throw new InvalidOperationException($"A request in status '{entity.Status}' cannot be edited.");
@@ -231,14 +338,15 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         _logger.LogInformation("Staff travel request updated: {RequestNumber}", entity.RequestNumber);
 
-        return (await _requestRepository.GetWithFullDetailsAsync(entity.Id))!.ToDto();
+        var refreshed = await _requestRepository.GetWithFullDetailsAsync(entity.Id);
+        if (refreshed == null || refreshed.TenantId != GetTenantId())
+            throw new ArgumentException($"Staff travel request with ID '{entity.Id}' not found.");
+        return refreshed.ToDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Staff travel request with ID '{id}' not found.");
+        var entity = await GetOwnedRequestAsync(id);
 
         if (entity.Status != StaffTravelRequestStatus.Draft)
             throw new InvalidOperationException("Only draft requests can be deleted. Cancel the request instead.");
@@ -255,9 +363,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<bool> SubmitAsync(SubmitStaffTravelRequestDto submitDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(submitDto.RequestId);
-        if (entity == null)
-            throw new ArgumentException($"Staff travel request with ID '{submitDto.RequestId}' not found.");
+        var entity = await GetOwnedRequestAsync(submitDto.RequestId);
 
         if (entity.Status is not (StaffTravelRequestStatus.Draft or StaffTravelRequestStatus.ReturnedForRevision))
             throw new InvalidOperationException("Only draft or returned requests can be submitted.");
@@ -276,9 +382,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<bool> ApproveAsync(ApproveStaffTravelRequestDto approveDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(approveDto.RequestId);
-        if (entity == null)
-            throw new ArgumentException($"Staff travel request with ID '{approveDto.RequestId}' not found.");
+        var entity = await GetOwnedRequestAsync(approveDto.RequestId);
 
         if (entity.Status != StaffTravelRequestStatus.Submitted)
             throw new InvalidOperationException("Only submitted requests can be approved.");
@@ -298,9 +402,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<bool> RejectAsync(Guid requestId, Guid rejectedByUserId, string? reason, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(requestId);
-        if (entity == null)
-            throw new ArgumentException($"Staff travel request with ID '{requestId}' not found.");
+        var entity = await GetOwnedRequestAsync(requestId);
 
         if (entity.Status != StaffTravelRequestStatus.Submitted)
             throw new InvalidOperationException("Only submitted requests can be rejected.");
@@ -319,9 +421,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(cancelDto.RequestId);
-        if (entity == null)
-            throw new ArgumentException($"Staff travel request with ID '{cancelDto.RequestId}' not found.");
+        var entity = await GetOwnedRequestAsync(cancelDto.RequestId);
 
         if (entity.Status is StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Completed or StaffTravelRequestStatus.Closed)
             throw new InvalidOperationException($"A request in status '{entity.Status}' cannot be cancelled.");
@@ -342,9 +442,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<bool> MarkCompletedAsync(Guid requestId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(requestId);
-        if (entity == null)
-            throw new ArgumentException($"Staff travel request with ID '{requestId}' not found.");
+        var entity = await GetOwnedRequestAsync(requestId);
 
         if (entity.Status is not (StaffTravelRequestStatus.Approved or StaffTravelRequestStatus.InProgress))
             throw new InvalidOperationException("Only approved or in-progress requests can be marked completed.");
@@ -365,6 +463,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<StaffTravelRequestCommentDto> AddCommentAsync(CreateStaffTravelRequestCommentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _commentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -372,14 +471,17 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     }
 
     public async Task<IEnumerable<StaffTravelRequestCommentDto>> GetCommentsAsync(Guid requestId, CancellationToken cancellationToken = default)
-        => (await _commentRepository.GetByRequestIdAsync(requestId)).Select(c => c.ToDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _commentRepository.GetByRequestIdAsync(requestId))
+            .Where(c => c.TenantId == tenantId)
+            .Select(c => c.ToDto())
+            .ToList();
+    }
 
     public async Task<StaffTravelRequestCommentDto> UpdateCommentAsync(UpdateStaffTravelRequestCommentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _commentRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Comment with ID '{updateDto.Id}' not found.");
-
+        var entity = await GetOwnedCommentAsync(updateDto.Id);
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _commentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -388,10 +490,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<bool> DeleteCommentAsync(Guid commentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _commentRepository.GetByIdAsync(commentId);
-        if (entity == null)
-            throw new ArgumentException($"Comment with ID '{commentId}' not found.");
-
+        var entity = await GetOwnedCommentAsync(commentId);
         await _commentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -401,6 +500,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<StaffTravelRequestAttachmentDto> AddAttachmentAsync(CreateStaffTravelRequestAttachmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -408,14 +508,17 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     }
 
     public async Task<IEnumerable<StaffTravelRequestAttachmentDto>> GetAttachmentsAsync(Guid requestId, CancellationToken cancellationToken = default)
-        => (await _attachmentRepository.GetByRequestIdAsync(requestId)).Select(a => a.ToDto()).ToList();
+    {
+        var tenantId = GetTenantId();
+        return (await _attachmentRepository.GetByRequestIdAsync(requestId))
+            .Where(a => a.TenantId == tenantId)
+            .Select(a => a.ToDto())
+            .ToList();
+    }
 
     public async Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _attachmentRepository.GetByIdAsync(attachmentId);
-        if (entity == null)
-            throw new ArgumentException($"Attachment with ID '{attachmentId}' not found.");
-
+        var entity = await GetOwnedAttachmentAsync(attachmentId);
         await _attachmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -425,6 +528,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<StaffGroupTravelDto> CreateGroupTravelAsync(CreateStaffGroupTravelDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _groupTravelRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -434,24 +538,32 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<StaffGroupTravelDto> GetGroupTravelByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _groupTravelRepository.GetWithRequestsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Group travel with ID '{id}' not found.");
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<StaffGroupTravelSummaryDto>> GetAllGroupTravelsAsync(CancellationToken cancellationToken = default)
-        => (await _groupTravelRepository.GetAllAsync()).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _groupTravelRepository.GetAllAsync())
+            .Where(g => g.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<IEnumerable<StaffGroupTravelSummaryDto>> GetGroupTravelsByStatusAsync(GroupTravelStatus status, CancellationToken cancellationToken = default)
-        => (await _groupTravelRepository.GetByStatusAsync(status)).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _groupTravelRepository.GetByStatusAsync(status))
+            .Where(g => g.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<StaffGroupTravelDto> UpdateGroupTravelAsync(UpdateStaffGroupTravelDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _groupTravelRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Group travel with ID '{updateDto.Id}' not found.");
-
+        var entity = await GetOwnedGroupTravelAsync(updateDto.Id);
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _groupTravelRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -460,10 +572,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<bool> DeleteGroupTravelAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _groupTravelRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Group travel with ID '{id}' not found.");
-
+        var entity = await GetOwnedGroupTravelAsync(id);
         await _groupTravelRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -471,8 +580,10 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     public async Task<StaffGroupTravelDto> AddGroupParticipantsAsync(AddGroupTravelParticipantsDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var group = await _groupTravelRepository.GetWithRequestsAsync(dto.GroupTravelId)
-            ?? throw new ArgumentException($"Group travel with ID '{dto.GroupTravelId}' not found.");
+        tenantId = RequireCurrentTenant(tenantId);
+        var group = await _groupTravelRepository.GetWithRequestsAsync(dto.GroupTravelId);
+        if (group == null || group.TenantId != tenantId)
+            throw new ArgumentException($"Group travel with ID '{dto.GroupTravelId}' not found.");
 
         // Skip employees already participating in the group.
         var existing = group.Requests.Select(r => r.EmployeeId).ToHashSet();
@@ -511,20 +622,23 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
             var entity = createDto.ToEntity(tenantId, createdByUserId);
             // Request numbers are derived from the persisted count, so save each in turn.
-            entity.RequestNumber = await GenerateRequestNumberAsync(cancellationToken);
+            entity.RequestNumber = await GenerateRequestNumberAsync(tenantId, cancellationToken);
             entity.Status = StaffTravelRequestStatus.Draft;
             await _requestRepository.AddAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
         _logger.LogInformation("Added {Count} participant(s) to group travel {GroupId}", toAdd.Count, group.Id);
-        return (await _groupTravelRepository.GetWithRequestsAsync(group.Id))!.ToDto();
+        var refreshed = await _groupTravelRepository.GetWithRequestsAsync(group.Id);
+        if (refreshed == null || refreshed.TenantId != GetTenantId())
+            throw new ArgumentException($"Group travel with ID '{group.Id}' not found.");
+        return refreshed.ToDto();
     }
 
     public async Task<bool> RemoveGroupParticipantAsync(Guid groupTravelId, Guid requestId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(requestId);
-        if (entity == null || entity.GroupTravelId != groupTravelId)
+        var entity = await GetOwnedRequestAsync(requestId);
+        if (entity.GroupTravelId != groupTravelId)
             return false;
 
         entity.GroupTravelId = null;
@@ -535,10 +649,11 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     // ---- Helpers -----------------------------------------------------------
 
-    private async Task<string> GenerateRequestNumberAsync(CancellationToken cancellationToken)
+    private async Task<string> GenerateRequestNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var year = DateTime.UtcNow.Year;
-        var count = await _requestRepository.CountByYearAsync(year);
+        var count = await _requestRepository.GetQueryable()
+            .CountAsync(r => r.TenantId == tenantId && r.CreatedAt.Year == year, cancellationToken);
         return $"TR-{year}-{(count + 1):D5}";
     }
 }

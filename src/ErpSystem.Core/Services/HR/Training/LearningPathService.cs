@@ -17,6 +17,7 @@ public class LearningPathService : ILearningPathService
     private readonly IEmployeeLearningPathStepRepository _stepRepository;
     private readonly ITrainingScheduleService _scheduleService;
     private readonly ITrainingNominationService _nominationService;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<LearningPathService> _logger;
 
@@ -28,6 +29,7 @@ public class LearningPathService : ILearningPathService
         IEmployeeLearningPathStepRepository stepRepository,
         ITrainingScheduleService scheduleService,
         ITrainingNominationService nominationService,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<LearningPathService> logger)
     {
@@ -38,49 +40,123 @@ public class LearningPathService : ILearningPathService
         _stepRepository = stepRepository;
         _scheduleService = scheduleService;
         _nominationService = nominationService;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A row owned by another tenant is reported as missing rather than forbidden, so the endpoints do not
+    // confirm that the id exists elsewhere.
+    private async Task<LearningPath> GetOwnedPathAsync(Guid id)
+    {
+        var entity = await _pathRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Learning path with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LearningPath> GetOwnedPathWithDetailsAsync(Guid id)
+    {
+        var entity = await _pathRepository.GetWithFullDetailsAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Learning path with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LearningPathProgram> GetOwnedPathProgramAsync(Guid id)
+    {
+        var entity = await _pathProgramRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Learning path program with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LearningPathSkill> GetOwnedPathSkillAsync(Guid id)
+    {
+        var entity = await _pathSkillRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Learning path skill with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<EmployeeLearningPath> GetOwnedEnrollmentAsync(Guid id)
+    {
+        var entity = await _enrollmentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Learning path enrollment with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<EmployeeLearningPath> GetOwnedEnrollmentWithDetailsAsync(Guid id)
+    {
+        var entity = await _enrollmentRepository.GetWithFullDetailsAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Learning path enrollment with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<EmployeeLearningPathStep> GetOwnedStepAsync(Guid id)
+    {
+        var entity = await _stepRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Learning path step with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Learning path queries ─────────────────────────────────────────────────
 
     public async Task<LearningPathDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _pathRepository.GetWithFullDetailsAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Learning path with ID '{id}' not found.");
-
+        var entity = await GetOwnedPathWithDetailsAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<LearningPathSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _pathRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<LearningPathSummaryDto>> GetActiveAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _pathRepository.GetActiveAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<LearningPathSummaryDto>> GetByStatusAsync(LearningPathStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _pathRepository.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<LearningPathSummaryDto>> GetByPositionAsync(Guid positionId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _pathRepository.GetByPositionAsync(positionId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<LearningPathDto> CreateAsync(CreateLearningPathDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
 
         await _pathRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -92,10 +168,7 @@ public class LearningPathService : ILearningPathService
 
     public async Task<LearningPathDto> UpdateAsync(UpdateLearningPathDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _pathRepository.GetByIdAsync(dto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Learning path with ID '{dto.Id}' not found.");
+        var entity = await GetOwnedPathAsync(dto.Id);
 
         entity.UpdateEntity(dto, updatedByUserId);
         entity.UpdatedAt = DateTime.UtcNow;
@@ -109,10 +182,7 @@ public class LearningPathService : ILearningPathService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _pathRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Learning path with ID '{id}' not found.");
+        var entity = await GetOwnedPathAsync(id);
 
         await _pathRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -126,12 +196,13 @@ public class LearningPathService : ILearningPathService
 
     public async Task<LearningPathProgramDto> AddProgramAsync(CreateLearningPathProgramDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var path = await _pathRepository.GetByIdAsync(dto.LearningPathId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        if (path == null)
-            throw new ArgumentException($"Learning path with ID '{dto.LearningPathId}' not found.");
+        await GetOwnedPathAsync(dto.LearningPathId);
 
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var entity = dto.ToEntity(current, createdByUserId);
 
         await _pathProgramRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -141,16 +212,14 @@ public class LearningPathService : ILearningPathService
 
     public async Task<IEnumerable<LearningPathProgramDto>> GetProgramsAsync(Guid learningPathId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _pathProgramRepository.GetByLearningPathIdAsync(learningPathId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<LearningPathProgramDto> UpdateProgramAsync(UpdateLearningPathProgramDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _pathProgramRepository.GetByIdAsync(dto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Learning path program with ID '{dto.Id}' not found.");
+        var entity = await GetOwnedPathProgramAsync(dto.Id);
 
         entity.UpdateEntity(dto, updatedByUserId);
         entity.UpdatedAt = DateTime.UtcNow;
@@ -164,10 +233,7 @@ public class LearningPathService : ILearningPathService
 
     public async Task<bool> DeleteProgramAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _pathProgramRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Learning path program with ID '{id}' not found.");
+        var entity = await GetOwnedPathProgramAsync(id);
 
         await _pathProgramRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -179,12 +245,13 @@ public class LearningPathService : ILearningPathService
 
     public async Task<LearningPathSkillDto> AddSkillAsync(CreateLearningPathSkillDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var path = await _pathRepository.GetByIdAsync(dto.LearningPathId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        if (path == null)
-            throw new ArgumentException($"Learning path with ID '{dto.LearningPathId}' not found.");
+        await GetOwnedPathAsync(dto.LearningPathId);
 
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var entity = dto.ToEntity(current, createdByUserId);
 
         await _pathSkillRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -194,16 +261,14 @@ public class LearningPathService : ILearningPathService
 
     public async Task<IEnumerable<LearningPathSkillDto>> GetSkillsAsync(Guid learningPathId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _pathSkillRepository.GetByLearningPathIdAsync(learningPathId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<bool> DeleteSkillAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _pathSkillRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Learning path skill with ID '{id}' not found.");
+        var entity = await GetOwnedPathSkillAsync(id);
 
         await _pathSkillRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -215,28 +280,26 @@ public class LearningPathService : ILearningPathService
 
     public async Task<EmployeeLearningPathDto> GetEnrollmentByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _enrollmentRepository.GetWithFullDetailsAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Learning path enrollment with ID '{id}' not found.");
-
+        var entity = await GetOwnedEnrollmentWithDetailsAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<EmployeeLearningPathSummaryDto>> GetEnrollmentsForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _enrollmentRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<EmployeeLearningPathDto> EnrollEmployeeAsync(EnrollEmployeeInLearningPathDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var path = await _pathRepository.GetWithFullDetailsAsync(dto.LearningPathId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        if (path == null)
-            throw new ArgumentException($"Learning path with ID '{dto.LearningPathId}' not found.");
+        await GetOwnedPathWithDetailsAsync(dto.LearningPathId);
 
-        var enrollment = dto.ToEntity(tenantId, createdByUserId);
+        var enrollment = dto.ToEntity(current, createdByUserId);
         enrollment.EnrolledDate = DateTime.UtcNow;
         enrollment.ProgressPercentage = 0;
         enrollment.IsCompleted = false;
@@ -246,14 +309,15 @@ public class LearningPathService : ILearningPathService
         // Create a step for each program in the learning path. Track the enrollment and all steps,
         // then persist them in a SINGLE SaveChanges so the enrollment can never be left step-less
         // (which would otherwise pin progress at 0% forever). enrollment.Id is assigned client-side.
-        var programs = await _pathProgramRepository.GetByLearningPathIdAsync(dto.LearningPathId);
+        var programs = (await _pathProgramRepository.GetByLearningPathIdAsync(dto.LearningPathId))
+            .Where(p => p.TenantId == current);
 
         foreach (var program in programs)
         {
             var step = new EmployeeLearningPathStep
             {
                 Id = Guid.NewGuid(),
-                TenantId = tenantId,
+                TenantId = current,
                 EmployeeLearningPathId = enrollment.Id,
                 LearningPathProgramId = program.Id,
                 IsCompleted = false,
@@ -273,13 +337,15 @@ public class LearningPathService : ILearningPathService
 
     public async Task<EmployeeLearningPathDto> RecalculateProgressAsync(Guid enrollmentId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var enrollment = await _enrollmentRepository.GetByIdAsync(enrollmentId);
+        var enrollment = await GetOwnedEnrollmentAsync(enrollmentId);
+        var tenantId = enrollment.TenantId;
 
-        if (enrollment == null)
-            throw new ArgumentException($"Learning path enrollment with ID '{enrollmentId}' not found.");
-
-        var steps = (await _stepRepository.GetByEmployeeLearningPathIdAsync(enrollmentId)).ToList();
-        var programs = await _pathProgramRepository.GetByLearningPathIdAsync(enrollment.LearningPathId);
+        // Rows belonging to another tenant would not merely leak: they would be counted into the
+        // mandatory totals and silently corrupt the stored progress percentage.
+        var steps = (await _stepRepository.GetByEmployeeLearningPathIdAsync(enrollmentId))
+            .Where(s => s.TenantId == tenantId).ToList();
+        var programs = (await _pathProgramRepository.GetByLearningPathIdAsync(enrollment.LearningPathId))
+            .Where(p => p.TenantId == tenantId);
         var mandatoryProgramIds = programs.Where(p => p.IsMandatory).Select(p => p.Id).ToHashSet();
 
         var mandatorySteps = steps.Where(s => mandatoryProgramIds.Contains(s.LearningPathProgramId)).ToList();
@@ -309,10 +375,7 @@ public class LearningPathService : ILearningPathService
 
     public async Task<EmployeeLearningPathStepDto> UpdateStepAsync(UpdateLearningPathStepDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _stepRepository.GetByIdAsync(dto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Learning path step with ID '{dto.Id}' not found.");
+        var entity = await GetOwnedStepAsync(dto.Id);
 
         entity.UpdateEntity(dto, updatedByUserId);
         entity.UpdatedAt = DateTime.UtcNow;
@@ -329,15 +392,14 @@ public class LearningPathService : ILearningPathService
 
     public async Task<IEnumerable<EmployeeLearningPathSummaryDto>> GetEnrollmentsByPathIdAsync(Guid pathId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _enrollmentRepository.GetByLearningPathIdAsync(pathId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<bool> RemoveEnrollmentAsync(Guid enrollmentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _enrollmentRepository.GetByIdAsync(enrollmentId);
-        if (entity == null)
-            throw new ArgumentException($"Learning path enrollment with ID '{enrollmentId}' not found.");
+        var entity = await GetOwnedEnrollmentAsync(enrollmentId);
 
         await _enrollmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -346,15 +408,14 @@ public class LearningPathService : ILearningPathService
 
     public async Task<IEnumerable<EnrollmentListItemDto>> GetAllEnrollmentsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _enrollmentRepository.GetAllWithDetailsAsync();
-        return entities.Select(e => e.ToEnrollmentListItemDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToEnrollmentListItemDto());
     }
 
     public async Task<EmployeeLearningPathDto> UpdateEnrollmentAsync(UpdateEnrollmentDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _enrollmentRepository.GetWithFullDetailsAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Learning path enrollment with ID '{dto.Id}' not found.");
+        var entity = await GetOwnedEnrollmentWithDetailsAsync(dto.Id);
 
         entity.TargetCompletionDate = dto.TargetCompletionDate;
         entity.Notes = dto.Notes;
@@ -370,14 +431,22 @@ public class LearningPathService : ILearningPathService
 
     public async Task<StepDetailPageDto> GetStepDetailAsync(Guid stepId, Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var step = await _stepRepository.GetStepWithContextAsync(stepId)
-            ?? throw new ArgumentException($"Step '{stepId}' not found.");
+        var tenantId = GetTenantId();
+
+        // A step owned by another tenant is reported as missing rather than forbidden, so the endpoint does
+        // not confirm that the id exists elsewhere.
+        var step = await _stepRepository.GetStepWithContextAsync(stepId);
+        if (step == null || step.TenantId != tenantId)
+            throw new ArgumentException($"Step '{stepId}' not found.");
 
         var lpp        = step.LearningPathProgram;
         var program    = lpp.Program;
         var enrollment = step.EmployeeLearningPath;
 
+        // Sibling steps drive the displayed sequence and total, so foreign rows would not merely leak:
+        // they would shift this step's position and inflate the step count.
         var allSteps = enrollment.Steps
+            .Where(s => s.TenantId == tenantId)
             .OrderBy(s => s.LearningPathProgram?.SequenceOrder ?? 0)
             .ToList();
 

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Orientation;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -18,6 +19,7 @@ public class OrientationProgramService : IOrientationProgramService
     private readonly IOrientationAudienceRuleRepository _audienceRuleRepository;
     private readonly IOrientationAssessmentQuestionRepository _questionRepository;
     private readonly IOrientationAssessmentOptionRepository _optionRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<OrientationProgramService> _logger;
 
@@ -29,6 +31,7 @@ public class OrientationProgramService : IOrientationProgramService
         IOrientationAudienceRuleRepository audienceRuleRepository,
         IOrientationAssessmentQuestionRepository questionRepository,
         IOrientationAssessmentOptionRepository optionRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<OrientationProgramService> logger)
     {
@@ -39,8 +42,84 @@ public class OrientationProgramService : IOrientationProgramService
         _audienceRuleRepository = audienceRuleRepository;
         _questionRepository = questionRepository;
         _optionRepository = optionRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<OrientationProgram> GetOwnedProgramAsync(Guid id)
+    {
+        var entity = await _programRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Orientation program with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<OrientationProgram> GetOwnedProgramWithDetailsAsync(Guid id)
+    {
+        var entity = await _programRepository.GetWithFullDetailsAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Orientation program with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<OrientationModule> GetOwnedModuleAsync(Guid id)
+    {
+        var entity = await _moduleRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Orientation module with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<OrientationContentItem> GetOwnedContentItemAsync(Guid id)
+    {
+        var entity = await _contentItemRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Orientation content item with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<OrientationPrerequisite> GetOwnedPrerequisiteAsync(Guid id)
+    {
+        var entity = await _prerequisiteRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Orientation prerequisite with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<OrientationAudienceRule> GetOwnedAudienceRuleAsync(Guid id)
+    {
+        var entity = await _audienceRuleRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Orientation audience rule with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<OrientationAssessmentQuestion> GetOwnedQuestionAsync(Guid id)
+    {
+        var entity = await _questionRepository.GetWithOptionsAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Orientation assessment question with ID '{id}' not found.");
+        return entity;
     }
 
     // ====================================================================
@@ -49,26 +128,31 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<OrientationProgramDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _programRepository.GetWithFullDetailsAsync(id)
-            ?? throw new ArgumentException($"Orientation program with ID '{id}' not found.");
+        var entity = await GetOwnedProgramWithDetailsAsync(id);
         return entity.ToDto();
     }
 
     public async Task<OrientationProgramDto?> GetByProgramCodeAsync(string programCode, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _programRepository.GetByProgramCodeAsync(programCode);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<OrientationProgramSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _programRepository.GetAllAsync(p => p.Category);
+        var tenantId = GetTenantId();
+        var entities = await _programRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
+            .Include(p => p.Category)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<OrientationProgramSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _programRepository.GetQueryable().Include(p => p.Category);
+        var tenantId = GetTenantId();
+        var query = _programRepository.GetQueryable().Where(p => p.TenantId == tenantId).Include(p => p.Category);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -87,19 +171,44 @@ public class OrientationProgramService : IOrientationProgramService
     }
 
     public async Task<IEnumerable<OrientationProgramSummaryDto>> GetByStatusAsync(OrientationProgramStatus status, CancellationToken cancellationToken = default)
-        => (await _programRepository.GetByStatusAsync(status)).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _programRepository.GetByStatusAsync(status))
+            .Where(p => p.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<IEnumerable<OrientationProgramSummaryDto>> GetByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default)
-        => (await _programRepository.GetByCategoryAsync(categoryId)).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _programRepository.GetByCategoryAsync(categoryId))
+            .Where(p => p.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<IEnumerable<OrientationProgramSummaryDto>> GetByTypeAsync(OrientationProgramType programType, CancellationToken cancellationToken = default)
-        => (await _programRepository.GetByTypeAsync(programType)).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _programRepository.GetByTypeAsync(programType))
+            .Where(p => p.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<IEnumerable<OrientationProgramSummaryDto>> GetActiveProgramsAsync(CancellationToken cancellationToken = default)
-        => (await _programRepository.GetActiveProgramsAsync()).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _programRepository.GetActiveProgramsAsync())
+            .Where(p => p.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     public async Task<IEnumerable<OrientationProgramSummaryDto>> GetByOwnerOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
-        => (await _programRepository.GetByOwnerOrganizationUnitAsync(organizationUnitId)).ToSummaryDtoList();
+    {
+        var tenantId = GetTenantId();
+        return (await _programRepository.GetByOwnerOrganizationUnitAsync(organizationUnitId))
+            .Where(p => p.TenantId == tenantId)
+            .ToSummaryDtoList();
+    }
 
     // ====================================================================
     // PROGRAM CRUD + LIFECYCLE
@@ -107,13 +216,16 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<OrientationProgramDto> CreateAsync(CreateOrientationProgramDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         entity.ProgramCode = string.IsNullOrWhiteSpace(createDto.ProgramCode)
-            ? await GenerateProgramCodeAsync(cancellationToken)
+            ? await GenerateProgramCodeAsync(tenantId, cancellationToken)
             : createDto.ProgramCode.Trim();
 
-        if (await _programRepository.ProgramCodeExistsAsync(entity.ProgramCode))
+        var codeExists = await _programRepository.GetQueryable()
+            .AnyAsync(p => p.TenantId == tenantId && p.ProgramCode == entity.ProgramCode && !p.IsDeleted, cancellationToken);
+        if (codeExists)
             throw new InvalidOperationException($"Program code '{entity.ProgramCode}' is already in use.");
 
         await _programRepository.AddAsync(entity);
@@ -125,8 +237,7 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<OrientationProgramDto> UpdateAsync(UpdateOrientationProgramDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _programRepository.GetByIdAsync(updateDto.Id)
-            ?? throw new ArgumentException($"Orientation program with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedProgramAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _programRepository.UpdateAsync(entity);
@@ -138,8 +249,7 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<bool> ChangeStatusAsync(ChangeOrientationProgramStatusDto changeDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _programRepository.GetByIdAsync(changeDto.ProgramId)
-            ?? throw new ArgumentException($"Orientation program with ID '{changeDto.ProgramId}' not found.");
+        var entity = await GetOwnedProgramAsync(changeDto.ProgramId);
 
         entity.Status = changeDto.NewStatus;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -153,8 +263,7 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _programRepository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Orientation program with ID '{id}' not found.");
+        var entity = await GetOwnedProgramAsync(id);
 
         if (entity.Status == OrientationProgramStatus.Active)
             throw new InvalidOperationException("An active program cannot be deleted. Suspend or retire it first.");
@@ -171,6 +280,7 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<OrientationModuleDto> AddModuleAsync(CreateOrientationModuleDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         await EnsureProgramExistsAsync(createDto.ProgramId);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
@@ -183,12 +293,16 @@ public class OrientationProgramService : IOrientationProgramService
     }
 
     public async Task<IEnumerable<OrientationModuleDto>> GetModulesAsync(Guid programId, CancellationToken cancellationToken = default)
-        => (await _moduleRepository.GetByProgramIdAsync(programId)).Select(m => m.ToDto());
+    {
+        var tenantId = GetTenantId();
+        return (await _moduleRepository.GetByProgramIdAsync(programId))
+            .Where(m => m.TenantId == tenantId)
+            .Select(m => m.ToDto());
+    }
 
     public async Task<OrientationModuleDto> UpdateModuleAsync(UpdateOrientationModuleDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _moduleRepository.GetByIdAsync(updateDto.Id)
-            ?? throw new ArgumentException($"Orientation module with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedModuleAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _moduleRepository.UpdateAsync(entity);
@@ -198,8 +312,7 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<bool> DeleteModuleAsync(Guid moduleId, CancellationToken cancellationToken = default)
     {
-        var entity = await _moduleRepository.GetByIdAsync(moduleId)
-            ?? throw new ArgumentException($"Orientation module with ID '{moduleId}' not found.");
+        var entity = await GetOwnedModuleAsync(moduleId);
 
         await _moduleRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -212,8 +325,8 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<OrientationContentItemDto> AddContentItemAsync(CreateOrientationContentItemDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var module = await _moduleRepository.GetByIdAsync(createDto.ModuleId)
-            ?? throw new ArgumentException($"Orientation module with ID '{createDto.ModuleId}' not found.");
+        tenantId = RequireCurrentTenant(tenantId);
+        var module = await GetOwnedModuleAsync(createDto.ModuleId);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         if (entity.SequenceOrder <= 0)
@@ -225,12 +338,16 @@ public class OrientationProgramService : IOrientationProgramService
     }
 
     public async Task<IEnumerable<OrientationContentItemDto>> GetContentItemsAsync(Guid moduleId, CancellationToken cancellationToken = default)
-        => (await _contentItemRepository.GetByModuleIdAsync(moduleId)).Select(c => c.ToDto());
+    {
+        var tenantId = GetTenantId();
+        return (await _contentItemRepository.GetByModuleIdAsync(moduleId))
+            .Where(c => c.TenantId == tenantId)
+            .Select(c => c.ToDto());
+    }
 
     public async Task<OrientationContentItemDto> UpdateContentItemAsync(UpdateOrientationContentItemDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _contentItemRepository.GetByIdAsync(updateDto.Id)
-            ?? throw new ArgumentException($"Orientation content item with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedContentItemAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _contentItemRepository.UpdateAsync(entity);
@@ -240,8 +357,7 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<bool> DeleteContentItemAsync(Guid contentItemId, CancellationToken cancellationToken = default)
     {
-        var entity = await _contentItemRepository.GetByIdAsync(contentItemId)
-            ?? throw new ArgumentException($"Orientation content item with ID '{contentItemId}' not found.");
+        var entity = await GetOwnedContentItemAsync(contentItemId);
 
         await _contentItemRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -254,6 +370,8 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<OrientationPrerequisiteDto> AddPrerequisiteAsync(CreateOrientationPrerequisiteDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+
         if (createDto.ProgramId == createDto.PrerequisiteProgramId)
             throw new InvalidOperationException("A program cannot be a prerequisite of itself.");
 
@@ -271,12 +389,16 @@ public class OrientationProgramService : IOrientationProgramService
     }
 
     public async Task<IEnumerable<OrientationPrerequisiteDto>> GetPrerequisitesAsync(Guid programId, CancellationToken cancellationToken = default)
-        => (await _prerequisiteRepository.GetByProgramIdAsync(programId)).Select(p => p.ToDto());
+    {
+        var tenantId = GetTenantId();
+        return (await _prerequisiteRepository.GetByProgramIdAsync(programId))
+            .Where(p => p.TenantId == tenantId)
+            .Select(p => p.ToDto());
+    }
 
     public async Task<bool> DeletePrerequisiteAsync(Guid prerequisiteId, CancellationToken cancellationToken = default)
     {
-        var entity = await _prerequisiteRepository.GetByIdAsync(prerequisiteId)
-            ?? throw new ArgumentException($"Orientation prerequisite with ID '{prerequisiteId}' not found.");
+        var entity = await GetOwnedPrerequisiteAsync(prerequisiteId);
 
         await _prerequisiteRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -289,6 +411,7 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<OrientationAudienceRuleDto> AddAudienceRuleAsync(CreateOrientationAudienceRuleDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         await EnsureProgramExistsAsync(createDto.ProgramId);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
@@ -298,12 +421,16 @@ public class OrientationProgramService : IOrientationProgramService
     }
 
     public async Task<IEnumerable<OrientationAudienceRuleDto>> GetAudienceRulesAsync(Guid programId, CancellationToken cancellationToken = default)
-        => (await _audienceRuleRepository.GetByProgramIdAsync(programId)).Select(r => r.ToDto());
+    {
+        var tenantId = GetTenantId();
+        return (await _audienceRuleRepository.GetByProgramIdAsync(programId))
+            .Where(r => r.TenantId == tenantId)
+            .Select(r => r.ToDto());
+    }
 
     public async Task<OrientationAudienceRuleDto> UpdateAudienceRuleAsync(UpdateOrientationAudienceRuleDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _audienceRuleRepository.GetByIdAsync(updateDto.Id)
-            ?? throw new ArgumentException($"Orientation audience rule with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAudienceRuleAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _audienceRuleRepository.UpdateAsync(entity);
@@ -313,8 +440,7 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<bool> DeleteAudienceRuleAsync(Guid ruleId, CancellationToken cancellationToken = default)
     {
-        var entity = await _audienceRuleRepository.GetByIdAsync(ruleId)
-            ?? throw new ArgumentException($"Orientation audience rule with ID '{ruleId}' not found.");
+        var entity = await GetOwnedAudienceRuleAsync(ruleId);
 
         await _audienceRuleRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -327,6 +453,7 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<OrientationAssessmentQuestionDto> AddQuestionAsync(CreateOrientationAssessmentQuestionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         await EnsureProgramExistsAsync(createDto.ProgramId);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
@@ -340,12 +467,17 @@ public class OrientationProgramService : IOrientationProgramService
     }
 
     public async Task<IEnumerable<OrientationAssessmentQuestionDto>> GetQuestionsAsync(Guid programId, CancellationToken cancellationToken = default)
-        => (await _questionRepository.GetByProgramIdAsync(programId)).Select(q => q.ToDto());
+    {
+        var tenantId = GetTenantId();
+        return (await _questionRepository.GetByProgramIdAsync(programId))
+            .Where(q => q.TenantId == tenantId)
+            .Select(q => q.ToDto());
+    }
 
     public async Task<OrientationAssessmentQuestionDto> UpdateQuestionAsync(UpdateOrientationAssessmentQuestionDto updateDto, Guid tenantId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _questionRepository.GetWithOptionsAsync(updateDto.Id)
-            ?? throw new ArgumentException($"Orientation assessment question with ID '{updateDto.Id}' not found.");
+        tenantId = RequireCurrentTenant(tenantId);
+        var entity = await GetOwnedQuestionAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -370,8 +502,7 @@ public class OrientationProgramService : IOrientationProgramService
 
     public async Task<bool> DeleteQuestionAsync(Guid questionId, CancellationToken cancellationToken = default)
     {
-        var entity = await _questionRepository.GetWithOptionsAsync(questionId)
-            ?? throw new ArgumentException($"Orientation assessment question with ID '{questionId}' not found.");
+        var entity = await GetOwnedQuestionAsync(questionId);
 
         if (entity.Options.Any())
             await _optionRepository.DeleteRangeAsync(entity.Options.ToList());
@@ -387,14 +518,23 @@ public class OrientationProgramService : IOrientationProgramService
 
     private async Task EnsureProgramExistsAsync(Guid programId)
     {
-        if (!await _programRepository.ExistsAsync(p => p.Id == programId && !p.IsDeleted))
-            throw new ArgumentException($"Orientation program with ID '{programId}' not found.");
+        await GetOwnedProgramAsync(programId);
     }
 
-    private async Task<string> GenerateProgramCodeAsync(CancellationToken cancellationToken)
+    private async Task<string> GenerateProgramCodeAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var prefix = $"ORI-{DateTime.UtcNow.Year}-";
-        var next = await _programRepository.GetMaxProgramCodeSequenceAsync(prefix) + 1;
-        return $"{prefix}{next:D4}";
+        var codes = await _programRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId && p.ProgramCode.StartsWith(prefix))
+            .Select(p => p.ProgramCode)
+            .ToListAsync(cancellationToken);
+
+        var max = 0;
+        foreach (var code in codes)
+        {
+            var suffix = code.Substring(prefix.Length);
+            if (int.TryParse(suffix, out var n) && n > max) max = n;
+        }
+        return $"{prefix}{(max + 1):D4}";
     }
 }

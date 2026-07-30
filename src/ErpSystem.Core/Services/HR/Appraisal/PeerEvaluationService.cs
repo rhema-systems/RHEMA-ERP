@@ -46,6 +46,7 @@ public class PeerEvaluationService : IPeerEvaluationService
     private readonly IGenericRepository<AppraisalCompetency> _appraisalCompetencyRepository;
     private readonly IGenericRepository<PerformanceAppraisalCriterionConfig> _criterionConfigRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<PeerEvaluationService> _logger;
 
     public PeerEvaluationService(
@@ -57,6 +58,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         IGenericRepository<AppraisalCompetency> appraisalCompetencyRepository,
         IGenericRepository<PerformanceAppraisalCriterionConfig> criterionConfigRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<PeerEvaluationService> logger)
     {
         _evaluatorEvaluationRepository = evaluatorEvaluationRepository;
@@ -67,7 +69,25 @@ public class PeerEvaluationService : IPeerEvaluationService
         _appraisalCompetencyRepository = appraisalCompetencyRepository;
         _criterionConfigRepository = criterionConfigRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private IQueryable<EvaluatorEvaluation> TenantEvaluationQuery()
+    {
+        var tenantId = GetTenantId();
+        return _evaluatorEvaluationRepository.GetQueryable().Where(e => e.TenantId == tenantId);
     }
 
     public async Task<IEnumerable<PeerEvaluationAssignmentDto>> GetPeerEvaluationAssignmentsAsync(
@@ -75,7 +95,8 @@ public class PeerEvaluationService : IPeerEvaluationService
         CancellationToken cancellationToken = default)
     {
         // Get all peer evaluation assignments for this evaluator
-        var evaluations = await _evaluatorEvaluationRepository.GetQueryable()
+        var tenantId = GetTenantId();
+        var evaluations = await TenantEvaluationQuery()
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.Employee)
                     .ThenInclude(emp => emp.Position)
@@ -114,7 +135,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         CancellationToken cancellationToken = default)
     {
         // Load the evaluation
-        var evaluation = await _evaluatorEvaluationRepository.GetQueryable()
+        var evaluation = await TenantEvaluationQuery()
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.Employee)
                     .ThenInclude(emp => emp.Position)
@@ -152,7 +173,7 @@ public class PeerEvaluationService : IPeerEvaluationService
 
         // Load appraisal settings
         var settings = await _settingsRepository.GetQueryable()
-            .FirstOrDefaultAsync(s => s.Id == evaluation.Appraisal.AppraisalCycle.AppraisalSettingsId, cancellationToken);
+            .FirstOrDefaultAsync(s => s.Id == evaluation.Appraisal.AppraisalCycle.AppraisalSettingsId && s.TenantId == GetTenantId(), cancellationToken);
 
         if (settings == null)
         {
@@ -184,7 +205,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         CancellationToken cancellationToken = default)
     {
         // Load evaluation with necessary navigation properties
-        var evaluation = await _evaluatorEvaluationRepository.GetQueryable()
+        var evaluation = await TenantEvaluationQuery()
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.AppraisalCycle)
             .Include(e => e.Appraisal)
@@ -236,6 +257,7 @@ public class PeerEvaluationService : IPeerEvaluationService
             {
                 var newScore = new CriterionScore
                 {
+                    TenantId = GetTenantId(),
                     EvaluatorEvaluationId = evaluation.Id,
                     TemplateItemId = templateItemId,
                     NumericScore = itemInput.NumericScore,
@@ -262,7 +284,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         Guid evaluatorId, 
         CancellationToken cancellationToken = default)
     {
-        var evaluation = await _evaluatorEvaluationRepository.GetQueryable()
+        var evaluation = await TenantEvaluationQuery()
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.Employee)
             .Include(e => e.Appraisal)
@@ -336,10 +358,12 @@ public class PeerEvaluationService : IPeerEvaluationService
             return;
         }
 
+        var tenantId = GetTenantId();
         var snapshot = await _criterionConfigRepository.GetQueryable()
             .Include(c => c.GradeRanges)
             .FirstOrDefaultAsync(
-                c => c.PerformanceAppraisalId == evaluation.AppraisalId
+                c => c.TenantId == tenantId
+                  && c.PerformanceAppraisalId == evaluation.AppraisalId
                   && c.TemplateItemId == criterionScore.TemplateItemId,
                 cancellationToken);
 

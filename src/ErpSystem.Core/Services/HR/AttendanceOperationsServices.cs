@@ -19,48 +19,74 @@ namespace ErpSystem.Core.Services.HR;
 public class GeofenceZoneService : IGeofenceZoneService
 {
     private readonly IGeofenceZoneRepository _repository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<GeofenceZoneService> _logger;
 
     public GeofenceZoneService(
         IGeofenceZoneRepository repository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<GeofenceZoneService> logger)
     {
         _repository = repository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<GeofenceZoneDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A geofence zone owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<GeofenceZone> GetOwnedAsync(Guid id)
     {
         var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Geofence zone '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<GeofenceZoneDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<GeofenceZoneSummaryDto>> GetAllAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetAllAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetAllAsync()).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<GeofenceZoneSummaryDto>> GetActiveZonesAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetActiveZonesAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetActiveZonesAsync()).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<GeofenceZoneSummaryDto>> GetByLocationIdAsync(Guid locationId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByLocationIdAsync(locationId);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByLocationIdAsync(locationId)).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<GeofenceZoneSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(z => z.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderBy(z => z.ZoneName)
@@ -79,9 +105,13 @@ public class GeofenceZoneService : IGeofenceZoneService
 
     public async Task<GeofenceZoneDto> CreateAsync(CreateGeofenceZoneDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         ValidateGeofenceDto(dto.Shape, dto.CentreLatitude, dto.CentreLongitude, dto.RadiusMetres, dto.PolygonCoordinatesJson);
 
-        var entity = dto.ToEntity(tenantId, userId);
+        var entity = dto.ToEntity(current, userId);
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
@@ -91,9 +121,7 @@ public class GeofenceZoneService : IGeofenceZoneService
 
     public async Task<GeofenceZoneDto> UpdateAsync(UpdateGeofenceZoneDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Geofence zone '{dto.Id}' not found.");
+        var entity = await GetOwnedAsync(dto.Id);
 
         ValidateGeofenceDto(dto.Shape, dto.CentreLatitude, dto.CentreLongitude, dto.RadiusMetres, dto.PolygonCoordinatesJson);
 
@@ -105,9 +133,7 @@ public class GeofenceZoneService : IGeofenceZoneService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Geofence zone '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _repository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -148,60 +174,88 @@ public class GeofenceZoneService : IGeofenceZoneService
 public class RemoteWorkRequestService : IRemoteWorkRequestService
 {
     private readonly IRemoteWorkRequestRepository _repository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<RemoteWorkRequestService> _logger;
 
     public RemoteWorkRequestService(
         IRemoteWorkRequestRepository repository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<RemoteWorkRequestService> logger)
     {
         _repository = repository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<RemoteWorkRequestDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A remote work request owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<RemoteWorkRequest> GetOwnedAsync(Guid id)
     {
         var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Remote work request '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<RemoteWorkRequestDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<RemoteWorkRequestDto?> GetByRequestNumberAsync(string requestNumber, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetByRequestNumberAsync(requestNumber);
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<RemoteWorkRequestSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByEmployeeIdAsync(employeeId);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByEmployeeIdAsync(employeeId)).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<RemoteWorkRequestSummaryDto>> GetByStatusAsync(RemoteWorkRequestStatus status, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByStatusAsync(status);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByStatusAsync(status)).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<RemoteWorkRequestSummaryDto>> GetPendingApprovalAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetPendingApprovalAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetPendingApprovalAsync()).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<RemoteWorkRequestSummaryDto>> GetByDateRangeAsync(DateOnly from, DateOnly to, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByDateRangeAsync(from, to);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByDateRangeAsync(from, to)).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<RemoteWorkRequestSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(r => r.StartDate)
@@ -220,8 +274,12 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
 
     public async Task<RemoteWorkRequestDto> CreateAsync(CreateRemoteWorkRequestDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        var entity = dto.ToEntity(tenantId, userId);
-        entity.RequestNumber = await GenerateRequestNumberAsync(ct);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, userId);
+        entity.RequestNumber = await GenerateRequestNumberAsync(current, ct);
         entity.Status = RemoteWorkRequestStatus.Pending;
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -232,9 +290,7 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
 
     public async Task<RemoteWorkRequestDto> UpdateAsync(UpdateRemoteWorkRequestDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Remote work request '{dto.Id}' not found.");
+        var entity = await GetOwnedAsync(dto.Id);
 
         if (entity.Status != RemoteWorkRequestStatus.Pending)
             throw new InvalidOperationException("Only pending remote work requests can be edited.");
@@ -247,9 +303,7 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
 
     public async Task<RemoteWorkRequestDto> ApproveAsync(Guid requestId, string? comments, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(requestId);
-        if (entity == null)
-            throw new ArgumentException($"Remote work request '{requestId}' not found.");
+        var entity = await GetOwnedAsync(requestId);
 
         if (entity.Status != RemoteWorkRequestStatus.Pending)
             throw new InvalidOperationException("Only pending remote work requests can be approved.");
@@ -270,9 +324,7 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
 
     public async Task<RemoteWorkRequestDto> RejectAsync(Guid requestId, string rejectionReason, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(requestId);
-        if (entity == null)
-            throw new ArgumentException($"Remote work request '{requestId}' not found.");
+        var entity = await GetOwnedAsync(requestId);
 
         if (entity.Status != RemoteWorkRequestStatus.Pending)
             throw new InvalidOperationException("Only pending remote work requests can be rejected.");
@@ -292,18 +344,16 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Remote work request '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _repository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
         return true;
     }
 
-    private async Task<string> GenerateRequestNumberAsync(CancellationToken ct)
+    private async Task<string> GenerateRequestNumberAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable().CountAsync(ct);
+        var count = await _repository.GetQueryable().CountAsync(r => r.TenantId == tenantId, ct);
         return $"RWR-{DateTime.UtcNow:yyyyMMdd}-{(count + 1):D5}";
     }
 }
@@ -320,58 +370,93 @@ public class HolidayCalendarService : IHolidayCalendarService
 {
     private readonly IHolidayCalendarRepository _repository;
     private readonly IPublicHolidayRepository _holidayRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<HolidayCalendarService> _logger;
 
     public HolidayCalendarService(
         IHolidayCalendarRepository repository,
         IPublicHolidayRepository holidayRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<HolidayCalendarService> logger)
     {
         _repository = repository;
         _holidayRepository = holidayRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<HolidayCalendarDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A holiday calendar owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<HolidayCalendar> GetOwnedCalendarAsync(Guid id)
     {
         var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Holiday calendar '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<PublicHoliday> GetOwnedHolidayAsync(Guid id)
+    {
+        var entity = await _holidayRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Public holiday '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<HolidayCalendarDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedCalendarAsync(id);
         return entity.ToDto();
     }
 
     public async Task<HolidayCalendarDto?> GetDefaultCalendarAsync(CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetDefaultCalendarAsync();
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<HolidayCalendarSummaryDto>> GetAllAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetAllAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetAllAsync()).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<HolidayCalendarSummaryDto>> GetActiveCalendarsAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetActiveCalendarsAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetActiveCalendarsAsync()).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<HolidayCalendarDto> GetWithHolidaysAsync(Guid id, int? year = null, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetWithHolidaysAsync(id, year);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Holiday calendar '{id}' not found.");
         return entity.ToDto();
     }
 
     public async Task<PagedResult<HolidayCalendarSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(c => c.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderBy(c => c.CalendarName)
@@ -390,7 +475,11 @@ public class HolidayCalendarService : IHolidayCalendarService
 
     public async Task<HolidayCalendarDto> CreateAsync(CreateHolidayCalendarDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        var entity = dto.ToEntity(tenantId, userId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, userId);
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
@@ -400,9 +489,7 @@ public class HolidayCalendarService : IHolidayCalendarService
 
     public async Task<HolidayCalendarDto> UpdateAsync(UpdateHolidayCalendarDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Holiday calendar '{dto.Id}' not found.");
+        var entity = await GetOwnedCalendarAsync(dto.Id);
 
         entity.UpdateEntity(dto, userId);
         await _repository.UpdateAsync(entity);
@@ -412,9 +499,7 @@ public class HolidayCalendarService : IHolidayCalendarService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Holiday calendar '{id}' not found.");
+        var entity = await GetOwnedCalendarAsync(id);
 
         await _repository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -423,7 +508,13 @@ public class HolidayCalendarService : IHolidayCalendarService
 
     public async Task<PublicHolidayDto> AddHolidayAsync(CreatePublicHolidayDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        var entity = dto.ToEntity(tenantId, userId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedCalendarAsync(dto.HolidayCalendarId);
+
+        var entity = dto.ToEntity(current, userId);
         await _holidayRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
         return entity.ToDto();
@@ -431,25 +522,23 @@ public class HolidayCalendarService : IHolidayCalendarService
 
     public async Task<IEnumerable<PublicHolidaySummaryDto>> GetHolidaysAsync(Guid calendarId, int? year = null, CancellationToken ct = default)
     {
+        await GetOwnedCalendarAsync(calendarId);
+        var tenantId = GetTenantId();
         var entities = year.HasValue
             ? await _holidayRepository.GetByCalendarAndYearAsync(calendarId, year.Value)
             : await _holidayRepository.GetByCalendarIdAsync(calendarId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PublicHolidayDto> GetHolidayByIdAsync(Guid holidayId, CancellationToken ct = default)
     {
-        var entity = await _holidayRepository.GetByIdAsync(holidayId);
-        if (entity == null)
-            throw new ArgumentException($"Public holiday '{holidayId}' not found.");
+        var entity = await GetOwnedHolidayAsync(holidayId);
         return entity.ToDto();
     }
 
     public async Task<PublicHolidayDto> UpdateHolidayAsync(UpdatePublicHolidayDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _holidayRepository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Public holiday '{dto.Id}' not found.");
+        var entity = await GetOwnedHolidayAsync(dto.Id);
 
         entity.UpdateEntity(dto, userId);
         await _holidayRepository.UpdateAsync(entity);
@@ -459,9 +548,7 @@ public class HolidayCalendarService : IHolidayCalendarService
 
     public async Task<bool> DeleteHolidayAsync(Guid holidayId, CancellationToken ct = default)
     {
-        var entity = await _holidayRepository.GetByIdAsync(holidayId);
-        if (entity == null)
-            throw new ArgumentException($"Public holiday '{holidayId}' not found.");
+        var entity = await GetOwnedHolidayAsync(holidayId);
 
         await _holidayRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -480,62 +567,90 @@ public class HolidayCalendarService : IHolidayCalendarService
 public class PayPeriodService : IPayPeriodService
 {
     private readonly IPayPeriodRepository _repository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<PayPeriodService> _logger;
 
     public PayPeriodService(
         IPayPeriodRepository repository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<PayPeriodService> logger)
     {
         _repository = repository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<PayPeriodDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A pay period owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<PayPeriod> GetOwnedAsync(Guid id)
     {
         var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Pay period '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<PayPeriodDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<PayPeriodDto?> GetCurrentOpenPeriodAsync(CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetCurrentOpenPeriodAsync();
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<PayPeriodDto?> GetPeriodCoveringDateAsync(DateOnly date, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetPeriodCoveringDateAsync(date);
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<PayPeriodSummaryDto>> GetByStatusAsync(PayPeriodStatus status, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByStatusAsync(status);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByStatusAsync(status)).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<PayPeriodSummaryDto>> GetByTypeAsync(PayPeriodType type, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByTypeAsync(type);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByTypeAsync(type)).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PayPeriodDto> GetWithSummariesAsync(Guid id, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetWithSummariesAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Pay period '{id}' not found.");
         return entity.ToDto();
     }
 
     public async Task<PagedResult<PayPeriodSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(p => p.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(p => p.StartDate)
@@ -554,11 +669,15 @@ public class PayPeriodService : IPayPeriodService
 
     public async Task<PayPeriodDto> CreateAsync(CreatePayPeriodDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         var overlapping = await _repository.GetPeriodCoveringDateAsync(dto.StartDate);
-        if (overlapping != null)
+        if (overlapping != null && overlapping.TenantId == current)
             throw new InvalidOperationException($"An existing pay period already covers {dto.StartDate}.");
 
-        var entity = dto.ToEntity(tenantId, userId);
+        var entity = dto.ToEntity(current, userId);
         entity.Status = PayPeriodStatus.Open;
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -569,9 +688,7 @@ public class PayPeriodService : IPayPeriodService
 
     public async Task<PayPeriodDto> UpdateAsync(UpdatePayPeriodDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Pay period '{dto.Id}' not found.");
+        var entity = await GetOwnedAsync(dto.Id);
 
         if (entity.Status == PayPeriodStatus.Closed)
             throw new InvalidOperationException("A closed pay period cannot be edited.");
@@ -584,9 +701,7 @@ public class PayPeriodService : IPayPeriodService
 
     public async Task<PayPeriodDto> CloseAsync(Guid periodId, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(periodId);
-        if (entity == null)
-            throw new ArgumentException($"Pay period '{periodId}' not found.");
+        var entity = await GetOwnedAsync(periodId);
 
         if (entity.Status == PayPeriodStatus.Closed)
             throw new InvalidOperationException("Pay period is already closed.");
@@ -606,9 +721,7 @@ public class PayPeriodService : IPayPeriodService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Pay period '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.Status == PayPeriodStatus.Closed)
             throw new InvalidOperationException("A closed pay period cannot be deleted.");
@@ -632,6 +745,7 @@ public class StaffAttendancePayrollExportService : IStaffAttendancePayrollExport
     private readonly IStaffAttendancePayrollExportRepository _repository;
     private readonly IPayPeriodRepository _payPeriodRepository;
     private readonly IStaffMonthlyAttendanceSummaryRepository _summaryRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffAttendancePayrollExportService> _logger;
 
@@ -639,51 +753,77 @@ public class StaffAttendancePayrollExportService : IStaffAttendancePayrollExport
         IStaffAttendancePayrollExportRepository repository,
         IPayPeriodRepository payPeriodRepository,
         IStaffMonthlyAttendanceSummaryRepository summaryRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffAttendancePayrollExportService> logger)
     {
         _repository = repository;
         _payPeriodRepository = payPeriodRepository;
         _summaryRepository = summaryRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<StaffAttendancePayrollExportDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A payroll export owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<StaffAttendancePayrollExport> GetOwnedAsync(Guid id)
     {
         var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Payroll export '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<StaffAttendancePayrollExportDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<StaffAttendancePayrollExportDto?> GetByExportReferenceAsync(string exportReference, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetByExportReferenceAsync(exportReference);
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffAttendancePayrollExportSummaryDto>> GetByPayPeriodIdAsync(Guid payPeriodId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByPayPeriodIdAsync(payPeriodId);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByPayPeriodIdAsync(payPeriodId)).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffAttendancePayrollExportSummaryDto>> GetByStatusAsync(PayrollExportStatus status, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByStatusAsync(status);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByStatusAsync(status)).Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<StaffAttendancePayrollExportDto?> GetLatestSuccessfulExportForPeriodAsync(Guid payPeriodId, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetLatestSuccessfulExportForPeriodAsync(payPeriodId);
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<PagedResult<StaffAttendancePayrollExportSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(e => e.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(e => e.ExportDate)
@@ -702,22 +842,24 @@ public class StaffAttendancePayrollExportService : IStaffAttendancePayrollExport
 
     public async Task<StaffAttendancePayrollExportDto> ExportAsync(Guid payPeriodId, string? targetSystem, Guid userId, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var period = await _payPeriodRepository.GetByIdAsync(payPeriodId);
-        if (period == null)
+        if (period == null || period.TenantId != tenantId)
             throw new ArgumentException($"Pay period '{payPeriodId}' not found.");
 
         if (period.Status != PayPeriodStatus.Closed)
             throw new InvalidOperationException("Only closed pay periods can be exported to payroll.");
 
-        var summaries = await _summaryRepository.GetByPayPeriodIdAsync(payPeriodId);
+        var summaries = (await _summaryRepository.GetByPayPeriodIdAsync(payPeriodId))
+            .Where(s => s.TenantId == tenantId);
         var summaryList = summaries.ToList();
 
         var export = new StaffAttendancePayrollExport
         {
             Id = Guid.NewGuid(),
-            TenantId = period.TenantId,
+            TenantId = tenantId,
             PayPeriodId = payPeriodId,
-            ExportReference = await GenerateExportReferenceAsync(ct),
+            ExportReference = await GenerateExportReferenceAsync(tenantId, ct),
             ExportDate = DateTime.UtcNow,
             ExportedById = userId,
             TargetSystem = targetSystem ?? "Payroll",
@@ -736,18 +878,16 @@ public class StaffAttendancePayrollExportService : IStaffAttendancePayrollExport
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Payroll export '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _repository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
         return true;
     }
 
-    private async Task<string> GenerateExportReferenceAsync(CancellationToken ct)
+    private async Task<string> GenerateExportReferenceAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable().CountAsync(ct);
+        var count = await _repository.GetQueryable().CountAsync(e => e.TenantId == tenantId, ct);
         return $"PAY-EXP-{DateTime.UtcNow:yyyyMMdd}-{(count + 1):D5}";
     }
 }

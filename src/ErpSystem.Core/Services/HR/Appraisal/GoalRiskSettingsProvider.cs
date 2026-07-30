@@ -31,23 +31,38 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 public sealed class GoalRiskSettingsProvider : IGoalRiskSettingsProvider
 {
     private readonly IGenericRepository<GoalRiskSetting>    _repo;
+    private readonly ICurrentUserProvider                   _currentUserProvider;
     private readonly ILogger<GoalRiskSettingsProvider>      _logger;
 
     public GoalRiskSettingsProvider(
         IGenericRepository<GoalRiskSetting> repo,
+        ICurrentUserProvider                currentUserProvider,
         ILogger<GoalRiskSettingsProvider>   logger)
     {
         _repo   = repo;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     /// <inheritdoc />
     public async Task<GoalRiskSetting> GetActiveAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var setting = await _repo
             .GetQueryable()
             .AsNoTracking()
-            .Where(s => s.IsActive && !s.IsDeleted)
+            .Where(s => s.TenantId == tenantId && s.IsActive && !s.IsDeleted)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (setting is null)

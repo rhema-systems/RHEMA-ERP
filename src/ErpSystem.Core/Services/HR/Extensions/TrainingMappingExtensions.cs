@@ -1074,7 +1074,8 @@ public static class TrainingMappingExtensions
             ScheduleId = dto.ScheduleId,
             EmployeeId = dto.EmployeeId,
             Type = dto.Type,
-            NominatedById = dto.NominatedById,
+            // Controllers pass the authenticated employee id as userId for training create flows.
+            NominatedById = userId,
             NominationDate = dto.NominationDate,
             Justification = dto.Justification,
             TrainingNeedsAssessmentId = dto.TrainingNeedsAssessmentId,
@@ -1218,8 +1219,9 @@ public static class TrainingMappingExtensions
             CheckOutTime = dto.CheckOutTime,
             AbsenceReason = dto.AbsenceReason,
             Notes = dto.Notes,
-            MarkedById = dto.MarkedById,
-            MarkedAt = dto.MarkedAt,
+            // Controllers pass the authenticated employee id as userId for training create flows.
+            MarkedById = userId,
+            MarkedAt = DateTime.UtcNow,
             CreatedBy = userId.ToString(),
         };
     }
@@ -1432,7 +1434,8 @@ public static class TrainingMappingExtensions
             ExternalUrl = dto.ExternalUrl,
             IsRenewal = dto.IsRenewal,
             PreviousCertificateId = dto.PreviousCertificateId,
-            IssuedById = dto.IssuedById,
+            // Controllers pass the authenticated employee id as userId for training create flows.
+            IssuedById = userId,
             CreatedBy = userId.ToString(),
         };
     }

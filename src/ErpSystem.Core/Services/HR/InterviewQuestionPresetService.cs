@@ -11,31 +11,64 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
 {
     private readonly IInterviewQuestionPresetRepository _presetRepository;
     private readonly IInterviewQuestionPresetItemRepository _itemRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<InterviewQuestionPresetService> _logger;
 
     public InterviewQuestionPresetService(
         IInterviewQuestionPresetRepository presetRepository,
         IInterviewQuestionPresetItemRepository itemRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<InterviewQuestionPresetService> logger)
     {
         _presetRepository = presetRepository;
         _itemRepository = itemRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A preset owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<InterviewQuestionPreset> GetOwnedPresetAsync(Guid id)
+    {
+        var entity = await _presetRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Interview question preset with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<InterviewQuestionPresetItem> GetOwnedItemAsync(Guid id)
+    {
+        var entity = await _itemRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Preset item with ID '{id}' not found.");
+        return entity;
+    }
+
     public async Task<IEnumerable<InterviewQuestionPresetSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _presetRepository.GetAllWithItemsAsync();
-        return entities.Select(e => e.ToSummaryDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToSummaryDto());
     }
 
     public async Task<InterviewQuestionPresetDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _presetRepository.GetWithItemsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Interview question preset with ID '{id}' not found.");
         return entity.ToDto();
     }
@@ -46,11 +79,15 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
         Guid createdByUserId,
         CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = createDto.ToEntity(current, createdByUserId);
 
         foreach (var itemDto in createDto.Items)
         {
-            var item = itemDto.ToEntity(tenantId, createdByUserId);
+            var item = itemDto.ToEntity(current, createdByUserId);
             entity.Items.Add(item);
         }
 
@@ -66,16 +103,16 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
         Guid updatedByUserId,
         CancellationToken cancellationToken = default)
     {
-        var entity = await _presetRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Interview question preset with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedPresetAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         // Sync items when provided
         if (updateDto.Items is not null)
         {
-            var existingItems = (await _itemRepository.GetByPresetIdAsync(entity.Id)).ToList();
+            var existingItems = (await _itemRepository.GetByPresetIdAsync(entity.Id))
+                .Where(i => i.TenantId == entity.TenantId)
+                .ToList();
 
             // Delete items removed from the list
             var incomingIds = updateDto.Items
@@ -128,8 +165,7 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _presetRepository.GetByIdAsync(id);
-        if (entity == null) return false;
+        var entity = await GetOwnedPresetAsync(id);
 
         await _presetRepository.DeleteAsync(id);
         await _unitOfWork.SaveChangesAsync();
@@ -142,12 +178,18 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
         Guid createdByUserId,
         CancellationToken cancellationToken = default)
     {
-        var item = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedPresetAsync(createDto.PresetId);
+
+        var item = createDto.ToEntity(current, createdByUserId);
         await _itemRepository.AddAsync(item);
         await _unitOfWork.SaveChangesAsync();
 
         var items = await _itemRepository.GetByPresetIdAsync(item.PresetId);
-        var saved = items.FirstOrDefault(i => i.Id == item.Id);
+        var saved = items.FirstOrDefault(i => i.Id == item.Id && i.TenantId == current);
         return saved!.ToDto();
     }
 
@@ -156,22 +198,19 @@ public class InterviewQuestionPresetService : IInterviewQuestionPresetService
         Guid updatedByUserId,
         CancellationToken cancellationToken = default)
     {
-        var entity = await _itemRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Preset item with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedItemAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _unitOfWork.SaveChangesAsync();
 
         var items = await _itemRepository.GetByPresetIdAsync(entity.PresetId);
-        var updated = items.FirstOrDefault(i => i.Id == entity.Id);
+        var updated = items.FirstOrDefault(i => i.Id == entity.Id && i.TenantId == entity.TenantId);
         return updated!.ToDto();
     }
 
     public async Task<bool> DeleteItemAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
-        var entity = await _itemRepository.GetByIdAsync(itemId);
-        if (entity == null) return false;
+        var entity = await GetOwnedItemAsync(itemId);
 
         await _itemRepository.DeleteAsync(itemId);
         await _unitOfWork.SaveChangesAsync();

@@ -16,19 +16,47 @@ namespace ErpSystem.Core.Services.HR;
 public class AppraisalGradeDefinitionService : IAppraisalGradeDefinitionService
 {
     private readonly IGenericRepository<AppraisalGradeDefinition> _gradeDefinitionRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<LeaveService> _logger;
 
-    public AppraisalGradeDefinitionService(IGenericRepository<AppraisalGradeDefinition> gradeDefinitionRepository, IUnitOfWork unitOfWork, ILogger<LeaveService> logger)
+    public AppraisalGradeDefinitionService(
+        IGenericRepository<AppraisalGradeDefinition> gradeDefinitionRepository,
+        ICurrentUserProvider currentUserProvider,
+        IUnitOfWork unitOfWork,
+        ILogger<LeaveService> logger)
     {
         _gradeDefinitionRepository = gradeDefinitionRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A grade definition owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<AppraisalGradeDefinition> GetOwnedAsync(Guid id)
+    {
+        var entity = await _gradeDefinitionRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Grade definition with ID '{id}' not found.");
+        return entity;
     }
 
     public async Task<AppraisalGradeDefinitionDto> CreateAsync(CreateAppraisalGradeDefinitionDto createDto, CancellationToken cancellationToken = default)
     {
         var gradeDefinition = createDto.ToEntity();
+        gradeDefinition.TenantId = GetTenantId();
 
         await _gradeDefinitionRepository.AddAsync(gradeDefinition);
         await _unitOfWork.SaveChangesAsync();
@@ -40,12 +68,7 @@ public class AppraisalGradeDefinitionService : IAppraisalGradeDefinitionService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _gradeDefinitionRepository.GetByIdAsync(id);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"Grade definition with ID '{id}' not found.");
-        }
+        var entity = await GetOwnedAsync(id);
 
         await _gradeDefinitionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -57,29 +80,30 @@ public class AppraisalGradeDefinitionService : IAppraisalGradeDefinitionService
 
     public async Task<IEnumerable<AppraisalGradeDefinitionDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var gradeDefinitions = await _gradeDefinitionRepository.GetAllAsync();
+        var tenantId = GetTenantId();
+        var gradeDefinitions = await _gradeDefinitionRepository.GetQueryable()
+            .Where(g => g.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
         return gradeDefinitions.ToDtoList();
     }
 
     public async Task<AppraisalGradeDefinitionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-
-        var gradeDefinition = await _gradeDefinitionRepository
-                .GetQueryable()
-                .FirstOrDefaultAsync(g => g.Id == id);
+        var gradeDefinition = await _gradeDefinitionRepository.GetQueryable()
+            .Where(g => g.TenantId == GetTenantId())
+            .FirstOrDefaultAsync(g => g.Id == id, cancellationToken);
 
         if (gradeDefinition == null)
-        {
             throw new ArgumentException($"Grade definition with ID '{id}' not found.");
-        }
 
-        // var dto = _mapper.Map<AppraisalGradeDefinitionDto>(entity);
         return gradeDefinition.ToDto();
     }
 
     public async Task<PagedResult<AppraisalGradeDefinitionDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var definitionsQuery = _gradeDefinitionRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var definitionsQuery = _gradeDefinitionRepository.GetQueryable()
+            .Where(g => g.TenantId == tenantId);
         var totalCount = await definitionsQuery.CountAsync(cancellationToken);
 
         var pagedGrades = await definitionsQuery.OrderBy(g => g.GradeName)
@@ -100,12 +124,7 @@ public class AppraisalGradeDefinitionService : IAppraisalGradeDefinitionService
 
     public async Task<AppraisalGradeDefinitionDto> UpdateAsync(UpdateAppraisalGradeDefinitionDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _gradeDefinitionRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"Appraisal grade definition with ID '{updateDto.Id}' not found.");
-        }
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         updateDto.UpdateEntity(entity);
 
@@ -119,4 +138,3 @@ public class AppraisalGradeDefinitionService : IAppraisalGradeDefinitionService
 }
 
 #endregion Appraisal Grade Definition
-

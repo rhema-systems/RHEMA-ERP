@@ -13,17 +13,34 @@ public sealed class ConsultantClientPortalService : IConsultantClientPortalServi
     private readonly IConsultantTimesheetRepository _timesheetRepo;
     private readonly IConsultantClientRepository _clientRepo;
     private readonly IConsultantTimesheetService _timesheetService;
+    private readonly ICurrentUserProvider _currentUserProvider;
 
     public ConsultantClientPortalService(
         IGenericRepository<ConsultantClientPortalAccount> accountRepo,
         IConsultantTimesheetRepository timesheetRepo,
         IConsultantClientRepository clientRepo,
-        IConsultantTimesheetService timesheetService)
+        IConsultantTimesheetService timesheetService,
+        ICurrentUserProvider currentUserProvider)
     {
         _accountRepo = accountRepo;
         _timesheetRepo = timesheetRepo;
         _clientRepo = clientRepo;
         _timesheetService = timesheetService;
+        _currentUserProvider = currentUserProvider;
+    }
+
+    // Portal JWT supplies tenantId. If CurrentUser also has a tenant (e.g. staff impersonation /
+    // dual context), it must match; empty CurrentUser TenantId is allowed for portal-only sessions.
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant id is required.", nameof(tenantId));
+
+        var current = _currentUserProvider.TenantId;
+        if (current != Guid.Empty && current != tenantId)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        return tenantId;
     }
 
     public async Task<ConsultantClientPortalDashboardDto> GetDashboardAsync(
@@ -31,12 +48,14 @@ public sealed class ConsultantClientPortalService : IConsultantClientPortalServi
         Guid tenantId,
         CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var account = await GetAccountAsync(accountId, tenantId);
-        var client = await _clientRepo.GetByIdAsync(account.ConsultantClientId)
+        var client = await _clientRepo.FirstOrDefaultAsync(
+            c => c.Id == account.ConsultantClientId && c.TenantId == tenantId)
             ?? throw new InvalidOperationException("Client organisation not found.");
 
         var pending = (await _timesheetRepo.GetByClientIdAsync(client.Id))
-            .Where(t => t.Status == TimesheetStatus.SentToClient)
+            .Where(t => t.TenantId == tenantId && t.Status == TimesheetStatus.SentToClient)
             .OrderByDescending(t => t.PeriodEndDate)
             .ToList();
 
@@ -58,6 +77,7 @@ public sealed class ConsultantClientPortalService : IConsultantClientPortalServi
         Guid tenantId,
         CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var account = await GetAccountAsync(accountId, tenantId);
         var timesheet = await _timesheetRepo.GetWithFullDetailsAsync(timesheetId);
 
@@ -122,11 +142,19 @@ public sealed class ConsultantClientPortalService : IConsultantClientPortalServi
         string? clientNotes,
         CancellationToken ct)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var account = await GetAccountAsync(accountId, tenantId);
 
         if (!account.IsEmailVerified)
             throw new InvalidOperationException(
                 "Please verify your email address before confirming or rejecting timesheets.");
+
+        var timesheet = await _timesheetRepo.GetByIdAsync(timesheetId);
+        if (timesheet == null || timesheet.TenantId != tenantId)
+            throw new ArgumentException("Timesheet not found.");
+
+        if (timesheet.ClientId != account.ConsultantClientId)
+            throw new UnauthorizedAccessException("You do not have access to this timesheet.");
 
         if (confirm)
         {
@@ -149,10 +177,11 @@ public sealed class ConsultantClientPortalService : IConsultantClientPortalServi
 
     private async Task<ConsultantClientPortalAccount> GetAccountAsync(Guid accountId, Guid tenantId)
     {
-        var account = await _accountRepo.GetByIdAsync(accountId)
+        var account = await _accountRepo.FirstOrDefaultAsync(
+            a => a.Id == accountId && a.TenantId == tenantId)
             ?? throw new UnauthorizedAccessException("Account not found.");
 
-        if (account.TenantId != tenantId || !account.IsActive)
+        if (!account.IsActive)
             throw new UnauthorizedAccessException();
 
         return account;

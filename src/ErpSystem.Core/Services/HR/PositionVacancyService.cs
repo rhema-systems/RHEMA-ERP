@@ -1,37 +1,85 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.Extensions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
 
 public class PositionVacancyService : IPositionVacancyService
 {
+    private static readonly PositionVacancyStatus[] OpenStatuses =
+    {
+        PositionVacancyStatus.Anticipated,
+        PositionVacancyStatus.Open,
+        PositionVacancyStatus.UnderReview,
+        PositionVacancyStatus.RequisitionRaised,
+    };
+
     private readonly IPositionVacancyRepository _repository;
     private readonly IStaffRequisitionService _requisitionService;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<PositionVacancyService> _logger;
 
     public PositionVacancyService(
         IPositionVacancyRepository repository,
         IStaffRequisitionService requisitionService,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<PositionVacancyService> logger)
     {
         _repository = repository;
         _requisitionService = requisitionService;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A vacancy owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<PositionVacancy> GetOwnedAsync(Guid id)
+    {
+        var entity = await _repository.GetWithDetailsAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Position vacancy '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<HashSet<Guid>> GetTenantPositionIdsAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var ids = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .Where(p => p.TenantId == tenantId && p.IsActive && !p.IsDeleted)
+            .Select(p => p.Id)
+            .ToListAsync(cancellationToken);
+        return ids.ToHashSet();
     }
 
     // ── Queries ─────────────────────────────────────────────────────────────
 
     public async Task<IEnumerable<PositionEstablishmentDto>> GetEstablishmentOverviewAsync(
         Guid? organizationUnitId = null, bool onlyVacant = false, CancellationToken cancellationToken = default)
-        => await _repository.GetEstablishmentOverviewAsync(organizationUnitId, onlyVacant);
+    {
+        var tenantPositionIds = await GetTenantPositionIdsAsync(cancellationToken);
+        var overview = await _repository.GetEstablishmentOverviewAsync(organizationUnitId, onlyVacant);
+        return overview.Where(p => tenantPositionIds.Contains(p.PositionId));
+    }
 
     public async Task<IEnumerable<PositionVacancySummaryDto>> GetVacanciesAsync(
         PositionVacancyStatus? status = null,
@@ -41,14 +89,16 @@ public class PositionVacancyService : IPositionVacancyService
         bool includeClosed = false,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetVacanciesAsync(status, organizationUnitId, reason, classification, includeClosed);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PositionVacancyDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetWithDetailsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             return null;
 
         var currentHeadcount = await _repository.CountActiveOnPositionAsync(entity.TenantId, entity.PositionId);
@@ -56,15 +106,38 @@ public class PositionVacancyService : IPositionVacancyService
     }
 
     public async Task<PositionVacancyStatsDto> GetStatsAsync(CancellationToken cancellationToken = default)
-        => await _repository.GetStatsAsync();
+    {
+        var tenantId = GetTenantId();
+
+        var open = await _repository.GetQueryable()
+            .AsNoTracking()
+            .Where(v => v.TenantId == tenantId && !v.IsDeleted && OpenStatuses.Contains(v.Status))
+            .Select(v => new { v.Status, v.Classification, v.PositionId })
+            .ToListAsync(cancellationToken);
+
+        var totalPositions = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .AsNoTracking()
+            .CountAsync(p => p.TenantId == tenantId && p.IsActive && !p.IsDeleted, cancellationToken);
+
+        return new PositionVacancyStatsDto
+        {
+            TotalOpen = open.Count,
+            Anticipated = open.Count(v => v.Status == PositionVacancyStatus.Anticipated),
+            UnderReview = open.Count(v => v.Status == PositionVacancyStatus.UnderReview),
+            RequisitionRaised = open.Count(v => v.Status == PositionVacancyStatus.RequisitionRaised),
+            WithinEstablishment = open.Count(v => v.Classification == VacancyClassification.WithinEstablishment),
+            NoShortfallOrOver = open.Count(v => v.Classification != VacancyClassification.WithinEstablishment),
+            TotalPositions = totalPositions,
+            PositionsWithVacancy = open.Select(v => v.PositionId).Distinct().Count(),
+        };
+    }
 
     // ── Mutations ───────────────────────────────────────────────────────────
 
     public async Task<PositionVacancyDto> UpdateStatusAsync(
         UpdatePositionVacancyStatusDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _repository.GetWithDetailsAsync(dto.VacancyId)
-            ?? throw new ArgumentException($"Position vacancy '{dto.VacancyId}' not found.");
+        var entity = await GetOwnedAsync(dto.VacancyId);
 
         if (entity.Status is PositionVacancyStatus.Filled or PositionVacancyStatus.Closed)
             throw new InvalidOperationException("A filled or closed vacancy can no longer change status.");
@@ -91,8 +164,7 @@ public class PositionVacancyService : IPositionVacancyService
     public async Task<PositionVacancyDto> UpdateNotesAsync(
         Guid vacancyId, string? notes, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _repository.GetWithDetailsAsync(vacancyId)
-            ?? throw new ArgumentException($"Position vacancy '{vacancyId}' not found.");
+        var entity = await GetOwnedAsync(vacancyId);
 
         entity.Notes = notes;
         Stamp(entity, userId);
@@ -105,8 +177,7 @@ public class PositionVacancyService : IPositionVacancyService
     public async Task<PositionVacancyDto> CloseAsync(
         ClosePositionVacancyDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _repository.GetWithDetailsAsync(dto.VacancyId)
-            ?? throw new ArgumentException($"Position vacancy '{dto.VacancyId}' not found.");
+        var entity = await GetOwnedAsync(dto.VacancyId);
 
         if (entity.Status is PositionVacancyStatus.Filled or PositionVacancyStatus.Closed)
             throw new InvalidOperationException("This vacancy is already filled or closed.");
@@ -125,8 +196,11 @@ public class PositionVacancyService : IPositionVacancyService
         Guid vacancyId, RaiseRequisitionFromVacancyDto dto, Guid tenantId, Guid requestedByUserId,
         CancellationToken cancellationToken = default)
     {
-        var vacancy = await _repository.GetWithDetailsAsync(vacancyId)
-            ?? throw new ArgumentException($"Position vacancy '{vacancyId}' not found.");
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var vacancy = await GetOwnedAsync(vacancyId);
 
         if (vacancy.Status is PositionVacancyStatus.Filled or PositionVacancyStatus.Closed)
             throw new InvalidOperationException("Cannot raise a requisition for a filled or closed vacancy.");
@@ -159,7 +233,7 @@ public class PositionVacancyService : IPositionVacancyService
             AllowExternalCandidates = true,
         };
 
-        var created = await _requisitionService.CreateAsync(createDto, tenantId, requestedByUserId, cancellationToken);
+        var created = await _requisitionService.CreateAsync(createDto, current, requestedByUserId, cancellationToken);
 
         vacancy.StaffRequisitionId = created.Id;
         vacancy.Status = PositionVacancyStatus.RequisitionRaised;
@@ -182,7 +256,14 @@ public class PositionVacancyService : IPositionVacancyService
     public async Task<ReconcileVacanciesResultDto> ReconcilePositionVacanciesAsync(
         Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
-        var overview = (await _repository.GetEstablishmentOverviewAsync()).ToList();
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var tenantPositionIds = await GetTenantPositionIdsAsync(cancellationToken);
+        var overview = (await _repository.GetEstablishmentOverviewAsync())
+            .Where(p => tenantPositionIds.Contains(p.PositionId))
+            .ToList();
         var opened = 0;
         var closed = 0;
 
@@ -192,7 +273,7 @@ public class PositionVacancyService : IPositionVacancyService
             {
                 await _repository.AddAsync(new PositionVacancy
                 {
-                    TenantId = tenantId,
+                    TenantId = current,
                     PositionId = p.PositionId,
                     OrganizationUnitId = p.OrganizationUnitId,
                     Reason = VacancyReason.Other,
@@ -211,7 +292,7 @@ public class PositionVacancyService : IPositionVacancyService
             else if (p.VacantCount == 0 && p.OpenVacancyId != null)
             {
                 var vac = await _repository.GetByIdAsync(p.OpenVacancyId.Value);
-                if (vac != null && vac.Status is not (PositionVacancyStatus.Filled or PositionVacancyStatus.Closed))
+                if (vac != null && vac.TenantId == current && vac.Status is not (PositionVacancyStatus.Filled or PositionVacancyStatus.Closed))
                 {
                     vac.Status = PositionVacancyStatus.Filled;
                     vac.ClosedDate = DateTime.UtcNow;

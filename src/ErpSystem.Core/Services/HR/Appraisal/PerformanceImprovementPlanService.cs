@@ -21,6 +21,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     private readonly IGenericRepository<AppraisalAttachment> _attachmentRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<PerformanceImprovementPlan> _logger;
 
     public PerformanceImprovementPlanService(
@@ -30,6 +31,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         IGenericRepository<AppraisalAttachment> attachmentRepository,
         IGenericRepository<Employee> employeeRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<PerformanceImprovementPlan> logger)
     {
         _improvementPlanRepository = improvementPlanRepository;
@@ -38,22 +40,48 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         _attachmentRepository = attachmentRepository;
         _employeeRepository = employeeRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A PIP owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<PerformanceImprovementPlan> GetOwnedPipAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _improvementPlanRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Performance Improvement Plan with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<PerformanceImprovementPlan> TenantPipQuery()
+    {
+        var tenantId = GetTenantId();
+        return _improvementPlanRepository.GetQueryable().Where(p => p.TenantId == tenantId);
     }
 
     public async Task<PipReviewMeetingDto> AddReviewMeetingAsync(Guid pipId, CreatePipReviewMeetingDto createDto, CancellationToken cancellationToken = default)
     {
-        // Validate PIP exists
-        var pipExists = await _improvementPlanRepository.ExistsAsync(p => p.Id == pipId);
-        if (!pipExists)
-            throw new ArgumentException("Performance Improvement Plan not found");
+        var pip = await GetOwnedPipAsync(pipId, cancellationToken);
 
-        // Validate conductor exists
-        var conductorExists = await _employeeRepository.ExistsAsync(e => e.Id == createDto.ConductedById);
+        var tenantId = GetTenantId();
+        var conductorExists = await _employeeRepository.ExistsAsync(e => e.TenantId == tenantId && e.Id == createDto.ConductedById);
         if (!conductorExists)
             throw new ArgumentException("Meeting conductor not found");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
         entity.PipId = pipId;
 
         await _reviewMeetingRepository.AddAsync(entity);
@@ -62,7 +90,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         // Reload with includes
         entity = await _reviewMeetingRepository.GetQueryable()
                                             .Include(m => m.ConductedBy)
-                                            .FirstOrDefaultAsync(m => m.Id == entity.Id, cancellationToken);
+                                            .FirstOrDefaultAsync(m => m.Id == entity.Id && m.TenantId == tenantId, cancellationToken);
 
         _logger.LogInformation("Review meeting added successfully: {Id}", entity!.Id);
 
@@ -71,12 +99,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<bool> CompletePipAsync(CompletePipDto completeDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _improvementPlanRepository.GetByIdAsync(completeDto.PipId);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"Performance Improvement Plan with ID '{completeDto.PipId}' not found.");
-        }
+        var entity = await GetOwnedPipAsync(completeDto.PipId, cancellationToken);
 
         entity.Status = completeDto.Outcome == PipOutcome.PerformanceImproved ? PipStatus.Completed : PipStatus.Unsuccessful;
         entity.CompletionDate = DateTime.UtcNow;
@@ -94,8 +117,10 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<PerformanceImprovementPlanDto> CreateAsync(CreatePerformanceImprovementPlanDto createDto, CancellationToken cancellationToken = default)
     {
         // ── Data integrity: only one active PIP per employee at a time ──────────
+        var tenantId = GetTenantId();
         var hasActivePip = await _improvementPlanRepository.ExistsAsync(
-            p => p.EmployeeId == createDto.EmployeeId
+            p => p.TenantId == tenantId
+              && p.EmployeeId == createDto.EmployeeId
               && (p.Status == PipStatus.Active || p.Status == PipStatus.InProgress));
 
         if (hasActivePip)
@@ -104,6 +129,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
                 "Complete or cancel the existing PIP before creating a new one.");
 
         var performanceImprovementPlan = createDto.ToEntity();
+        performanceImprovementPlan.TenantId = tenantId;
 
         await _improvementPlanRepository.AddAsync(performanceImprovementPlan);
         await _unitOfWork.SaveChangesAsync();
@@ -115,12 +141,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _improvementPlanRepository.GetByIdAsync(id);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"Performance Improvement Plan with ID '{id}' not found.");
-        }
+        var entity = await GetOwnedPipAsync(id, cancellationToken);
 
         await _improvementPlanRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -132,7 +153,10 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<bool> DeleteReviewMeetingAsync(Guid pipId, Guid meetingId, CancellationToken cancellationToken = default)
     {
-        var entity = await _reviewMeetingRepository.FirstOrDefaultAsync(m => m.Id == meetingId && m.PipId == pipId);
+        await GetOwnedPipAsync(pipId, cancellationToken);
+
+        var tenantId = GetTenantId();
+        var entity = await _reviewMeetingRepository.FirstOrDefaultAsync(m => m.Id == meetingId && m.PipId == pipId && m.TenantId == tenantId);
 
         if (entity == null)
             throw new ArgumentException("Review meeting not found");
@@ -147,7 +171,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<IEnumerable<PerformanceImprovementPlanDto>> GetActivePipsAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _improvementPlanRepository.GetQueryable(p => p.Status == PipStatus.Active || p.Status == PipStatus.InProgress)
+        var entities = await TenantPipQuery().Where(p => p.Status == PipStatus.Active || p.Status == PipStatus.InProgress)
                                                     .Include(p => p.Employee)
                                                     .Include(p => p.Supervisor)
                                                     .Include(p => p.Appraisal)
@@ -158,7 +182,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<IEnumerable<PerformanceImprovementPlanDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _improvementPlanRepository.GetQueryable()
+        var entities = await TenantPipQuery()
                                                     .Include(p => p.Employee)
                                                     .Include(p => p.Supervisor)
                                                     .Include(p => p.Appraisal)
@@ -169,7 +193,8 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<IEnumerable<PerformanceImprovementPlanDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var entities = await _improvementPlanRepository.GetQueryable(p => p.EmployeeId == employeeId)
+        var entities = await TenantPipQuery()
+                                    .Where(p => p.EmployeeId == employeeId)
                                     .Include(p => p.Employee)
                                     .Include(p => p.Supervisor)
                                     .Include(p => p.Appraisal)
@@ -181,7 +206,8 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<PerformanceImprovementPlanDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _improvementPlanRepository.GetQueryable()
+        var tenantId = GetTenantId();
+        var entity = await TenantPipQuery()
                                                     .Include(p => p.Employee)
                                                     .Include(p => p.Supervisor)
                                                     .Include(p => p.Appraisal)
@@ -197,7 +223,8 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<IEnumerable<PerformanceImprovementPlanDto>> GetByStatusAsync(PipStatus status, CancellationToken cancellationToken = default)
     {
-        var entities = await _improvementPlanRepository.GetQueryable(p => p.Status == status)
+        var entities = await TenantPipQuery()
+                                                    .Where(p => p.Status == status)
                                                     .Include(p => p.Employee)
                                                     .Include(p => p.Supervisor)
                                                     .Include(p => p.Appraisal)
@@ -208,7 +235,10 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<PipReviewMeetingDto> GetLatestReviewMeetingAsync(Guid pipId, CancellationToken cancellationToken = default)
     {
-        var entity = await _reviewMeetingRepository.GetQueryable(m => m.PipId == pipId)
+        await GetOwnedPipAsync(pipId, cancellationToken);
+
+        var tenantId = GetTenantId();
+        var entity = await _reviewMeetingRepository.GetQueryable(m => m.PipId == pipId && m.TenantId == tenantId)
                                                 .Include(m => m.ConductedBy)
                                                 .OrderByDescending(m => m.MeetingDate)
                                                 .FirstOrDefaultAsync(cancellationToken);
@@ -221,7 +251,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<PagedResult<PerformanceImprovementPlanDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _improvementPlanRepository.GetQueryable()
+        var query = TenantPipQuery()
                                             .Include(p => p.Employee)
                                             .Include(p => p.Supervisor)
                                             .Include(p => p.Appraisal);
@@ -246,7 +276,10 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<IEnumerable<PipReviewMeetingDto>> GetReviewMeetingsAsync(Guid pipId, CancellationToken cancellationToken = default)
     {
-        var entities = await _reviewMeetingRepository.GetQueryable(m => m.PipId == pipId)
+        await GetOwnedPipAsync(pipId, cancellationToken);
+
+        var tenantId = GetTenantId();
+        var entities = await _reviewMeetingRepository.GetQueryable(m => m.PipId == pipId && m.TenantId == tenantId)
                                                     .Include(m => m.ConductedBy)
                                                     .OrderByDescending(m => m.MeetingDate)
                                                     .ToListAsync(cancellationToken);
@@ -256,7 +289,8 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<PipReviewMeetingDto?> GetReviewMeetingByIdAsync(Guid meetingId, CancellationToken cancellationToken = default)
     {
-        var entity = await _reviewMeetingRepository.GetQueryable(m => m.Id == meetingId)
+        var tenantId = GetTenantId();
+        var entity = await _reviewMeetingRepository.GetQueryable(m => m.Id == meetingId && m.TenantId == tenantId)
                                                    .Include(m => m.ConductedBy)
                                                    .FirstOrDefaultAsync(cancellationToken);
         return entity?.ToDto();
@@ -264,12 +298,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<PerformanceImprovementPlanDto> UpdateAsync(UpdatePerformanceImprovementPlanDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _improvementPlanRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"Performance Improvement Plan with ID '{updateDto.Id}' not found.");
-        }
+        var entity = await GetOwnedPipAsync(updateDto.Id, cancellationToken);
 
         updateDto.UpdateEntity(entity);
 
@@ -283,9 +312,12 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<PipReviewMeetingDto> UpdateReviewMeetingAsync(Guid pipId, UpdatePipReviewMeetingDto updateDto, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPipAsync(pipId, cancellationToken);
+
+        var tenantId = GetTenantId();
         var entity = await _reviewMeetingRepository.GetQueryable()
             .Include(m => m.ConductedBy)
-            .FirstOrDefaultAsync(m => m.Id == updateDto.Id && m.PipId == pipId, cancellationToken);
+            .FirstOrDefaultAsync(m => m.Id == updateDto.Id && m.PipId == pipId && m.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("Review meeting not found");
@@ -301,12 +333,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<bool> UpdateStatusAsync(UpdatePipStatusDto statusDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _improvementPlanRepository.GetByIdAsync(statusDto.PipId);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"Performance Improvement Plan with ID '{statusDto.PipId}' not found.");
-        }
+        var entity = await GetOwnedPipAsync(statusDto.PipId, cancellationToken);
 
         entity.Status = statusDto.Status;
 
@@ -323,11 +350,11 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<PipGoalDto> AddPipGoalAsync(
         Guid pipId, CreatePipGoalDto dto, CancellationToken cancellationToken = default)
     {
-        var pipExists = await _improvementPlanRepository.ExistsAsync(p => p.Id == pipId);
-        if (!pipExists)
-            throw new ArgumentException($"PIP with ID '{pipId}' not found.");
+        var pip = await GetOwnedPipAsync(pipId, cancellationToken);
 
+        var tenantId = GetTenantId();
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         entity.PipId = pipId;
         entity.Status = GoalProgressStatus.NotStarted;
 
@@ -341,8 +368,11 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<IEnumerable<PipGoalDto>> GetPipGoalsAsync(
         Guid pipId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPipAsync(pipId, cancellationToken);
+
+        var tenantId = GetTenantId();
         var entities = await _pipGoalRepository
-            .GetQueryable(g => g.PipId == pipId)
+            .GetQueryable(g => g.PipId == pipId && g.TenantId == tenantId)
             .OrderBy(g => g.DueDate)
             .ToListAsync(cancellationToken);
         return entities.ToDtoList();
@@ -351,8 +381,11 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<PipGoalDto> UpdatePipGoalAsync(
         Guid pipId, UpdatePipGoalDto dto, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPipAsync(pipId, cancellationToken);
+
+        var tenantId = GetTenantId();
         var entity = await _pipGoalRepository.GetQueryable()
-            .FirstOrDefaultAsync(g => g.Id == dto.Id && g.PipId == pipId, cancellationToken);
+            .FirstOrDefaultAsync(g => g.Id == dto.Id && g.PipId == pipId && g.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("PIP goal not found.");
@@ -368,8 +401,11 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<bool> DeletePipGoalAsync(
         Guid pipId, Guid goalId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPipAsync(pipId, cancellationToken);
+
+        var tenantId = GetTenantId();
         var entity = await _pipGoalRepository.GetQueryable()
-            .FirstOrDefaultAsync(g => g.Id == goalId && g.PipId == pipId, cancellationToken);
+            .FirstOrDefaultAsync(g => g.Id == goalId && g.PipId == pipId && g.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("PIP goal not found.");
@@ -383,8 +419,11 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         Guid pipId, Guid goalId, decimal progressPercent, string? notes,
         GoalProgressStatus status, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPipAsync(pipId, cancellationToken);
+
+        var tenantId = GetTenantId();
         var entity = await _pipGoalRepository.GetQueryable()
-            .FirstOrDefaultAsync(g => g.Id == goalId && g.PipId == pipId, cancellationToken);
+            .FirstOrDefaultAsync(g => g.Id == goalId && g.PipId == pipId && g.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("PIP goal not found.");
@@ -406,8 +445,11 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<PipGoalDto?> GetGoalByIdAsync(Guid goalId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _pipGoalRepository.GetByIdAsync(goalId);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != tenantId)
+            return null;
+        return entity.ToDto();
     }
 
     // ─── PIP Attachments ────────────────────────────────────────────────────────
@@ -415,8 +457,11 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<IEnumerable<PipAttachmentDto>> GetPipAttachmentsAsync(
         Guid pipId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPipAsync(pipId, cancellationToken);
+
+        var tenantId = GetTenantId();
         var entities = await _attachmentRepository
-            .GetQueryable(a => a.PipId == pipId && a.EntityType == AppraisalAttachmentEntityType.PipPlan)
+            .GetQueryable(a => a.PipId == pipId && a.TenantId == tenantId && a.EntityType == AppraisalAttachmentEntityType.PipPlan)
             .Include(a => a.UploadedBy)
             .OrderByDescending(a => a.UploadDate)
             .ToListAsync(cancellationToken);
@@ -426,8 +471,9 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<PipAttachmentDto?> GetAttachmentByIdAsync(
         Guid attachmentId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _attachmentRepository
-            .GetQueryable(a => a.Id == attachmentId)
+            .GetQueryable(a => a.Id == attachmentId && a.TenantId == tenantId)
             .Include(a => a.UploadedBy)
             .FirstOrDefaultAsync(cancellationToken);
         return entity?.ToPipAttachmentDto();
@@ -438,12 +484,12 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         string? publicUrl, long? fileSizeBytes, string? description,
         CancellationToken cancellationToken = default)
     {
-        var pipExists = await _improvementPlanRepository.ExistsAsync(p => p.Id == pipId);
-        if (!pipExists)
-            throw new ArgumentException($"PIP with ID '{pipId}' not found.");
+        await GetOwnedPipAsync(pipId, cancellationToken);
 
+        var tenantId = GetTenantId();
         var entity = new AppraisalAttachment
         {
+            TenantId = tenantId,
             PipId = pipId,
             EntityType = AppraisalAttachmentEntityType.PipPlan,
             FileName = fileName,
@@ -472,8 +518,9 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<bool> DeletePipAttachmentAsync(
         Guid attachmentId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _attachmentRepository
-            .GetQueryable(a => a.Id == attachmentId && a.EntityType == AppraisalAttachmentEntityType.PipPlan)
+            .GetQueryable(a => a.Id == attachmentId && a.TenantId == tenantId && a.EntityType == AppraisalAttachmentEntityType.PipPlan)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (entity == null)

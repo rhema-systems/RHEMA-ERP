@@ -24,6 +24,7 @@ namespace ErpSystem.Core.Services.HR;
 public sealed class OfferLetterService : IOfferLetterService
 {
     private readonly IJobOfferRepository _offerRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ITemplatedEmailService _templatedEmail;
     private readonly ICompanyProfileProvider _companyProfile;
@@ -31,22 +32,36 @@ public sealed class OfferLetterService : IOfferLetterService
 
     public OfferLetterService(
         IJobOfferRepository offerRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ITemplatedEmailService templatedEmail,
         ICompanyProfileProvider companyProfile,
         ILogger<OfferLetterService> logger)
     {
         _offerRepository = offerRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _templatedEmail = templatedEmail;
         _companyProfile = companyProfile;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
     public async Task<OfferLetterDto> GenerateAsync(Guid offerId, CancellationToken cancellationToken = default)
     {
-        var offer = await _offerRepository.GetWithFullDetailsAsync(offerId)
-            ?? throw new ArgumentException($"Job offer with ID '{offerId}' not found.");
+        var offer = await _offerRepository.GetWithFullDetailsAsync(offerId);
+        if (offer == null || offer.TenantId != GetTenantId())
+            throw new ArgumentException($"Job offer with ID '{offerId}' not found.");
 
         var candidateName = offer.Application?.JobCandidate?.FullName ?? "Candidate";
         var currency = string.IsNullOrWhiteSpace(offer.CurrencyCode) ? "GHS" : offer.CurrencyCode!.Trim();
@@ -56,10 +71,10 @@ public sealed class OfferLetterService : IOfferLetterService
         var company = await _companyProfile.GetAsync(cancellationToken);
 
         // Enrichment sources not carried on the offer itself.
-        var jobDescription = await LoadJobDescriptionAsync(offer.PositionId, cancellationToken);
-        var payComponents = await LoadAllowanceComponentsAsync(offer.PositionId, cancellationToken);
+        var jobDescription = await LoadJobDescriptionAsync(offer.PositionId, offer.TenantId, cancellationToken);
+        var payComponents = await LoadAllowanceComponentsAsync(offer.PositionId, offer.TenantId, cancellationToken);
         var preCheck = offer.IsConditional
-            ? await LoadPreEmploymentCheckAsync(offer.Id, cancellationToken)
+            ? await LoadPreEmploymentCheckAsync(offer.Id, offer.TenantId, cancellationToken)
             : null;
 
         var (salaryTable, baseSalaryLine, grossSalaryLine) = BuildSalaryBreakdown(offer, payComponents, currency);
@@ -144,24 +159,24 @@ public sealed class OfferLetterService : IOfferLetterService
 
     // ── Enrichment loaders ──────────────────────────────────────────────────────
 
-    private async Task<JobDescription?> LoadJobDescriptionAsync(Guid positionId, CancellationToken ct)
+    private async Task<JobDescription?> LoadJobDescriptionAsync(Guid positionId, Guid tenantId, CancellationToken ct)
     {
         return await _unitOfWork.Repository<JobDescription>().GetQueryable()
             .Include(j => j.DutyItems)
             .Include(j => j.StaffLevel)
             .Include(j => j.Union)
-            .Where(j => j.PositionId == positionId && !j.IsDeleted && j.SupersededByVersionId == null)
+            .Where(j => j.TenantId == tenantId && j.PositionId == positionId && !j.IsDeleted && j.SupersededByVersionId == null)
             .OrderByDescending(j => j.Status == JobDescriptionStatus.Active)
             .ThenByDescending(j => j.Status == JobDescriptionStatus.Approved)
             .ThenByDescending(j => j.EffectiveDate)
             .FirstOrDefaultAsync(ct);
     }
 
-    private async Task<List<PositionPayComponent>> LoadAllowanceComponentsAsync(Guid positionId, CancellationToken ct)
+    private async Task<List<PositionPayComponent>> LoadAllowanceComponentsAsync(Guid positionId, Guid tenantId, CancellationToken ct)
     {
         return await _unitOfWork.Repository<PositionPayComponent>().GetQueryable()
             .Include(p => p.PayComponent)
-            .Where(p => p.PositionId == positionId && p.IsActive && !p.IsDeleted
+            .Where(p => p.TenantId == tenantId && p.PositionId == positionId && p.IsActive && !p.IsDeleted
                      && p.PayComponent != null
                      && p.PayComponent.IsActive
                      && p.PayComponent.ComponentType == PayComponentType.Allowance
@@ -169,11 +184,11 @@ public sealed class OfferLetterService : IOfferLetterService
             .ToListAsync(ct);
     }
 
-    private async Task<PreEmploymentCheck?> LoadPreEmploymentCheckAsync(Guid offerId, CancellationToken ct)
+    private async Task<PreEmploymentCheck?> LoadPreEmploymentCheckAsync(Guid offerId, Guid tenantId, CancellationToken ct)
     {
         return await _unitOfWork.Repository<PreEmploymentCheck>().GetQueryable()
             .Include(p => p.Items)
-            .Where(p => p.JobOfferId == offerId && !p.IsDeleted)
+            .Where(p => p.TenantId == tenantId && p.JobOfferId == offerId && !p.IsDeleted)
             .FirstOrDefaultAsync(ct);
     }
 

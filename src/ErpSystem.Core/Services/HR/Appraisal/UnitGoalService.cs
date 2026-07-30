@@ -15,31 +15,60 @@ public class UnitGoalService : IUnitGoalService
 {
     private readonly IGenericRepository<UnitGoal> _unitGoalRepository;
     private readonly IGenericRepository<AppraisalAttachment> _attachmentRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<UnitGoalService> _logger;
 
     public UnitGoalService(
         IGenericRepository<UnitGoal> unitGoalRepository,
         IGenericRepository<AppraisalAttachment> attachmentRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<UnitGoalService> logger)
     {
         _unitGoalRepository = unitGoalRepository;
         _attachmentRepository = attachmentRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    private IQueryable<UnitGoal> BaseQuery => _unitGoalRepository.GetQueryable()
-        .Include(g => g.AppraisalCycle)
-        .Include(g => g.ParentCompanyGoal)
-        .Include(g => g.OrganizationLevel)
-        .Include(g => g.OrganizationUnit)
-        .Include(g => g.CreatedByManager);
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A unit goal owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<UnitGoal> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _unitGoalRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Unit goal with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<UnitGoal> BaseQuery()
+    {
+        var tenantId = GetTenantId();
+        return _unitGoalRepository.GetQueryable()
+            .Where(g => g.TenantId == tenantId)
+            .Include(g => g.AppraisalCycle)
+            .Include(g => g.ParentCompanyGoal)
+            .Include(g => g.OrganizationLevel)
+            .Include(g => g.OrganizationUnit)
+            .Include(g => g.CreatedByManager);
+    }
 
     public async Task<UnitGoalDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await BaseQuery.FirstOrDefaultAsync(g => g.Id == id, cancellationToken);
+        var entity = await BaseQuery().FirstOrDefaultAsync(g => g.Id == id, cancellationToken);
         if (entity == null)
             throw new ArgumentException($"Unit goal with ID '{id}' not found.");
         return entity.ToDto();
@@ -47,7 +76,7 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<IEnumerable<UnitGoalDto>> GetByCycleIdAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
-        var entities = await BaseQuery
+        var entities = await BaseQuery()
             .Where(g => g.AppraisalCycleId == cycleId)
             .OrderBy(g => g.Priority).ThenBy(g => g.Title)
             .ToListAsync(cancellationToken);
@@ -56,7 +85,7 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<IEnumerable<UnitGoalDto>> GetByOrganizationUnitIdAsync(Guid orgUnitId, CancellationToken cancellationToken = default)
     {
-        var entities = await BaseQuery
+        var entities = await BaseQuery()
             .Where(g => g.OrganizationUnitId == orgUnitId)
             .OrderBy(g => g.Priority).ThenBy(g => g.Title)
             .ToListAsync(cancellationToken);
@@ -65,7 +94,7 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<IEnumerable<UnitGoalDto>> GetByCreatedByManagerIdAsync(Guid managerId, Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery.Where(g => g.CreatedByManagerId == managerId);
+        var query = BaseQuery().Where(g => g.CreatedByManagerId == managerId);
         if (cycleId.HasValue)
             query = query.Where(g => g.AppraisalCycleId == cycleId.Value);
         var entities = await query.OrderByDescending(g => g.DueDate).ThenBy(g => g.Title).ToListAsync(cancellationToken);
@@ -74,7 +103,7 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<IEnumerable<UnitGoalDto>> GetByParentCompanyGoalAsync(Guid companyGoalId, CancellationToken cancellationToken = default)
     {
-        var entities = await BaseQuery
+        var entities = await BaseQuery()
             .Where(g => g.ParentCompanyGoalId == companyGoalId)
             .OrderBy(g => g.Priority)
             .ToListAsync(cancellationToken);
@@ -83,7 +112,7 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<PagedResult<UnitGoalDto>> GetPagedAsync(int pageNumber, int pageSize, Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery.AsQueryable();
+        var query = BaseQuery().AsQueryable();
         if (cycleId.HasValue)
             query = query.Where(g => g.AppraisalCycleId == cycleId.Value);
         query = query.OrderByDescending(g => g.AppraisalCycleId).ThenBy(g => g.Priority);
@@ -109,9 +138,10 @@ public class UnitGoalService : IUnitGoalService
         bool? isLinked, Guid? managerEmployeeId, int pageNumber, int pageSize,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var query = _unitGoalRepository.GetQueryable()
             .AsNoTracking()
-            .Where(g => g.AppraisalCycleId == cycleId);
+            .Where(g => g.TenantId == tenantId && g.AppraisalCycleId == cycleId);
 
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(g => g.Title.Contains(search));
@@ -174,9 +204,10 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<UnitGoalDashboardMetricsDto> GetDashboardMetricsAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var data = await _unitGoalRepository.GetQueryable()
             .AsNoTracking()
-            .Where(g => g.AppraisalCycleId == cycleId)
+            .Where(g => g.TenantId == tenantId && g.AppraisalCycleId == cycleId)
             .Select(g => new
             {
                 IsLinked           = g.ParentCompanyGoalId != null,
@@ -196,9 +227,10 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<UnitGoalCascadeStatsDto> GetCascadeStatsAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         return await _unitGoalRepository.GetQueryable()
             .AsNoTracking()
-            .Where(g => g.Id == id)
+            .Where(g => g.TenantId == tenantId && g.Id == id)
             .Select(g => new UnitGoalCascadeStatsDto
             {
                 GoalId             = g.Id,
@@ -210,10 +242,11 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<IEnumerable<UnitGoalEmployeeGoalSummaryDto>> GetEmployeeGoalSummariesAsync(Guid unitGoalId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         return await _unitGoalRepository.GetQueryable()
             .AsNoTracking()
-            .Where(g => g.Id == unitGoalId)
-            .SelectMany(g => g.EmployeeGoals)
+            .Where(g => g.TenantId == tenantId && g.Id == unitGoalId)
+            .SelectMany(g => g.EmployeeGoals.Where(eg => eg.TenantId == tenantId))
             .OrderBy(eg => eg.Employee.LastName)
             .ThenBy(eg => eg.Employee.FirstName)
             .Select(eg => new UnitGoalEmployeeGoalSummaryDto
@@ -233,6 +266,7 @@ public class UnitGoalService : IUnitGoalService
     public async Task<UnitGoalDto> CreateAsync(CreateUnitGoalDto createDto, CancellationToken cancellationToken = default)
     {
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
         await _unitGoalRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Unit goal created: {Id} '{Title}'", entity.Id, entity.Title);
@@ -241,9 +275,7 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<UnitGoalDto> UpdateAsync(UpdateUnitGoalDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _unitGoalRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Unit goal with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
         updateDto.UpdateEntity(entity);
         await _unitGoalRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -253,9 +285,7 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _unitGoalRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Unit goal with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id, cancellationToken);
         await _unitGoalRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Unit goal deleted: {Id}", id);
@@ -266,11 +296,11 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<AppraisalAttachmentDto> AddAttachmentAsync(Guid goalId, CreateAppraisalAttachmentDto dto, CancellationToken cancellationToken = default)
     {
-        var goalExists = await _unitGoalRepository.ExistsAsync(g => g.Id == goalId);
-        if (!goalExists)
-            throw new ArgumentException($"Unit goal with ID '{goalId}' not found.");
+        await GetOwnedAsync(goalId, cancellationToken);
+        var tenantId = GetTenantId();
 
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         entity.UnitGoalId = goalId;
 
         entity.UploadDate = DateTime.UtcNow;
@@ -284,7 +314,9 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid goalId, CancellationToken cancellationToken = default)
     {
-        var entities = await _attachmentRepository.GetQueryable(a => a.UnitGoalId == goalId)
+        await GetOwnedAsync(goalId, cancellationToken);
+        var tenantId = GetTenantId();
+        var entities = await _attachmentRepository.GetQueryable(a => a.UnitGoalId == goalId && a.TenantId == tenantId)
             .Include(a => a.UploadedBy)
             .OrderByDescending(a => a.UploadDate)
             .ToListAsync(cancellationToken);
@@ -293,8 +325,10 @@ public class UnitGoalService : IUnitGoalService
 
     public async Task<bool> DeleteAttachmentAsync(Guid goalId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(goalId, cancellationToken);
+        var tenantId = GetTenantId();
         var entity = await _attachmentRepository.GetQueryable()
-            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.UnitGoalId == goalId, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.UnitGoalId == goalId && a.TenantId == tenantId, cancellationToken);
         if (entity == null)
             throw new ArgumentException("Attachment not found.");
         await _attachmentRepository.DeleteAsync(entity);

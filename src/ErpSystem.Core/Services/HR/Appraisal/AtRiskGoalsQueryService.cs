@@ -45,6 +45,7 @@ public sealed class AtRiskGoalsQueryService : IAtRiskGoalsQueryService
     private readonly IGenericRepository<Employee>     _employeeRepo;
     private readonly IGoalRiskSettingsProvider        _riskSettingsProvider;
     private readonly IGoalRiskEvaluator               _riskEvaluator;
+    private readonly ICurrentUserProvider             _currentUserProvider;
     private readonly IDateTimeProvider                _clock;
     private readonly ILogger<AtRiskGoalsQueryService> _logger;
 
@@ -53,6 +54,7 @@ public sealed class AtRiskGoalsQueryService : IAtRiskGoalsQueryService
         IGenericRepository<Employee>     employeeRepo,
         IGoalRiskSettingsProvider        riskSettingsProvider,
         IGoalRiskEvaluator               riskEvaluator,
+        ICurrentUserProvider             currentUserProvider,
         IDateTimeProvider                clock,
         ILogger<AtRiskGoalsQueryService> logger)
     {
@@ -60,8 +62,20 @@ public sealed class AtRiskGoalsQueryService : IAtRiskGoalsQueryService
         _employeeRepo         = employeeRepo;
         _riskSettingsProvider = riskSettingsProvider;
         _riskEvaluator        = riskEvaluator;
+        _currentUserProvider  = currentUserProvider;
         _clock                = clock;
         _logger               = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     /// <inheritdoc />
@@ -87,7 +101,7 @@ public sealed class AtRiskGoalsQueryService : IAtRiskGoalsQueryService
         // Builds a single JOIN query; optional org filters fold into the WHERE.
         // Pre-filter widens the candidate set using indexed columns; the evaluator
         // (Phase 2) is the authoritative gate for at-risk classification.
-        var query = BuildCandidateQuery(request, cutoffDate, riskSettings.MinimumProgressPercent);
+        var query = BuildCandidateQuery(request, cutoffDate, riskSettings.MinimumProgressPercent, GetTenantId());
         var raw   = await query.ToListAsync(cancellationToken);
 
         _logger.LogDebug(
@@ -128,13 +142,14 @@ public sealed class AtRiskGoalsQueryService : IAtRiskGoalsQueryService
     private IQueryable<OrgRawGoalRow> BuildCandidateQuery(
         AtRiskGoalsRequest request,
         DateOnly           cutoffDate,
-        decimal            minProgressPercent)
+        decimal            minProgressPercent,
+        Guid               tenantId)
     {
         // SECURITY note: no ManagerId scope here — intentional for org-wide view.
         // Access control is at the controller level.
         var employees = _employeeRepo.GetQueryable()
             .AsNoTracking()
-            .Where(e => e.IsActive);
+            .Where(e => e.TenantId == tenantId && e.IsActive);
 
         // Apply optional org filters — EF Core translates these to SQL WHERE clauses.
         if (request.OrganizationUnitId.HasValue)
@@ -146,7 +161,8 @@ public sealed class AtRiskGoalsQueryService : IAtRiskGoalsQueryService
         return
             from g in _goalRepo.GetQueryable().AsNoTracking()
             join e in employees on g.EmployeeId equals e.Id
-            where g.AppraisalCycleId == request.AppraisalCycleId
+            where g.TenantId == tenantId
+               && g.AppraisalCycleId == request.AppraisalCycleId
                && (
                       g.Status == GoalStatus.AtRisk
                       || (

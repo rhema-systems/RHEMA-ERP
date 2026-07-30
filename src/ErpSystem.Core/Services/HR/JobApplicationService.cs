@@ -32,6 +32,7 @@ public class JobApplicationService : IJobApplicationService
     private readonly IJobCandidateLanguageRepository _languageRepository;
     private readonly IApplicationSnapshotService _snapshotService;
     private readonly IApplicationPipelineService _pipelineService;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobApplicationService> _logger;
     private readonly IEmailService _email;
@@ -54,6 +55,7 @@ public class JobApplicationService : IJobApplicationService
         IJobCandidateLanguageRepository languageRepository,
         IApplicationSnapshotService snapshotService,
         IApplicationPipelineService pipelineService,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<JobApplicationService> logger,
         IEmailService email,
@@ -75,43 +77,90 @@ public class JobApplicationService : IJobApplicationService
         _languageRepository = languageRepository;
         _snapshotService    = snapshotService;
         _pipelineService    = pipelineService;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
         _email = email;
         _templatedEmail = templatedEmail;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An application owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<JobApplication> GetOwnedApplicationAsync(Guid id)
+    {
+        var entity = await _applicationRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Job application with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobVacancy> GetOwnedVacancyAsync(Guid id)
+    {
+        var entity = await _vacancyRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Vacancy '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobApplicantTestResult> GetOwnedTestResultAsync(Guid id)
+    {
+        var entity = await _testResultRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Test result with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<ShortlistReview> GetOwnedReviewAsync(Guid id)
+    {
+        var entity = await _shortlistReviewRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Shortlist review '{id}' not found.");
+        return entity;
+    }
+
     // ── Queries ──────────────────────────────────────────────────────────────
 
     public async Task<JobApplicationDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _applicationRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Job application with ID '{id}' not found.");
+        var entity = await GetOwnedApplicationAsync(id);
         return entity.ToDto();
     }
 
     public async Task<JobApplicationDto?> GetByApplicationNumberAsync(string applicationNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _applicationRepository.GetByApplicationNumberAsync(applicationNumber);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
     public async Task<JobApplicationDetailDto> GetWithFullDetailsAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _applicationRepository.GetWithFullDetailsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Job application with ID '{id}' not found.");
         return entity.ToDetailDto();
     }
 
     public async Task<IEnumerable<JobApplicationSummaryDto>> GetAllAsync(Guid? vacancyId = null, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         IEnumerable<JobApplication> entities = vacancyId.HasValue
             ? await _applicationRepository.GetByVacancyIdAsync(vacancyId.Value)
             : await _applicationRepository.GetAllAsync();
 
-        return entities.ToSummaryDtoList();
+        return entities.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<JobApplicationSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, Guid? vacancyId = null, CancellationToken cancellationToken = default)
@@ -120,7 +169,8 @@ public class JobApplicationService : IJobApplicationService
         // a caller pull the whole table with ?pageSize=1000000.
         (pageNumber, pageSize) = PagingGuard.Clamp(pageNumber, pageSize);
 
-        var query = _applicationRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _applicationRepository.GetQueryable().Where(a => a.TenantId == tenantId);
 
         if (vacancyId.HasValue)
             query = query.Where(a => a.JobVacancyId == vacancyId.Value);
@@ -144,40 +194,50 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<IEnumerable<JobApplicationSummaryDto>> GetByVacancyIdAsync(Guid vacancyId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedVacancyAsync(vacancyId);
+        var tenantId = GetTenantId();
         var entities = await _applicationRepository.GetByVacancyIdAsync(vacancyId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobApplicationSummaryDto>> GetByCandidateIdAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _applicationRepository.GetByCandidateIdAsync(candidateId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobApplicationSummaryDto>> GetByStatusAsync(ApplicationStatus status, Guid? vacancyId = null, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _applicationRepository.GetByStatusAsync(status, vacancyId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobApplicationSummaryDto>> GetShortlistedAsync(Guid? vacancyId = null, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _applicationRepository.GetShortlistedAsync(vacancyId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobApplicationSummaryDto>> GetByCurrentStageAsync(Guid pipelineStageId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _applicationRepository.GetByCurrentStageAsync(pipelineStageId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
     public async Task<JobApplicationDto> CreateAsync(CreateJobApplicationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
-        entity.ApplicationNumber = await _applicationRepository.GetNextApplicationNumberAsync();
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = createDto.ToEntity(current, createdByUserId);
+        entity.ApplicationNumber = await _applicationRepository.GetNextApplicationNumberAsync(current);
         entity.Status = ApplicationStatus.New;
         entity.ApplicationDate = DateTime.UtcNow;
 
@@ -190,9 +250,7 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _applicationRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Job application with ID '{id}' not found.");
+        var entity = await GetOwnedApplicationAsync(id);
 
         if (entity.Status is not (ApplicationStatus.Draft or ApplicationStatus.New))
             throw new InvalidOperationException("Only draft or newly received applications can be deleted.");
@@ -206,9 +264,7 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<bool> ShortlistAsync(ShortlistApplicationDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _applicationRepository.GetByIdAsync(dto.ApplicationId);
-        if (entity == null)
-            throw new ArgumentException($"Job application '{dto.ApplicationId}' not found.");
+        var entity = await GetOwnedApplicationAsync(dto.ApplicationId);
 
         // Guard: terminal states cannot be shortlisted
         if (entity.Status is ApplicationStatus.Hired or ApplicationStatus.Withdrawn)
@@ -218,8 +274,8 @@ public class JobApplicationService : IJobApplicationService
             throw new InvalidOperationException("Application is already shortlisted.");
 
         // Enforce shortlisting deadline
-        var vacancy = await _vacancyRepository.GetByIdAsync(entity.JobVacancyId);
-        if (vacancy?.ShortlistingDeadline != null && DateTime.UtcNow > vacancy.ShortlistingDeadline.Value)
+        var vacancy = await GetOwnedVacancyAsync(entity.JobVacancyId);
+        if (vacancy.ShortlistingDeadline != null && DateTime.UtcNow > vacancy.ShortlistingDeadline.Value)
             throw new InvalidOperationException(
                 $"The shortlisting deadline for this vacancy passed on {vacancy.ShortlistingDeadline.Value:d}. " +
                 "Contact HR to extend or override the deadline.");
@@ -260,9 +316,7 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<bool> UnshortlistAsync(UnshortlistApplicationDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _applicationRepository.GetByIdAsync(dto.ApplicationId);
-        if (entity == null)
-            throw new ArgumentException($"Job application '{dto.ApplicationId}' not found.");
+        var entity = await GetOwnedApplicationAsync(dto.ApplicationId);
 
         if (entity.Status != ApplicationStatus.Shortlisted)
             throw new InvalidOperationException("Only shortlisted applications can be un-shortlisted.");
@@ -294,9 +348,7 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<bool> WaitlistAsync(WaitlistApplicationDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _applicationRepository.GetByIdAsync(dto.ApplicationId);
-        if (entity == null)
-            throw new ArgumentException($"Job application '{dto.ApplicationId}' not found.");
+        var entity = await GetOwnedApplicationAsync(dto.ApplicationId);
 
         if (entity.Status is ApplicationStatus.Hired or ApplicationStatus.Withdrawn or ApplicationStatus.Rejected)
             throw new InvalidOperationException($"Cannot waitlist an application that is {entity.Status}.");
@@ -318,9 +370,7 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<bool> RejectAsync(RejectApplicationDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _applicationRepository.GetByIdAsync(dto.ApplicationId);
-        if (entity == null)
-            throw new ArgumentException($"Job application with ID '{dto.ApplicationId}' not found.");
+        var entity = await GetOwnedApplicationAsync(dto.ApplicationId);
 
         if (entity.Status is ApplicationStatus.Hired or ApplicationStatus.Withdrawn or ApplicationStatus.Rejected)
             throw new InvalidOperationException($"Cannot reject an application that is already {entity.Status}.");
@@ -360,9 +410,7 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<bool> WithdrawAsync(WithdrawApplicationDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _applicationRepository.GetByIdAsync(dto.ApplicationId);
-        if (entity == null)
-            throw new ArgumentException($"Job application with ID '{dto.ApplicationId}' not found.");
+        var entity = await GetOwnedApplicationAsync(dto.ApplicationId);
 
         if (entity.Status == ApplicationStatus.Hired)
             throw new InvalidOperationException("A hired application cannot be withdrawn.");
@@ -385,9 +433,7 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<bool> MoveToStageAsync(MoveApplicationToStageDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _applicationRepository.GetByIdAsync(dto.ApplicationId);
-        if (entity == null)
-            throw new ArgumentException($"Job application with ID '{dto.ApplicationId}' not found.");
+        var entity = await GetOwnedApplicationAsync(dto.ApplicationId);
 
         // Close current stage history
         var currentHistory = await _stageHistoryRepository.GetCurrentStageAsync(dto.ApplicationId);
@@ -418,9 +464,9 @@ public class JobApplicationService : IJobApplicationService
         // Derive the correct ApplicationStatus from the stage's functional type
         var targetStage = await _unitOfWork.Repository<RecruitmentPipelineStage>()
             .GetByIdAsync(dto.PipelineStageId);
-        entity.Status = targetStage is not null
-            ? MapStageTypeToApplicationStatus(targetStage.StageType)
-            : ApplicationStatus.UnderReview;
+        if (targetStage == null || targetStage.TenantId != GetTenantId())
+            throw new ArgumentException($"Pipeline stage '{dto.PipelineStageId}' not found.");
+        entity.Status = MapStageTypeToApplicationStatus(targetStage.StageType);
 
         await _stageHistoryRepository.AddAsync(newHistory);
         await _applicationRepository.UpdateAsync(entity);
@@ -430,7 +476,7 @@ public class JobApplicationService : IJobApplicationService
 
         // Email #6 — Under Review
         var candUr = await _candidateRepository.GetByIdAsync(entity.JobCandidateId);
-        var vacUr  = await _vacancyRepository.GetByIdAsync(entity.JobVacancyId);
+        var vacUr  = await GetOwnedVacancyAsync(entity.JobVacancyId);
         await SendUnderReviewEmailAsync(
             candUr?.Email ?? string.Empty,
             candUr?.FullName ?? "Candidate",
@@ -444,15 +490,22 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<IEnumerable<JobApplicationStageHistoryDto>> GetStageHistoryAsync(Guid applicationId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedApplicationAsync(applicationId);
+        var tenantId = GetTenantId();
         var entities = await _stageHistoryRepository.GetByApplicationIdAsync(applicationId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     // ── Test results ──────────────────────────────────────────────────────────
 
     public async Task<JobApplicantTestResultDto> AddTestResultAsync(CreateJobApplicantTestResultDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedApplicationAsync(createDto.JobApplicationId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _testResultRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -465,15 +518,15 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<IEnumerable<JobApplicantTestResultDto>> GetTestResultsAsync(Guid applicationId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedApplicationAsync(applicationId);
+        var tenantId = GetTenantId();
         var entities = await _testResultRepository.GetByApplicationIdAsync(applicationId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<JobApplicantTestResultDto> UpdateTestResultAsync(UpdateJobApplicantTestResultDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _testResultRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Test result with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedTestResultAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _testResultRepository.UpdateAsync(entity);
@@ -483,9 +536,7 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<bool> DeleteTestResultAsync(Guid testResultId, CancellationToken cancellationToken = default)
     {
-        var entity = await _testResultRepository.GetByIdAsync(testResultId);
-        if (entity == null)
-            throw new ArgumentException($"Test result with ID '{testResultId}' not found.");
+        var entity = await GetOwnedTestResultAsync(testResultId);
 
         await _testResultRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -496,7 +547,12 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<JobApplicantCommunicationDto> AddCommunicationAsync(CreateJobApplicantCommunicationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedApplicationAsync(createDto.JobApplicationId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         entity.SentAt = DateTime.UtcNow;
 
         await _communicationRepository.AddAsync(entity);
@@ -506,26 +562,33 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<IEnumerable<JobApplicantCommunicationDto>> GetCommunicationsAsync(Guid applicationId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedApplicationAsync(applicationId);
+        var tenantId = GetTenantId();
         var entities = await _communicationRepository.GetByApplicationIdAsync(applicationId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<IEnumerable<JobApplicantTestResultDto>> GetTestResultsByVacancyAsync(Guid vacancyId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedVacancyAsync(vacancyId);
+        var tenantId = GetTenantId();
         var entities = await _testResultRepository.GetByVacancyIdAsync(vacancyId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<IEnumerable<JobApplicantTestResultDto>> GetTestResultsByTypeAsync(Guid applicationId, JobApplicantTestType testType, CancellationToken cancellationToken = default)
     {
+        await GetOwnedApplicationAsync(applicationId);
+        var tenantId = GetTenantId();
         var entities = await _testResultRepository.GetByTestTypeAsync(applicationId, testType);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<ApplicationAutoScoreDto> EvaluateApplicationScoreAsync(Guid applicationId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var application = await _applicationRepository.GetWithFullDetailsAsync(applicationId);
-        if (application == null)
+        if (application == null || application.TenantId != tenantId)
             throw new ArgumentException($"Job application '{applicationId}' not found.");
 
         return await EvaluateLoadedApplicationScoreAsync(application, cancellationToken);
@@ -533,6 +596,9 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<ApplicationAutoScoreDto> EvaluateLoadedApplicationScoreAsync(JobApplication application, CancellationToken cancellationToken = default)
     {
+        if (application.TenantId != GetTenantId())
+            throw new ArgumentException($"Job application '{application.Id}' not found.");
+
         var applicationId = application.Id;
         var vacancy = application.JobVacancy;
         var candidate = application.JobCandidate;
@@ -695,10 +761,13 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<IEnumerable<ApplicationAutoScoreDto>> EvaluateAllScoresForVacancyAsync(Guid vacancyId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedVacancyAsync(vacancyId);
+        var tenantId = GetTenantId();
         // Single bulk fetch — all navigation properties required for scoring loaded in one query
         var applications = await _applicationRepository.GetAllWithFullDetailsByVacancyIdAsync(vacancyId);
         var scoreable = applications
-            .Where(a => a.Status != ApplicationStatus.Withdrawn
+            .Where(a => a.TenantId == tenantId
+                     && a.Status != ApplicationStatus.Withdrawn
                      && a.Status != ApplicationStatus.Rejected)
             .ToList();
 
@@ -1279,15 +1348,17 @@ public class JobApplicationService : IJobApplicationService
         AutoShortlistByScoreDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         // Enforce shortlisting deadline (same guard as ShortlistAsync)
-        var vacancyForDeadline = await _vacancyRepository.GetByIdAsync(dto.VacancyId);
-        if (vacancyForDeadline?.ShortlistingDeadline != null && DateTime.UtcNow > vacancyForDeadline.ShortlistingDeadline.Value)
+        var vacancyForDeadline = await GetOwnedVacancyAsync(dto.VacancyId);
+        if (vacancyForDeadline.ShortlistingDeadline != null && DateTime.UtcNow > vacancyForDeadline.ShortlistingDeadline.Value)
             throw new InvalidOperationException(
                 $"The shortlisting deadline for this vacancy passed on {vacancyForDeadline.ShortlistingDeadline.Value:d}. " +
                 "Contact HR to extend or override the deadline.");
 
+        var tenantId = GetTenantId();
         var applications = await _applicationRepository.GetByVacancyIdAsync(dto.VacancyId);
         var eligible = applications
-            .Where(a => a.Status != ApplicationStatus.Withdrawn
+            .Where(a => a.TenantId == tenantId
+                     && a.Status != ApplicationStatus.Withdrawn
                      && a.Status != ApplicationStatus.Rejected
                      && a.Status != ApplicationStatus.Shortlisted
                      && a.Status != ApplicationStatus.Hired
@@ -1359,13 +1430,12 @@ public class JobApplicationService : IJobApplicationService
     public async Task<RecruitmentBulkOperationResultDto> SendShortlistNotificationsAsync(
         Guid vacancyId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(vacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{vacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
 
+        var tenantId = GetTenantId();
         var applications = await _applicationRepository.GetByVacancyIdAsync(vacancyId);
         var shortlisted = applications
-            .Where(a => a.Status == ApplicationStatus.Shortlisted && a.ShortlistNotificationSentAt == null)
+            .Where(a => a.TenantId == tenantId && a.Status == ApplicationStatus.Shortlisted && a.ShortlistNotificationSentAt == null)
             .ToList();
 
         var result = new RecruitmentBulkOperationResultDto();
@@ -1408,13 +1478,12 @@ public class JobApplicationService : IJobApplicationService
     public async Task<RecruitmentBulkOperationResultDto> SendRejectionNotificationsAsync(
         Guid vacancyId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(vacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{vacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
 
+        var tenantId = GetTenantId();
         var applications = await _applicationRepository.GetByVacancyIdAsync(vacancyId);
         var rejected = applications
-            .Where(a => a.Status == ApplicationStatus.Rejected && a.RejectionNotificationSentAt == null)
+            .Where(a => a.TenantId == tenantId && a.Status == ApplicationStatus.Rejected && a.RejectionNotificationSentAt == null)
             .ToList();
 
         var result = new RecruitmentBulkOperationResultDto();
@@ -1460,12 +1529,11 @@ public class JobApplicationService : IJobApplicationService
     public async Task<ShortlistSummaryDto> GetShortlistSummaryAsync(
         Guid vacancyId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(vacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{vacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
 
+        var tenantId = GetTenantId();
         var applications = await _applicationRepository.GetByVacancyIdAsync(vacancyId);
-        var all = applications.ToList();
+        var all = applications.Where(a => a.TenantId == tenantId).ToList();
         var scored = all.Where(a => a.AutoScore.HasValue && a.ScoredAt.HasValue).ToList();
 
         return new ShortlistSummaryDto
@@ -1492,15 +1560,14 @@ public class JobApplicationService : IJobApplicationService
     public async Task<CandidateComparisonDto> GetCandidateComparisonAsync(
         Guid vacancyId, IEnumerable<Guid> applicationIds, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(vacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{vacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
 
+        var tenantId = GetTenantId();
         var appIdList = applicationIds.ToList();
         var allApps = await _applicationRepository.GetByVacancyIdAsync(vacancyId);
         var selectedApps = appIdList.Any()
-            ? allApps.Where(a => appIdList.Contains(a.Id)).ToList()
-            : allApps.Where(a => a.Status == ApplicationStatus.Shortlisted).ToList();
+            ? allApps.Where(a => a.TenantId == tenantId && appIdList.Contains(a.Id)).ToList()
+            : allApps.Where(a => a.TenantId == tenantId && a.Status == ApplicationStatus.Shortlisted).ToList();
 
         var criteria = vacancy.ShortlistingCriteria?.ToList() ?? new List<JobShortlistingCriteria>();
         var criteriaMapping = criteria
@@ -1565,9 +1632,7 @@ public class JobApplicationService : IJobApplicationService
     public async Task<bool> SubmitShortlistForApprovalAsync(
         SubmitShortlistForApprovalDto dto, Guid submittedByUserId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(dto.VacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{dto.VacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(dto.VacancyId);
 
         if (vacancy.ShortlistApprovalStatus == ShortlistApprovalStatus.PendingApproval)
             throw new InvalidOperationException("Shortlist is already pending approval.");
@@ -1592,9 +1657,7 @@ public class JobApplicationService : IJobApplicationService
     public async Task<bool> ReviewShortlistApprovalAsync(
         ReviewShortlistApprovalDto dto, Guid reviewedByUserId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(dto.VacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{dto.VacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(dto.VacancyId);
 
         if (vacancy.ShortlistApprovalStatus != ShortlistApprovalStatus.PendingApproval)
             throw new InvalidOperationException("Shortlist is not currently pending approval.");
@@ -1631,9 +1694,7 @@ public class JobApplicationService : IJobApplicationService
     public async Task<bool> RecallShortlistApprovalAsync(
         Guid vacancyId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(vacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{vacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
 
         if (vacancy.ShortlistApprovalStatus != ShortlistApprovalStatus.PendingApproval)
             throw new InvalidOperationException("Shortlist is not currently pending approval.");
@@ -1656,8 +1717,11 @@ public class JobApplicationService : IJobApplicationService
     public async Task<IEnumerable<ShortlistDecisionLogDto>> GetShortlistDecisionLogAsync(
         Guid applicationId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+        await GetOwnedApplicationAsync(applicationId);
+
         var logs = _applicationRepository.GetQueryable()
-            .Where(a => a.Id == applicationId)
+            .Where(a => a.Id == applicationId && a.TenantId == tenantId)
             .SelectMany(a => a.DecisionLogs)
             .OrderByDescending(l => l.DecisionAt);
         var list = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
@@ -1686,14 +1750,16 @@ public class JobApplicationService : IJobApplicationService
     public async Task<ShortlistReviewDto> AddShortlistReviewAsync(
         CreateShortlistReviewDto dto, Guid tenantId, Guid reviewerId, CancellationToken cancellationToken = default)
     {
-        var application = await _applicationRepository.GetByIdAsync(dto.ApplicationId);
-        if (application == null)
-            throw new ArgumentException($"Application '{dto.ApplicationId}' not found.");
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var application = await GetOwnedApplicationAsync(dto.ApplicationId);
 
         var review = new ShortlistReview
         {
             Id = Guid.NewGuid(),
-            TenantId = tenantId,
+            TenantId = current,
             JobApplicationId = dto.ApplicationId,
             ReviewerId = reviewerId,
             Score = dto.Score,
@@ -1731,12 +1797,11 @@ public class JobApplicationService : IJobApplicationService
     public async Task<AggregatedReviewScoreDto> GetAggregatedReviewScoreAsync(
         Guid applicationId, CancellationToken cancellationToken = default)
     {
-        var application = await _applicationRepository.GetByIdAsync(applicationId);
-        if (application == null)
-            throw new ArgumentException($"Application '{applicationId}' not found.");
+        var application = await GetOwnedApplicationAsync(applicationId);
+        var tenantId = GetTenantId();
 
         var reviews = await _shortlistReviewRepository.GetByApplicationIdAsync(applicationId);
-        var reviewList = reviews.ToList();
+        var reviewList = reviews.Where(r => r.TenantId == tenantId).ToList();
         var finalized = reviewList.Where(r => r.IsFinalized).ToList();
 
         decimal? aggregated = finalized.Any()
@@ -1772,9 +1837,7 @@ public class JobApplicationService : IJobApplicationService
     public async Task<ShortlistReviewDto> FinalizeShortlistReviewAsync(
         Guid reviewId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var review = await _shortlistReviewRepository.GetByIdAsync(reviewId);
-        if (review == null)
-            throw new ArgumentException($"Shortlist review '{reviewId}' not found.");
+        var review = await GetOwnedReviewAsync(reviewId);
 
         if (review.IsFinalized)
             throw new InvalidOperationException("This review is already finalized.");
@@ -1787,16 +1850,16 @@ public class JobApplicationService : IJobApplicationService
         await _shortlistReviewRepository.UpdateAsync(review);
 
         // Recompute aggregated score on the application
-        var application = await _applicationRepository.GetByIdAsync(review.JobApplicationId);
-        if (application != null)
-        {
-            var allReviews = (await _shortlistReviewRepository.GetByApplicationIdAsync(review.JobApplicationId)).ToList();
-            var finalizedReviews = allReviews.Where(r => r.IsFinalized).ToList();
-            application.AggregatedReviewScore = finalizedReviews.Any()
-                ? Math.Round(finalizedReviews.Average(r => r.Score), 2)
-                : (decimal?)null;
-            await _applicationRepository.UpdateAsync(application);
-        }
+        var application = await GetOwnedApplicationAsync(review.JobApplicationId);
+        var tenantId = GetTenantId();
+        var allReviews = (await _shortlistReviewRepository.GetByApplicationIdAsync(review.JobApplicationId))
+            .Where(r => r.TenantId == tenantId)
+            .ToList();
+        var finalizedReviews = allReviews.Where(r => r.IsFinalized).ToList();
+        application.AggregatedReviewScore = finalizedReviews.Any()
+            ? Math.Round(finalizedReviews.Average(r => r.Score), 2)
+            : (decimal?)null;
+        await _applicationRepository.UpdateAsync(application);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1821,11 +1884,12 @@ public class JobApplicationService : IJobApplicationService
     public async Task<EeoComplianceReportDto> GetEeoReportAsync(
         Guid vacancyId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(vacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{vacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
 
-        var applications = (await _applicationRepository.GetByVacancyIdAsync(vacancyId)).ToList();
+        var tenantId = GetTenantId();
+        var applications = (await _applicationRepository.GetByVacancyIdAsync(vacancyId))
+            .Where(a => a.TenantId == tenantId)
+            .ToList();
 
         static EeoPipelineStageDto BuildStage(List<JobApplication> apps)
         {
@@ -1883,9 +1947,7 @@ public class JobApplicationService : IJobApplicationService
     public async Task<ShortlistSlaStatusDto> GetShortlistSlaStatusAsync(
         Guid vacancyId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(vacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{vacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
 
         int? daysOverdue = null;
         int? daysRemaining = null;
@@ -1918,16 +1980,15 @@ public class JobApplicationService : IJobApplicationService
     public async Task<IEnumerable<BlindApplicationSummaryDto>> GetBlindApplicationsAsync(
         Guid vacancyId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(vacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{vacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
 
         if (!vacancy.IsBlindScreeningEnabled)
             throw new InvalidOperationException("Blind screening is not enabled for this vacancy. Enable it on the vacancy settings first.");
 
+        var tenantId = GetTenantId();
         var applications = await _applicationRepository.GetByVacancyIdAsync(vacancyId);
         return applications
-            .Where(a => a.Status != ApplicationStatus.Withdrawn)
+            .Where(a => a.TenantId == tenantId && a.Status != ApplicationStatus.Withdrawn)
             .Select(a => new BlindApplicationSummaryDto
             {
                 ApplicationId = a.Id,
@@ -1947,9 +2008,7 @@ public class JobApplicationService : IJobApplicationService
     public async Task<bool> MarkAsInternalCandidateAsync(
         MarkInternalCandidateDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var application = await _applicationRepository.GetByIdAsync(dto.ApplicationId);
-        if (application == null)
-            throw new ArgumentException($"Application '{dto.ApplicationId}' not found.");
+        var application = await GetOwnedApplicationAsync(dto.ApplicationId);
 
         application.IsInternalCandidate = true;
         application.InternalEmployeeId = dto.InternalEmployeeId;
@@ -1964,9 +2023,7 @@ public class JobApplicationService : IJobApplicationService
     public async Task<bool> UnmarkAsInternalCandidateAsync(
         Guid applicationId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var application = await _applicationRepository.GetByIdAsync(applicationId);
-        if (application == null)
-            throw new ArgumentException($"Application '{applicationId}' not found.");
+        var application = await GetOwnedApplicationAsync(applicationId);
 
         application.IsInternalCandidate = false;
         application.InternalEmployeeId  = null;
@@ -1983,13 +2040,13 @@ public class JobApplicationService : IJobApplicationService
     public async Task<byte[]> GetShortlistCsvExportAsync(
         Guid vacancyId, CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(vacancyId);
-        if (vacancy == null)
-            throw new ArgumentException($"Vacancy '{vacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
 
+        var tenantId = GetTenantId();
         var applications = (await _applicationRepository.GetByVacancyIdAsync(vacancyId))
-            .Where(a => a.Status == ApplicationStatus.Shortlisted
-                     || a.Status == ApplicationStatus.Waitlisted)
+            .Where(a => a.TenantId == tenantId
+                     && (a.Status == ApplicationStatus.Shortlisted
+                     || a.Status == ApplicationStatus.Waitlisted))
             .OrderByDescending(a => a.AutoScore)
             .ToList();
 
@@ -2286,8 +2343,9 @@ public class JobApplicationService : IJobApplicationService
         Guid employeeId,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _applicationRepository.GetQueryable()
-            .Where(a => a.InternalEmployeeId == employeeId)
+            .Where(a => a.InternalEmployeeId == employeeId && a.TenantId == tenantId)
             .Include(a => a.JobCandidate)
             .Include(a => a.JobVacancy)
             .OrderByDescending(a => a.ApplicationDate)

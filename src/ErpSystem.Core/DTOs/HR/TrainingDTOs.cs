@@ -1057,10 +1057,7 @@ public class ApproveTrainingScheduleDto
     [Required]
     public Guid ScheduleId { get; set; }
 
-    [Required]
-    public Guid ApprovedById { get; set; }
-
-    public DateTime ApprovalDate { get; set; } = DateTime.UtcNow;
+    // Approver and approval timestamp come from the authenticated user / server clock.
 }
 
 public class CancelTrainingScheduleDto
@@ -1230,7 +1227,7 @@ public class CreateTrainingNominationDto : CreateDtoBase
     [Required]
     public NominationType Type { get; set; }
 
-    public Guid? NominatedById { get; set; }
+    // NominatedById is taken from the authenticated employee, not the request body.
 
     public DateTime NominationDate { get; set; } = DateTime.UtcNow;
 
@@ -1256,7 +1253,7 @@ public class BulkCreateTrainingNominationDto
     [Required]
     public NominationType Type { get; set; }
 
-    public Guid? NominatedById { get; set; }
+    // NominatedById is taken from the authenticated employee, not the request body.
 
     [MaxLength(2000)]
     public string? Justification { get; set; }
@@ -1306,10 +1303,7 @@ public class ApproveNominationDto
     [Required]
     public string ApproverRole { get; set; } = string.Empty;
 
-    [Required]
-    public Guid ApprovedById { get; set; }
-
-    public DateTime ApprovalDate { get; set; } = DateTime.UtcNow;
+    // Approver and approval timestamp come from the authenticated employee / server clock.
 
     [MaxLength(2000)]
     public string? Comments { get; set; }
@@ -1320,14 +1314,11 @@ public class RejectNominationDto
     [Required]
     public Guid NominationId { get; set; }
 
-    [Required]
-    public Guid RejectedById { get; set; }
+    // Rejector is taken from the authenticated employee; rejection timestamp is server UTC.
 
     [Required]
     [MaxLength(1000)]
     public string RejectionReason { get; set; } = string.Empty;
-
-    public DateTime RejectedDate { get; set; } = DateTime.UtcNow;
 }
 
 public class WithdrawNominationDto
@@ -1474,10 +1465,7 @@ public class VerifyTrainingCompletionDto
     [Required]
     public Guid CompletionId { get; set; }
 
-    [Required]
-    public Guid VerifiedById { get; set; }
-
-    public DateTime VerificationDate { get; set; } = DateTime.UtcNow;
+    // Verifier and verification timestamp come from the authenticated employee / server clock.
 
     [MaxLength(2000)]
     public string? VerificationNotes { get; set; }
@@ -1559,10 +1547,7 @@ public class MarkAttendanceDto : CreateDtoBase
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
-    [Required]
-    public Guid MarkedById { get; set; }
-
-    public DateTime MarkedAt { get; set; } = DateTime.UtcNow;
+    // MarkedById / MarkedAt come from the authenticated employee / server clock.
 }
 
 public class BulkMarkAttendanceDto
@@ -1573,8 +1558,7 @@ public class BulkMarkAttendanceDto
     [Required]
     public DateTime AttendanceDate { get; set; }
 
-    [Required]
-    public Guid MarkedById { get; set; }
+    // MarkedById comes from the authenticated employee.
 
     [Required]
     public List<AttendanceEntryDto> Entries { get; set; } = new();
@@ -1777,14 +1761,11 @@ public class SubmitManagerObservationDto
     [Required]
     public Guid AssessmentId { get; set; }
 
-    [Required]
-    public Guid ManagerId { get; set; }
+    // ManagerId and submitted timestamp come from the authenticated employee / server clock.
 
     [Required]
     [MaxLength(2000)]
     public string ManagerObservationNotes { get; set; } = string.Empty;
-
-    public DateTime ManagerSubmittedDate { get; set; } = DateTime.UtcNow;
 }
 
 #endregion
@@ -1911,8 +1892,7 @@ public class IssueCertificateDto : CreateDtoBase
     public bool IsRenewal { get; set; }
     public Guid? PreviousCertificateId { get; set; }
 
-    [Required]
-    public Guid IssuedById { get; set; }
+    // IssuedById is taken from the authenticated employee, not the request body.
 }
 
 public class RevokeCertificateDto
@@ -1920,14 +1900,11 @@ public class RevokeCertificateDto
     [Required]
     public Guid CertificateId { get; set; }
 
-    [Required]
-    public Guid RevokedById { get; set; }
+    // Revoker and revocation timestamp come from the authenticated employee / server clock.
 
     [Required]
     [MaxLength(1000)]
     public string RevokedReason { get; set; } = string.Empty;
-
-    public DateTime RevokedDate { get; set; } = DateTime.UtcNow;
 }
 
 #endregion
@@ -2014,10 +1991,7 @@ public class VerifyEmployeeCertificateDto
     [Required]
     public Guid CertificateId { get; set; }
 
-    [Required]
-    public Guid VerifiedById { get; set; }
-
-    public DateTime VerifiedDate { get; set; } = DateTime.UtcNow;
+    // Verifier and verification timestamp come from the authenticated employee / server clock.
 }
 
 public class UpdateEmployeeCertificateDto : UpdateDtoBase
@@ -2246,14 +2220,12 @@ public class ExemptEmployeeComplianceDto
     [Required]
     public Guid RecordId { get; set; }
 
-    [Required]
-    public Guid ExemptedById { get; set; }
+    // Exemptor and exemption timestamp come from the authenticated employee / server clock.
 
     [Required]
     [MaxLength(1000)]
     public string ExemptionReason { get; set; } = string.Empty;
 
-    public DateTime ExemptionDate { get; set; } = DateTime.UtcNow;
     public DateTime? ExemptionExpiryDate { get; set; }
 }
 
@@ -2367,10 +2339,7 @@ public class ApproveTrainingBudgetDto
     [Required]
     public Guid BudgetId { get; set; }
 
-    [Required]
-    public Guid ApprovedById { get; set; }
-
-    public DateTime ApprovalDate { get; set; } = DateTime.UtcNow;
+    // Approver and approval timestamp come from the authenticated employee / server clock.
 }
 
 #endregion
@@ -2512,10 +2481,7 @@ public class ApproveTrainingPlanDto
     [Required]
     public Guid PlanId { get; set; }
 
-    [Required]
-    public Guid ApprovedById { get; set; }
-
-    public DateTime ApprovalDate { get; set; } = DateTime.UtcNow;
+    // Approver and approval timestamp come from the authenticated employee / server clock.
 }
 
 #endregion
@@ -3011,10 +2977,7 @@ public class ApproveTrainingRequestDto
     [Required]
     public Guid RequestId { get; set; }
 
-    [Required]
-    public Guid ApprovedById { get; set; }
-
-    public DateTime ApprovalDate { get; set; } = DateTime.UtcNow;
+    // Approver and approval timestamp come from the authenticated employee / server clock.
 
     public Guid? LinkedProgramId { get; set; }
 }
@@ -3024,8 +2987,7 @@ public class RejectTrainingRequestDto
     [Required]
     public Guid RequestId { get; set; }
 
-    [Required]
-    public Guid RejectedById { get; set; }
+    // Rejector is taken from the authenticated employee.
 
     [Required]
     [MaxLength(1000)]

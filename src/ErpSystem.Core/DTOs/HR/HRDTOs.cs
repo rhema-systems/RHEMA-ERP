@@ -229,6 +229,7 @@ public class UpdateEmployeeDto
     public MaritalStatus? MaritalStatus { get; set; }
     public string? Religion { get; set; }
     public bool IsFullTime { get; set; }
+    public DateOnly? DateEmployed { get; set; }
 
     // Contact Information
     public string? Address { get; set; }

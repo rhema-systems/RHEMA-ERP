@@ -25,6 +25,7 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
     private readonly IEmailService _email;
     private readonly ICandidateJwtService _jwtService;
     private readonly IPasswordHasher<CandidatePortalAccount> _hasher;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<CandidatePortalAuthService> _logger;
     private readonly string _portalUrl;
 
@@ -40,6 +41,7 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
         IEmailService email,
         ICandidateJwtService jwtService,
         IPasswordHasher<CandidatePortalAccount> hasher,
+        ICurrentUserProvider currentUserProvider,
         ILogger<CandidatePortalAuthService> logger,
         IOptions<CandidatePortalOptions> portalOptions)
     {
@@ -49,8 +51,30 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
         _email         = email;
         _jwtService    = jwtService;
         _hasher        = hasher;
+        _currentUserProvider = currentUserProvider;
         _logger        = logger;
         _portalUrl     = portalOptions.Value.PortalUrl.TrimEnd('/');
+    }
+
+    // Portal callers supply tenantId via header/JWT. When ICurrentUserProvider.TenantId is set
+    // (non-empty), it must match; when empty (anonymous register/login), trust the explicit tenantId.
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant id is required.", nameof(tenantId));
+        var current = _currentUserProvider.TenantId;
+        if (current != Guid.Empty && current != tenantId)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return tenantId;
+    }
+
+    private async Task<CandidatePortalAccount> GetOwnedAccountAsync(Guid accountId, Guid tenantId)
+    {
+        var account = await _accountRepo.FirstOrDefaultAsync(
+            a => a.Id == accountId && a.TenantId == tenantId);
+        if (account == null)
+            throw new InvalidOperationException("Account not found.");
+        return account;
     }
 
     // ── Register ──────────────────────────────────────────────────────────────
@@ -59,6 +83,7 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
         Guid tenantId,
         CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var email = dto.Email.Trim().ToLowerInvariant();
 
         var existing = await _accountRepo.FirstOrDefaultAsync(
@@ -99,6 +124,7 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
         Guid tenantId,
         CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var email = dto.Email.Trim().ToLowerInvariant();
 
         var account = await _accountRepo.FirstOrDefaultAsync(
@@ -196,6 +222,7 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
     // ── Forgot password ────────────────────────────────────────────────────────
     public async Task RequestPasswordResetAsync(string email, Guid tenantId, CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var normalised = email.Trim().ToLowerInvariant();
         var account = await _accountRepo.FirstOrDefaultAsync(
             a => a.TenantId == tenantId && a.Email == normalised);
@@ -246,11 +273,8 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
         Guid tenantId,
         CancellationToken ct = default)
     {
-        var account = await _accountRepo.GetByIdAsync(accountId)
-            ?? throw new InvalidOperationException("Account not found.");
-
-        if (account.TenantId != tenantId)
-            throw new UnauthorizedAccessException();
+        tenantId = RequireCurrentTenant(tenantId);
+        var account = await GetOwnedAccountAsync(accountId, tenantId);
 
         var verify = _hasher.VerifyHashedPassword(account, account.PasswordHash, dto.CurrentPassword);
         if (verify == PasswordVerificationResult.Failed)

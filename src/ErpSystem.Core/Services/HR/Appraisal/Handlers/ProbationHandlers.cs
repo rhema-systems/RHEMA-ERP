@@ -17,31 +17,56 @@ public abstract class ProbationHandlerBase : IOutcomeRecommendationHandler
 {
     protected readonly IGenericRepository<ProbationPeriod> ProbationRepository;
     protected readonly IGenericRepository<PerformanceAppraisal> AppraisalRepository;
+    protected readonly ICurrentUserProvider CurrentUserProvider;
     protected readonly IUnitOfWork UnitOfWork;
     protected readonly ILogger Logger;
 
     protected ProbationHandlerBase(
         IGenericRepository<ProbationPeriod> probationRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger logger)
     {
         ProbationRepository = probationRepository;
         AppraisalRepository = appraisalRepository;
+        CurrentUserProvider = currentUserProvider;
         UnitOfWork = unitOfWork;
         Logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    protected Guid GetTenantId()
+    {
+        var tenantId = CurrentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // Callers supply the tenant alongside the recommendation. Reject anything other than
+    // the authenticated tenant so a supplied id can never widen the scope of a write.
+    protected Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
     }
 
     public abstract RecommendationType Type { get; }
 
     protected async Task<ProbationPeriod?> GetActiveProbationAsync(AppraisalOutcomeRecommendation rec, CancellationToken cancellationToken)
     {
+        var tenantId = RequireCurrentTenant(rec.TenantId);
         var appraisal = await AppraisalRepository.GetQueryable()
-            .FirstOrDefaultAsync(a => a.Id == rec.PerformanceAppraisalId, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == rec.PerformanceAppraisalId && a.TenantId == tenantId, cancellationToken);
         if (appraisal == null) return null;
 
         return await ProbationRepository.GetQueryable()
-            .Where(p => p.EmployeeId == appraisal.EmployeeId && p.Status == ProbationStatus.Active)
+            .Where(p => p.TenantId == tenantId && p.EmployeeId == appraisal.EmployeeId && p.Status == ProbationStatus.Active)
             .OrderByDescending(p => p.StartDate)
             .FirstOrDefaultAsync(cancellationToken);
     }
@@ -56,9 +81,10 @@ public class ConfirmProbationHandler : ProbationHandlerBase
     public ConfirmProbationHandler(
         IGenericRepository<ProbationPeriod> probationRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ConfirmProbationHandler> logger)
-        : base(probationRepository, appraisalRepository, unitOfWork, logger) { }
+        : base(probationRepository, appraisalRepository, currentUserProvider, unitOfWork, logger) { }
 
     public override RecommendationType Type => RecommendationType.ConfirmProbation;
 
@@ -91,15 +117,17 @@ public class ExtendProbationHandler : ProbationHandlerBase
     public ExtendProbationHandler(
         IGenericRepository<ProbationPeriod> probationRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ExtendProbationHandler> logger)
-        : base(probationRepository, appraisalRepository, unitOfWork, logger) { }
+        : base(probationRepository, appraisalRepository, currentUserProvider, unitOfWork, logger) { }
 
     public override RecommendationType Type => RecommendationType.ExtendProbation;
 
     public override async Task<(string TargetEntityType, Guid TargetEntityId)?> HandleAsync(
         AppraisalOutcomeRecommendation recommendation, CancellationToken cancellationToken = default)
     {
+        var tenantId = RequireCurrentTenant(recommendation.TenantId);
         var probation = await GetActiveProbationAsync(recommendation, cancellationToken);
         if (probation == null)
         {
@@ -109,7 +137,7 @@ public class ExtendProbationHandler : ProbationHandlerBase
 
         // Configurable extension length (AppraisalSettings.ProbationExtensionMonths), defaulting to 3.
         var configuredMonths = await AppraisalRepository.GetQueryable()
-            .Where(a => a.Id == recommendation.PerformanceAppraisalId)
+            .Where(a => a.Id == recommendation.PerformanceAppraisalId && a.TenantId == tenantId)
             .Select(a => (int?)a.AppraisalCycle.AppraisalSettings.ProbationExtensionMonths)
             .FirstOrDefaultAsync(cancellationToken);
         var months = configuredMonths is > 0 ? configuredMonths.Value : DefaultExtensionMonths;

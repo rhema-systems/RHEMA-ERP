@@ -13,22 +13,52 @@ namespace ErpSystem.Core.Services.HR;
 public class StrategicGoalService : IStrategicGoalService
 {
     private readonly IGenericRepository<StrategicGoal> _repository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StrategicGoalService> _logger;
 
     public StrategicGoalService(
         IGenericRepository<StrategicGoal> repository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StrategicGoalService> logger)
     {
         _repository = repository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A strategic goal owned by another tenant is reported as missing rather than forbidden, so the endpoints
+    // do not confirm that the id exists elsewhere.
+    private async Task<StrategicGoal> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Strategic goal with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<StrategicGoal> BaseQuery()
+    {
+        var tenantId = GetTenantId();
+        return _repository.GetQueryable().Where(g => g.TenantId == tenantId);
+    }
+
     public async Task<StrategicGoalDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _repository.GetQueryable()
+        var entity = await BaseQuery()
             .Include(g => g.CompanyGoals)
             .FirstOrDefaultAsync(g => g.Id == id, cancellationToken);
 
@@ -40,7 +70,7 @@ public class StrategicGoalService : IStrategicGoalService
 
     public async Task<IEnumerable<StrategicGoalDto>> GetAllAsync(bool activeOnly = false, CancellationToken cancellationToken = default)
     {
-        var query = _repository.GetQueryable().Include(g => g.CompanyGoals).AsQueryable();
+        var query = BaseQuery().Include(g => g.CompanyGoals).AsQueryable();
 
         if (activeOnly)
             query = query.Where(g => g.IsActive);
@@ -56,7 +86,7 @@ public class StrategicGoalService : IStrategicGoalService
 
     public async Task<PagedResult<StrategicGoalDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _repository.GetQueryable().Include(g => g.CompanyGoals)
+        var query = BaseQuery().Include(g => g.CompanyGoals)
             .OrderByDescending(g => g.StartYear)
             .ThenBy(g => g.Priority);
 
@@ -78,6 +108,7 @@ public class StrategicGoalService : IStrategicGoalService
             throw new ArgumentException("End year cannot be earlier than start year.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -92,9 +123,7 @@ public class StrategicGoalService : IStrategicGoalService
         if (updateDto.EndYear < updateDto.StartYear)
             throw new ArgumentException("End year cannot be earlier than start year.");
 
-        var entity = await _repository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Strategic goal with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
 
         updateDto.UpdateEntity(entity);
 
@@ -108,14 +137,15 @@ public class StrategicGoalService : IStrategicGoalService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _repository.GetQueryable()
+        var tenantId = GetTenantId();
+        var entity = await BaseQuery()
             .Include(g => g.CompanyGoals)
             .FirstOrDefaultAsync(g => g.Id == id, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Strategic goal with ID '{id}' not found.");
 
-        if (entity.CompanyGoals.Any())
+        if (entity.CompanyGoals.Any(c => c.TenantId == tenantId))
             throw new InvalidOperationException("Cannot delete a strategic goal that has yearly objectives derived from it. Detach or delete those first.");
 
         await _repository.DeleteAsync(entity);
@@ -127,9 +157,7 @@ public class StrategicGoalService : IStrategicGoalService
 
     public async Task<bool> SetActiveStatusAsync(Guid id, bool isActive, CancellationToken cancellationToken = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Strategic goal with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id, cancellationToken);
 
         entity.IsActive = isActive;
         await _repository.UpdateAsync(entity);

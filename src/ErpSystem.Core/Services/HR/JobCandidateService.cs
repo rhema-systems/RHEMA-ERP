@@ -21,6 +21,7 @@ public class JobCandidateService : IJobCandidateService
     private readonly IJobCandidateNoteRepository _noteRepository;
     private readonly IJobVacancyRepository _vacancyRepository;
     private readonly ICandidateSegmentMembershipRepository _segmentMembershipRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobCandidateService> _logger;
 
@@ -35,6 +36,7 @@ public class JobCandidateService : IJobCandidateService
         IJobCandidateNoteRepository noteRepository,
         IJobVacancyRepository vacancyRepository,
         ICandidateSegmentMembershipRepository segmentMembershipRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<JobCandidateService> logger)
     {
@@ -48,45 +50,132 @@ public class JobCandidateService : IJobCandidateService
         _noteRepository = noteRepository;
         _vacancyRepository = vacancyRepository;
         _segmentMembershipRepository = segmentMembershipRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A candidate owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<JobCandidate> GetOwnedCandidateAsync(Guid id)
+    {
+        var entity = await _candidateRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Candidate with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobVacancy> GetOwnedVacancyAsync(Guid id)
+    {
+        var entity = await _vacancyRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Vacancy '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobCandidateQualification> GetOwnedQualificationAsync(Guid id)
+    {
+        var entity = await _qualificationRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Qualification with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobCandidateWorkHistory> GetOwnedWorkHistoryAsync(Guid id)
+    {
+        var entity = await _workHistoryRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Work history with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobCandidateReferee> GetOwnedRefereeAsync(Guid id)
+    {
+        var entity = await _refereeRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Referee with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobCandidateSkill> GetOwnedSkillAsync(Guid id)
+    {
+        var entity = await _skillRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Skill with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobCandidateInterest> GetOwnedInterestAsync(Guid id)
+    {
+        var entity = await _interestRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Interest with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobCandidateDocument> GetOwnedDocumentAsync(Guid id)
+    {
+        var entity = await _documentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Document with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobCandidateNote> GetOwnedNoteAsync(Guid id)
+    {
+        var entity = await _noteRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Note with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Queries ──────────────────────────────────────────────────────────────
 
     public async Task<JobCandidateDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Candidate with ID '{id}' not found.");
+        var entity = await GetOwnedCandidateAsync(id);
         return entity.ToDto();
     }
 
     public async Task<JobCandidateDto?> GetByCandidateNumberAsync(string candidateNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _candidateRepository.GetByCandidateNumberAsync(candidateNumber);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
     public async Task<JobCandidateDetailDto> GetWithFullDetailsAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _candidateRepository.GetWithFullDetailsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Candidate with ID '{id}' not found.");
         return entity.ToDetailDto();
     }
 
     public async Task<IEnumerable<JobCandidateSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _candidateRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(c => c.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<JobCandidateSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
         (pageNumber, pageSize) = PagingGuard.Clamp(pageNumber, pageSize);
 
-        var query = _candidateRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _candidateRepository.GetQueryable().Where(c => c.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -107,19 +196,22 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<IEnumerable<JobCandidateSummaryDto>> GetTalentPoolAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _candidateRepository.GetTalentPoolCandidatesAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(c => c.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobCandidateSummaryDto>> GetByVacancyIdAsync(Guid vacancyId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedVacancyAsync(vacancyId);
+        var tenantId = GetTenantId();
         var entities = await _candidateRepository.GetByVacancyIdAsync(vacancyId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(c => c.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<JobCandidateDto?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByEmailAsync(email);
+        var entity = await _candidateRepository.GetByEmailAsync(email, GetTenantId());
         return entity?.ToDto();
     }
 
@@ -127,12 +219,16 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<JobCandidateDto> CreateAsync(CreateJobCandidateDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var existing = await _candidateRepository.GetByEmailAsync(createDto.Email);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var existing = await _candidateRepository.GetByEmailAsync(createDto.Email, current);
         if (existing != null)
             throw new InvalidOperationException($"A candidate with email '{createDto.Email}' already exists.");
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
-        entity.CandidateNumber = await _candidateRepository.GetNextCandidateNumberAsync();
+        var entity = createDto.ToEntity(current, createdByUserId);
+        entity.CandidateNumber = await _candidateRepository.GetNextCandidateNumberAsync(current);
 
         await _candidateRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -143,9 +239,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<JobCandidateDto> UpdateAsync(UpdateJobCandidateDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Candidate with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedCandidateAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _candidateRepository.UpdateAsync(entity);
@@ -157,9 +251,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Candidate with ID '{id}' not found.");
+        var entity = await GetOwnedCandidateAsync(id);
 
         await _candidateRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -170,8 +262,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> AddToTalentPoolAsync(Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(candidateId);
-        if (entity == null) throw new ArgumentException($"Candidate '{candidateId}' not found.");
+        var entity = await GetOwnedCandidateAsync(candidateId);
         entity.IsInTalentPool = true;
         entity.TalentPoolAddedDate = DateTime.UtcNow;
         entity.TalentPoolStatus = ErpSystem.Core.Enums.TalentPoolCandidateStatus.Active;
@@ -184,8 +275,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> RemoveFromTalentPoolAsync(Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(candidateId);
-        if (entity == null) throw new ArgumentException($"Candidate '{candidateId}' not found.");
+        var entity = await GetOwnedCandidateAsync(candidateId);
         entity.IsInTalentPool = false;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = updatedByUserId.ToString();
@@ -196,8 +286,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> AddToTalentPoolRichAsync(Guid candidateId, AddToTalentPoolDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(candidateId);
-        if (entity == null) throw new ArgumentException($"Candidate '{candidateId}' not found.");
+        var entity = await GetOwnedCandidateAsync(candidateId);
 
         entity.IsInTalentPool = true;
         entity.TalentPoolAddedDate = DateTime.UtcNow;
@@ -215,8 +304,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> RemoveFromTalentPoolRichAsync(Guid candidateId, RemoveFromTalentPoolDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(candidateId);
-        if (entity == null) throw new ArgumentException($"Candidate '{candidateId}' not found.");
+        var entity = await GetOwnedCandidateAsync(candidateId);
 
         entity.IsInTalentPool = false;
         entity.TalentPoolRemovalReason = dto.Reason;
@@ -232,7 +320,9 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<TalentPoolPagedResultDto> GetTalentPoolFilteredAsync(TalentPoolFilterDto filter, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var (items, total) = await _candidateRepository.GetTalentPoolFilteredAsync(filter, cancellationToken);
+        items = items.Where(c => c.TenantId == tenantId).ToList();
         return new TalentPoolPagedResultDto
         {
             Items = items.Select(c => c.ToTalentPoolDto()).ToList(),
@@ -245,14 +335,13 @@ public class JobCandidateService : IJobCandidateService
     public async Task<TalentPoolCandidateDto> GetTalentPoolCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
         var entity = await _candidateRepository.GetWithSegmentsAsync(candidateId, cancellationToken);
-        if (entity == null) throw new ArgumentException($"Candidate '{candidateId}' not found.");
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException($"Candidate '{candidateId}' not found.");
         return entity.ToTalentPoolDto();
     }
 
     public async Task<bool> UpdateTalentPoolStatusAsync(Guid candidateId, ErpSystem.Core.Enums.TalentPoolCandidateStatus status, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(candidateId);
-        if (entity == null) throw new ArgumentException($"Candidate '{candidateId}' not found.");
+        var entity = await GetOwnedCandidateAsync(candidateId);
         entity.TalentPoolStatus = status;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = updatedByUserId.ToString();
@@ -263,8 +352,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> UpdateTalentPoolReviewDateAsync(Guid candidateId, DateTime reviewDate, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(candidateId);
-        if (entity == null) throw new ArgumentException($"Candidate '{candidateId}' not found.");
+        var entity = await GetOwnedCandidateAsync(candidateId);
         entity.TalentPoolReviewDate = reviewDate;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = updatedByUserId.ToString();
@@ -369,9 +457,11 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<List<TalentPoolVacancyMatchResultDto>> MatchToVacancyAsync(Guid vacancyId, int topN, CancellationToken cancellationToken = default)
     {
+        await GetOwnedVacancyAsync(vacancyId);
+        var tenantId = GetTenantId();
         // Simple scoring: returns active pool candidates ordered by experience, vacancy-specific scoring done in service layer or UI
         var candidates = (await _candidateRepository.GetTalentPoolCandidatesAsync())
-            .Where(c => c.TalentPoolStatus == ErpSystem.Core.Enums.TalentPoolCandidateStatus.Active)
+            .Where(c => c.TenantId == tenantId && c.TalentPoolStatus == ErpSystem.Core.Enums.TalentPoolCandidateStatus.Active)
             .OrderByDescending(c => c.TotalYearsExperience)
             .Take(topN)
             .Select(c => new TalentPoolVacancyMatchResultDto
@@ -394,10 +484,12 @@ public class JobCandidateService : IJobCandidateService
     public async Task<List<CandidateVacancyMatchResultDto>> MatchCandidateToVacanciesAsync(
         Guid candidateId, int topN = 10, CancellationToken cancellationToken = default)
     {
-        var candidate = await _candidateRepository.GetByIdAsync(candidateId);
-        if (candidate is null) return new();
+        var candidate = await GetOwnedCandidateAsync(candidateId);
 
-        var vacancies = (await _vacancyRepository.GetActiveVacanciesAsync()).ToList();
+        var tenantId = GetTenantId();
+        var vacancies = (await _vacancyRepository.GetActiveVacanciesAsync())
+            .Where(v => v.TenantId == tenantId)
+            .ToList();
         var now       = DateTime.UtcNow;
         var results   = new List<CandidateVacancyMatchResultDto>(vacancies.Count);
 
@@ -466,7 +558,12 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<JobCandidateQualificationDto> AddQualificationAsync(CreateJobCandidateQualificationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedCandidateAsync(createDto.JobCandidateId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _qualificationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -474,15 +571,14 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<IEnumerable<JobCandidateQualificationDto>> GetQualificationsAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCandidateAsync(candidateId);
         var entities = await _qualificationRepository.GetByCandidateIdAsync(candidateId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == GetTenantId()).Select(e => e.ToDto());
     }
 
     public async Task<JobCandidateQualificationDto> UpdateQualificationAsync(UpdateJobCandidateQualificationDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _qualificationRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Qualification with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedQualificationAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _qualificationRepository.UpdateAsync(entity);
@@ -492,9 +588,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> DeleteQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default)
     {
-        var entity = await _qualificationRepository.GetByIdAsync(qualificationId);
-        if (entity == null)
-            throw new ArgumentException($"Qualification with ID '{qualificationId}' not found.");
+        var entity = await GetOwnedQualificationAsync(qualificationId);
 
         await _qualificationRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -505,7 +599,12 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<JobCandidateWorkHistoryDto> AddWorkHistoryAsync(CreateJobCandidateWorkHistoryDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedCandidateAsync(createDto.JobCandidateId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _workHistoryRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -513,15 +612,14 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<IEnumerable<JobCandidateWorkHistoryDto>> GetWorkHistoriesAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCandidateAsync(candidateId);
         var entities = await _workHistoryRepository.GetByCandidateIdAsync(candidateId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == GetTenantId()).Select(e => e.ToDto());
     }
 
     public async Task<JobCandidateWorkHistoryDto> UpdateWorkHistoryAsync(UpdateJobCandidateWorkHistoryDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _workHistoryRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Work history with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedWorkHistoryAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _workHistoryRepository.UpdateAsync(entity);
@@ -531,9 +629,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> DeleteWorkHistoryAsync(Guid workHistoryId, CancellationToken cancellationToken = default)
     {
-        var entity = await _workHistoryRepository.GetByIdAsync(workHistoryId);
-        if (entity == null)
-            throw new ArgumentException($"Work history with ID '{workHistoryId}' not found.");
+        var entity = await GetOwnedWorkHistoryAsync(workHistoryId);
 
         await _workHistoryRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -544,7 +640,12 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<JobCandidateRefereeDto> AddRefereeAsync(CreateJobCandidateRefereeDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedCandidateAsync(createDto.JobCandidateId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _refereeRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -552,15 +653,14 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<IEnumerable<JobCandidateRefereeDto>> GetRefereesAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCandidateAsync(candidateId);
         var entities = await _refereeRepository.GetByCandidateIdAsync(candidateId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == GetTenantId()).Select(e => e.ToDto());
     }
 
     public async Task<JobCandidateRefereeDto> UpdateRefereeAsync(UpdateJobCandidateRefereeDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _refereeRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Referee with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedRefereeAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _refereeRepository.UpdateAsync(entity);
@@ -570,9 +670,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> DeleteRefereeAsync(Guid refereeId, CancellationToken cancellationToken = default)
     {
-        var entity = await _refereeRepository.GetByIdAsync(refereeId);
-        if (entity == null)
-            throw new ArgumentException($"Referee with ID '{refereeId}' not found.");
+        var entity = await GetOwnedRefereeAsync(refereeId);
 
         await _refereeRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -583,7 +681,12 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<JobCandidateSkillDto> AddSkillAsync(CreateJobCandidateSkillDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedCandidateAsync(createDto.JobCandidateId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _skillRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -591,15 +694,14 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<IEnumerable<JobCandidateSkillDto>> GetSkillsAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCandidateAsync(candidateId);
         var entities = await _skillRepository.GetByCandidateIdAsync(candidateId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == GetTenantId()).Select(e => e.ToDto());
     }
 
     public async Task<JobCandidateSkillDto> UpdateSkillAsync(UpdateJobCandidateSkillDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _skillRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Skill with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedSkillAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _skillRepository.UpdateAsync(entity);
@@ -609,9 +711,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> DeleteSkillAsync(Guid skillId, CancellationToken cancellationToken = default)
     {
-        var entity = await _skillRepository.GetByIdAsync(skillId);
-        if (entity == null)
-            throw new ArgumentException($"Skill with ID '{skillId}' not found.");
+        var entity = await GetOwnedSkillAsync(skillId);
 
         await _skillRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -622,7 +722,12 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<JobCandidateInterestDto> AddInterestAsync(CreateJobCandidateInterestDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedCandidateAsync(createDto.JobCandidateId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _interestRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -630,15 +735,14 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<IEnumerable<JobCandidateInterestDto>> GetInterestsAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCandidateAsync(candidateId);
         var entities = await _interestRepository.GetByCandidateIdAsync(candidateId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == GetTenantId()).Select(e => e.ToDto());
     }
 
     public async Task<JobCandidateInterestDto> UpdateInterestAsync(UpdateJobCandidateInterestDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _interestRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Interest with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedInterestAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _interestRepository.UpdateAsync(entity);
@@ -648,9 +752,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> DeleteInterestAsync(Guid interestId, CancellationToken cancellationToken = default)
     {
-        var entity = await _interestRepository.GetByIdAsync(interestId);
-        if (entity == null)
-            throw new ArgumentException($"Interest with ID '{interestId}' not found.");
+        var entity = await GetOwnedInterestAsync(interestId);
 
         await _interestRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -661,7 +763,12 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<JobCandidateDocumentDto> AddDocumentAsync(CreateJobCandidateDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedCandidateAsync(createDto.JobCandidateId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -669,15 +776,14 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<IEnumerable<JobCandidateDocumentDto>> GetDocumentsAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCandidateAsync(candidateId);
         var entities = await _documentRepository.GetByCandidateIdAsync(candidateId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == GetTenantId()).Select(e => e.ToDto());
     }
 
     public async Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _documentRepository.GetByIdAsync(documentId);
-        if (entity == null)
-            throw new ArgumentException($"Document with ID '{documentId}' not found.");
+        var entity = await GetOwnedDocumentAsync(documentId);
 
         await _documentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -688,7 +794,12 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<JobCandidateNoteDto> AddNoteAsync(CreateJobCandidateNoteDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedCandidateAsync(createDto.JobCandidateId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _noteRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -696,18 +807,18 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<IEnumerable<JobCandidateNoteDto>> GetNotesAsync(Guid candidateId, bool includePrivate = false, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCandidateAsync(candidateId);
+        var tenantId = GetTenantId();
         var entities = includePrivate
             ? await _noteRepository.GetAllByCandidateIdAsync(candidateId)
             : await _noteRepository.GetByCandidateIdAsync(candidateId);
 
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<JobCandidateNoteDto> UpdateNoteAsync(UpdateJobCandidateNoteDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _noteRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Note with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedNoteAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _noteRepository.UpdateAsync(entity);
@@ -717,9 +828,7 @@ public class JobCandidateService : IJobCandidateService
 
     public async Task<bool> DeleteNoteAsync(Guid noteId, CancellationToken cancellationToken = default)
     {
-        var entity = await _noteRepository.GetByIdAsync(noteId);
-        if (entity == null)
-            throw new ArgumentException($"Note with ID '{noteId}' not found.");
+        var entity = await GetOwnedNoteAsync(noteId);
 
         await _noteRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

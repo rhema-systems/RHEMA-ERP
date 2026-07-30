@@ -17,16 +17,38 @@ public sealed class PipelineQueryService : IPipelineQueryService
 {
     private readonly IJobVacancyRepository _vacancyRepository;
     private readonly IRecruitmentPipelineStageRepository _stageRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
 
     public PipelineQueryService(
         IJobVacancyRepository vacancyRepository,
         IRecruitmentPipelineStageRepository stageRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork)
     {
         _vacancyRepository = vacancyRepository;
         _stageRepository   = stageRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork        = unitOfWork;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private async Task<JobVacancy> GetOwnedVacancyAsync(Guid id)
+    {
+        var entity = await _vacancyRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new KeyNotFoundException($"Vacancy '{id}' not found.");
+        return entity;
     }
 
     // =========================================================================
@@ -37,9 +59,8 @@ public sealed class PipelineQueryService : IPipelineQueryService
         Guid vacancyId,
         CancellationToken cancellationToken = default)
     {
-        var vacancy = await _vacancyRepository.GetByIdAsync(vacancyId);
-        if (vacancy is null)
-            throw new KeyNotFoundException($"Vacancy '{vacancyId}' not found.");
+        var vacancy = await GetOwnedVacancyAsync(vacancyId);
+        var tenantId = GetTenantId();
 
         var result = new PipelineOverviewDto
         {
@@ -50,7 +71,7 @@ public sealed class PipelineQueryService : IPipelineQueryService
         // All application IDs for this vacancy
         var allAppIds = await _unitOfWork.Repository<JobApplication>()
             .GetQueryable()
-            .Where(a => a.JobVacancyId == vacancyId)
+            .Where(a => a.JobVacancyId == vacancyId && a.TenantId == tenantId)
             .Select(a => a.Id)
             .ToListAsync(cancellationToken);
 
@@ -85,7 +106,7 @@ public sealed class PipelineQueryService : IPipelineQueryService
         // Current stage for each application (one row per app, IsCurrent = true)
         var currentHistories = await _unitOfWork.Repository<JobApplicationStageHistory>()
             .GetQueryable()
-            .Where(h => appIdSet.Contains(h.JobApplicationId) && h.IsCurrent)
+            .Where(h => appIdSet.Contains(h.JobApplicationId) && h.IsCurrent && h.TenantId == tenantId)
             .ToListAsync(cancellationToken);
 
         // Applications with no current history = inbox
@@ -131,6 +152,8 @@ public sealed class PipelineQueryService : IPipelineQueryService
         CancellationToken cancellationToken = default)
     {
         var isInbox = stageId == Guid.Empty;
+        var tenantId = GetTenantId();
+        await GetOwnedVacancyAsync(vacancyId);
 
         // ── 1. Resolve which application IDs belong to this stage/inbox ──────
 
@@ -141,26 +164,26 @@ public sealed class PipelineQueryService : IPipelineQueryService
             // Inbox: applications for this vacancy that have NO current stage history
             var stagedIds = await _unitOfWork.Repository<JobApplicationStageHistory>()
                 .GetQueryable()
-                .Where(h => h.IsCurrent)
+                .Where(h => h.IsCurrent && h.TenantId == tenantId)
                 .Select(h => h.JobApplicationId)
                 .ToListAsync(cancellationToken);
 
             appQuery = _unitOfWork.Repository<JobApplication>()
                 .GetQueryable()
-                .Where(a => a.JobVacancyId == vacancyId && !stagedIds.Contains(a.Id));
+                .Where(a => a.JobVacancyId == vacancyId && a.TenantId == tenantId && !stagedIds.Contains(a.Id));
         }
         else
         {
             // Specific stage: applications whose current history points to this stage
             var stageAppIds = await _unitOfWork.Repository<JobApplicationStageHistory>()
                 .GetQueryable()
-                .Where(h => h.PipelineStageId == stageId && h.IsCurrent)
+                .Where(h => h.PipelineStageId == stageId && h.IsCurrent && h.TenantId == tenantId)
                 .Select(h => h.JobApplicationId)
                 .ToListAsync(cancellationToken);
 
             appQuery = _unitOfWork.Repository<JobApplication>()
                 .GetQueryable()
-                .Where(a => a.JobVacancyId == vacancyId && stageAppIds.Contains(a.Id));
+                .Where(a => a.JobVacancyId == vacancyId && a.TenantId == tenantId && stageAppIds.Contains(a.Id));
         }
 
         // Always include the candidate navigation for name/email
@@ -232,7 +255,8 @@ public sealed class PipelineQueryService : IPipelineQueryService
                 .GetQueryable()
                 .Where(h => pageAppIds.Contains(h.JobApplicationId)
                          && h.PipelineStageId == stageId
-                         && h.IsCurrent)
+                         && h.IsCurrent
+                         && h.TenantId == tenantId)
                 .ToDictionaryAsync(h => h.JobApplicationId, h => h.EnteredAt, cancellationToken);
         }
 

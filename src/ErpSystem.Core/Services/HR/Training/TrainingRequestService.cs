@@ -1,6 +1,7 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -12,6 +13,8 @@ namespace ErpSystem.Core.Services.HR;
 public class TrainingRequestService : ITrainingRequestService
 {
     private readonly ITrainingRequestRepository _requestRepository;
+    private readonly IGenericRepository<TrainingProgram> _programRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TrainingRequestService> _logger;
 
@@ -19,37 +22,63 @@ public class TrainingRequestService : ITrainingRequestService
 
     public TrainingRequestService(
         ITrainingRequestRepository requestRepository,
+        IGenericRepository<TrainingProgram> programRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         INumberSequenceService numberSequence,
         ILogger<TrainingRequestService> logger)
     {
         _requestRepository = requestRepository;
+        _programRepository = programRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _numberSequence = numberSequence;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A request owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<TrainingRequest> GetOwnedAsync(Guid id)
+    {
+        var entity = await _requestRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Training request with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
 
     public async Task<TrainingRequestDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training request with ID '{id}' not found.");
-
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<TrainingRequestDto?> GetByRequestNumberAsync(string requestNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _requestRepository.GetByRequestNumberAsync(requestNumber);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<PagedResult<TrainingRequestSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _requestRepository.GetQueryable();
+        var tenantId = GetTenantId();
+
+        // Scoping the query before the count matters: an unscoped CountAsync reports other tenants' rows
+        // in TotalCount and breaks the pager.
+        var query = _requestRepository.GetQueryable().Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
         // Eager-load navigations the summary DTO reads (employee + linked program names).
         var items = await query
@@ -70,33 +99,41 @@ public class TrainingRequestService : ITrainingRequestService
 
     public async Task<IEnumerable<TrainingRequestSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requestRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingRequestSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requestRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingRequestSummaryDto>> GetByStatusAsync(TrainingRequestStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requestRepository.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingRequestSummaryDto>> GetPendingApprovalAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requestRepository.GetByStatusAsync(TrainingRequestStatus.Submitted);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
     public async Task<TrainingRequestDto> CreateAsync(CreateTrainingRequestDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
         entity.RequestNumber = await GenerateRequestNumberAsync(cancellationToken);
         entity.Status = TrainingRequestStatus.Draft;
 
@@ -110,10 +147,7 @@ public class TrainingRequestService : ITrainingRequestService
 
     public async Task<TrainingRequestDto> UpdateAsync(UpdateTrainingRequestDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training request with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         if (entity.Status != TrainingRequestStatus.Draft)
             throw new InvalidOperationException("Only draft training requests can be updated.");
@@ -130,10 +164,7 @@ public class TrainingRequestService : ITrainingRequestService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training request with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.Status != TrainingRequestStatus.Draft)
             throw new InvalidOperationException("Only draft training requests can be deleted.");
@@ -150,10 +181,7 @@ public class TrainingRequestService : ITrainingRequestService
 
     public async Task<bool> SubmitAsync(Guid requestId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(requestId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training request with ID '{requestId}' not found.");
+        var entity = await GetOwnedAsync(requestId);
 
         if (entity.Status != TrainingRequestStatus.Draft)
             throw new InvalidOperationException($"Training request cannot be submitted from status '{entity.Status}'.");
@@ -170,37 +198,38 @@ public class TrainingRequestService : ITrainingRequestService
         return true;
     }
 
-    public async Task<TrainingRequestDto> ApproveAsync(ApproveTrainingRequestDto dto, CancellationToken cancellationToken = default)
+    public async Task<TrainingRequestDto> ApproveAsync(ApproveTrainingRequestDto dto, Guid approvedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(dto.RequestId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training request with ID '{dto.RequestId}' not found.");
+        var entity = await GetOwnedAsync(dto.RequestId);
 
         if (entity.Status != TrainingRequestStatus.Submitted)
             throw new InvalidOperationException($"Training request cannot be approved from status '{entity.Status}'.");
 
+        if (dto.LinkedProgramId.HasValue && dto.LinkedProgramId.Value != Guid.Empty)
+        {
+            var program = await _programRepository.GetByIdAsync(dto.LinkedProgramId.Value);
+            if (program == null || program.TenantId != entity.TenantId)
+                throw new ArgumentException($"Training program with ID '{dto.LinkedProgramId}' not found.");
+        }
+
         entity.Status = TrainingRequestStatus.Approved;
-        entity.ApprovedById = dto.ApprovedById;
-        entity.ApprovalDate = dto.ApprovalDate;
+        entity.ApprovedById = approvedById;
+        entity.ApprovalDate = DateTime.UtcNow;
         entity.LinkedProgramId = dto.LinkedProgramId;
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = dto.ApprovedById.ToString();
+        entity.UpdatedBy = approvedById.ToString();
 
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Training request {RequestNumber} approved by {ApprovedById}", entity.RequestNumber, dto.ApprovedById);
+        _logger.LogInformation("Training request {RequestNumber} approved by {ApprovedById}", entity.RequestNumber, approvedById);
 
         return entity.ToDto();
     }
 
-    public async Task<bool> RejectAsync(RejectTrainingRequestDto dto, CancellationToken cancellationToken = default)
+    public async Task<bool> RejectAsync(RejectTrainingRequestDto dto, Guid rejectedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _requestRepository.GetByIdAsync(dto.RequestId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training request with ID '{dto.RequestId}' not found.");
+        var entity = await GetOwnedAsync(dto.RequestId);
 
         if (entity.Status != TrainingRequestStatus.Submitted)
             throw new InvalidOperationException($"Training request cannot be rejected from status '{entity.Status}'.");
@@ -208,7 +237,7 @@ public class TrainingRequestService : ITrainingRequestService
         entity.Status = TrainingRequestStatus.Rejected;
         entity.RejectionReason = dto.RejectionReason;
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = dto.RejectedById.ToString();
+        entity.UpdatedBy = rejectedById.ToString();
 
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

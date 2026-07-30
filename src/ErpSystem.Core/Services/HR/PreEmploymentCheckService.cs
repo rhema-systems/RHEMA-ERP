@@ -15,6 +15,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
     private readonly IReferenceCheckResponseRepository _referenceResponseRepository;
     private readonly IJobOfferRepository _offerRepository;
     private readonly IPreEmploymentCheckTemplateRepository _templateRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<PreEmploymentCheckService> _logger;
 
@@ -24,6 +25,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
         IReferenceCheckResponseRepository referenceResponseRepository,
         IJobOfferRepository offerRepository,
         IPreEmploymentCheckTemplateRepository templateRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<PreEmploymentCheckService> logger)
     {
@@ -32,46 +34,92 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
         _referenceResponseRepository = referenceResponseRepository;
         _offerRepository = offerRepository;
         _templateRepository = templateRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A check owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<PreEmploymentCheck> GetOwnedCheckAsync(Guid id)
+    {
+        var entity = await _checkRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Pre-employment check with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<PreEmploymentCheckItem> GetOwnedItemAsync(Guid id)
+    {
+        var entity = await _itemRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Pre-employment check item with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<ReferenceCheckResponse> GetOwnedReferenceResponseAsync(Guid id)
+    {
+        var entity = await _referenceResponseRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Reference response with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Queries ──────────────────────────────────────────────────────────────
 
     public async Task<PreEmploymentCheckDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _checkRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Pre-employment check with ID '{id}' not found.");
+        var entity = await GetOwnedCheckAsync(id);
         return entity.ToDto();
     }
 
     public async Task<PreEmploymentCheckDto?> GetByOfferIdAsync(Guid offerId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _checkRepository.GetByOfferIdAsync(offerId);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<PreEmploymentCheckDetailDto> GetWithItemsAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _checkRepository.GetWithItemsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Pre-employment check with ID '{id}' not found.");
         return entity.ToDetailDto();
     }
 
     public async Task<IEnumerable<PreEmploymentCheckDto>> GetByStatusAsync(PreEmploymentCheckStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _checkRepository.GetByStatusAsync(status);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
     public async Task<PreEmploymentCheckDto> CreateAsync(CreatePreEmploymentCheckDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = createDto.ToEntity(current, createdByUserId);
         entity.OverallStatus = PreEmploymentCheckStatus.Pending;
+
+        var offer = await _offerRepository.GetByIdAsync(createDto.JobOfferId);
+        if (offer == null || offer.TenantId != current)
+            throw new ArgumentException($"Job offer '{createDto.JobOfferId}' not found.");
 
         await _checkRepository.AddAsync(entity);
 
@@ -79,7 +127,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
         foreach (var itemDto in createDto.Items)
         {
             itemDto.PreEmploymentCheckId = entity.Id;
-            var item = itemDto.ToEntity(tenantId, createdByUserId);
+            var item = itemDto.ToEntity(current, createdByUserId);
             await _itemRepository.AddAsync(item);
         }
 
@@ -93,13 +141,21 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
 
     public async Task<IEnumerable<PreEmploymentCheckItemDto>> GetItemsAsync(Guid checkId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCheckAsync(checkId);
+        var tenantId = GetTenantId();
         var entities = await _itemRepository.GetByPreEmploymentCheckIdAsync(checkId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<PreEmploymentCheckItemDto> AddItemAsync(CreatePreEmploymentCheckItemDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedCheckAsync(createDto.PreEmploymentCheckId);
+
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _itemRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -107,9 +163,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
 
     public async Task<PreEmploymentCheckItemDto> UpdateItemAsync(UpdatePreEmploymentCheckItemDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _itemRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Pre-employment check item with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedItemAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _itemRepository.UpdateAsync(entity);
@@ -119,9 +173,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
 
     public async Task<bool> DeleteItemAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
-        var entity = await _itemRepository.GetByIdAsync(itemId);
-        if (entity == null)
-            throw new ArgumentException($"Pre-employment check item with ID '{itemId}' not found.");
+        var entity = await GetOwnedItemAsync(itemId);
 
         await _itemRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -130,18 +182,26 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
 
     public async Task<IEnumerable<PreEmploymentCheckItemDto>> GetBlockingFailuresAsync(Guid checkId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCheckAsync(checkId);
+        var tenantId = GetTenantId();
         var entities = await _itemRepository.GetBlockingFailuresAsync(checkId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     // ── Reference responses ───────────────────────────────────────────────────
 
     public async Task<ReferenceCheckResponseDto> AddReferenceResponseAsync(CreateReferenceCheckResponseDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedItemAsync(createDto.CheckItemId);
+
         // Upsert: the unique index allows only one response per check item.
         // If a response already exists, update it in place.
         var existing = (await _referenceResponseRepository.GetByCheckItemIdAsync(createDto.CheckItemId))
-            .FirstOrDefault();
+            .FirstOrDefault(r => r.TenantId == current);
 
         if (existing != null)
         {
@@ -165,7 +225,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
             return existing.ToDto();
         }
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _referenceResponseRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -173,15 +233,15 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
 
     public async Task<IEnumerable<ReferenceCheckResponseDto>> GetReferenceResponsesAsync(Guid checkItemId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedItemAsync(checkItemId);
+        var tenantId = GetTenantId();
         var entities = await _referenceResponseRepository.GetByCheckItemIdAsync(checkItemId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<ReferenceCheckResponseDto> UpdateReferenceResponseAsync(UpdateReferenceCheckResponseDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _referenceResponseRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Reference response with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedReferenceResponseAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _referenceResponseRepository.UpdateAsync(entity);
@@ -191,9 +251,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
 
     public async Task<bool> DeleteReferenceResponseAsync(Guid referenceResponseId, CancellationToken cancellationToken = default)
     {
-        var entity = await _referenceResponseRepository.GetByIdAsync(referenceResponseId);
-        if (entity == null)
-            throw new ArgumentException($"Reference response with ID '{referenceResponseId}' not found.");
+        var entity = await GetOwnedReferenceResponseAsync(referenceResponseId);
 
         await _referenceResponseRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -205,7 +263,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
     public async Task<bool> CompleteCheckAsync(Guid checkId, Guid completedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await _checkRepository.GetWithItemsAsync(checkId);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Pre-employment check with ID '{checkId}' not found.");
 
         var hasBlockingFailures = entity.Items.Any(i => i.IsBlockingOnFail && i.Passed != true);
@@ -218,7 +276,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
         if (!hasBlockingFailures)
         {
             var offer = await _offerRepository.GetByIdAsync(entity.JobOfferId);
-            if (offer != null && offer.OfferStatus == JobOfferStatus.ConditionallyAccepted)
+            if (offer != null && offer.TenantId == entity.TenantId && offer.OfferStatus == JobOfferStatus.ConditionallyAccepted)
             {
                 offer.OfferStatus = JobOfferStatus.ChecksCleared;
                 await _offerRepository.UpdateAsync(offer);
@@ -233,31 +291,40 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
 
     public async Task<IEnumerable<PreEmploymentCheckItemDto>> GetItemsByStatusAsync(CheckItemStatus status, Guid? checkId = null, CancellationToken cancellationToken = default)
     {
+        if (checkId.HasValue)
+            await GetOwnedCheckAsync(checkId.Value);
+
+        var tenantId = GetTenantId();
         var entities = await _itemRepository.GetByStatusAsync(status, checkId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<IEnumerable<PreEmploymentCheckItemDto>> GetMandatoryItemsAsync(Guid checkId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCheckAsync(checkId);
+        var tenantId = GetTenantId();
         var entities = await _itemRepository.GetMandatoryItemsAsync(checkId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<IEnumerable<ReferenceCheckResponseDto>> GetReferenceResponsesByRefereeAsync(Guid refereeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _referenceResponseRepository.GetByRefereeIdAsync(refereeId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     // ── Template application ──────────────────────────────────────────────────
 
     public async Task<PreEmploymentCheckDetailDto> ApplyTemplateAsync(Guid checkId, Guid templateId, Guid appliedByUserId, bool overwriteExisting = false, CancellationToken ct = default)
     {
-        var check = await _checkRepository.GetWithItemsAsync(checkId)
-            ?? throw new ArgumentException($"Pre-employment check '{checkId}' not found.");
+        var check = await _checkRepository.GetWithItemsAsync(checkId);
+        if (check == null || check.TenantId != GetTenantId())
+            throw new ArgumentException($"Pre-employment check '{checkId}' not found.");
 
-        var template = await _templateRepository.GetByIdWithItemsAsync(templateId)
-            ?? throw new ArgumentException($"Pre-employment check template '{templateId}' not found.");
+        var template = await _templateRepository.GetByIdWithItemsAsync(templateId);
+        if (template == null || template.TenantId != check.TenantId)
+            throw new ArgumentException($"Pre-employment check template '{templateId}' not found.");
 
         var existingTypes = check.Items.Select(i => i.CheckType).ToHashSet();
 

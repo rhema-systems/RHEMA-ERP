@@ -20,7 +20,9 @@ namespace ErpSystem.Core.Services.HR;
 /// - Uses repositories for data access only
 /// - Uses <see cref="IUnitOfWork"/> for transactional persistence
 ///
-/// Tenant isolation is enforced by the current tenant context via DbContext query filters.
+/// The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+/// TenantId auto-stamp are inert. This service scopes every read and mutation to the authenticated
+/// tenant explicitly.
 /// </summary>
 public class BenefitPolicyService : IBenefitPolicyService
 {
@@ -29,6 +31,7 @@ public class BenefitPolicyService : IBenefitPolicyService
     private readonly IGenericRepository<BenefitGradeValue> _gradeValueRepository;
     private readonly IGenericRepository<PayComponent> _payComponentRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<BenefitPolicyService> _logger;
 
     public BenefitPolicyService(
@@ -37,6 +40,7 @@ public class BenefitPolicyService : IBenefitPolicyService
         IGenericRepository<BenefitGradeValue> gradeValueRepository,
         IGenericRepository<PayComponent> payComponentRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<BenefitPolicyService> logger)
     {
         _benefitPolicyRepository = benefitPolicyRepository ?? throw new ArgumentNullException(nameof(benefitPolicyRepository));
@@ -44,7 +48,27 @@ public class BenefitPolicyService : IBenefitPolicyService
         _gradeValueRepository = gradeValueRepository ?? throw new ArgumentNullException(nameof(gradeValueRepository));
         _payComponentRepository = payComponentRepository ?? throw new ArgumentNullException(nameof(payComponentRepository));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _currentUserProvider = currentUserProvider ?? throw new ArgumentNullException(nameof(currentUserProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
     }
 
     /// <inheritdoc />
@@ -55,8 +79,9 @@ public class BenefitPolicyService : IBenefitPolicyService
             throw new ArgumentException("Id is required.", nameof(id));
         }
 
+        var tenantId = GetTenantId();
         var entity = await _benefitPolicyRepository
-            .GetQueryable(p => p.Id == id)
+            .GetQueryable(p => p.Id == id && p.TenantId == tenantId)
             .AsNoTracking()
             .AsSplitQuery()
             .Include(p => p.BenefitPolicyRelations)
@@ -69,8 +94,9 @@ public class BenefitPolicyService : IBenefitPolicyService
     /// <inheritdoc />
     public async Task<IReadOnlyList<BenefitPolicyDto>> GetAllAsync()
     {
+        var tenantId = GetTenantId();
         var entities = await _benefitPolicyRepository
-            .GetQueryable()
+            .GetQueryable(p => p.TenantId == tenantId)
             .AsNoTracking()
             .AsSplitQuery()
             .Include(p => p.BenefitPolicyRelations)
@@ -93,8 +119,9 @@ public class BenefitPolicyService : IBenefitPolicyService
             throw new ArgumentOutOfRangeException(nameof(pageSize), "PageSize must be >= 1.");
         }
 
+        var tenantId = GetTenantId();
         var query = _benefitPolicyRepository
-            .GetQueryable()
+            .GetQueryable(p => p.TenantId == tenantId)
             .AsNoTracking();
 
         var totalCount = await query.CountAsync();
@@ -117,8 +144,9 @@ public class BenefitPolicyService : IBenefitPolicyService
     /// <inheritdoc />
     public async Task<IReadOnlyList<BenefitPolicyDto>> GetAllActiveAsync()
     {
+        var tenantId = GetTenantId();
         var entities = await _benefitPolicyRepository
-            .GetQueryable(p => p.IsActive)
+            .GetQueryable(p => p.TenantId == tenantId && p.IsActive)
             .AsNoTracking()
             .AsSplitQuery()
             .Include(p => p.BenefitPolicyRelations)
@@ -131,8 +159,9 @@ public class BenefitPolicyService : IBenefitPolicyService
     /// <inheritdoc />
     public async Task<IReadOnlyList<BenefitPolicyDto>> GetByPolicyTypeAsync(BenefitPolicyType policyType)
     {
+        var tenantId = GetTenantId();
         var entities = await _benefitPolicyRepository
-            .GetQueryable(p => p.PolicyType == policyType)
+            .GetQueryable(p => p.TenantId == tenantId && p.PolicyType == policyType)
             .AsNoTracking()
             .AsSplitQuery()
             .Include(p => p.BenefitPolicyRelations)
@@ -145,8 +174,9 @@ public class BenefitPolicyService : IBenefitPolicyService
     /// <inheritdoc />
     public async Task<IReadOnlyList<BenefitPolicyDto>> GetEffectivePoliciesAsync(DateTime asOfDate)
     {
+        var tenantId = GetTenantId();
         var entities = await _benefitPolicyRepository
-            .GetQueryable(p => p.IsActive && p.EffectiveFrom <= asOfDate && (p.EffectiveTo == null || p.EffectiveTo >= asOfDate))
+            .GetQueryable(p => p.TenantId == tenantId && p.IsActive && p.EffectiveFrom <= asOfDate && (p.EffectiveTo == null || p.EffectiveTo >= asOfDate))
             .AsNoTracking()
             .AsSplitQuery()
             .Include(p => p.BenefitPolicyRelations)
@@ -164,6 +194,7 @@ public class BenefitPolicyService : IBenefitPolicyService
 
         ValidateEffectiveDates(dto.EffectiveFrom, dto.EffectiveTo);
 
+        var tenantId = GetTenantId();
         var normalizedCode = NormalizeCode(dto.PolicyCode);
         if (!string.IsNullOrWhiteSpace(normalizedCode))
         {
@@ -175,19 +206,12 @@ public class BenefitPolicyService : IBenefitPolicyService
         }
 
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         entity.PolicyName = NormalizeName(dto.PolicyName);
         entity.PolicyCode = normalizedCode;
 
-        // If TenantId is not explicitly set by the caller, DbContext will attempt to set it via current tenant context.
-        // We validate after persistence to ensure tenant boundaries are not violated.
-
         await _benefitPolicyRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-
-        if (entity.TenantId == Guid.Empty)
-        {
-            throw new InvalidOperationException("TenantId could not be resolved for the created benefit policy.");
-        }
 
         _logger.LogInformation(
             "Created BenefitPolicy {BenefitPolicyId} for Tenant {TenantId}.",
@@ -209,8 +233,9 @@ public class BenefitPolicyService : IBenefitPolicyService
 
         ValidateEffectiveDates(dto.EffectiveFrom, dto.EffectiveTo);
 
+        var tenantId = GetTenantId();
         var entity = await _benefitPolicyRepository
-            .GetQueryable(p => p.Id == id)
+            .GetQueryable(p => p.Id == id && p.TenantId == tenantId)
             .AsSplitQuery()
             .Include(p => p.BenefitPolicyRelations)
             .Include(p => p.PositionBenefits)
@@ -255,8 +280,9 @@ public class BenefitPolicyService : IBenefitPolicyService
             throw new ArgumentException("Id is required.", nameof(id));
         }
 
+        var tenantId = GetTenantId();
         var entity = await _benefitPolicyRepository
-            .GetQueryable(p => p.Id == id)
+            .GetQueryable(p => p.Id == id && p.TenantId == tenantId)
             .FirstOrDefaultAsync();
 
         if (entity == null)
@@ -287,8 +313,9 @@ public class BenefitPolicyService : IBenefitPolicyService
             throw new ArgumentException("Id is required.", nameof(id));
         }
 
+        var tenantId = GetTenantId();
         var entity = await _benefitPolicyRepository
-            .GetQueryable(p => p.Id == id)
+            .GetQueryable(p => p.Id == id && p.TenantId == tenantId)
             .FirstOrDefaultAsync();
 
         if (entity == null)
@@ -297,7 +324,7 @@ public class BenefitPolicyService : IBenefitPolicyService
         }
 
         var isReferenced = await _positionBenefitRepository
-            .GetQueryable(pb => pb.PolicyId == id)
+            .GetQueryable(pb => pb.TenantId == tenantId && pb.PolicyId == id)
             .AsNoTracking()
             .AnyAsync();
 
@@ -322,10 +349,11 @@ public class BenefitPolicyService : IBenefitPolicyService
 
     private async Task<bool> PolicyCodeExistsAsync(string policyCode, Guid? excludeId)
     {
+        var tenantId = GetTenantId();
         var normalizedUpper = NormalizeCode(policyCode).ToUpperInvariant();
 
         var query = _benefitPolicyRepository
-            .GetQueryable(p => (p.PolicyCode ?? string.Empty).Trim().ToUpperInvariant() == normalizedUpper)
+            .GetQueryable(p => p.TenantId == tenantId && (p.PolicyCode ?? string.Empty).Trim().ToUpperInvariant() == normalizedUpper)
             .AsNoTracking();
 
         if (excludeId.HasValue)
@@ -347,8 +375,9 @@ public class BenefitPolicyService : IBenefitPolicyService
     /// <inheritdoc />
     public async Task<BenefitPolicyLookupsDto> GetLookupsAsync()
     {
+        var tenantId = GetTenantId();
         var payComponents = await _payComponentRepository
-            .GetQueryable(c => c.IsActive)
+            .GetQueryable(c => c.TenantId == tenantId && c.IsActive)
             .AsNoTracking()
             .OrderBy(c => c.Name)
             .Select(c => new PayComponentLookupDto
@@ -379,8 +408,9 @@ public class BenefitPolicyService : IBenefitPolicyService
     /// <inheritdoc />
     public async Task<IReadOnlyList<BenefitGradeValueDto>> GetGradeValuesAsync(Guid policyId)
     {
+        var tenantId = GetTenantId();
         var rows = await _gradeValueRepository
-            .GetQueryable(g => g.BenefitPolicyId == policyId)
+            .GetQueryable(g => g.TenantId == tenantId && g.BenefitPolicyId == policyId)
             .AsNoTracking()
             .ToListAsync();
 
@@ -392,8 +422,9 @@ public class BenefitPolicyService : IBenefitPolicyService
     {
         ArgumentNullException.ThrowIfNull(dto);
 
+        var tenantId = GetTenantId();
         var policy = await _benefitPolicyRepository
-            .GetQueryable(p => p.Id == policyId)
+            .GetQueryable(p => p.Id == policyId && p.TenantId == tenantId)
             .FirstOrDefaultAsync()
             ?? throw new ArgumentException($"Benefit policy with ID '{policyId}' not found.");
 
@@ -412,8 +443,9 @@ public class BenefitPolicyService : IBenefitPolicyService
     {
         ArgumentNullException.ThrowIfNull(dto);
 
+        var tenantId = GetTenantId();
         var entity = await _gradeValueRepository
-            .GetQueryable(g => g.Id == gradeValueId && g.BenefitPolicyId == policyId)
+            .GetQueryable(g => g.Id == gradeValueId && g.BenefitPolicyId == policyId && g.TenantId == tenantId)
             .FirstOrDefaultAsync()
             ?? throw new ArgumentException($"Grade value '{gradeValueId}' not found for policy '{policyId}'.");
 
@@ -433,8 +465,9 @@ public class BenefitPolicyService : IBenefitPolicyService
     /// <inheritdoc />
     public async Task<bool> DeleteGradeValueAsync(Guid policyId, Guid gradeValueId)
     {
+        var tenantId = GetTenantId();
         var entity = await _gradeValueRepository
-            .GetQueryable(g => g.Id == gradeValueId && g.BenefitPolicyId == policyId)
+            .GetQueryable(g => g.Id == gradeValueId && g.BenefitPolicyId == policyId && g.TenantId == tenantId)
             .FirstOrDefaultAsync();
 
         if (entity == null)

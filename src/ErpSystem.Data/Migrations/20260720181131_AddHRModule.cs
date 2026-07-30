@@ -428,12 +428,14 @@ IF EXISTS (SELECT 1 FROM PublicHolidays)
                 newName: "IX_Employees_HireRecordId");
 
             // [HR-MODULE-PORT] The two renames just above re-point columns at unrelated targets
-            // (ApprovedByEmployeeId -> WorkflowInstanceId; Employees.ShiftId -> HireRecordId). Both new
-            // columns are nullable with NO valid legacy mapping, so clear the mis-carried legacy ids to NULL
-            // rather than leave a value that points at the wrong entity. No-op on a fresh/empty database.
+            // (ApprovedByEmployeeId -> WorkflowInstanceId; Employees.ShiftId -> HireRecordId).
+            // Employees.ShiftId referenced the dropped Shifts table and has no hire-record equivalent, so
+            // halt instead of discarding it. (The Shifts guard above already stops the common case; this
+            // also catches rows whose shift reference outlived its parent.) The LeaveRequests approver IS
+            // recoverable and is carried into the new ApprovedById once that column exists, further below.
             migrationBuilder.Sql(@"
-UPDATE LeaveRequests SET WorkflowInstanceId = NULL WHERE WorkflowInstanceId IS NOT NULL;
-UPDATE Employees      SET HireRecordId      = NULL WHERE HireRecordId      IS NOT NULL;");
+IF EXISTS (SELECT 1 FROM Employees WHERE HireRecordId IS NOT NULL)
+    THROW 50000, 'HR-port upgrade halted: Employees.ShiftId holds data and is renamed to HireRecordId, which points at the unrelated hire-record model. Preserve the shift assignment per docs/hr-port-data-migration.md, then re-run.', 1;");
 
             migrationBuilder.RenameIndex(
                 name: "IX_EmployeeBankBranch_Tenant_Bank_Code",
@@ -695,6 +697,26 @@ UPDATE Employees      SET HireRecordId      = NULL WHERE HireRecordId      IS NO
                 table: "LeaveRequests",
                 type: "uniqueidentifier",
                 nullable: true);
+
+            // [HR-MODULE-PORT] Carry the legacy leave approver into the new model. The legacy
+            // ApprovedByEmployeeId (an Employees.Id) was renamed to the unrelated WorkflowInstanceId above,
+            // so translate it into ApprovedById — which holds a Users.Id, per LeaveService — by
+            // matching Users.EmployeeId within the same tenant. Approvers with no linked user account
+            // cannot be represented in the new model, so halt for manual handling rather than silently
+            // discarding the approval history. WorkflowInstanceId is only cleared once the value is safe.
+            migrationBuilder.Sql(@"
+UPDATE lr
+SET    ApprovedById = (SELECT MIN(u.Id)
+                       FROM   Users u
+                       WHERE  u.EmployeeId = lr.WorkflowInstanceId
+                         AND  u.TenantId   = lr.TenantId)
+FROM   LeaveRequests lr
+WHERE  lr.WorkflowInstanceId IS NOT NULL;
+
+IF EXISTS (SELECT 1 FROM LeaveRequests WHERE WorkflowInstanceId IS NOT NULL AND ApprovedById IS NULL)
+    THROW 50000, 'HR-port upgrade halted: some LeaveRequests hold a legacy ApprovedByEmployeeId whose employee has no Users account in the same tenant, so the approver cannot be carried into the new ApprovedById. Link those approvers to user accounts (Users.EmployeeId) or migrate them per docs/hr-port-data-migration.md, then re-run.', 1;
+
+UPDATE LeaveRequests SET WorkflowInstanceId = NULL WHERE WorkflowInstanceId IS NOT NULL;");
 
             migrationBuilder.AddColumn<string>(
                 name: "HandoverNotes",
@@ -35419,6 +35441,19 @@ END;
             migrationBuilder.DropColumn(
                 name: "IsActive",
                 table: "LeaveSubTypes");
+
+            // [HR-MODULE-PORT] Mirror of the Up backfill: translate ApprovedById (a Users.Id) back
+            // into the employee id that WorkflowInstanceId is about to be renamed to (ApprovedByEmployeeId),
+            // so a rollback keeps the approver instead of dropping it with the column.
+            migrationBuilder.Sql(@"
+UPDATE lr
+SET    WorkflowInstanceId = (SELECT MIN(u.EmployeeId)
+                             FROM   Users u
+                             WHERE  u.Id       = lr.ApprovedById
+                               AND  u.TenantId = lr.TenantId
+                               AND  u.EmployeeId IS NOT NULL)
+FROM   LeaveRequests lr
+WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
 
             migrationBuilder.DropColumn(
                 name: "ApprovedById",

@@ -203,7 +203,7 @@ public interface ITrainingScheduleService
 
     // Workflow
     /// <summary>Approves a training schedule, making it visible for nomination.</summary>
-    Task<bool> ApproveAsync(ApproveTrainingScheduleDto dto, CancellationToken cancellationToken = default);
+    Task<bool> ApproveAsync(ApproveTrainingScheduleDto dto, Guid approvedById, CancellationToken cancellationToken = default);
     /// <summary>Cancels a training schedule with a stated reason.</summary>
     Task<bool> CancelAsync(CancelTrainingScheduleDto dto, CancellationToken cancellationToken = default);
     /// <summary>Marks a training schedule as completed.</summary>
@@ -262,9 +262,9 @@ public interface ITrainingNominationService
 
     // Workflow
     /// <summary>Approves a nomination at the specified role level ("Supervisor" or "HR").</summary>
-    Task<bool> ApproveAsync(ApproveNominationDto dto, CancellationToken cancellationToken = default);
+    Task<bool> ApproveAsync(ApproveNominationDto dto, Guid approvedById, CancellationToken cancellationToken = default);
     /// <summary>Rejects a nomination with a reason.</summary>
-    Task<bool> RejectAsync(RejectNominationDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RejectAsync(RejectNominationDto dto, Guid rejectedById, CancellationToken cancellationToken = default);
     /// <summary>Withdraws a confirmed or approved nomination.</summary>
     Task<bool> WithdrawAsync(WithdrawNominationDto dto, CancellationToken cancellationToken = default);
 
@@ -454,7 +454,7 @@ public interface ITrainingBudgetService
 
     // Workflow
     /// <summary>Approves a training budget, making it available for schedule allocation.</summary>
-    Task<bool> ApproveAsync(ApproveTrainingBudgetDto dto, CancellationToken cancellationToken = default);
+    Task<bool> ApproveAsync(ApproveTrainingBudgetDto dto, Guid approvedById, CancellationToken cancellationToken = default);
 
     // Transaction sub-operations
     /// <summary>Records a debit or credit transaction against a training budget.</summary>
@@ -497,7 +497,7 @@ public interface ITrainingPlanService
 
     // Workflow
     /// <summary>Approves a training plan.</summary>
-    Task<bool> ApproveAsync(ApproveTrainingPlanDto dto, CancellationToken cancellationToken = default);
+    Task<bool> ApproveAsync(ApproveTrainingPlanDto dto, Guid approvedById, CancellationToken cancellationToken = default);
     /// <summary>Submits a training plan for approval.</summary>
     Task<bool> SubmitForApprovalAsync(Guid planId, Guid submittedByUserId, CancellationToken cancellationToken = default);
 
@@ -644,9 +644,9 @@ public interface ITrainingRequestService
     /// <summary>Submits a draft training request for approval.</summary>
     Task<bool> SubmitAsync(Guid requestId, Guid submittedByUserId, CancellationToken cancellationToken = default);
     /// <summary>Approves a training request, optionally linking it to an existing program.</summary>
-    Task<TrainingRequestDto> ApproveAsync(ApproveTrainingRequestDto dto, CancellationToken cancellationToken = default);
+    Task<TrainingRequestDto> ApproveAsync(ApproveTrainingRequestDto dto, Guid approvedById, CancellationToken cancellationToken = default);
     /// <summary>Rejects a training request with a reason.</summary>
-    Task<bool> RejectAsync(RejectTrainingRequestDto dto, CancellationToken cancellationToken = default);
+    Task<bool> RejectAsync(RejectTrainingRequestDto dto, Guid rejectedById, CancellationToken cancellationToken = default);
 }
 
 #endregion

@@ -18,18 +18,43 @@ namespace ErpSystem.Core.Services.HR;
 public class EmployeeBankBranchService : IEmployeeBankBranchService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<EmployeeBankBranchService> _logger;
 
-    public EmployeeBankBranchService(IUnitOfWork unitOfWork, ILogger<EmployeeBankBranchService> logger)
+    public EmployeeBankBranchService(
+        IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
+        ILogger<EmployeeBankBranchService> logger)
     {
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
     }
 
     // ── Queries ──────────────────────────────────────────────────────────────
 
     public async Task<IReadOnlyList<EmployeeBankBranchDto>> GetByBankAsync(Guid tenantId, Guid bankId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var items = await _unitOfWork.Repository<EmployeeBankBranch>()
             .GetQueryable(br => br.TenantId == tenantId && !br.IsDeleted && br.BankId == bankId)
             .Include(br => br.Bank)
@@ -43,6 +68,7 @@ public class EmployeeBankBranchService : IEmployeeBankBranchService
 
     public async Task<IReadOnlyList<EmployeeBankBranchDto>> GetActiveByBankAsync(Guid tenantId, Guid bankId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var items = await _unitOfWork.Repository<EmployeeBankBranch>()
             .GetQueryable(br => br.TenantId == tenantId && !br.IsDeleted && br.BankId == bankId && br.IsActive)
             .Include(br => br.Bank)
@@ -56,12 +82,14 @@ public class EmployeeBankBranchService : IEmployeeBankBranchService
 
     public async Task<EmployeeBankBranchDto> GetByIdAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = await FindOrThrowAsync(tenantId, id, cancellationToken);
         return entity.ToDto();
     }
 
     public async Task<EmployeeBankBranchDto?> GetByCodeAsync(Guid tenantId, Guid bankId, string code, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var normalized = NormalizeCode(code);
         var entity = await _unitOfWork.Repository<EmployeeBankBranch>()
             .GetQueryable(br => br.TenantId == tenantId && !br.IsDeleted && br.BankId == bankId && br.Code == normalized)
@@ -78,6 +106,7 @@ public class EmployeeBankBranchService : IEmployeeBankBranchService
     public async Task<EmployeeBankBranchDto> CreateAsync(Guid tenantId, CreateEmployeeBankBranchDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        tenantId = RequireCurrentTenant(tenantId);
 
         // Ensure parent bank exists in this tenant
         var bankExists = await _unitOfWork.Repository<EmployeeBank>()
@@ -110,6 +139,7 @@ public class EmployeeBankBranchService : IEmployeeBankBranchService
     public async Task<EmployeeBankBranchDto> UpdateAsync(Guid tenantId, UpdateEmployeeBankBranchDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        tenantId = RequireCurrentTenant(tenantId);
 
         var entity = await FindOrThrowAsync(tenantId, dto.Id, cancellationToken);
 
@@ -133,6 +163,7 @@ public class EmployeeBankBranchService : IEmployeeBankBranchService
 
     public async Task<EmployeeBankBranchDto> ActivateAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = await FindOrThrowAsync(tenantId, id, cancellationToken);
         if (!entity.IsActive)
         {
@@ -146,6 +177,7 @@ public class EmployeeBankBranchService : IEmployeeBankBranchService
 
     public async Task<EmployeeBankBranchDto> DeactivateAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = await FindOrThrowAsync(tenantId, id, cancellationToken);
         if (entity.IsActive)
         {
@@ -159,6 +191,7 @@ public class EmployeeBankBranchService : IEmployeeBankBranchService
 
     public async Task<bool> DeleteAsync(Guid tenantId, Guid id, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = await FindOrThrowAsync(tenantId, id, cancellationToken);
 
         var isReferenced = await _unitOfWork.Repository<EmployeeBankDetail>()

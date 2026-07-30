@@ -13,6 +13,7 @@ public class ProbationService : IProbationService
     private readonly IProbationPeriodRepository _probationRepository;
     private readonly IProbationReviewRepository _reviewRepository;
     private readonly IProbationExtensionRepository _extensionRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ProbationService> _logger;
 
@@ -20,66 +21,113 @@ public class ProbationService : IProbationService
         IProbationPeriodRepository probationRepository,
         IProbationReviewRepository reviewRepository,
         IProbationExtensionRepository extensionRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ProbationService> logger)
     {
         _probationRepository = probationRepository;
         _reviewRepository = reviewRepository;
         _extensionRepository = extensionRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    // A probation period owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<ProbationPeriod> GetOwnedProbationAsync(Guid id)
+    {
+        var entity = await _probationRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Probation record with ID '{id}' not found.");
+        return entity;
+    }
+
+    // A review owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<ProbationReview> GetOwnedReviewAsync(Guid id)
+    {
+        var entity = await _reviewRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Probation review with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Queries ──────────────────────────────────────────────────────────────
 
     public async Task<ProbationPeriodDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _probationRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Probation record with ID '{id}' not found.");
+        var entity = await GetOwnedProbationAsync(id);
         return entity.ToDto();
     }
 
     public async Task<ProbationPeriodDto?> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _probationRepository.GetByEmployeeIdAsync(employeeId);
-        var active = entities.FirstOrDefault(p => p.Status == ProbationStatus.Active)
-            ?? entities.OrderByDescending(p => p.StartDate).FirstOrDefault();
+        var scoped = entities.Where(p => p.TenantId == tenantId).ToList();
+        var active = scoped.FirstOrDefault(p => p.Status == ProbationStatus.Active)
+            ?? scoped.OrderByDescending(p => p.StartDate).FirstOrDefault();
         return active?.ToDto();
     }
 
     public async Task<ProbationPeriodDetailDto> GetWithReviewsAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _probationRepository.GetWithReviewsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Probation record with ID '{id}' not found.");
         return entity.ToDetailDto();
     }
 
     public async Task<IEnumerable<ProbationPeriodSummaryDto>> GetByStatusAsync(ProbationStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _probationRepository.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ProbationPeriodSummaryDto>> GetActiveProbationsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _probationRepository.GetActiveProbationsAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ProbationPeriodSummaryDto>> GetEndingWithinAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _probationRepository.GetEndingWithinAsync(daysAhead);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
     public async Task<ProbationPeriodDto> CreateAsync(CreateProbationPeriodDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+
         var existing = await _probationRepository.GetByEmployeeIdAsync(createDto.EmployeeId);
-        if (existing.Any(p => p.Status == ProbationStatus.Active))
+        if (existing.Any(p => p.TenantId == tenantId && p.Status == ProbationStatus.Active))
             throw new InvalidOperationException("This employee already has an active probation period.");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
@@ -94,9 +142,7 @@ public class ProbationService : IProbationService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _probationRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Probation record with ID '{id}' not found.");
+        var entity = await GetOwnedProbationAsync(id);
 
         if (entity.Status != ProbationStatus.Active)
             throw new InvalidOperationException("Only active probation records can be deleted.");
@@ -110,9 +156,7 @@ public class ProbationService : IProbationService
 
     public async Task<bool> ExtendAsync(Guid probationId, DateTime newEndDate, string reason, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _probationRepository.GetByIdAsync(probationId);
-        if (entity == null)
-            throw new ArgumentException($"Probation record with ID '{probationId}' not found.");
+        var entity = await GetOwnedProbationAsync(probationId);
 
         if (entity.Status != ProbationStatus.Active)
             throw new InvalidOperationException("Only active probations can be extended.");
@@ -133,9 +177,7 @@ public class ProbationService : IProbationService
 
     public async Task<bool> ConfirmAsync(Guid probationId, Guid confirmedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _probationRepository.GetByIdAsync(probationId);
-        if (entity == null)
-            throw new ArgumentException($"Probation record with ID '{probationId}' not found.");
+        var entity = await GetOwnedProbationAsync(probationId);
 
         if (entity.Status != ProbationStatus.Active)
             throw new InvalidOperationException("Only active probations can be confirmed.");
@@ -151,9 +193,7 @@ public class ProbationService : IProbationService
 
     public async Task<bool> TerminateAsync(TerminateProbationPeriodDto dto, Guid terminatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _probationRepository.GetByIdAsync(dto.ProbationId);
-        if (entity == null)
-            throw new ArgumentException($"Probation record with ID '{dto.ProbationId}' not found.");
+        var entity = await GetOwnedProbationAsync(dto.ProbationId);
 
         if (entity.Status != ProbationStatus.Active)
             throw new InvalidOperationException("Only active probations can be terminated.");
@@ -172,6 +212,9 @@ public class ProbationService : IProbationService
 
     public async Task<ProbationReviewDto> AddReviewAsync(CreateProbationReviewDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedProbationAsync(createDto.ProbationPeriodId);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _reviewRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -180,15 +223,15 @@ public class ProbationService : IProbationService
 
     public async Task<IEnumerable<ProbationReviewDto>> GetReviewsAsync(Guid probationId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+        await GetOwnedProbationAsync(probationId);
         var entities = await _reviewRepository.GetByProbationPeriodIdAsync(probationId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<ProbationReviewDto> UpdateReviewAsync(UpdateProbationReviewDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _reviewRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Probation review with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedReviewAsync(updateDto.Id);
 
         if (updateDto.ScheduledDate.HasValue) entity.ScheduledDate = updateDto.ScheduledDate.Value;
         if (updateDto.SecondReviewerId.HasValue) entity.SecondReviewerId = updateDto.SecondReviewerId;
@@ -199,9 +242,7 @@ public class ProbationService : IProbationService
 
     public async Task<bool> CompleteReviewAsync(Guid reviewId, Guid completedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _reviewRepository.GetByIdAsync(reviewId);
-        if (entity == null)
-            throw new ArgumentException($"Probation review with ID '{reviewId}' not found.");
+        var entity = await GetOwnedReviewAsync(reviewId);
 
         entity.Status = ProbationReviewStatus.Completed;
 
@@ -212,27 +253,29 @@ public class ProbationService : IProbationService
 
     public async Task<IEnumerable<ProbationReviewDto>> GetReviewsByStatusAsync(ProbationReviewStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _reviewRepository.GetByStatusAsync(status);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<ProbationReviewDto>> GetOverdueReviewsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _reviewRepository.GetOverdueReviewsAsync();
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<ProbationReviewDto>> GetReviewsByReviewerAsync(Guid reviewerEmployeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _reviewRepository.GetByReviewerIdAsync(reviewerEmployeeId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<ProbationExtensionDto> RecordExtensionAsync(CreateProbationExtensionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var probation = await _probationRepository.GetByIdAsync(createDto.ProbationPeriodId);
-        if (probation == null)
-            throw new ArgumentException($"Probation record '{createDto.ProbationPeriodId}' not found.");
+        tenantId = RequireCurrentTenant(tenantId);
+        var probation = await GetOwnedProbationAsync(createDto.ProbationPeriodId);
 
         if (probation.Status != ProbationStatus.Active)
             throw new InvalidOperationException("Only active probation periods can be extended.");
@@ -291,8 +334,10 @@ public class ProbationService : IProbationService
 
     public async Task<IEnumerable<ProbationExtensionDto>> GetExtensionsAsync(Guid probationId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+        await GetOwnedProbationAsync(probationId);
         var extensions = await _extensionRepository.GetByProbationIdAsync(probationId);
-        return extensions.Select(e => new ProbationExtensionDto
+        return extensions.Where(e => e.TenantId == tenantId).Select(e => new ProbationExtensionDto
         {
             Id = e.Id,
             CreatedAt = e.CreatedAt,
@@ -307,6 +352,6 @@ public class ProbationService : IProbationService
             ExtendedById = e.ExtendedById,
             ExtendedDate = e.ExtendedDate,
             Comments = e.Comments,
-        });
+        }).ToList();
     }
 }

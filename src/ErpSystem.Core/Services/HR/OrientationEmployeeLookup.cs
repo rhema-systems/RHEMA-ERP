@@ -12,12 +12,12 @@ namespace ErpSystem.Core.Services.HR;
 internal static class OrientationEmployeeLookup
 {
     public static async Task<IReadOnlyDictionary<Guid, (string Name, string Number)>> ResolveEmployeesAsync(
-        this IUnitOfWork uow, IEnumerable<Guid?> ids)
+        this IUnitOfWork uow, Guid tenantId, IEnumerable<Guid?> ids)
     {
         var idList = ids.Where(i => i.HasValue && i.Value != Guid.Empty).Select(i => i!.Value).Distinct().ToList();
         if (idList.Count == 0) return new Dictionary<Guid, (string, string)>();
 
-        var employees = await uow.Repository<Employee>().FindAsync(e => idList.Contains(e.Id));
+        var employees = await uow.Repository<Employee>().FindAsync(e => e.TenantId == tenantId && idList.Contains(e.Id));
         return employees.ToDictionary(e => e.Id, e => (e.FullName, e.EmployeeNumber));
     }
 

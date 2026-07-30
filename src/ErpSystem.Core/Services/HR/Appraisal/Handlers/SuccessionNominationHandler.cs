@@ -23,6 +23,7 @@ public class SuccessionNominationHandler : IOutcomeRecommendationHandler
     private readonly IGenericRepository<TalentPoolMember> _memberRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IPerformanceRatingResolver _ratingResolver;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SuccessionNominationHandler> _logger;
 
@@ -31,6 +32,7 @@ public class SuccessionNominationHandler : IOutcomeRecommendationHandler
         IGenericRepository<TalentPoolMember> memberRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IPerformanceRatingResolver ratingResolver,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<SuccessionNominationHandler> logger)
     {
@@ -38,8 +40,30 @@ public class SuccessionNominationHandler : IOutcomeRecommendationHandler
         _memberRepository = memberRepository;
         _appraisalRepository = appraisalRepository;
         _ratingResolver = ratingResolver;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // Callers supply the tenant alongside the recommendation. Reject anything other than
+    // the authenticated tenant so a supplied id can never widen the scope of a write.
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
     }
 
     public RecommendationType Type => RecommendationType.SuccessionNomination;
@@ -47,8 +71,9 @@ public class SuccessionNominationHandler : IOutcomeRecommendationHandler
     public async Task<(string TargetEntityType, Guid TargetEntityId)?> HandleAsync(
         AppraisalOutcomeRecommendation recommendation, CancellationToken cancellationToken = default)
     {
+        var tenantId = RequireCurrentTenant(recommendation.TenantId);
         var appraisal = await _appraisalRepository.GetQueryable()
-            .FirstOrDefaultAsync(a => a.Id == recommendation.PerformanceAppraisalId, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == recommendation.PerformanceAppraisalId && a.TenantId == tenantId, cancellationToken);
         if (appraisal == null)
         {
             _logger.LogWarning("SuccessionNominationHandler: appraisal {Id} not found", recommendation.PerformanceAppraisalId);
@@ -59,7 +84,7 @@ public class SuccessionNominationHandler : IOutcomeRecommendationHandler
 
         // Configurable pool name + default readiness (AppraisalSettings), with the prior constants as fallback.
         var config = await _appraisalRepository.GetQueryable()
-            .Where(a => a.Id == recommendation.PerformanceAppraisalId)
+            .Where(a => a.Id == recommendation.PerformanceAppraisalId && a.TenantId == tenantId)
             .Select(a => new
             {
                 PoolName = a.AppraisalCycle.AppraisalSettings.SuccessionPoolName,
@@ -70,17 +95,18 @@ public class SuccessionNominationHandler : IOutcomeRecommendationHandler
         var poolName = !string.IsNullOrWhiteSpace(config?.PoolName) ? config!.PoolName : DefaultPoolName;
         var defaultReadiness = config?.Readiness ?? ReadinessLevel.ReadyIn12Months;
 
-        // Find-or-create the per-tenant nominations pool (repo is tenant-scoped).
+        // Find-or-create the per-tenant nominations pool.
         var pool = await _poolRepository.GetQueryable()
-            .FirstOrDefaultAsync(p => p.Name == poolName, cancellationToken);
+            .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.Name == poolName, cancellationToken);
 
         if (pool == null)
         {
             pool = new TalentPool
             {
+                TenantId = tenantId,
                 Name = poolName,
                 Description = "Auto-created pool for employees nominated to succession via appraisal recommendations.",
-                PoolTypeId = await ResolveDefaultPoolTypeIdAsync(cancellationToken),
+                PoolTypeId = await ResolveDefaultPoolTypeIdAsync(tenantId, cancellationToken),
                 TargetSize = 0,
                 IsActive = true,
                 OwnerId = ownerId
@@ -91,18 +117,19 @@ public class SuccessionNominationHandler : IOutcomeRecommendationHandler
 
         // Idempotency: if already a member, return the existing membership.
         var existing = await _memberRepository.GetQueryable()
-            .FirstOrDefaultAsync(m => m.TalentPoolId == pool.Id && m.EmployeeId == appraisal.EmployeeId, cancellationToken);
+            .FirstOrDefaultAsync(m => m.TenantId == tenantId && m.TalentPoolId == pool.Id && m.EmployeeId == appraisal.EmployeeId, cancellationToken);
         if (existing != null)
             return ("TalentPoolMember", existing.Id);
 
         var nextRank = (await _memberRepository.GetQueryable()
-            .Where(m => m.TalentPoolId == pool.Id)
+            .Where(m => m.TenantId == tenantId && m.TalentPoolId == pool.Id)
             .CountAsync(cancellationToken)) + 1;
 
         var latestRating = await _ratingResolver.ResolveAsync(appraisal.OverallScore, cancellationToken);
 
         var member = new TalentPoolMember
         {
+            TenantId = tenantId,
             TalentPoolId = pool.Id,
             EmployeeId = appraisal.EmployeeId,
             Rank = nextRank,
@@ -125,13 +152,12 @@ public class SuccessionNominationHandler : IOutcomeRecommendationHandler
 
     /// <summary>
     /// Resolves a pool type for the auto-created nominations pool: prefers the built-in
-    /// "HighPotential" type, else the first active type by sort order. (Tenant-scoped via the
-    /// global query filter.)
+    /// "HighPotential" type, else the first active type by sort order.
     /// </summary>
-    private async Task<Guid> ResolveDefaultPoolTypeIdAsync(CancellationToken cancellationToken)
+    private async Task<Guid> ResolveDefaultPoolTypeIdAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var typeQuery = _unitOfWork.Repository<TalentPoolTypeDefinition>().GetQueryable()
-            .Where(t => t.IsActive && !t.IsDeleted);
+            .Where(t => t.TenantId == tenantId && t.IsActive && !t.IsDeleted);
 
         var highPotential = await typeQuery
             .FirstOrDefaultAsync(t => t.Code == "HighPotential", cancellationToken);

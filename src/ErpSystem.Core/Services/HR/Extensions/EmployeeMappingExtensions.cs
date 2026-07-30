@@ -332,6 +332,7 @@ public static class EmployeeMappingExtensions
         if (dto.DateOfBirth.HasValue) e.DateOfBirth = dto.DateOfBirth;
         if (dto.MaritalStatus.HasValue) e.MaritalStatus = dto.MaritalStatus;
         if (dto.Religion != null) e.Religion = dto.Religion;
+        if (dto.DateEmployed.HasValue) e.DateEmployed = dto.DateEmployed;
 
         e.IsFullTime = dto.IsFullTime;
 

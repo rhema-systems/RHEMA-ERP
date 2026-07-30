@@ -1,6 +1,7 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -21,6 +22,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     private readonly IStaffDisciplineActionStepRepository _actionStepRepository;
     private readonly IStaffDisciplineCorrectiveActionItemRepository _correctiveItemRepository;
     private readonly IStaffDisciplineFineRepository _fineRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplinaryCaseService> _logger;
 
@@ -29,6 +31,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         IStaffDisciplineActionStepRepository actionStepRepository,
         IStaffDisciplineCorrectiveActionItemRepository correctiveItemRepository,
         IStaffDisciplineFineRepository fineRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplinaryCaseService> logger)
     {
@@ -36,17 +39,46 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         _actionStepRepository = actionStepRepository;
         _correctiveItemRepository = correctiveItemRepository;
         _fineRepository = fineRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<StaffDisciplinaryAction> GetOwnedCaseAsync(Guid id)
+    {
+        var entity = await _caseRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Disciplinary case with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
 
     public async Task<StaffDisciplinaryActionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _caseRepository.GetWithFullDetailsAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Disciplinary case with ID '{id}' not found.");
 
         return entity.ToDto();
@@ -54,19 +86,22 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<StaffDisciplinaryActionDto?> GetByCaseNumberAsync(string caseNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _caseRepository.GetByCaseNumberAsync(caseNumber);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetAllOpenAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetOpenCasesAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<StaffDisciplinaryActionSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _caseRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _caseRepository.GetQueryable().Where(d => d.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -87,108 +122,134 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetByEmployeeAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetByStatusAsync(DisciplinaryStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetByOffenseAsync(Guid offenseId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetByOffenseAsync(offenseId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetBySeverityAsync(StaffOffenseSeverity minimumSeverity, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetBySeverityAsync(minimumSeverity);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetByIncidentDateRangeAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetByIncidentDateRangeAsync(from, to);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetByReportedDateRangeAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetByReportedDateRangeAsync(from, to);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetPendingInvestigationAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetPendingInvestigationAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetPendingHearingAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetPendingHearingAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetPendingClosureAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetPendingClosureAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithActiveWarningAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetWithActiveWarningAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithActiveSuspensionAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetWithActiveSuspensionAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithOutstandingFineAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetWithOutstandingFineAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithPendingTerminationAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetWithPendingTerminationAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithActiveAppealAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetWithActiveAppealAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithActiveLegalReviewAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _caseRepository.GetWithActiveLegalReviewAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<int> GetOpenCaseCountForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
-        => await _caseRepository.GetOpenCaseCountForEmployeeAsync(employeeId);
+    {
+        var tenantId = GetTenantId();
+        return await _caseRepository.GetQueryable()
+            .CountAsync(d => d.TenantId == tenantId
+                          && d.EmployeeId == employeeId
+                          && d.Status != DisciplinaryStatus.Closed
+                          && d.Status != DisciplinaryStatus.Dismissed, cancellationToken);
+    }
 
     public async Task<bool> CaseNumberExistsAsync(string caseNumber, Guid tenantId, CancellationToken cancellationToken = default)
-        => await _caseRepository.CaseNumberExistsAsync(caseNumber, tenantId);
+    {
+        tenantId = RequireCurrentTenant(tenantId);
+        return await _caseRepository.CaseNumberExistsAsync(caseNumber, tenantId);
+    }
 
     // ── CRUD ─────────────────────────────────────────────────────────────────
 
     public async Task<StaffDisciplinaryActionDto> CreateAsync(CreateStaffDisciplinaryActionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         if (string.IsNullOrWhiteSpace(entity.CaseNumber))
-            entity.CaseNumber = await GenerateCaseNumberAsync(cancellationToken);
+            entity.CaseNumber = await GenerateCaseNumberAsync(tenantId, cancellationToken);
 
         entity.Status = DisciplinaryStatus.Draft;
 
@@ -202,10 +263,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<StaffDisciplinaryActionDto> UpdateAsync(UpdateStaffDisciplinaryActionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _caseRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Disciplinary case with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedCaseAsync(updateDto.Id);
 
         if (entity.Status == DisciplinaryStatus.Closed || entity.Status == DisciplinaryStatus.Dismissed)
             throw new InvalidOperationException("A closed or dismissed case cannot be edited.");
@@ -222,10 +280,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _caseRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Disciplinary case with ID '{id}' not found.");
+        var entity = await GetOwnedCaseAsync(id);
 
         if (entity.Status != DisciplinaryStatus.Draft)
             throw new InvalidOperationException("Only Draft cases can be deleted. Close or dismiss the case instead.");
@@ -242,10 +297,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<bool> SubmitAsync(Guid caseId, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _caseRepository.GetByIdAsync(caseId);
-
-        if (entity == null)
-            throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
+        var entity = await GetOwnedCaseAsync(caseId);
 
         if (entity.Status != DisciplinaryStatus.Draft)
             throw new InvalidOperationException("Only Draft cases can be submitted.");
@@ -264,10 +316,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<bool> StartReviewAsync(Guid caseId, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _caseRepository.GetByIdAsync(caseId);
-
-        if (entity == null)
-            throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
+        var entity = await GetOwnedCaseAsync(caseId);
 
         if (entity.Status != DisciplinaryStatus.Reported)
             throw new InvalidOperationException("Only Reported cases can be moved to UnderReview.");
@@ -286,10 +335,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<bool> RecordDecisionAsync(RecordDisciplinaryDecisionDto dto, CancellationToken cancellationToken = default)
     {
-        var entity = await _caseRepository.GetByIdAsync(dto.CaseId);
-
-        if (entity == null)
-            throw new ArgumentException($"Disciplinary case with ID '{dto.CaseId}' not found.");
+        var entity = await GetOwnedCaseAsync(dto.CaseId);
 
         var allowedStatuses = new[]
         {
@@ -320,10 +366,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<bool> CloseCaseAsync(CloseDisciplinaryCaseDto dto, CancellationToken cancellationToken = default)
     {
-        var entity = await _caseRepository.GetByIdAsync(dto.CaseId);
-
-        if (entity == null)
-            throw new ArgumentException($"Disciplinary case with ID '{dto.CaseId}' not found.");
+        var entity = await GetOwnedCaseAsync(dto.CaseId);
 
         var allowedStatuses = new[]
         {
@@ -352,10 +395,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<bool> PutOnHoldAsync(Guid caseId, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _caseRepository.GetByIdAsync(caseId);
-
-        if (entity == null)
-            throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
+        var entity = await GetOwnedCaseAsync(caseId);
 
         var terminalStatuses = new[] { DisciplinaryStatus.Closed, DisciplinaryStatus.Dismissed, DisciplinaryStatus.OnHold };
 
@@ -376,10 +416,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<bool> ReactivateCaseAsync(Guid caseId, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _caseRepository.GetByIdAsync(caseId);
-
-        if (entity == null)
-            throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
+        var entity = await GetOwnedCaseAsync(caseId);
 
         if (entity.Status != DisciplinaryStatus.OnHold)
             throw new InvalidOperationException("Only OnHold cases can be reactivated.");
@@ -398,10 +435,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<bool> DismissCaseAsync(Guid caseId, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _caseRepository.GetByIdAsync(caseId);
-
-        if (entity == null)
-            throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
+        var entity = await GetOwnedCaseAsync(caseId);
 
         var allowedStatuses = new[]
         {
@@ -429,10 +463,11 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     public async Task<StaffDisciplineDashboardDto> GetDashboardAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var today = DateTime.UtcNow.Date;
         var firstDayOfMonth = new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        var caseQuery = _caseRepository.GetQueryable();
+        var caseQuery = _caseRepository.GetQueryable().Where(d => d.TenantId == tenantId);
 
         var cases = await caseQuery.Select(d => new
         {
@@ -461,15 +496,15 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
         // Overdue action steps
         var overdueSteps = await _actionStepRepository.GetOverdueStepsAsync();
-        int overdueStepCount = overdueSteps.Count();
+        int overdueStepCount = overdueSteps.Count(s => s.TenantId == tenantId);
 
         // Overdue corrective action items
         var overdueItems = await _correctiveItemRepository.GetOverdueItemsAsync();
-        int overdueItemCount = overdueItems.Count();
+        int overdueItemCount = overdueItems.Count(i => i.TenantId == tenantId);
 
         // Outstanding fines
         var outstandingFines = await _fineRepository.GetOutstandingAsync();
-        int outstandingFineCount = outstandingFines.Count();
+        int outstandingFineCount = outstandingFines.Count(f => f.TenantId == tenantId);
 
         // Recent open cases for alerts (newest 15)
         var recentOpenAlerts = openCases
@@ -535,10 +570,12 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     // ── Helper methods ────────────────────────────────────────────────────────
 
-    private async Task<string> GenerateCaseNumberAsync(CancellationToken cancellationToken)
+    private async Task<string> GenerateCaseNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var count = await _caseRepository.CountAsync();
-        return $"DC-{DateTime.UtcNow.Year}-{(count + 1):D5}";
+        var year = DateTime.UtcNow.Year;
+        var count = await _caseRepository.GetQueryable()
+            .CountAsync(d => d.TenantId == tenantId && d.CreatedAt.Year == year, cancellationToken);
+        return $"DC-{year}-{(count + 1):D5}";
     }
 }
 

@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -16,62 +17,101 @@ public class JobPostingService : IJobPostingService
 {
     private readonly IJobPostingRepository _postingRepository;
     private readonly IGenericRepository<JobPostingAttachment> _attachmentRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobPostingService> _logger;
 
     public JobPostingService(
         IJobPostingRepository postingRepository,
         IGenericRepository<JobPostingAttachment> attachmentRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<JobPostingService> logger)
     {
         _postingRepository = postingRepository;
         _attachmentRepository = attachmentRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<JobPostingDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A posting owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<JobPosting> GetOwnedAsync(Guid id)
     {
         var entity = await _postingRepository.GetByIdAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Job posting with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<JobPostingAttachment?> TryGetOwnedAttachmentAsync(Guid id)
+    {
+        var entity = await _attachmentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            return null;
+        return entity;
+    }
+
+    public async Task<JobPostingDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<JobPostingSummaryDto>> GetByVacancyIdAsync(Guid vacancyId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _postingRepository.GetByVacancyIdAsync(vacancyId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobPostingSummaryDto>> GetActivePostingsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _postingRepository.GetActivePostingsAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobPostingSummaryDto>> GetByStatusAsync(JobPostingStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _postingRepository.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobPostingSummaryDto>> GetByChannelAsync(JobPostingChannel channel, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _postingRepository.GetByChannelAsync(channel);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<JobPostingSummaryDto>> GetExpiredActivePostingsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _postingRepository.GetExpiredActivePostingsAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<JobPostingDto> CreateAsync(CreateJobPostingDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = createDto.ToEntity(current, createdByUserId);
         entity.Status = JobPostingStatus.Draft;
 
         await _postingRepository.AddAsync(entity);
@@ -83,9 +123,7 @@ public class JobPostingService : IJobPostingService
 
     public async Task<JobPostingDto> UpdateAsync(UpdateJobPostingDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _postingRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Job posting with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _postingRepository.UpdateAsync(entity);
@@ -97,9 +135,7 @@ public class JobPostingService : IJobPostingService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _postingRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Job posting with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.Status == JobPostingStatus.Published)
             throw new InvalidOperationException("A published job posting must be expired before it can be deleted.");
@@ -111,9 +147,7 @@ public class JobPostingService : IJobPostingService
 
     public async Task<bool> ExpireAsync(Guid postingId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _postingRepository.GetByIdAsync(postingId);
-        if (entity == null)
-            throw new ArgumentException($"Job posting with ID '{postingId}' not found.");
+        var entity = await GetOwnedAsync(postingId);
 
         entity.Status = JobPostingStatus.Expired;
         entity.IsActive = false;
@@ -125,15 +159,14 @@ public class JobPostingService : IJobPostingService
     }
     public async Task<JobPostingDto?> GetByExternalPostingIdAsync(string externalPostingId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _postingRepository.GetByExternalPostingIdAsync(externalPostingId);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
     public async Task<JobPostingDto> PublishAsync(Guid postingId, DateTime? actualPublishDate, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _postingRepository.GetByIdAsync(postingId);
-        if (entity == null)
-            throw new ArgumentException($"Job posting with ID '{postingId}' not found.");
+        var entity = await GetOwnedAsync(postingId);
 
         entity.Status = JobPostingStatus.Published;
         entity.IsActive = true;
@@ -154,9 +187,15 @@ public class JobPostingService : IJobPostingService
     public async Task<JobPostingAttachmentDto> AddAttachmentAsync(
         CreateJobPostingAttachmentDto createDto, Guid tenantId, Guid uploadedByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedAsync(createDto.JobPostingId);
+
         var entity = new JobPostingAttachment
         {
-            TenantId = tenantId,
+            TenantId = current,
             JobPostingId = createDto.JobPostingId,
             FileName = createDto.FileName,
             FilePath = createDto.FilePath,
@@ -174,13 +213,15 @@ public class JobPostingService : IJobPostingService
 
     public async Task<IEnumerable<JobPostingAttachmentDto>> GetAttachmentsAsync(Guid postingId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(postingId);
+        var tenantId = GetTenantId();
         var entities = await _attachmentRepository.FindAsync(a => a.JobPostingId == postingId && !a.IsDeleted, a => a.UploadedBy);
-        return entities.Select(a => a.ToDto());
+        return entities.Where(a => a.TenantId == tenantId).Select(a => a.ToDto());
     }
 
     public async Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _attachmentRepository.GetByIdAsync(attachmentId);
+        var entity = await TryGetOwnedAttachmentAsync(attachmentId);
         if (entity == null)
             return false;
 
@@ -198,62 +239,106 @@ public class RecruitmentPipelineService : IRecruitmentPipelineService
 {
     private readonly IRecruitmentPipelineRepository _pipelineRepository;
     private readonly IRecruitmentPipelineStageRepository _stageRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<RecruitmentPipelineService> _logger;
 
     public RecruitmentPipelineService(
         IRecruitmentPipelineRepository pipelineRepository,
         IRecruitmentPipelineStageRepository stageRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<RecruitmentPipelineService> logger)
     {
         _pipelineRepository = pipelineRepository;
         _stageRepository = stageRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<RecruitmentPipelineDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A pipeline owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<RecruitmentPipeline> GetOwnedAsync(Guid id)
+    {
+        var entity = await _pipelineRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Recruitment pipeline with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<RecruitmentPipeline> GetOwnedWithStagesAsync(Guid id)
     {
         var entity = await _pipelineRepository.GetWithStagesAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Recruitment pipeline with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<RecruitmentPipelineStage> GetOwnedStageAsync(Guid id)
+    {
+        var entity = await _stageRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Pipeline stage with ID '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<RecruitmentPipelineDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedWithStagesAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<RecruitmentPipelineSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _pipelineRepository.GetAllWithStagesAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<RecruitmentPipelineDto?> GetDefaultPipelineAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _pipelineRepository.GetDefaultPipelineAsync();
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
     public async Task<RecruitmentPipelineDto> CreateAsync(CreateRecruitmentPipelineDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        // If this is set as default, clear the existing default
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        // If this is set as default, clear the existing default for this tenant only.
         if (createDto.IsDefault)
         {
             var existingDefault = await _pipelineRepository.GetDefaultPipelineAsync();
-            if (existingDefault != null)
+            if (existingDefault != null && existingDefault.TenantId == current)
             {
                 existingDefault.IsDefault = false;
                 await _pipelineRepository.UpdateAsync(existingDefault);
             }
         }
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _pipelineRepository.AddAsync(entity);
 
         // Add stages if provided
         foreach (var stageDto in createDto.Stages)
         {
             stageDto.RecruitmentPipelineId = entity.Id;
-            var stage = stageDto.ToEntity(tenantId, createdByUserId);
+            var stage = stageDto.ToEntity(current, createdByUserId);
             await _stageRepository.AddAsync(stage);
         }
 
@@ -266,19 +351,24 @@ public class RecruitmentPipelineService : IRecruitmentPipelineService
     public async Task<RecruitmentPipelineDto> ClonePipelineAsync(
         Guid sourceId, string newName, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         if (string.IsNullOrWhiteSpace(newName))
             throw new ArgumentException("A name is required for the cloned pipeline.", nameof(newName));
 
-        var source = await _pipelineRepository.GetWithStagesAsync(sourceId)
-            ?? throw new ArgumentException($"Recruitment pipeline with ID '{sourceId}' not found.");
+        var source = await GetOwnedWithStagesAsync(sourceId);
 
-        if (await _pipelineRepository.GetByNameAsync(newName.Trim()) != null)
-            throw new InvalidOperationException($"A pipeline named '{newName.Trim()}' already exists.");
+        var trimmedName = newName.Trim();
+        var duplicate = await _pipelineRepository.GetByNameAsync(trimmedName);
+        if (duplicate != null && duplicate.TenantId == current)
+            throw new InvalidOperationException($"A pipeline named '{trimmedName}' already exists.");
 
         var clone = new RecruitmentPipeline
         {
-            TenantId = tenantId,
-            Name = newName.Trim(),
+            TenantId = current,
+            Name = trimmedName,
             Description = source.Description,
             IsDefault = false, // a clone is never the default
             IsActive = source.IsActive,
@@ -292,7 +382,7 @@ public class RecruitmentPipelineService : IRecruitmentPipelineService
         {
             await _stageRepository.AddAsync(new RecruitmentPipelineStage
             {
-                TenantId = tenantId,
+                TenantId = current,
                 RecruitmentPipelineId = clone.Id,
                 Name = stage.Name,
                 Description = stage.Description,
@@ -322,14 +412,12 @@ public class RecruitmentPipelineService : IRecruitmentPipelineService
 
     public async Task<RecruitmentPipelineDto> UpdateAsync(UpdateRecruitmentPipelineDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _pipelineRepository.GetWithStagesAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Recruitment pipeline with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedWithStagesAsync(updateDto.Id);
 
         if (updateDto.IsDefault && !entity.IsDefault)
         {
             var existingDefault = await _pipelineRepository.GetDefaultPipelineAsync();
-            if (existingDefault != null && existingDefault.Id != entity.Id)
+            if (existingDefault != null && existingDefault.Id != entity.Id && existingDefault.TenantId == entity.TenantId)
             {
                 existingDefault.IsDefault = false;
                 await _pipelineRepository.UpdateAsync(existingDefault);
@@ -346,9 +434,7 @@ public class RecruitmentPipelineService : IRecruitmentPipelineService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _pipelineRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Recruitment pipeline with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.IsDefault)
             throw new InvalidOperationException("The default recruitment pipeline cannot be deleted. Assign a new default first.");
@@ -362,7 +448,13 @@ public class RecruitmentPipelineService : IRecruitmentPipelineService
 
     public async Task<RecruitmentPipelineStageDto> AddStageAsync(CreateRecruitmentPipelineStageDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedAsync(createDto.RecruitmentPipelineId);
+
+        var entity = createDto.ToEntity(current, createdByUserId);
         await _stageRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -370,15 +462,15 @@ public class RecruitmentPipelineService : IRecruitmentPipelineService
 
     public async Task<IEnumerable<RecruitmentPipelineStageDto>> GetStagesAsync(Guid pipelineId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(pipelineId);
+        var tenantId = GetTenantId();
         var entities = await _stageRepository.GetByPipelineIdAsync(pipelineId);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<RecruitmentPipelineStageDto> UpdateStageAsync(UpdateRecruitmentPipelineStageDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _stageRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Pipeline stage with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedStageAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _stageRepository.UpdateAsync(entity);
@@ -388,9 +480,7 @@ public class RecruitmentPipelineService : IRecruitmentPipelineService
 
     public async Task<bool> DeleteStageAsync(Guid stageId, CancellationToken cancellationToken = default)
     {
-        var entity = await _stageRepository.GetByIdAsync(stageId);
-        if (entity == null)
-            throw new ArgumentException($"Pipeline stage with ID '{stageId}' not found.");
+        var entity = await GetOwnedStageAsync(stageId);
 
         await _stageRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -399,7 +489,10 @@ public class RecruitmentPipelineService : IRecruitmentPipelineService
 
     public async Task<bool> ReorderStagesAsync(Guid pipelineId, IEnumerable<(Guid StageId, int NewOrder)> stageOrders, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var stages = await _stageRepository.GetByPipelineIdAsync(pipelineId);
+        await GetOwnedAsync(pipelineId);
+        var tenantId = GetTenantId();
+        var stages = (await _stageRepository.GetByPipelineIdAsync(pipelineId))
+            .Where(s => s.TenantId == tenantId);
         var stageMap = stages.ToDictionary(s => s.Id);
 
         foreach (var (stageId, newOrder) in stageOrders)
@@ -417,24 +510,31 @@ public class RecruitmentPipelineService : IRecruitmentPipelineService
 
     public async Task<RecruitmentPipelineDto?> GetByNameAsync(string name, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _pipelineRepository.GetByNameAsync(name);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<RecruitmentPipelineStageDto>> GetStagesByTypeAsync(RecruitmentPipelineStageType stageType, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _stageRepository.GetByStageTypeAsync(stageType);
-        return entities.Select(e => e.ToDto());
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
     public async Task<RecruitmentPipelineStageDto?> GetFinalStageAsync(Guid pipelineId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(pipelineId);
+        var tenantId = GetTenantId();
         var entity = await _stageRepository.GetFinalStageAsync(pipelineId);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
     public async Task<int> GetMaxStageOrderAsync(Guid pipelineId, CancellationToken cancellationToken = default)
     {
-        return await _stageRepository.GetMaxStageOrderAsync(pipelineId);
+        await GetOwnedAsync(pipelineId);
+        var tenantId = GetTenantId();
+        var stages = await _stageRepository.GetByPipelineIdAsync(pipelineId);
+        return stages.Where(s => s.TenantId == tenantId).Select(s => s.Order).DefaultIfEmpty(0).Max();
     }
 }

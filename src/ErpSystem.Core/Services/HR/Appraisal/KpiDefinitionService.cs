@@ -16,39 +16,64 @@ namespace ErpSystem.Core.Services.HR;
 public class KpiDefinitionService : IKpiDefinitionService
 {
     private readonly IGenericRepository<KpiDefinition> _kpiDefinitionRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<KpiDefinitionService> _logger;
 
     public KpiDefinitionService(
         IGenericRepository<KpiDefinition> kpiDefinitionRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<KpiDefinitionService> logger)
     {
         _kpiDefinitionRepository = kpiDefinitionRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<KpiDefinitionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A KPI definition owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<KpiDefinition> GetOwnedAsync(Guid id)
     {
         var entity = await _kpiDefinitionRepository.GetByIdAsync(id);
-
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"KPI definition with ID '{id}' not found.");
+        return entity;
+    }
 
+    public async Task<KpiDefinitionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<KpiDefinitionDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var kpiDefinitions = await _kpiDefinitionRepository.GetAllAsync();
+        var tenantId = GetTenantId();
+        var kpiDefinitions = await _kpiDefinitionRepository.GetQueryable()
+            .Where(k => k.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
         return kpiDefinitions.ToDtoList();
     }
 
     public async Task<PagedResult<KpiDefinitionDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var definitionsQuery = _kpiDefinitionRepository.GetQueryable()
-                                                       .OrderBy(k => k.KpiName);
+            .Where(k => k.TenantId == tenantId)
+            .OrderBy(k => k.KpiName);
         var totalCount = await definitionsQuery.CountAsync(cancellationToken);
 
         var pagedDefinitions = await definitionsQuery.Skip((pageNumber - 1) * pageSize)
@@ -69,6 +94,7 @@ public class KpiDefinitionService : IKpiDefinitionService
     public async Task<KpiDefinitionDto> CreateAsync(CreateKpiDefinitionDto createDto, CancellationToken cancellationToken = default)
     {
         var kpiDefinition = createDto.ToEntity();
+        kpiDefinition.TenantId = GetTenantId();
 
         await _kpiDefinitionRepository.AddAsync(kpiDefinition);
         await _unitOfWork.SaveChangesAsync();
@@ -80,12 +106,7 @@ public class KpiDefinitionService : IKpiDefinitionService
 
     public async Task<KpiDefinitionDto> UpdateAsync(UpdateKpiDefinitionDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _kpiDefinitionRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"KPI definition with ID '{updateDto.Id}' not found.");
-        }
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         updateDto.UpdateEntity(entity);
 
@@ -99,12 +120,7 @@ public class KpiDefinitionService : IKpiDefinitionService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _kpiDefinitionRepository.GetByIdAsync(id);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"KPI definition with ID '{id}' not found.");
-        }
+        var entity = await GetOwnedAsync(id);
 
         await _kpiDefinitionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -116,4 +132,3 @@ public class KpiDefinitionService : IKpiDefinitionService
 }
 
 #endregion KPI Definition
-

@@ -47,6 +47,7 @@ public sealed class GoalRiskService
     private readonly IGoalRiskSettingsProvider              _settingsProvider;
     private readonly IGoalRiskEvaluator                     _evaluator;
     private readonly ICurrentUserService                    _currentUser;
+    private readonly ICurrentUserProvider                   _currentUserProvider;
     private readonly IDateTimeProvider                      _clock;
     private readonly ILogger<GoalRiskService>    _logger;
 
@@ -55,6 +56,7 @@ public sealed class GoalRiskService
         IGoalRiskSettingsProvider           settingsProvider,
         IGoalRiskEvaluator                  evaluator,
         ICurrentUserService                 currentUser,
+        ICurrentUserProvider                currentUserProvider,
         IDateTimeProvider                   clock,
         ILogger<GoalRiskService> logger)
     {
@@ -62,8 +64,20 @@ public sealed class GoalRiskService
         _settingsProvider = settingsProvider;
         _evaluator        = evaluator;
         _currentUser      = currentUser;
+        _currentUserProvider = currentUserProvider;
         _clock            = clock;
         _logger           = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     // =========================================================================
@@ -97,6 +111,8 @@ public sealed class GoalRiskService
             return [];
         }
 
+        var tenantId = GetTenantId();
+
         // ── 2. Materialise flat goal projections for this cycle ────────────
         // Select() projects only the scalar fields needed by the evaluator.
         // AsNoTracking() is required — these objects are never updated.
@@ -105,6 +121,7 @@ public sealed class GoalRiskService
             .GetQueryable()
             .AsNoTracking()
             .Where(g => !g.IsDeleted
+                     && g.TenantId == tenantId
                      && g.AppraisalCycleId == cycleId
                      && g.Employee.ManagerId == managerId)
             .Select(g => new

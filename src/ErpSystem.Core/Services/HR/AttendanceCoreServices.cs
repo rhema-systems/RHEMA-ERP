@@ -21,60 +21,92 @@ namespace ErpSystem.Core.Services.HR;
 public class StaffAttendanceRecordService : IStaffAttendanceRecordService
 {
     private readonly IStaffAttendanceRecordRepository _repository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffAttendanceRecordService> _logger;
 
     public StaffAttendanceRecordService(
         IStaffAttendanceRecordRepository repository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffAttendanceRecordService> logger)
     {
         _repository = repository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<StaffAttendanceRecordDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An attendance record owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<StaffAttendanceRecord> GetOwnedAsync(Guid id)
     {
         var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Attendance record '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<StaffAttendanceRecordDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<StaffAttendanceRecordDto?> GetByEmployeeAndDateAsync(Guid employeeId, DateOnly date, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetByEmployeeAndDateAsync(employeeId, date);
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffAttendanceRecordSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, DateOnly from, DateOnly to, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByEmployeeIdAsync(employeeId, from, to);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByEmployeeIdAsync(employeeId, from, to))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffAttendanceRecordSummaryDto>> GetByDateAsync(DateOnly date, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByDateAsync(date);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByDateAsync(date))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffAttendanceRecordSummaryDto>> GetByDateRangeAsync(DateOnly from, DateOnly to, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByDateRangeAsync(from, to);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByDateRangeAsync(from, to))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffAttendanceRecordSummaryDto>> GetByStatusAsync(StaffAttendanceStatus status, DateOnly from, DateOnly to, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByStatusAsync(status, from, to);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByStatusAsync(status, from, to))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<StaffAttendanceRecordSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(r => r.Date)
@@ -93,11 +125,15 @@ public class StaffAttendanceRecordService : IStaffAttendanceRecordService
 
     public async Task<StaffAttendanceRecordDto> CreateAsync(CreateStaffAttendanceRecordDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         var existing = await _repository.GetByEmployeeAndDateAsync(dto.EmployeeId, dto.Date);
-        if (existing != null)
+        if (existing != null && existing.TenantId == current)
             throw new InvalidOperationException($"An attendance record already exists for this employee on {dto.Date}.");
 
-        var entity = dto.ToEntity(tenantId, userId);
+        var entity = dto.ToEntity(current, userId);
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
@@ -107,9 +143,7 @@ public class StaffAttendanceRecordService : IStaffAttendanceRecordService
 
     public async Task<StaffAttendanceRecordDto> UpdateAsync(UpdateStaffAttendanceRecordDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Attendance record '{dto.Id}' not found.");
+        var entity = await GetOwnedAsync(dto.Id);
 
         entity.UpdateEntity(dto, userId);
         await _repository.UpdateAsync(entity);
@@ -120,9 +154,7 @@ public class StaffAttendanceRecordService : IStaffAttendanceRecordService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Attendance record '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _repository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -141,90 +173,140 @@ public class StaffAttendanceRecordService : IStaffAttendanceRecordService
 public class StaffDailyAttendanceService : IStaffDailyAttendanceService
 {
     private readonly IStaffDailyAttendanceRepository _repository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDailyAttendanceService> _logger;
 
     public StaffDailyAttendanceService(
         IStaffDailyAttendanceRepository repository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDailyAttendanceService> logger)
     {
         _repository = repository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<StaffDailyAttendanceDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A daily attendance record owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<StaffDailyAttendance> GetOwnedAsync(Guid id)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Daily attendance '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffDailyAttendance> GetOwnedWithDetailsAsync(Guid id)
     {
         var entity = await _repository.GetWithFullDetailsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Daily attendance record '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<StaffDailyAttendanceDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedWithDetailsAsync(id);
         return entity.ToDto();
     }
 
     public async Task<StaffDailyAttendanceDto?> GetByEmployeeAndDateAsync(Guid employeeId, DateOnly date, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetByEmployeeAndDateAsync(employeeId, date);
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffDailyAttendanceSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, DateOnly from, DateOnly to, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByEmployeeIdAsync(employeeId, from, to);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByEmployeeIdAsync(employeeId, from, to))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDailyAttendanceSummaryDto>> GetByDateAsync(DateOnly date, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByDateAsync(date);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByDateAsync(date))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDailyAttendanceSummaryDto>> GetByStatusAsync(StaffAttendanceStatus status, DateOnly from, DateOnly to, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByStatusAsync(status, from, to);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByStatusAsync(status, from, to))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDailyAttendanceSummaryDto>> GetPendingVerificationAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetPendingVerificationAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetPendingVerificationAsync())
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDailyAttendanceSummaryDto>> GetWithOpenExceptionsAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetWithOpenExceptionsAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetWithOpenExceptionsAsync())
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDailyAttendanceSummaryDto>> GetWithOvertimeAsync(DateOnly from, DateOnly to, Guid? employeeId = null, CancellationToken ct = default)
     {
-        var entities = await _repository.GetWithOvertimeAsync(from, to, employeeId);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetWithOvertimeAsync(from, to, employeeId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDailyAttendanceSummaryDto>> GetLateAttendancesAsync(DateOnly from, DateOnly to, Guid? employeeId = null, CancellationToken ct = default)
     {
-        var entities = await _repository.GetLateAttendancesAsync(from, to, employeeId);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetLateAttendancesAsync(from, to, employeeId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDailyAttendanceSummaryDto>> GetRemoteWorkDaysAsync(DateOnly from, DateOnly to, Guid? employeeId = null, CancellationToken ct = default)
     {
-        var entities = await _repository.GetRemoteWorkDaysAsync(from, to, employeeId);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetRemoteWorkDaysAsync(from, to, employeeId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDailyAttendanceSummaryDto>> GetByPayPeriodIdAsync(Guid payPeriodId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByPayPeriodIdAsync(payPeriodId);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByPayPeriodIdAsync(payPeriodId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<StaffDailyAttendanceSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(r => r.AttendanceDate)
@@ -243,11 +325,15 @@ public class StaffDailyAttendanceService : IStaffDailyAttendanceService
 
     public async Task<StaffDailyAttendanceDto> CreateAsync(CreateStaffDailyAttendanceDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         var existing = await _repository.GetByEmployeeAndDateAsync(dto.EmployeeId, dto.AttendanceDate);
-        if (existing != null)
+        if (existing != null && existing.TenantId == current)
             throw new InvalidOperationException($"A daily attendance record already exists for employee {dto.EmployeeId} on {dto.AttendanceDate}.");
 
-        var entity = dto.ToEntity(tenantId, userId);
+        var entity = dto.ToEntity(current, userId);
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
@@ -257,9 +343,7 @@ public class StaffDailyAttendanceService : IStaffDailyAttendanceService
 
     public async Task<StaffDailyAttendanceDto> UpdateAsync(UpdateStaffDailyAttendanceDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Daily attendance '{dto.Id}' not found.");
+        var entity = await GetOwnedAsync(dto.Id);
 
         entity.UpdateEntity(dto, userId);
         await _repository.UpdateAsync(entity);
@@ -270,9 +354,7 @@ public class StaffDailyAttendanceService : IStaffDailyAttendanceService
 
     public async Task<StaffDailyAttendanceDto> VerifyAsync(VerifyAttendanceDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.AttendanceId);
-        if (entity == null)
-            throw new ArgumentException($"Daily attendance '{dto.AttendanceId}' not found.");
+        var entity = await GetOwnedAsync(dto.AttendanceId);
 
         entity.IsVerified = true;
         entity.VerifiedById = userId;
@@ -290,9 +372,7 @@ public class StaffDailyAttendanceService : IStaffDailyAttendanceService
 
     public async Task<StaffDailyAttendanceDto> ApproveExceptionAsync(Guid attendanceId, string? notes, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(attendanceId);
-        if (entity == null)
-            throw new ArgumentException($"Daily attendance '{attendanceId}' not found.");
+        var entity = await GetOwnedAsync(attendanceId);
 
         if (!entity.HasException)
             throw new InvalidOperationException("This attendance record has no pending exception.");
@@ -311,9 +391,7 @@ public class StaffDailyAttendanceService : IStaffDailyAttendanceService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Daily attendance '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _repository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -335,6 +413,7 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
     private readonly IStaffDailyAttendanceRepository _dailyRepository;
     private readonly IAttendanceLocationVerificationLogRepository _verificationLogRepository;
     private readonly IGeofenceVerificationService _geofenceVerification;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffAttendanceLogService> _logger;
 
@@ -343,6 +422,7 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
         IStaffDailyAttendanceRepository dailyRepository,
         IAttendanceLocationVerificationLogRepository verificationLogRepository,
         IGeofenceVerificationService geofenceVerification,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffAttendanceLogService> logger)
     {
@@ -350,39 +430,66 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
         _dailyRepository = dailyRepository;
         _verificationLogRepository = verificationLogRepository;
         _geofenceVerification = geofenceVerification;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<StaffAttendanceLogDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An attendance log owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<StaffAttendanceLog> GetOwnedAsync(Guid id)
     {
         var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Attendance log '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<StaffAttendanceLogDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<StaffAttendanceLogSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, DateTime from, DateTime to, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByEmployeeIdAsync(employeeId, from, to);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByEmployeeIdAsync(employeeId, from, to))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffAttendanceLogSummaryDto>> GetUnprocessedLogsAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetUnprocessedLogsAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetUnprocessedLogsAsync())
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffAttendanceLogSummaryDto>> GetByDeviceIdAsync(Guid deviceId, DateTime from, DateTime to, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByDeviceIdAsync(deviceId, from, to);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByDeviceIdAsync(deviceId, from, to))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<StaffAttendanceLogSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(l => l.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(l => l.LogDateTime)
@@ -401,14 +508,18 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
 
     public async Task<StaffAttendanceLogDto> CreateAsync(CreateStaffAttendanceLogDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         if (dto.Latitude.HasValue && dto.Longitude.HasValue)
         {
             var verification = await _geofenceVerification.VerifyPunchAsync(
-                dto.EmployeeId, tenantId, dto.Latitude, dto.Longitude, ct);
+                dto.EmployeeId, current, dto.Latitude, dto.Longitude, ct);
             RejectIfRequired(verification);
         }
 
-        var entity = dto.ToEntity(tenantId, userId);
+        var entity = dto.ToEntity(current, userId);
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
@@ -423,8 +534,12 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
         Guid userId,
         CancellationToken ct = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         var verification = await _geofenceVerification.VerifyPunchAsync(
-            employeeId, tenantId, dto.Latitude, dto.Longitude, ct);
+            employeeId, current, dto.Latitude, dto.Longitude, ct);
         RejectIfRequired(verification);
 
         var createDto = new CreateStaffAttendanceLogDto
@@ -437,7 +552,7 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
             Location = dto.Location,
         };
 
-        var entity = createDto.ToEntity(tenantId, userId);
+        var entity = createDto.ToEntity(current, userId);
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
@@ -467,9 +582,7 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
 
     public async Task<Guid?> ProcessLogAsync(Guid logId, Guid userId, CancellationToken ct = default)
     {
-        var log = await _repository.GetByIdAsync(logId);
-        if (log == null)
-            throw new ArgumentException($"Attendance log '{logId}' not found.");
+        var log = await GetOwnedAsync(logId);
 
         if (log.IsProcessed)
             throw new InvalidOperationException("This log has already been processed.");
@@ -487,8 +600,15 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
         GeofenceVerificationResult verification,
         CancellationToken ct)
     {
+        var tenantId = GetTenantId();
+        if (log.TenantId != tenantId)
+            throw new ArgumentException($"Attendance log '{log.Id}' not found.");
+
         var logDate = DateOnly.FromDateTime(log.LogDateTime);
         var daily = await _dailyRepository.GetByEmployeeAndDateAsync(log.EmployeeId, logDate);
+
+        if (daily != null && daily.TenantId != tenantId)
+            daily = null;
 
         if (daily == null)
         {
@@ -619,9 +739,7 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Attendance log '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _repository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -641,62 +759,102 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
 {
     private readonly IStaffAttendanceRegularizationRepository _repository;
     private readonly IStaffDailyAttendanceRepository _dailyRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffAttendanceRegularizationService> _logger;
 
     public StaffAttendanceRegularizationService(
         IStaffAttendanceRegularizationRepository repository,
         IStaffDailyAttendanceRepository dailyRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffAttendanceRegularizationService> logger)
     {
         _repository = repository;
         _dailyRepository = dailyRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<StaffAttendanceRegularizationDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A regularization owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<StaffAttendanceRegularization> GetOwnedAsync(Guid id)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Regularization '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffAttendanceRegularization> GetOwnedWithDetailsAsync(Guid id)
     {
         var entity = await _repository.GetWithFullDetailsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Regularization '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<StaffAttendanceRegularizationDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedWithDetailsAsync(id);
         return entity.ToDto();
     }
 
     public async Task<StaffAttendanceRegularizationDto?> GetByRegularizationNumberAsync(string regularizationNumber, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetByRegularizationNumberAsync(regularizationNumber);
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffAttendanceRegularizationSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByEmployeeIdAsync(employeeId);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByEmployeeIdAsync(employeeId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffAttendanceRegularizationSummaryDto>> GetByAttendanceIdAsync(Guid attendanceId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByAttendanceIdAsync(attendanceId);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByAttendanceIdAsync(attendanceId))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffAttendanceRegularizationSummaryDto>> GetByStatusAsync(AttendanceRegularizationStatus status, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByStatusAsync(status);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByStatusAsync(status))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffAttendanceRegularizationSummaryDto>> GetPendingApprovalAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetPendingApprovalAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetPendingApprovalAsync())
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<StaffAttendanceRegularizationSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(r => r.CreatedAt)
@@ -715,8 +873,12 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
 
     public async Task<StaffAttendanceRegularizationDto> CreateAsync(CreateStaffAttendanceRegularizationDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        var entity = dto.ToEntity(tenantId, userId);
-        entity.RegularizationNumber = await GenerateRegularizationNumberAsync(ct);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, userId);
+        entity.RegularizationNumber = await GenerateRegularizationNumberAsync(current, ct);
         entity.Status = AttendanceRegularizationStatus.Pending;
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -727,9 +889,7 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
 
     public async Task<StaffAttendanceRegularizationDto> UpdateAsync(UpdateStaffAttendanceRegularizationDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Regularization '{dto.Id}' not found.");
+        var entity = await GetOwnedAsync(dto.Id);
 
         if (entity.Status != AttendanceRegularizationStatus.Pending)
             throw new InvalidOperationException("Only pending regularizations can be edited.");
@@ -743,9 +903,7 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
 
     public async Task<StaffAttendanceRegularizationDto> ApproveAsync(ApproveRegularizationDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.RegularizationId);
-        if (entity == null)
-            throw new ArgumentException($"Regularization '{dto.RegularizationId}' not found.");
+        var entity = await GetOwnedAsync(dto.RegularizationId);
 
         if (entity.Status != AttendanceRegularizationStatus.Pending)
             throw new InvalidOperationException("Only pending regularizations can be approved.");
@@ -766,9 +924,7 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
 
     public async Task<StaffAttendanceRegularizationDto> RejectAsync(RejectRegularizationDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.RegularizationId);
-        if (entity == null)
-            throw new ArgumentException($"Regularization '{dto.RegularizationId}' not found.");
+        var entity = await GetOwnedAsync(dto.RegularizationId);
 
         if (entity.Status != AttendanceRegularizationStatus.Pending)
             throw new InvalidOperationException("Only pending regularizations can be rejected.");
@@ -788,15 +944,13 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
 
     public async Task<bool> ApplyAsync(Guid regularizationId, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(regularizationId);
-        if (entity == null)
-            throw new ArgumentException($"Regularization '{regularizationId}' not found.");
+        var entity = await GetOwnedAsync(regularizationId);
 
         if (entity.Status != AttendanceRegularizationStatus.Approved)
             throw new InvalidOperationException("Only approved regularizations can be applied.");
 
         var daily = await _dailyRepository.GetByIdAsync(entity.AttendanceId);
-        if (daily == null)
+        if (daily == null || daily.TenantId != entity.TenantId)
             throw new InvalidOperationException("The linked daily attendance record could not be found.");
 
         if (entity.RequestedCheckInTime.HasValue)
@@ -821,9 +975,7 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Regularization '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.Status == AttendanceRegularizationStatus.Applied)
             throw new InvalidOperationException("Applied regularizations cannot be deleted.");
@@ -833,9 +985,9 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
         return true;
     }
 
-    private async Task<string> GenerateRegularizationNumberAsync(CancellationToken ct)
+    private async Task<string> GenerateRegularizationNumberAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable().CountAsync(ct);
+        var count = await _repository.GetQueryable().CountAsync(r => r.TenantId == tenantId, ct);
         return $"REG-{DateTime.UtcNow:yyyyMMdd}-{(count + 1):D5}";
     }
 }
@@ -852,66 +1004,102 @@ public class StaffMonthlyAttendanceSummaryService : IStaffMonthlyAttendanceSumma
 {
     private readonly IStaffMonthlyAttendanceSummaryRepository _repository;
     private readonly IStaffDailyAttendanceRepository _dailyRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffMonthlyAttendanceSummaryService> _logger;
 
     public StaffMonthlyAttendanceSummaryService(
         IStaffMonthlyAttendanceSummaryRepository repository,
         IStaffDailyAttendanceRepository dailyRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffMonthlyAttendanceSummaryService> logger)
     {
         _repository = repository;
         _dailyRepository = dailyRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<StaffMonthlyAttendanceSummaryDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A monthly summary owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<StaffMonthlyAttendanceSummary> GetOwnedAsync(Guid id)
     {
         var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Monthly summary '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<StaffMonthlyAttendanceSummaryDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<StaffMonthlyAttendanceSummaryDto?> GetByEmployeeAndPeriodAsync(Guid employeeId, int year, int month, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetByEmployeeAndPeriodAsync(employeeId, year, month);
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffMonthlyAttendanceSummaryDto>> GetByEmployeeAndYearAsync(Guid employeeId, int year, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByEmployeeAndYearAsync(employeeId, year);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByEmployeeAndYearAsync(employeeId, year))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffMonthlyAttendanceSummaryDto>> GetByYearAndMonthAsync(int year, int month, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByYearAndMonthAsync(year, month);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByYearAndMonthAsync(year, month))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffMonthlyAttendanceSummaryDto>> GetByPayPeriodIdAsync(Guid payPeriodId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByPayPeriodIdAsync(payPeriodId);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByPayPeriodIdAsync(payPeriodId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffMonthlyAttendanceSummaryDto>> GetUnfinalizedAsync(int year, int month, CancellationToken ct = default)
     {
-        var entities = await _repository.GetUnfinalizedAsync(year, month);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetUnfinalizedAsync(year, month))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffMonthlyAttendanceSummaryDto> RecalculateAsync(Guid employeeId, int year, int month, Guid userId, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var from = new DateOnly(year, month, 1);
         var to = from.AddMonths(1).AddDays(-1);
-        var days = (await _dailyRepository.GetByEmployeeIdAsync(employeeId, from, to)).ToList();
+        var days = (await _dailyRepository.GetByEmployeeIdAsync(employeeId, from, to))
+            .Where(d => d.TenantId == tenantId)
+            .ToList();
 
         var existing = await _repository.GetByEmployeeAndPeriodAsync(employeeId, year, month);
+        if (existing != null && existing.TenantId != tenantId)
+            existing = null;
 
         if (existing != null && existing.IsFinalized)
             throw new InvalidOperationException("A finalized monthly summary cannot be recalculated.");
@@ -928,7 +1116,7 @@ public class StaffMonthlyAttendanceSummaryService : IStaffMonthlyAttendanceSumma
             existing = new StaffMonthlyAttendanceSummary
             {
                 Id = Guid.NewGuid(),
-                TenantId = days.FirstOrDefault()?.TenantId ?? Guid.Empty,
+                TenantId = tenantId,
                 EmployeeId = employeeId,
                 Year = year,
                 Month = month,
@@ -946,7 +1134,7 @@ public class StaffMonthlyAttendanceSummaryService : IStaffMonthlyAttendanceSumma
         existing.UpdatedAt = DateTime.UtcNow;
         existing.UpdatedBy = userId.ToString();
 
-        if (existing.Id == Guid.Empty || await _repository.GetByIdAsync(existing.Id) == null)
+        if (existing.Id == Guid.Empty || await _repository.GetByIdAsync(existing.Id) is not { TenantId: var tid } || tid != tenantId)
             await _repository.AddAsync(existing);
         else
             await _repository.UpdateAsync(existing);
@@ -959,9 +1147,7 @@ public class StaffMonthlyAttendanceSummaryService : IStaffMonthlyAttendanceSumma
 
     public async Task<StaffMonthlyAttendanceSummaryDto> FinalizeAsync(Guid summaryId, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(summaryId);
-        if (entity == null)
-            throw new ArgumentException($"Monthly summary '{summaryId}' not found.");
+        var entity = await GetOwnedAsync(summaryId);
 
         if (entity.IsFinalized)
             throw new InvalidOperationException("This monthly summary is already finalized.");
@@ -981,9 +1167,7 @@ public class StaffMonthlyAttendanceSummaryService : IStaffMonthlyAttendanceSumma
 
     public async Task<StaffMonthlyAttendanceSummaryDto> UpdateAsync(UpdateStaffMonthlyAttendanceSummaryDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Monthly summary '{dto.Id}' not found.");
+        var entity = await GetOwnedAsync(dto.Id);
 
         if (entity.IsFinalized)
             throw new InvalidOperationException("A finalized monthly summary cannot be edited directly. Use RecalculateAsync instead.");
@@ -997,9 +1181,7 @@ public class StaffMonthlyAttendanceSummaryService : IStaffMonthlyAttendanceSumma
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Monthly summary '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.IsFinalized)
             throw new InvalidOperationException("A finalized monthly summary cannot be deleted.");
@@ -1023,6 +1205,7 @@ public class StaffBulkAttendanceImportService : IStaffBulkAttendanceImportServic
     private readonly IStaffBulkAttendanceImportRepository _repository;
     private readonly IStaffBulkAttendanceImportRowRepository _rowRepository;
     private readonly IStaffDailyAttendanceRepository _dailyRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffBulkAttendanceImportService> _logger;
 
@@ -1030,39 +1213,72 @@ public class StaffBulkAttendanceImportService : IStaffBulkAttendanceImportServic
         IStaffBulkAttendanceImportRepository repository,
         IStaffBulkAttendanceImportRowRepository rowRepository,
         IStaffDailyAttendanceRepository dailyRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffBulkAttendanceImportService> logger)
     {
         _repository = repository;
         _rowRepository = rowRepository;
         _dailyRepository = dailyRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<StaffBulkAttendanceImportDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An import batch owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<StaffBulkAttendanceImport> GetOwnedAsync(Guid id)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Import batch '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffBulkAttendanceImport> GetOwnedWithRowsAsync(Guid id)
     {
         var entity = await _repository.GetWithRowsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Import batch '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<StaffBulkAttendanceImportDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedWithRowsAsync(id);
         return entity.ToDto();
     }
 
     public async Task<StaffBulkAttendanceImportDto?> GetByImportReferenceAsync(string importReference, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetByImportReferenceAsync(importReference);
-        return entity?.ToDto();
+        return entity?.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffBulkAttendanceImportSummaryDto>> GetByStatusAsync(AttendanceImportStatus status, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByStatusAsync(status);
+        var tenantId = GetTenantId();
+        var entities = (await _repository.GetByStatusAsync(status))
+            .Where(e => e.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<StaffBulkAttendanceImportSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(i => i.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(i => i.CreatedAt)
@@ -1081,20 +1297,30 @@ public class StaffBulkAttendanceImportService : IStaffBulkAttendanceImportServic
 
     public async Task<IEnumerable<StaffBulkAttendanceImportRowDto>> GetRowsAsync(Guid importId, CancellationToken ct = default)
     {
-        var rows = await _rowRepository.GetByImportIdAsync(importId);
+        await GetOwnedAsync(importId);
+        var tenantId = GetTenantId();
+        var rows = (await _rowRepository.GetByImportIdAsync(importId))
+            .Where(r => r.TenantId == tenantId);
         return rows.Select(r => r.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffBulkAttendanceImportRowDto>> GetFailedRowsAsync(Guid importId, CancellationToken ct = default)
     {
-        var rows = await _rowRepository.GetFailedRowsAsync(importId);
+        await GetOwnedAsync(importId);
+        var tenantId = GetTenantId();
+        var rows = (await _rowRepository.GetFailedRowsAsync(importId))
+            .Where(r => r.TenantId == tenantId);
         return rows.Select(r => r.ToDto()).ToList();
     }
 
     public async Task<StaffBulkAttendanceImportDto> InitiateAsync(CreateStaffBulkAttendanceImportDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        var entity = dto.ToEntity(tenantId, userId);
-        entity.ImportReference = await GenerateImportReferenceAsync(ct);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, userId);
+        entity.ImportReference = await GenerateImportReferenceAsync(current, ct);
         entity.Status = AttendanceImportStatus.Pending;
         entity.TotalRows = dto.Rows?.Count ?? 0;
 
@@ -1108,7 +1334,7 @@ public class StaffBulkAttendanceImportService : IStaffBulkAttendanceImportServic
                 var row = new StaffBulkAttendanceImportRow
                 {
                     Id = Guid.NewGuid(),
-                    TenantId = tenantId,
+                    TenantId = current,
                     ImportId = entity.Id,
                     RowNumber = rowDto.RowNumber,
                     EmployeeId = rowDto.EmployeeId,
@@ -1129,14 +1355,12 @@ public class StaffBulkAttendanceImportService : IStaffBulkAttendanceImportServic
         _logger.LogInformation("Bulk import initiated: {Reference} with {Count} rows", entity.ImportReference, entity.TotalRows);
 
         var loaded = await _repository.GetWithRowsAsync(entity.Id);
-        return loaded!.ToDto();
+        return loaded!.TenantId == current ? loaded.ToDto() : entity.ToDto();
     }
 
     public async Task<StaffBulkAttendanceImportDto> ProcessAsync(Guid importId, Guid userId, CancellationToken ct = default)
     {
-        var import = await _repository.GetWithRowsAsync(importId);
-        if (import == null)
-            throw new ArgumentException($"Import batch '{importId}' not found.");
+        var import = await GetOwnedWithRowsAsync(importId);
 
         if (import.Status == AttendanceImportStatus.Completed)
             throw new InvalidOperationException("This import has already been completed.");
@@ -1145,12 +1369,15 @@ public class StaffBulkAttendanceImportService : IStaffBulkAttendanceImportServic
 
         int successCount = 0, failureCount = 0;
 
-        foreach (var row in import.ImportRows)
+        foreach (var row in import.ImportRows.Where(r => r.TenantId == import.TenantId))
         {
             try
             {
                 var attendanceDate = row.AttendanceDate ?? DateOnly.MinValue;
                 var existing = await _dailyRepository.GetByEmployeeAndDateAsync(row.EmployeeId ?? Guid.Empty, attendanceDate);
+                if (existing != null && existing.TenantId != import.TenantId)
+                    existing = null;
+
                 if (existing == null && row.EmployeeId.HasValue)
                 {
                     var daily = new StaffDailyAttendance
@@ -1196,9 +1423,7 @@ public class StaffBulkAttendanceImportService : IStaffBulkAttendanceImportServic
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Import batch '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.Status == AttendanceImportStatus.Processing)
             throw new InvalidOperationException("An import that is currently processing cannot be deleted.");
@@ -1208,9 +1433,9 @@ public class StaffBulkAttendanceImportService : IStaffBulkAttendanceImportServic
         return true;
     }
 
-    private async Task<string> GenerateImportReferenceAsync(CancellationToken ct)
+    private async Task<string> GenerateImportReferenceAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable().CountAsync(ct);
+        var count = await _repository.GetQueryable().CountAsync(i => i.TenantId == tenantId, ct);
         return $"ATT-IMP-{DateTime.UtcNow:yyyyMMdd}-{(count + 1):D5}";
     }
 }

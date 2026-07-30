@@ -18,6 +18,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     private readonly IGenericRepository<AppraisalAttachment> _attachmentRepository;
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<AppraisalReviewEventService> _logger;
 
     public AppraisalReviewEventService(
@@ -26,6 +27,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         IGenericRepository<AppraisalAttachment> attachmentRepository,
         IGenericRepository<EmployeeGoal> goalRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<AppraisalReviewEventService> logger)
     {
         _reviewEventRepository = reviewEventRepository;
@@ -33,17 +35,42 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         _attachmentRepository = attachmentRepository;
         _goalRepository = goalRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A review event owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<AppraisalReviewEvent> GetOwnedReviewEventAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _reviewEventRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Review event with ID '{id}' not found.");
+        return entity;
     }
 
     // ─── Settings-driven review gates (Phase 2B) ──────────────────────────────
 
     /// <summary>Loads the AppraisalSettings governing a review event (via its cycle), or null.</summary>
-    private async Task<AppraisalSettings?> GetSettingsForEventAsync(Guid eventId, CancellationToken cancellationToken) =>
-        await _reviewEventRepository.GetQueryable(e => e.Id == eventId)
+    private async Task<AppraisalSettings?> GetSettingsForEventAsync(Guid eventId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        return await _reviewEventRepository.GetQueryable(e => e.Id == eventId && e.TenantId == tenantId)
             .Include(e => e.Cycle).ThenInclude(c => c.AppraisalSettings)
             .Select(e => e.Cycle.AppraisalSettings)
             .FirstOrDefaultAsync(cancellationToken);
+    }
 
     /// <summary>
     /// Enforces RequireGoalProgressUpdateAtReview: every active (non-rejected) goal in the appraisal
@@ -51,12 +78,14 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     /// </summary>
     private async Task EnsureGoalProgressRecordedAsync(AppraisalReviewEvent ev, CancellationToken cancellationToken)
     {
-        var employeeId = await _reviewEventRepository.GetQueryable(e => e.Id == ev.Id)
+        var tenantId = GetTenantId();
+        var employeeId = await _reviewEventRepository.GetQueryable(e => e.Id == ev.Id && e.TenantId == tenantId)
             .Select(e => e.Appraisal.EmployeeId)
             .FirstOrDefaultAsync(cancellationToken);
 
         var activeGoals = await _goalRepository
-            .GetQueryable(g => g.EmployeeId == employeeId
+            .GetQueryable(g => g.TenantId == tenantId
+                            && g.EmployeeId == employeeId
                             && g.AppraisalCycleId == ev.AppraisalCycleId
                             && g.Status != GoalStatus.Rejected)
             .Select(g => g.Id)
@@ -66,7 +95,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
             return; // nothing to update against
 
         var goalsWithProgress = (await _progressEntryRepository
-                .GetQueryable(p => p.ReviewEventId == ev.Id)
+                .GetQueryable(p => p.ReviewEventId == ev.Id && p.TenantId == tenantId)
                 .Select(p => p.EmployeeGoalId)
                 .ToListAsync(cancellationToken))
             .ToHashSet();
@@ -87,11 +116,12 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         var employeeId = ev.Appraisal.EmployeeId;
 
         var goals = await _goalRepository
-            .GetQueryable(g => g.EmployeeId == employeeId && g.AppraisalCycleId == ev.AppraisalCycleId)
+            .GetQueryable(g => g.TenantId == GetTenantId() && g.EmployeeId == employeeId && g.AppraisalCycleId == ev.AppraisalCycleId)
             .ToListAsync(cancellationToken);
 
+        var tenantId = GetTenantId();
         var existing = await _progressEntryRepository
-            .GetQueryable(p => p.ReviewEventId == eventId)
+            .GetQueryable(p => p.ReviewEventId == eventId && p.TenantId == tenantId)
             .ToListAsync(cancellationToken);
 
         var goalDtos = goals
@@ -126,17 +156,18 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         if (recordedById == Guid.Empty)
             throw new InvalidOperationException("Unable to determine the recording employee. Please ensure your account is linked to an employee record.");
 
-        var ev = await _reviewEventRepository.GetByIdAsync(eventId)
-            ?? throw new ArgumentException($"Review event with ID '{eventId}' not found.");
+        var ev = await GetOwnedReviewEventAsync(eventId, cancellationToken);
 
         if (!ev.IsFullAppraisal)
             throw new InvalidOperationException("This review event is not configured as a full appraisal.");
 
+        var tenantId = GetTenantId();
         // Record a score per goal as a GoalProgressEntry tied to this review event.
         foreach (var s in dto.Scores)
         {
             await _progressEntryRepository.AddAsync(new GoalProgressEntry
             {
+                TenantId = tenantId,
                 EmployeeGoalId = s.EmployeeGoalId,
                 ProgressPercent = s.Score,
                 Status = s.Score >= 100 ? GoalProgressStatus.Completed : GoalProgressStatus.OnTrack,
@@ -152,7 +183,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         if (dto.Scores.Any())
         {
             var goalIds = dto.Scores.Select(s => s.EmployeeGoalId).ToList();
-            var weightById = (await _goalRepository.GetQueryable(g => goalIds.Contains(g.Id)).ToListAsync(cancellationToken))
+            var weightById = (await _goalRepository.GetQueryable(g => g.TenantId == tenantId && goalIds.Contains(g.Id)).ToListAsync(cancellationToken))
                 .ToDictionary(g => g.Id, g => g.Weight);
 
             var totalWeight = dto.Scores.Sum(s => weightById.GetValueOrDefault(s.EmployeeGoalId, 0));
@@ -173,10 +204,18 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         return await GetByIdAsync(eventId, cancellationToken);
     }
 
-    private IQueryable<AppraisalReviewEvent> BaseQuery => _reviewEventRepository.GetQueryable()
-        .Include(e => e.Appraisal)
-            .ThenInclude(a => a.Employee)
-        .Include(e => e.Cycle);
+    private IQueryable<AppraisalReviewEvent> BaseQuery
+    {
+        get
+        {
+            var tenantId = GetTenantId();
+            return _reviewEventRepository.GetQueryable()
+                .Where(e => e.TenantId == tenantId)
+                .Include(e => e.Appraisal)
+                    .ThenInclude(a => a.Employee)
+                .Include(e => e.Cycle);
+        }
+    }
 
     public async Task<AppraisalReviewEventDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -230,6 +269,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     public async Task<AppraisalReviewEventDto> CreateAsync(CreateAppraisalReviewEventDto createDto, CancellationToken cancellationToken = default)
     {
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
         entity.Status = AppraisalReviewStatus.Pending;
 
         await _reviewEventRepository.AddAsync(entity);
@@ -241,9 +281,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
     public async Task<AppraisalReviewEventDto> UpdateAsync(UpdateAppraisalReviewEventDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _reviewEventRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Review event with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedReviewEventAsync(updateDto.Id, cancellationToken);
 
         if (entity.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("Cannot update a completed review event.");
@@ -258,9 +296,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _reviewEventRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Review event with ID '{id}' not found.");
+        var entity = await GetOwnedReviewEventAsync(id, cancellationToken);
 
         await _reviewEventRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -272,9 +308,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         Guid eventId, string? achievementsSummary, string? challengesSummary,
         CancellationToken cancellationToken = default)
     {
-        var entity = await _reviewEventRepository.GetByIdAsync(eventId);
-        if (entity == null)
-            throw new ArgumentException($"Review event with ID '{eventId}' not found.");
+        var entity = await GetOwnedReviewEventAsync(eventId, cancellationToken);
 
         if (entity.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("Review event is already completed.");
@@ -301,9 +335,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         Guid eventId, string? notes, string? managerNotes,
         CancellationToken cancellationToken = default)
     {
-        var entity = await _reviewEventRepository.GetByIdAsync(eventId);
-        if (entity == null)
-            throw new ArgumentException($"Review event with ID '{eventId}' not found.");
+        var entity = await GetOwnedReviewEventAsync(eventId, cancellationToken);
 
         if (entity.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("Review event is already completed.");
@@ -331,11 +363,11 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     public async Task<GoalProgressEntryDto> RecordProgressEntryAsync(
         Guid eventId, CreateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
     {
-        var eventExists = await _reviewEventRepository.ExistsAsync(e => e.Id == eventId);
-        if (!eventExists)
-            throw new ArgumentException("Review event not found.");
+        await GetOwnedReviewEventAsync(eventId, cancellationToken);
 
+        var tenantId = GetTenantId();
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         entity.ReviewEventId = eventId;
         entity.EntryDate = DateTime.UtcNow;
 
@@ -353,7 +385,10 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
     public async Task<IEnumerable<GoalProgressEntryDto>> GetProgressEntriesAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
-        var entities = await _progressEntryRepository.GetQueryable(p => p.ReviewEventId == eventId)
+        await GetOwnedReviewEventAsync(eventId, cancellationToken);
+
+        var tenantId = GetTenantId();
+        var entities = await _progressEntryRepository.GetQueryable(p => p.ReviewEventId == eventId && p.TenantId == tenantId)
             .Include(p => p.EmployeeGoal)
             .OrderByDescending(p => p.EntryDate)
             .ToListAsync(cancellationToken);
@@ -365,11 +400,11 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     public async Task<AppraisalAttachmentDto> AddAttachmentAsync(
         Guid eventId, CreateAppraisalAttachmentDto dto, CancellationToken cancellationToken = default)
     {
-        var exists = await _reviewEventRepository.ExistsAsync(e => e.Id == eventId);
-        if (!exists)
-            throw new ArgumentException("Review event not found.");
+        await GetOwnedReviewEventAsync(eventId, cancellationToken);
 
+        var tenantId = GetTenantId();
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         entity.ReviewEventId = eventId;
         entity.UploadDate = DateTime.UtcNow;
 
@@ -382,7 +417,8 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
     public async Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
-        var entities = await _attachmentRepository.GetQueryable(a => a.ReviewEventId == eventId)
+        var tenantId = GetTenantId();
+        var entities = await _attachmentRepository.GetQueryable(a => a.ReviewEventId == eventId && a.TenantId == tenantId)
             .Include(a => a.UploadedBy)
             .OrderByDescending(a => a.UploadDate)
             .ToListAsync(cancellationToken);
@@ -391,8 +427,9 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
     public async Task<bool> DeleteAttachmentAsync(Guid eventId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _attachmentRepository.GetQueryable()
-            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.ReviewEventId == eventId, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.ReviewEventId == eventId && a.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("Attachment not found.");

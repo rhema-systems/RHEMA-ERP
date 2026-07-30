@@ -32,31 +32,52 @@ public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUser.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
     public async Task<CompanyHrPolicySettingsDto> GetAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetQueryable()
             .AsNoTracking()
-            .Where(s => !s.IsDeleted)
+            .Where(s => !s.IsDeleted && s.TenantId == tenantId)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (entity is not null)
             return entity.ToDto();
 
         // Nothing persisted yet — surface coded defaults without creating a row.
-        return new CompanyHrPolicySettings { TenantId = _currentUser.TenantId }.ToDto();
+        return new CompanyHrPolicySettings { TenantId = tenantId }.ToDto();
     }
 
     public async Task<CompanyHrPolicySettingsDto> UpdateAsync(UpdateCompanyHrPolicySettingsDto dto, CancellationToken cancellationToken = default)
     {
         ValidateRetirementAges(dto);
 
+        var tenantId = GetTenantId();
         var entity = await _repository.GetQueryable()
-            .Where(s => !s.IsDeleted)
+            .Where(s => !s.IsDeleted && s.TenantId == tenantId)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (entity is null)
         {
-            entity = new CompanyHrPolicySettings { TenantId = _currentUser.TenantId };
+            entity = new CompanyHrPolicySettings { TenantId = tenantId };
             entity.ApplyUpdate(dto);
             await _repository.AddAsync(entity);
             _logger.LogInformation("Company HR policy settings created for tenant {TenantId}", entity.TenantId);

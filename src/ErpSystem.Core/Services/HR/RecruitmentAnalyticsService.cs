@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -10,8 +11,6 @@ namespace ErpSystem.Core.Services.HR;
 
 /// <summary>
 /// Read-only aggregation over the recruitment domain for the analytics dashboard.
-/// Every query runs through the repositories' <c>GetQueryable()</c>, so the global
-/// tenant filter applies — these figures are always scoped to the caller's tenant.
 /// </summary>
 public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
 {
@@ -21,6 +20,7 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
     private readonly IJobHireRecordRepository       _hireRepository;
     private readonly IStaffRequisitionCostRepository _costRepository;
     private readonly IPositionVacancyRepository     _positionVacancyRepository;
+    private readonly ICurrentUserProvider           _currentUserProvider;
     private readonly ILogger<RecruitmentAnalyticsService> _logger;
 
     /// <summary>Vacancy statuses that represent live recruitment work — used for ageing and recruiter load.</summary>
@@ -49,6 +49,7 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
         IJobHireRecordRepository        hireRepository,
         IStaffRequisitionCostRepository costRepository,
         IPositionVacancyRepository      positionVacancyRepository,
+        ICurrentUserProvider            currentUserProvider,
         ILogger<RecruitmentAnalyticsService> logger)
     {
         _vacancyRepository         = vacancyRepository;
@@ -57,12 +58,25 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
         _hireRepository            = hireRepository;
         _costRepository            = costRepository;
         _positionVacancyRepository = positionVacancyRepository;
+        _currentUserProvider       = currentUserProvider;
         _logger                    = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<RecruitmentAnalyticsDto> GetAnalyticsAsync(
         int? year = null, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var y     = year ?? DateTime.UtcNow.Year;
         var today = DateTime.UtcNow.Date;
 
@@ -70,7 +84,7 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
 
         // ── Applications received this year ───────────────────────────────────
         var apps = await _applicationRepository.GetQueryable()
-            .Where(a => a.ApplicationDate.Year == y)
+            .Where(a => a.TenantId == tenantId && a.ApplicationDate.Year == y)
             .Select(a => new
             {
                 a.ApplicationDate,
@@ -85,7 +99,8 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
 
         // ── Offers issued this year (latest version only — revisions must not double-count) ──
         var offers = await _offerRepository.GetQueryable()
-            .Where(o => o.IsLatestVersion
+            .Where(o => o.TenantId == tenantId
+                     && o.IsLatestVersion
                      && ((o.OfferDate.HasValue && o.OfferDate.Value.Year == y)
                       || (!o.OfferDate.HasValue && o.CreatedAt.Year == y)))
             .Select(o => new { o.OfferStatus, o.OfferDate, o.CreatedAt })
@@ -93,7 +108,7 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
 
         // ── Hires (all non-cancelled; filtered to the year in memory on effective start date) ──
         var hireRaw = await _hireRepository.GetQueryable()
-            .Where(h => h.Status != JobHireStatus.Cancelled)
+            .Where(h => h.TenantId == tenantId && h.Status != JobHireStatus.Cancelled)
             .Select(h => new
             {
                 h.ExpectedStartDate,
@@ -125,13 +140,14 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
 
         // ── Requisition costs recorded this year ──────────────────────────────
         var costs = await _costRepository.GetQueryable()
-            .Where(c => c.RecordedDate.Year == y)
+            .Where(c => c.TenantId == tenantId && c.RecordedDate.Year == y)
             .Select(c => new { c.Category, c.Amount, c.ExchangeRate, c.Currency })
             .ToListAsync(cancellationToken);
 
         // ── Time-to-shortlist (vacancies whose shortlist completed this year) ─
         var shortlistDays = await _vacancyRepository.GetQueryable()
-            .Where(v => v.TimeToShortlistDays.HasValue
+            .Where(v => v.TenantId == tenantId
+                     && v.TimeToShortlistDays.HasValue
                      && v.ShortlistCompletedAt.HasValue
                      && v.ShortlistCompletedAt.Value.Year == y)
             .Select(v => v.TimeToShortlistDays!.Value)
@@ -139,7 +155,7 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
 
         // ── Open vacancies (point-in-time) ────────────────────────────────────
         var openVacancies = await _vacancyRepository.GetQueryable()
-            .Where(v => OpenVacancyStatuses.Contains(v.VacancyStatus))
+            .Where(v => v.TenantId == tenantId && OpenVacancyStatuses.Contains(v.VacancyStatus))
             .Select(v => new
             {
                 v.Id,
@@ -159,7 +175,7 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
 
         // ── Open position vacancies — empty seats (point-in-time) ─────────────
         var openSeats = await _positionVacancyRepository.GetQueryable()
-            .Where(p => OpenPositionVacancyStatuses.Contains(p.Status))
+            .Where(p => p.TenantId == tenantId && OpenPositionVacancyStatuses.Contains(p.Status))
             .Select(p => p.VacatedDate)
             .ToListAsync(cancellationToken);
 

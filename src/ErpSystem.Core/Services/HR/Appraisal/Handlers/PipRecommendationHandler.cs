@@ -17,19 +17,41 @@ public class PipRecommendationHandler : IOutcomeRecommendationHandler
 {
     private readonly IGenericRepository<PerformanceImprovementPlan> _pipRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<PipRecommendationHandler> _logger;
 
     public PipRecommendationHandler(
         IGenericRepository<PerformanceImprovementPlan> pipRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<PipRecommendationHandler> logger)
     {
         _pipRepository = pipRepository;
         _appraisalRepository = appraisalRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
     }
 
     public RecommendationType Type => RecommendationType.PerformanceImprovementPlan;
@@ -37,9 +59,10 @@ public class PipRecommendationHandler : IOutcomeRecommendationHandler
     public async Task<(string TargetEntityType, Guid TargetEntityId)?> HandleAsync(
         AppraisalOutcomeRecommendation recommendation, CancellationToken cancellationToken = default)
     {
+        var tenantId = RequireCurrentTenant(recommendation.TenantId);
         var appraisal = await _appraisalRepository.GetQueryable()
             .Include(a => a.Employee)
-            .FirstOrDefaultAsync(a => a.Id == recommendation.PerformanceAppraisalId, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == recommendation.PerformanceAppraisalId && a.TenantId == tenantId, cancellationToken);
         if (appraisal == null)
         {
             _logger.LogWarning("PipRecommendationHandler: appraisal {Id} not found", recommendation.PerformanceAppraisalId);
@@ -48,7 +71,7 @@ public class PipRecommendationHandler : IOutcomeRecommendationHandler
 
         // Idempotency: reuse the PIP already raised from this appraisal on a re-dispatch.
         var existing = await _pipRepository.GetQueryable()
-            .FirstOrDefaultAsync(p => p.AppraisalId == appraisal.Id, cancellationToken);
+            .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.AppraisalId == appraisal.Id, cancellationToken);
         if (existing != null)
         {
             _logger.LogInformation("PIP: existing plan {Id} reused for appraisal {AppraisalId}", existing.Id, appraisal.Id);
@@ -71,6 +94,7 @@ public class PipRecommendationHandler : IOutcomeRecommendationHandler
         var now = DateTime.UtcNow;
         var entity = new PerformanceImprovementPlan
         {
+            TenantId = tenantId,
             PipNumber = $"PIP-APR-{now:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
             EmployeeId = appraisal.EmployeeId,
             AppraisalId = appraisal.Id,

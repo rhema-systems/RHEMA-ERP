@@ -1,6 +1,7 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -22,6 +23,7 @@ public class TrainingDashboardService : ITrainingDashboardService
     private readonly ITrainingFollowUpAssessmentRepository _followUpRepository;
     private readonly ITrainingAttendanceRepository _attendanceRepository;
     private readonly ITrainerProfileRepository _trainerRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TrainingDashboardService> _logger;
 
     public TrainingDashboardService(
@@ -38,6 +40,7 @@ public class TrainingDashboardService : ITrainingDashboardService
         ITrainingFollowUpAssessmentRepository followUpRepository,
         ITrainingAttendanceRepository attendanceRepository,
         ITrainerProfileRepository trainerRepository,
+        ICurrentUserProvider currentUserProvider,
         ILogger<TrainingDashboardService> logger)
     {
         _programRepository = programRepository;
@@ -53,19 +56,33 @@ public class TrainingDashboardService : ITrainingDashboardService
         _followUpRepository = followUpRepository;
         _attendanceRepository = attendanceRepository;
         _trainerRepository = trainerRepository;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // Every figure on this dashboard is an aggregate, so an unscoped query does not just leak another
+    // tenant's rows — it silently folds their totals into this tenant's numbers. The DI-created
+    // ApplicationDbContext carries no tenant, so each query is scoped explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<TrainingDashboardDto> GetDashboardAsync(int? year = null, CancellationToken cancellationToken = default)
     {
         var targetYear = year ?? DateTime.UtcNow.Year;
+        var tenantId = GetTenantId();
 
         // ── Programs ──────────────────────────────────────────────────────────
         var totalProgramsActive = await _programRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
             .CountAsync(p => p.IsActive, cancellationToken);
 
         var categoryBreakdown = await _programRepository.GetQueryable()
-            .Where(p => p.IsActive)
+            .Where(p => p.TenantId == tenantId && p.IsActive)
             .GroupBy(p => new { p.CategoryOptionId, CategoryName = p.CategoryOption != null ? p.CategoryOption.Name : "Uncategorised", Color = p.CategoryOption != null ? p.CategoryOption.ColorHex : null })
             .Select(g => new TrainingCategoryBreakdownDto
             {
@@ -78,9 +95,11 @@ public class TrainingDashboardService : ITrainingDashboardService
 
         // ── Schedules ─────────────────────────────────────────────────────────
         var totalSchedulesThisYear = await _scheduleRepository.GetQueryable()
+            .Where(s => s.TenantId == tenantId)
             .CountAsync(s => s.StartDate.Year == targetYear, cancellationToken);
 
         var upcomingSchedules = (await _scheduleRepository.GetUpcomingSchedulesAsync(90))
+            .Where(s => s.TenantId == tenantId)
             .Take(10)
             .ToSummaryDtoList();
 
@@ -88,6 +107,7 @@ public class TrainingDashboardService : ITrainingDashboardService
 
         // ── Nominations ───────────────────────────────────────────────────────
         var totalNominationsThisYear = await _nominationRepository.GetQueryable()
+            .Where(n => n.TenantId == tenantId)
             .CountAsync(n => n.NominationDate.Year == targetYear, cancellationToken);
 
         var pendingStatuses = new[]
@@ -98,16 +118,18 @@ public class TrainingDashboardService : ITrainingDashboardService
         };
 
         var pendingNominationsCount = await _nominationRepository.GetQueryable()
+            .Where(n => n.TenantId == tenantId)
             .CountAsync(n => pendingStatuses.Contains(n.Status), cancellationToken);
 
         var recentNominations = await _nominationRepository.GetQueryable()
+            .Where(n => n.TenantId == tenantId)
             .OrderByDescending(n => n.NominationDate)
             .Take(10)
             .ToListAsync(cancellationToken);
 
         // ── Completions ───────────────────────────────────────────────────────
         var completionsThisYear = await _completionRepository.GetQueryable()
-            .Where(c => c.CreatedAt.Year == targetYear)
+            .Where(c => c.TenantId == tenantId && c.CreatedAt.Year == targetYear)
             .ToListAsync(cancellationToken);
 
         var completedTrainingsThisYear = completionsThisYear.Count(c => c.IsPassed);
@@ -117,13 +139,15 @@ public class TrainingDashboardService : ITrainingDashboardService
 
         // ── Certificates ──────────────────────────────────────────────────────
         var employeesCertifiedThisYear = await _certificateRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
             .CountAsync(c => c.IssuedDate.Year == targetYear && c.Status == CertificateStatus.Active, cancellationToken);
 
         var expiringCertificates = await _certificateRepository.GetExpiringAsync(30);
-        var expiringCertificatesIn30Days = expiringCertificates.Count();
+        var expiringCertificatesIn30Days = expiringCertificates.Count(c => c.TenantId == tenantId);
 
         // ── Compliance ────────────────────────────────────────────────────────
         var allComplianceRecords = await _complianceRepository.GetQueryable()
+            .Where(r => r.TenantId == tenantId)
             .ToListAsync(cancellationToken);
 
         var totalComplianceRecords = allComplianceRecords.Count;
@@ -141,16 +165,18 @@ public class TrainingDashboardService : ITrainingDashboardService
 
         // ── Mentoring ─────────────────────────────────────────────────────────
         var activeMentoringPairsCount = await _mentoringPairRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
             .CountAsync(p => p.Status == MentoringStatus.Active, cancellationToken);
 
         // ── Learning paths ────────────────────────────────────────────────────
         var activeLearningPathEnrollmentsCount = await _learningPathEnrollmentRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
             .CountAsync(e => !e.IsCompleted, cancellationToken);
 
         // ── Budget ────────────────────────────────────────────────────────────
-        var approvedBudgets = await _budgetRepository.GetQueryable()
-            .Where(b => b.Year == targetYear && b.Status == TrainingBudgetStatus.Approved)
-            .ToListAsync(cancellationToken);
+        var approvedBudgets = (await _budgetRepository.GetByStatusAsync(TrainingBudgetStatus.Approved, tenantId))
+            .Where(b => b.Year == targetYear)
+            .ToList();
 
         var budgetAllocated = approvedBudgets.Sum(b => b.AllocatedAmount);
         var budgetSpent = approvedBudgets.Sum(b => b.SpentAmount);
@@ -185,28 +211,34 @@ public class TrainingDashboardService : ITrainingDashboardService
     public async Task<TrainingAnalyticsDto> GetAnalyticsAsync(int? year = null, CancellationToken cancellationToken = default)
     {
         var y = year ?? DateTime.UtcNow.Year;
+        var tenantId = GetTenantId();
 
         // ── Operations ──────────────────────────────────────────────────────────
-        var activePrograms = await _programRepository.GetQueryable().CountAsync(p => p.IsActive, cancellationToken);
+        var activePrograms = await _programRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
+            .CountAsync(p => p.IsActive, cancellationToken);
 
         var completions = await _completionRepository.GetQueryable()
-            .Where(c => c.CompletionDate.Year == y)
+            .Where(c => c.TenantId == tenantId && c.CompletionDate.Year == y)
             .ToListAsync(cancellationToken);
         var completionsYtd = completions.Count;
         var passedYtd = completions.Count(c => c.IsPassed);
         var passRate = completionsYtd > 0 ? Math.Round((decimal)passedYtd / completionsYtd * 100, 1) : 0m;
 
-        var compliance = await _complianceRepository.GetQueryable().ToListAsync(cancellationToken);
+        var compliance = await _complianceRepository.GetQueryable()
+            .Where(r => r.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
         var complianceRate = compliance.Count > 0
             ? Math.Round((decimal)compliance.Count(r => r.Status == ComplianceStatus.Compliant) / compliance.Count * 100, 1)
             : 0m;
 
         var certsIssued = await _certificateRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
             .CountAsync(c => c.IssuedDate.Year == y && c.Status == CertificateStatus.Active, cancellationToken);
 
-        var budgets = await _budgetRepository.GetQueryable()
-            .Where(b => b.Year == y && b.Status == TrainingBudgetStatus.Approved)
-            .ToListAsync(cancellationToken);
+        var budgets = (await _budgetRepository.GetByStatusAsync(TrainingBudgetStatus.Approved, tenantId))
+            .Where(b => b.Year == y)
+            .ToList();
         var allocated = budgets.Sum(b => b.AllocatedAmount);
         var spent = budgets.Sum(b => b.SpentAmount);
         var util = allocated > 0 ? Math.Round(spent / allocated * 100, 1) : 0m;
@@ -214,13 +246,13 @@ public class TrainingDashboardService : ITrainingDashboardService
 
         // Category breakdown: active programs + completions per category
         var catPrograms = await _programRepository.GetQueryable()
-            .Where(p => p.IsActive)
+            .Where(p => p.TenantId == tenantId && p.IsActive)
             .GroupBy(p => new { p.CategoryOptionId, Name = p.CategoryOption != null ? p.CategoryOption.Name : "Uncategorised", Color = p.CategoryOption != null ? p.CategoryOption.ColorHex : null })
             .Select(g => new { g.Key.CategoryOptionId, g.Key.Name, g.Key.Color, Programs = g.Count() })
             .ToListAsync(cancellationToken);
 
         var catCompletions = await _completionRepository.GetQueryable()
-            .Where(c => c.CompletionDate.Year == y)
+            .Where(c => c.TenantId == tenantId && c.CompletionDate.Year == y)
             .GroupBy(c => c.Nomination.Schedule.Program.CategoryOptionId)
             .Select(g => new { CategoryOptionId = g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
@@ -235,7 +267,7 @@ public class TrainingDashboardService : ITrainingDashboardService
         }).OrderByDescending(c => c.ProgramsCount).ToList();
 
         var topTrainers = await _trainerRepository.GetQueryable()
-            .Where(t => t.IsActive)
+            .Where(t => t.TenantId == tenantId && t.IsActive)
             .OrderByDescending(t => t.TotalSessionsDelivered).ThenByDescending(t => t.TotalTrainingHoursDelivered)
             .Take(8)
             .Select(t => new TrainerUtilizationDto
@@ -259,18 +291,20 @@ public class TrainingDashboardService : ITrainingDashboardService
 
         // ── Effectiveness (Kirkpatrick) ──────────────────────────────────────────
         var nominated = await _nominationRepository.GetQueryable()
+            .Where(n => n.TenantId == tenantId)
             .CountAsync(n => n.NominationDate.Year == y && (n.Status == NominationStatus.Approved || n.Status == NominationStatus.Confirmed), cancellationToken);
 
         var attended = await _attendanceRepository.GetQueryable()
-            .Where(a => a.IsPresent && a.AttendanceDate.Year == y)
+            .Where(a => a.TenantId == tenantId && a.IsPresent && a.AttendanceDate.Year == y)
             .Select(a => new { a.EmployeeId, a.ScheduleId })
             .Distinct()
             .CountAsync(cancellationToken);
 
         var feedback = await _feedbackRepository.GetQueryable()
-            .Where(f => f.FeedbackDate.Year == y)
+            .Where(f => f.TenantId == tenantId && f.FeedbackDate.Year == y)
             .ToListAsync(cancellationToken);
         var followUps = await _followUpRepository.GetQueryable()
+            .Where(f => f.TenantId == tenantId)
             .CountAsync(f => f.AssessmentDate.Year == y, cancellationToken);
 
         var satisfactionVals = feedback.Where(f => f.OverallSatisfactionRating.HasValue).Select(f => (decimal)f.OverallSatisfactionRating!.Value).ToList();
@@ -318,19 +352,22 @@ public class TrainingDashboardService : ITrainingDashboardService
 
     public async Task<EmployeeTrainingSummaryDto> GetEmployeeSummaryAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+
         var completions = await _completionRepository.GetByEmployeeIdAsync(employeeId);
-        var completionsList = completions.ToList();
+        var completionsList = completions.Where(c => c.TenantId == tenantId).ToList();
 
         var certificates = await _certificateRepository.GetByEmployeeIdAsync(employeeId);
-        var certList = certificates.ToList();
+        var certList = certificates.Where(c => c.TenantId == tenantId).ToList();
 
         var complianceRecords = await _complianceRepository.GetByEmployeeIdAsync(employeeId);
-        var complianceList = complianceRecords.ToList();
+        var complianceList = complianceRecords.Where(r => r.TenantId == tenantId).ToList();
 
         var learningPathEnrollments = await _learningPathEnrollmentRepository.GetByEmployeeIdAsync(employeeId);
-        var enrollmentList = learningPathEnrollments.ToList();
+        var enrollmentList = learningPathEnrollments.Where(e => e.TenantId == tenantId).ToList();
 
         var activeMentoringPairs = await _mentoringPairRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
             .CountAsync(p => (p.MentorId == employeeId || p.MenteeId == employeeId) && p.Status == MentoringStatus.Active, cancellationToken);
 
         return new EmployeeTrainingSummaryDto

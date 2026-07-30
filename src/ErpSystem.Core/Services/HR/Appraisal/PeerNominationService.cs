@@ -20,6 +20,7 @@ public class PeerNominationService : IPeerNominationService
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IGenericRepository<EvaluatorEvaluation> _evaluatorEvaluationRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<PeerNominationService> _logger;
 
     public PeerNominationService(
@@ -28,6 +29,7 @@ public class PeerNominationService : IPeerNominationService
         IGenericRepository<Employee> employeeRepository,
         IGenericRepository<EvaluatorEvaluation> evaluatorEvaluationRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<PeerNominationService> logger)
     {
         _nominationRepository = nominationRepository;
@@ -35,7 +37,43 @@ public class PeerNominationService : IPeerNominationService
         _employeeRepository = employeeRepository;
         _evaluatorEvaluationRepository = evaluatorEvaluationRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A nomination owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<PeerNomination> GetOwnedNominationAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _nominationRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Peer nomination with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<PeerNomination> TenantNominationQuery()
+    {
+        var tenantId = GetTenantId();
+        return _nominationRepository.GetQueryable().Where(n => n.TenantId == tenantId);
+    }
+
+    private async Task<PerformanceAppraisal> GetOwnedAppraisalAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _appraisalRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Performance appraisal not found.");
+        return entity;
     }
 
     private static void EnsureNominationsEditable(PerformanceAppraisal appraisal, AppraisalSettings settings)
@@ -60,7 +98,7 @@ public class PeerNominationService : IPeerNominationService
 
     public async Task<PeerNominationDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _nominationRepository.GetQueryable()
+        var entity = await TenantNominationQuery()
             .Include(n => n.Appraisal)
             .Include(n => n.PeerEmployee)
             .Include(n => n.NominatedBy)
@@ -74,7 +112,7 @@ public class PeerNominationService : IPeerNominationService
 
     public async Task<IEnumerable<PeerNominationDto>> GetByAppraisalIdAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
-        var entities = await _nominationRepository.GetQueryable()
+        var entities = await TenantNominationQuery()
             .Include(n => n.Appraisal)
             .Include(n => n.PeerEmployee)
             .Include(n => n.NominatedBy)
@@ -87,7 +125,7 @@ public class PeerNominationService : IPeerNominationService
 
     public async Task<IEnumerable<PeerNominationDto>> GetByPeerEmployeeIdAsync(Guid peerEmployeeId, CancellationToken cancellationToken = default)
     {
-        var entities = await _nominationRepository.GetQueryable()
+        var entities = await TenantNominationQuery()
             .Include(n => n.Appraisal)
             .Include(n => n.PeerEmployee)
             .Include(n => n.NominatedBy)
@@ -101,7 +139,7 @@ public class PeerNominationService : IPeerNominationService
     public async Task<IEnumerable<PeerNominationDto>> GetPendingNominationsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         // Get nominations where the employee is the peer and invitation not yet sent, or sent but not completed
-        var entities = await _nominationRepository.GetQueryable()
+        var entities = await TenantNominationQuery()
             .Include(n => n.Appraisal)
                 .ThenInclude(a => a.EvaluatorEvaluations)
             .Include(n => n.PeerEmployee)
@@ -124,11 +162,12 @@ public class PeerNominationService : IPeerNominationService
     public async Task<PeerNominationDto> CreateAsync(CreatePeerNominationDto createDto, CancellationToken cancellationToken = default)
     {
         // Validate appraisal exists
+        var tenantId = GetTenantId();
         var appraisal = await _appraisalRepository.GetQueryable()
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.PeerNominations)
-            .FirstOrDefaultAsync(a => a.Id == createDto.AppraisalId, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == createDto.AppraisalId && a.TenantId == tenantId, cancellationToken);
 
         if (appraisal == null)
             throw new ArgumentException("Performance appraisal not found.");
@@ -138,7 +177,7 @@ public class PeerNominationService : IPeerNominationService
 
         // Validate peer employee exists and is not the same as appraisee
         var peerEmployee = await _employeeRepository.GetByIdAsync(createDto.PeerEmployeeId);
-        if (peerEmployee == null)
+        if (peerEmployee == null || peerEmployee.TenantId != tenantId)
             throw new ArgumentException("Peer employee not found.");
 
         if (createDto.PeerEmployeeId == appraisal.EmployeeId)
@@ -156,6 +195,7 @@ public class PeerNominationService : IPeerNominationService
         }
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
 
         await _nominationRepository.AddAsync(entity);
         try
@@ -171,7 +211,7 @@ public class PeerNominationService : IPeerNominationService
         }
 
         // Reload with includes
-        entity = await _nominationRepository.GetQueryable()
+        entity = await TenantNominationQuery()
             .Include(n => n.Appraisal)
             .Include(n => n.PeerEmployee)
             .Include(n => n.NominatedBy)
@@ -184,12 +224,12 @@ public class PeerNominationService : IPeerNominationService
 
     /// <summary>True when an active nomination for this (appraisal, peer) already exists in the database.</summary>
     private async Task<bool> PeerAlreadyNominatedAsync(Guid appraisalId, Guid peerEmployeeId, CancellationToken cancellationToken)
-        => await _nominationRepository.GetQueryable()
+        => await TenantNominationQuery()
             .AnyAsync(n => n.AppraisalId == appraisalId && n.PeerEmployeeId == peerEmployeeId, cancellationToken);
 
     public async Task<PeerNominationDto> UpdateAsync(UpdatePeerNominationDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _nominationRepository.GetQueryable()
+        var entity = await TenantNominationQuery()
             .Include(n => n.Appraisal)
                 .ThenInclude(a => a.AppraisalCycle)
                     .ThenInclude(c => c.AppraisalSettings)
@@ -215,7 +255,7 @@ public class PeerNominationService : IPeerNominationService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _nominationRepository.GetQueryable()
+        var entity = await TenantNominationQuery()
             .Include(n => n.Appraisal)
                 .ThenInclude(a => a.AppraisalCycle)
                     .ThenInclude(c => c.AppraisalSettings)
@@ -254,10 +294,7 @@ public class PeerNominationService : IPeerNominationService
 
     public async Task<bool> SendInvitationAsync(SendPeerEvaluationInvitationDto invitationDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _nominationRepository.GetByIdAsync(invitationDto.PeerNominationId);
-        
-        if (entity == null)
-            throw new ArgumentException($"Peer nomination with ID '{invitationDto.PeerNominationId}' not found.");
+        var entity = await GetOwnedNominationAsync(invitationDto.PeerNominationId, cancellationToken);
 
         if (entity.InvitationSentDate.HasValue)
         {
@@ -278,6 +315,7 @@ public class PeerNominationService : IPeerNominationService
 
     public async Task<PeerNominationSummaryDto> GetNominationSummaryAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var appraisal = await _appraisalRepository.GetQueryable()
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
@@ -285,7 +323,7 @@ public class PeerNominationService : IPeerNominationService
                 .ThenInclude(n => n.PeerEmployee)
             .Include(a => a.PeerNominations)
                 .ThenInclude(n => n.NominatedBy)
-            .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == appraisalId && a.TenantId == tenantId, cancellationToken);
 
         if (appraisal == null)
             throw new ArgumentException("Performance appraisal not found.");
@@ -324,11 +362,12 @@ public class PeerNominationService : IPeerNominationService
 
     public async Task<IEnumerable<PeerNominationDto>> BatchCreateAsync(BatchCreatePeerNominationsDto batchDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var appraisal = await _appraisalRepository.GetQueryable()
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.PeerNominations)
-            .FirstOrDefaultAsync(a => a.Id == batchDto.AppraisalId, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == batchDto.AppraisalId && a.TenantId == tenantId, cancellationToken);
 
         if (appraisal == null)
             throw new ArgumentException("Performance appraisal not found.");
@@ -361,7 +400,7 @@ public class PeerNominationService : IPeerNominationService
         if (duplicates.Any())
         {
             var employees = await _employeeRepository.GetQueryable()
-                .Where(e => duplicates.Contains(e.Id))
+                .Where(e => e.TenantId == tenantId && duplicates.Contains(e.Id))
                 .Select(e => e.FullName)
                 .ToListAsync(cancellationToken);
             throw new InvalidOperationException($"The following peers are already nominated: {string.Join(", ", employees)}");
@@ -376,6 +415,7 @@ public class PeerNominationService : IPeerNominationService
         {
             var nomination = new PeerNomination
             {
+                TenantId = tenantId,
                 AppraisalId = batchDto.AppraisalId,
                 PeerEmployeeId = peerId,
                 NominatedById = nominatorId,
@@ -392,7 +432,7 @@ public class PeerNominationService : IPeerNominationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Reload with includes
-        var reloadedNominations = await _nominationRepository.GetQueryable()
+        var reloadedNominations = await TenantNominationQuery()
             .Include(n => n.Appraisal)
             .Include(n => n.PeerEmployee)
             .Include(n => n.NominatedBy)
@@ -407,12 +447,13 @@ public class PeerNominationService : IPeerNominationService
 
     public async Task<IEnumerable<PeerNominationDto>> ApproveNominationsAsync(ApprovePeerNominationsDto approvalDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var appraisal = await _appraisalRepository.GetQueryable()
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.PeerNominations)
             .Include(a => a.EvaluatorEvaluations)
-            .FirstOrDefaultAsync(a => a.Id == approvalDto.AppraisalId, cancellationToken);
+            .FirstOrDefaultAsync(a => a.Id == approvalDto.AppraisalId && a.TenantId == tenantId, cancellationToken);
 
         if (appraisal == null)
             throw new ArgumentException("Performance appraisal not found.");
@@ -443,6 +484,7 @@ public class PeerNominationService : IPeerNominationService
             // Create EvaluatorEvaluation record ONLY on approval
             var evaluatorEvaluation = new EvaluatorEvaluation
             {
+                TenantId = tenantId,
                 AppraisalId = appraisal.Id,
                 EvaluatorId = nomination.PeerEmployeeId,
                 EvaluatorRole = EvaluatorRole.Peer,
@@ -460,7 +502,7 @@ public class PeerNominationService : IPeerNominationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Reload with includes
-        var reloadedNominations = await _nominationRepository.GetQueryable()
+        var reloadedNominations = await TenantNominationQuery()
             .Include(n => n.Appraisal)
             .Include(n => n.PeerEmployee)
             .Include(n => n.NominatedBy)
@@ -477,7 +519,10 @@ public class PeerNominationService : IPeerNominationService
 
     public async Task<IEnumerable<PeerNominationDto>> RejectNominationsAsync(RejectPeerNominationsDto rejectionDto, CancellationToken cancellationToken = default)
     {
-        var nominations = await _nominationRepository.GetQueryable()
+        var tenantId = GetTenantId();
+        await GetOwnedAppraisalAsync(rejectionDto.AppraisalId, cancellationToken);
+
+        var nominations = await TenantNominationQuery()
             .Where(n => rejectionDto.NominationIds.Contains(n.Id) && n.AppraisalId == rejectionDto.AppraisalId)
             .ToListAsync(cancellationToken);
 
@@ -497,7 +542,7 @@ public class PeerNominationService : IPeerNominationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Reload with includes
-        var reloadedNominations = await _nominationRepository.GetQueryable()
+        var reloadedNominations = await TenantNominationQuery()
             .Include(n => n.Appraisal)
             .Include(n => n.PeerEmployee)
             .Include(n => n.NominatedBy)

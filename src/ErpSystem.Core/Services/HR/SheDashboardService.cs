@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 
 namespace ErpSystem.Core.Services.HR;
@@ -16,6 +17,7 @@ public class SheDashboardService : ISheDashboardService
     private readonly IShePermitToWorkService _permits;
     private readonly ISafetyEquipmentService _equipment;
     private readonly IPpeManagementService _ppe;
+    private readonly ICurrentUserProvider _currentUserProvider;
 
     public SheDashboardService(
         ISafetyIncidentService incidents,
@@ -24,7 +26,8 @@ public class SheDashboardService : ISheDashboardService
         ISafetyInspectionService inspections,
         IShePermitToWorkService permits,
         ISafetyEquipmentService equipment,
-        IPpeManagementService ppe)
+        IPpeManagementService ppe,
+        ICurrentUserProvider currentUserProvider)
     {
         _incidents = incidents;
         _hazards = hazards;
@@ -33,10 +36,34 @@ public class SheDashboardService : ISheDashboardService
         _permits = permits;
         _equipment = equipment;
         _ppe = ppe;
+        _currentUserProvider = currentUserProvider;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
     }
 
     public async Task<SheDashboardDto> GetAsync(CancellationToken cancellationToken = default)
     {
+        // Ensure an authenticated tenant is present; composed SHE services apply the same scope
+        // to every underlying list/count so dashboard totals never fold in other tenants' rows.
+        _ = GetTenantId();
+
         return new SheDashboardDto
         {
             // Incidents

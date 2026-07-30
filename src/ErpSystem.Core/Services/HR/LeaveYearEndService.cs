@@ -20,6 +20,7 @@ public class LeaveYearEndService : ILeaveYearEndService
     private readonly IGenericRepository<LeaveAdjustment> _adjustmentRepository;
     private readonly ILeaveBalanceRecalculationService _recalculationService;
     private readonly ILeaveEntitlementService _entitlementService;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<LeaveYearEndService> _logger;
@@ -30,6 +31,7 @@ public class LeaveYearEndService : ILeaveYearEndService
         IGenericRepository<LeaveAdjustment> adjustmentRepository,
         ILeaveBalanceRecalculationService recalculationService,
         ILeaveEntitlementService entitlementService,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IDateTimeProvider clock,
         ILogger<LeaveYearEndService> logger)
@@ -39,13 +41,26 @@ public class LeaveYearEndService : ILeaveYearEndService
         _adjustmentRepository = adjustmentRepository;
         _recalculationService = recalculationService;
         _entitlementService = entitlementService;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _clock = clock;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
     public async Task<LeaveYearEndResult> ProcessCarryOverAsync(int fromYear, Guid? employeeId = null, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var result = new LeaveYearEndResult();
         var toYear = fromYear + 1;
 
@@ -56,7 +71,7 @@ public class LeaveYearEndService : ILeaveYearEndService
             result.BalancesProcessed++;
 
             var leaveType = balance.LeaveType ?? await _leaveTypeRepository.GetByIdAsync(balance.LeaveTypeId);
-            if (leaveType is null || !leaveType.AllowCarryOver)
+            if (leaveType is null || leaveType.TenantId != tenantId || !leaveType.AllowCarryOver)
                 continue;
 
             var remaining = balance.AvailableDays;
@@ -68,7 +83,8 @@ public class LeaveYearEndService : ILeaveYearEndService
             // Find-or-create the next year's balance and set (not stack) its carried-over figure.
             var target = await _balanceRepository
                 .GetQueryable()
-                .FirstOrDefaultAsync(b => b.EmployeeId == balance.EmployeeId
+                .FirstOrDefaultAsync(b => b.TenantId == tenantId
+                                       && b.EmployeeId == balance.EmployeeId
                                        && b.LeaveTypeId == balance.LeaveTypeId
                                        && b.Year == toYear, ct);
 
@@ -80,6 +96,7 @@ public class LeaveYearEndService : ILeaveYearEndService
                         balance.EmployeeId, balance.LeaveTypeId, balance.LeaveSubTypeId, toYear, innerCt);
                     target = new LeaveBalance
                     {
+                        TenantId        = tenantId,
                         EmployeeId      = balance.EmployeeId,
                         LeaveTypeId     = balance.LeaveTypeId,
                         LeaveSubTypeId  = balance.LeaveSubTypeId,
@@ -109,6 +126,7 @@ public class LeaveYearEndService : ILeaveYearEndService
 
     public async Task<LeaveYearEndResult> ProcessForfeitureAsync(int year, DateOnly? asOf = null, Guid? employeeId = null, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var result = new LeaveYearEndResult();
         var effectiveAsOf = asOf ?? _clock.TodayUtc;
         var yearStart = new DateOnly(year, 1, 1);
@@ -120,7 +138,7 @@ public class LeaveYearEndService : ILeaveYearEndService
             result.BalancesProcessed++;
 
             var leaveType = balance.LeaveType ?? await _leaveTypeRepository.GetByIdAsync(balance.LeaveTypeId);
-            if (leaveType is null)
+            if (leaveType is null || leaveType.TenantId != tenantId)
                 continue;
 
             bool affected = false;
@@ -146,7 +164,7 @@ public class LeaveYearEndService : ILeaveYearEndService
             {
                 var alreadyForfeited = await _adjustmentRepository
                     .GetQueryable()
-                    .AnyAsync(a => a.LeaveBalanceId == balance.Id && a.Reason == ForfeitureReason, ct);
+                    .AnyAsync(a => a.TenantId == tenantId && a.LeaveBalanceId == balance.Id && a.Reason == ForfeitureReason, ct);
 
                 var unused = balance.AvailableDays;
                 if (!alreadyForfeited && unused > 0)
@@ -155,6 +173,7 @@ public class LeaveYearEndService : ILeaveYearEndService
                     {
                         var adjustment = new LeaveAdjustment
                         {
+                            TenantId       = tenantId,
                             LeaveBalanceId = balance.Id,
                             EmployeeId     = balance.EmployeeId,
                             LeaveTypeId    = balance.LeaveTypeId,
@@ -186,10 +205,11 @@ public class LeaveYearEndService : ILeaveYearEndService
 
     private async Task<List<LeaveBalance>> LoadBalancesAsync(int year, Guid? employeeId, CancellationToken ct)
     {
+        var tenantId = GetTenantId();
         var query = _balanceRepository
             .GetQueryable()
             .Include(b => b.LeaveType)
-            .Where(b => b.Year == year);
+            .Where(b => b.TenantId == tenantId && b.Year == year);
 
         if (employeeId.HasValue)
             query = query.Where(b => b.EmployeeId == employeeId.Value);

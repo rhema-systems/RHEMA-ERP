@@ -14,24 +14,56 @@ namespace ErpSystem.Core.Services.HR;
 public class AppraisalConversationService : IAppraisalConversationService
 {
     private readonly IGenericRepository<AppraisalConversation> _conversationRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalConversationService> _logger;
 
     public AppraisalConversationService(
         IGenericRepository<AppraisalConversation> conversationRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalConversationService> logger)
     {
         _conversationRepository = conversationRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    private IQueryable<AppraisalConversation> BaseQuery => _conversationRepository.GetQueryable()
-        .Include(c => c.Appraisal)
-            .ThenInclude(a => a.Employee)
-        .Include(c => c.ScheduledBy)
-        .Include(c => c.ConductedBy);
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A conversation owned by another tenant is reported as missing rather than forbidden, so the
+    // endpoints do not confirm that the id exists elsewhere.
+    private async Task<AppraisalConversation> GetOwnedAsync(Guid id)
+    {
+        var entity = await _conversationRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Conversation with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<AppraisalConversation> BaseQuery
+    {
+        get
+        {
+            var tenantId = GetTenantId();
+            return _conversationRepository.GetQueryable()
+                .Where(c => c.TenantId == tenantId)
+                .Include(c => c.Appraisal)
+                    .ThenInclude(a => a.Employee)
+                .Include(c => c.ScheduledBy)
+                .Include(c => c.ConductedBy);
+        }
+    }
 
     public async Task<AppraisalConversationDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -85,6 +117,7 @@ public class AppraisalConversationService : IAppraisalConversationService
     public async Task<AppraisalConversationDto> CreateAsync(CreateAppraisalConversationDto createDto, CancellationToken cancellationToken = default)
     {
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
         entity.IsCompleted = false;
 
         await _conversationRepository.AddAsync(entity);
@@ -96,9 +129,7 @@ public class AppraisalConversationService : IAppraisalConversationService
 
     public async Task<AppraisalConversationDto> UpdateAsync(UpdateAppraisalConversationDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _conversationRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Conversation with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         if (entity.IsCompleted)
             throw new InvalidOperationException("Cannot update a completed conversation.");
@@ -113,9 +144,7 @@ public class AppraisalConversationService : IAppraisalConversationService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _conversationRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Conversation with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _conversationRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -127,9 +156,7 @@ public class AppraisalConversationService : IAppraisalConversationService
         Guid conversationId, string? postMeetingNotes, string? keyTakeaways,
         CancellationToken cancellationToken = default)
     {
-        var entity = await _conversationRepository.GetByIdAsync(conversationId);
-        if (entity == null)
-            throw new ArgumentException($"Conversation with ID '{conversationId}' not found.");
+        var entity = await GetOwnedAsync(conversationId);
 
         if (entity.IsCompleted)
             throw new InvalidOperationException("Conversation is already completed.");

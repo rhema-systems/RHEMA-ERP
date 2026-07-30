@@ -1174,78 +1174,96 @@ public class TrainingBudgetRepository : GenericRepository<TrainingBudget>, ITrai
 {
     public TrainingBudgetRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TrainingBudget?> GetByBudgetCodeAsync(string budgetCode)
+    // Single source of tenant + soft-delete scoping so no query below can forget either.
+    private IQueryable<TrainingBudget> OwnedBy(Guid tenantId)
+        => _dbSet.Where(b => b.TenantId == tenantId && !b.IsDeleted);
+
+    public async Task<TrainingBudget?> GetForTenantAsync(Guid id, Guid tenantId)
     {
-        return await _dbSet
-            .FirstOrDefaultAsync(b => b.BudgetCode == budgetCode && !b.IsDeleted);
+        return await OwnedBy(tenantId).FirstOrDefaultAsync(b => b.Id == id);
     }
 
-    public async Task<IEnumerable<TrainingBudget>> GetByYearAsync(int year)
+    public async Task<TrainingBudget?> GetByBudgetCodeAsync(string budgetCode, Guid tenantId)
     {
-        return await _dbSet
+        return await OwnedBy(tenantId)
+            .FirstOrDefaultAsync(b => b.BudgetCode == budgetCode);
+    }
+
+    public async Task<IEnumerable<TrainingBudget>> GetAllForTenantAsync(Guid tenantId)
+    {
+        return await OwnedBy(tenantId)
             .Include(b => b.OrganizationUnit)
-            .Where(b => b.Year == year && !b.IsDeleted)
+            .OrderByDescending(b => b.Year)
+            .ThenBy(b => b.Quarter)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<TrainingBudget>> GetByYearAsync(int year, Guid tenantId)
+    {
+        return await OwnedBy(tenantId)
+            .Include(b => b.OrganizationUnit)
+            .Where(b => b.Year == year)
             .OrderBy(b => b.Quarter)
             .ThenBy(b => b.OrganizationUnit!.Name)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<TrainingBudget>> GetByYearAndQuarterAsync(int year, int? quarter)
+    public async Task<IEnumerable<TrainingBudget>> GetByYearAndQuarterAsync(int year, int? quarter, Guid tenantId)
     {
-        return await _dbSet
+        return await OwnedBy(tenantId)
             .Include(b => b.OrganizationUnit)
-            .Where(b => b.Year == year && b.Quarter == quarter && !b.IsDeleted)
+            .Where(b => b.Year == year && b.Quarter == quarter)
             .OrderBy(b => b.OrganizationUnit!.Name)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<TrainingBudget>> GetByOrganizationUnitAsync(Guid orgUnitId)
+    public async Task<IEnumerable<TrainingBudget>> GetByOrganizationUnitAsync(Guid orgUnitId, Guid tenantId)
     {
-        return await _dbSet
-            .Where(b => b.OrganizationUnitId == orgUnitId && !b.IsDeleted)
+        return await OwnedBy(tenantId)
+            .Where(b => b.OrganizationUnitId == orgUnitId)
             .OrderByDescending(b => b.Year)
             .ThenBy(b => b.Quarter)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<TrainingBudget>> GetByStatusAsync(TrainingBudgetStatus status)
+    public async Task<IEnumerable<TrainingBudget>> GetByStatusAsync(TrainingBudgetStatus status, Guid tenantId)
     {
-        return await _dbSet
+        return await OwnedBy(tenantId)
             .Include(b => b.OrganizationUnit)
-            .Where(b => b.Status == status && !b.IsDeleted)
+            .Where(b => b.Status == status)
             .OrderByDescending(b => b.Year)
             .ThenBy(b => b.Quarter)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<TrainingBudget>> GetApprovedAsync()
+    public async Task<IEnumerable<TrainingBudget>> GetApprovedAsync(Guid tenantId)
     {
-        return await _dbSet
+        return await OwnedBy(tenantId)
             .Include(b => b.OrganizationUnit)
-            .Where(b => b.Status == TrainingBudgetStatus.Approved && !b.IsDeleted)
+            .Where(b => b.Status == TrainingBudgetStatus.Approved)
             .OrderByDescending(b => b.Year)
             .ThenBy(b => b.Quarter)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<TrainingBudget>> GetWithExceededBudgetAsync()
+    public async Task<IEnumerable<TrainingBudget>> GetWithExceededBudgetAsync(Guid tenantId)
     {
-        return await _dbSet
+        return await OwnedBy(tenantId)
             .Include(b => b.OrganizationUnit)
-            .Where(b => !b.IsDeleted && b.SpentAmount > b.AllocatedAmount)
+            .Where(b => b.SpentAmount > b.AllocatedAmount)
             .OrderByDescending(b => b.Year)
             .ToListAsync();
     }
 
-    public async Task<TrainingBudget?> GetWithFullDetailsAsync(Guid id)
+    public async Task<TrainingBudget?> GetWithFullDetailsAsync(Guid id, Guid tenantId)
     {
-        return await _dbSet
+        return await OwnedBy(tenantId)
             .Include(b => b.OrganizationLevel)
             .Include(b => b.OrganizationUnit)
             .Include(b => b.ApprovedBy)
             .Include(b => b.Transactions).ThenInclude(t => t.RecordedBy)
             .Include(b => b.Schedules).ThenInclude(s => s.Program)
-            .FirstOrDefaultAsync(b => b.Id == id && !b.IsDeleted);
+            .FirstOrDefaultAsync(b => b.Id == id);
     }
 }
 
@@ -1257,31 +1275,33 @@ public class TrainingBudgetTransactionRepository : GenericRepository<TrainingBud
 {
     public TrainingBudgetTransactionRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<IEnumerable<TrainingBudgetTransaction>> GetByBudgetIdAsync(Guid budgetId)
+    private IQueryable<TrainingBudgetTransaction> OwnedBy(Guid tenantId)
+        => _dbSet.Where(t => t.TenantId == tenantId && !t.IsDeleted);
+
+    public async Task<IEnumerable<TrainingBudgetTransaction>> GetByBudgetIdAsync(Guid budgetId, Guid tenantId)
     {
-        return await _dbSet
+        return await OwnedBy(tenantId)
             .Include(t => t.RecordedBy)
-            .Where(t => t.BudgetId == budgetId && !t.IsDeleted)
+            .Where(t => t.BudgetId == budgetId)
             .OrderByDescending(t => t.TransactionDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<TrainingBudgetTransaction>> GetByScheduleIdAsync(Guid scheduleId)
+    public async Task<IEnumerable<TrainingBudgetTransaction>> GetByScheduleIdAsync(Guid scheduleId, Guid tenantId)
     {
-        return await _dbSet
+        return await OwnedBy(tenantId)
             .Include(t => t.Budget)
             .Include(t => t.RecordedBy)
-            .Where(t => t.ScheduleId == scheduleId && !t.IsDeleted)
+            .Where(t => t.ScheduleId == scheduleId)
             .OrderByDescending(t => t.TransactionDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<TrainingBudgetTransaction>> GetByDateRangeAsync(Guid budgetId, DateTime from, DateTime to)
+    public async Task<IEnumerable<TrainingBudgetTransaction>> GetByDateRangeAsync(Guid budgetId, DateTime from, DateTime to, Guid tenantId)
     {
-        return await _dbSet
+        return await OwnedBy(tenantId)
             .Include(t => t.RecordedBy)
             .Where(t => t.BudgetId == budgetId
-                     && !t.IsDeleted
                      && t.TransactionDate >= from
                      && t.TransactionDate <= to)
             .OrderByDescending(t => t.TransactionDate)

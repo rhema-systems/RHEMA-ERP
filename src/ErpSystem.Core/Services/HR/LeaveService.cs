@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Interfaces;
@@ -78,23 +79,114 @@ public class LeaveService : ILeaveService
         _clock = clock;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserService.TenantId;
+        if (tenantId is null || tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId.Value;
+    }
+
+    // A leave request owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<LeaveRequest> GetOwnedLeaveRequestAsync(Guid id)
+    {
+        var entity = await _leaveRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave request with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LeaveBalance> GetOwnedLeaveBalanceAsync(Guid id)
+    {
+        var entity = await _leaveBalanceRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave balance with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LeaveAdjustment> GetOwnedLeaveAdjustmentAsync(Guid id)
+    {
+        var entity = await _leaveAdjustmentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave adjustment with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LeaveRequestAttachment> GetOwnedAttachmentAsync(Guid id)
+    {
+        var entity = await _attachmentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave request attachment '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var entity = await _employeeRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LeaveType> GetOwnedLeaveTypeAsync(Guid id)
+    {
+        var entity = await _leaveTypeRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave type with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<bool> HasConflictingLeaveAsync(
+        Guid employeeId, DateOnly startDate, DateOnly endDate, Guid? excludeRequestId = null)
+    {
+        var tenantId = GetTenantId();
+        var query = _leaveRepository.GetQueryable()
+            .Where(la => la.TenantId == tenantId &&
+                        la.EmployeeId == employeeId &&
+                        (la.Status == LeaveStatus.Approved || la.Status == LeaveStatus.Pending) &&
+                        (la.StartDate <= endDate && la.EndDate >= startDate));
+
+        if (excludeRequestId.HasValue)
+            query = query.Where(la => la.Id != excludeRequestId.Value);
+
+        return await query.AnyAsync();
+    }
+
+    private async Task<bool> RelieverHasConflictAsync(Guid relieverId, DateOnly startDate, DateOnly endDate)
+    {
+        var tenantId = GetTenantId();
+
+        var relieverOnLeave = await _leaveRepository.GetQueryable()
+            .AnyAsync(la => la.TenantId == tenantId &&
+                           la.EmployeeId == relieverId &&
+                           la.Status == LeaveStatus.Approved &&
+                           la.StartDate <= endDate &&
+                           la.EndDate >= startDate);
+
+        if (relieverOnLeave)
+            return true;
+
+        return await _leaveRepository.GetQueryable()
+            .AnyAsync(la => la.TenantId == tenantId &&
+                           la.RelieverEmployeeId == relieverId &&
+                           la.Status == LeaveStatus.Approved &&
+                           la.StartDate <= endDate &&
+                           la.EndDate >= startDate);
+    }
+
     #region Leave CRUD operations
 
     public async Task<LeaveRequestDto> CreateLeaveRequestAsync(CreateLeaveRequestDto dto)
     {
         // Validate employee exists
-        var employee = await _employeeRepository.GetByIdAsync(dto.EmployeeId);
-        if (employee == null)
-        {
-            throw new ArgumentException($"Employee with ID '{dto.EmployeeId}' not found.");
-        }
+        var employee = await GetOwnedEmployeeAsync(dto.EmployeeId);
 
         // Validate leave type exists
-        var leaveType = await _leaveTypeRepository.GetByIdAsync(dto.LeaveTypeId);
-        if (leaveType == null)
-        {
-            throw new ArgumentException($"Leave type with ID '{dto.LeaveTypeId}' not found.");
-        }
+        var leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
 
         // Check that the employee is eligible for this leave type (gender / org / position rules)
         var isEligible = await _leaveTypeService.IsEmployeeEligibleAsync(dto.LeaveTypeId, dto.EmployeeId);
@@ -134,7 +226,7 @@ public class LeaveService : ILeaveService
         }
 
         // Check for conflicting leave
-        var hasConflict = await _leaveRepository.HasConflictingLeaveAsync(dto.EmployeeId, dto.StartDate, dto.EndDate, null);
+        var hasConflict = await HasConflictingLeaveAsync(dto.EmployeeId, dto.StartDate, dto.EndDate, null);
 
         if (hasConflict)
         {
@@ -148,8 +240,10 @@ public class LeaveService : ILeaveService
         // We do NOT persist the balance here — the recalculation service (called inside the
         // transaction below) creates and populates it.
         var currentYear = dto.StartDate.Year;
+        var tenantId = GetTenantId();
         var balance = await _leaveBalanceRepository.FirstOrDefaultAsync(
-            lb => lb.EmployeeId == dto.EmployeeId &&
+            lb => lb.TenantId == tenantId &&
+                  lb.EmployeeId == dto.EmployeeId &&
                   lb.LeaveTypeId == dto.LeaveTypeId &&
                   lb.Year == currentYear);
 
@@ -182,6 +276,7 @@ public class LeaveService : ILeaveService
                 "This leave type requires a reliever, but none could be assigned. Please select a reliever.");
 
         var request = dto.ToEntity();
+        request.TenantId = tenantId;
         request.RequestDate = _clock.UtcNow;
         request.TotalDays = totalDays;
         request.Status = dto.SaveAsDraft ? LeaveStatus.Draft : LeaveStatus.Pending;
@@ -219,8 +314,7 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveRequestDto> UpdateDraftAsync(Guid id, CreateLeaveRequestDto dto)
     {
-        var request = await _leaveRepository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Leave request with ID '{id}' not found.");
+        var request = await GetOwnedLeaveRequestAsync(id);
 
         if (request.Status != LeaveStatus.Draft)
             throw new InvalidOperationException("Only draft leave requests can be updated.");
@@ -234,8 +328,7 @@ public class LeaveService : ILeaveService
         LeaveType leaveType;
         if (typeChanged)
         {
-            leaveType = await _leaveTypeRepository.GetByIdAsync(dto.LeaveTypeId)
-                ?? throw new ArgumentException($"Leave type with ID '{dto.LeaveTypeId}' not found.");
+            leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
 
             var isEligible = await _leaveTypeService.IsEmployeeEligibleAsync(dto.LeaveTypeId, request.EmployeeId);
             if (!isEligible)
@@ -249,8 +342,7 @@ public class LeaveService : ILeaveService
         }
         else
         {
-            leaveType = await _leaveTypeRepository.GetByIdAsync(request.LeaveTypeId)
-                ?? throw new ArgumentException("Leave type not found.");
+            leaveType = await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
         }
 
         if (dto.EndDate < dto.StartDate)
@@ -259,7 +351,7 @@ public class LeaveService : ILeaveService
         // Check for conflicting leave (exclude this request itself).
         if (datesChanged)
         {
-            var hasConflict = await _leaveRepository.HasConflictingLeaveAsync(
+            var hasConflict = await HasConflictingLeaveAsync(
                 request.EmployeeId, dto.StartDate, dto.EndDate, id);
             if (hasConflict)
                 throw new InvalidOperationException("Employee already has a leave request for this period.");
@@ -272,8 +364,10 @@ public class LeaveService : ILeaveService
         if (needsBalanceRecalc)
         {
             var currentYear = dto.StartDate.Year;
+            var tenantId = GetTenantId();
             var balance = await _leaveBalanceRepository.FirstOrDefaultAsync(
-                lb => lb.EmployeeId == request.EmployeeId &&
+                lb => lb.TenantId == tenantId &&
+                      lb.EmployeeId == request.EmployeeId &&
                       lb.LeaveTypeId == dto.LeaveTypeId &&
                       lb.Year == currentYear);
 
@@ -329,8 +423,7 @@ public class LeaveService : ILeaveService
 
     public async Task<bool> SubmitForApprovalAsync(Guid id)
     {
-        var request = await _leaveRepository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Leave request with ID '{id}' not found.");
+        var request = await GetOwnedLeaveRequestAsync(id);
 
         if (request.Status != LeaveStatus.Pending && request.Status != LeaveStatus.Draft)
             throw new InvalidOperationException("Only Pending or Draft leave requests can be submitted for approval.");
@@ -340,8 +433,8 @@ public class LeaveService : ILeaveService
         // Auto-approval: leave types configured with RequiresApproval = false skip the workflow
         // entirely and are approved on submission (balance deducted via the recalc, same as a
         // normal approval). Used for low-risk types (e.g. short casual leave).
-        var leaveType = await _leaveTypeRepository.GetByIdAsync(request.LeaveTypeId);
-        if (leaveType != null && !leaveType.RequiresApproval)
+        var leaveType = await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
+        if (!leaveType.RequiresApproval)
         {
             request.Status = LeaveStatus.Approved;
             request.ApprovedById = userId == Guid.Empty ? null : userId;
@@ -376,7 +469,12 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveRequestDto> ApproveLeaveAsync(Guid id, ApproveLeaveDto dto)
     {
-        var request = await _leaveRepository.GetByIdAsync(id, lr => lr.Employee, lr => lr.LeaveType)
+        var tenantId = GetTenantId();
+        var request = await _leaveRepository
+            .GetQueryable()
+            .Include(lr => lr.Employee)
+            .Include(lr => lr.LeaveType)
+            .FirstOrDefaultAsync(lr => lr.Id == id && lr.TenantId == tenantId)
             ?? throw new ArgumentException($"Leave request with ID '{id}' not found.");
 
         var userId = GetCurrentUserId();
@@ -410,8 +508,7 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveRequestDto> RejectLeaveAsync(Guid id, RejectLeaveDto dto)
     {
-        var request = await _leaveRepository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Leave request with ID '{id}' not found.");
+        var request = await GetOwnedLeaveRequestAsync(id);
 
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty)
@@ -444,6 +541,7 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveRequestDto> GetLeaveRequestByIdAsync(Guid id)
     {
+        var tenantId = GetTenantId();
         var request = await _leaveRepository
             .GetQueryable()
             .Include(la => la.Employee)
@@ -451,7 +549,7 @@ public class LeaveService : ILeaveService
             .Include(la => la.LeaveSubType)
             .Include(la => la.RelieverEmployee)
             .Include(la => la.SecondRelieverEmployee)
-            .FirstOrDefaultAsync(la => la.Id == id);
+            .FirstOrDefaultAsync(la => la.Id == id && la.TenantId == tenantId);
 
         if (request == null)
         {
@@ -464,19 +562,27 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveRequestDto?> GetLeaveRequestByNumberAsync(string requestNumber)
     {
-        var request = await _leaveRepository.GetByRequestNumberAsync(requestNumber);
-        // return request == null ? null : _mapper.Map<LeaveRequestDto>(request);
+        var tenantId = GetTenantId();
+        var request = await _leaveRepository
+            .GetQueryable()
+            .Include(lr => lr.Employee)
+            .Include(lr => lr.LeaveType)
+            .Include(lr => lr.LeaveSubType)
+            .Include(lr => lr.RelieverEmployee)
+            .Include(lr => lr.SecondRelieverEmployee)
+            .FirstOrDefaultAsync(lr => lr.TenantId == tenantId && lr.RequestNumber == requestNumber);
         return request?.ToDto();
     }
 
     public async Task<PagedResult<LeaveRequestDto>> GetEmployeeLeaveHistoryAsync(Guid employeeId, int year, int pageNumber, int pageSize)
     {
+        var tenantId = GetTenantId();
         var query = _leaveRepository
             .GetQueryable()
             .Include(la => la.LeaveType)
             .Include(la => la.RelieverEmployee)
             .Include(la => la.SecondRelieverEmployee)
-            .Where(la => la.EmployeeId == employeeId && la.StartDate.Year == year);
+            .Where(la => la.TenantId == tenantId && la.EmployeeId == employeeId && la.StartDate.Year == year);
 
         var totalCount = await query.CountAsync();
 
@@ -500,7 +606,9 @@ public class LeaveService : ILeaveService
 
     public async Task<PagedResult<LeaveRequestDto>> GetPendingApprovalsAsync(Guid managerId, int pageNumber, int pageSize)
     {
-        var requests = await _leaveRepository.GetPendingApprovalsForManagerAsync(managerId);
+        var tenantId = GetTenantId();
+        var requests = (await _leaveRepository.GetPendingApprovalsForManagerAsync(managerId))
+            .Where(r => r.TenantId == tenantId);
 
         var totalCount = requests.Count();
         var pagedrequests = requests
@@ -522,11 +630,12 @@ public class LeaveService : ILeaveService
 
     public async Task<IEnumerable<LeaveBalanceDto>> GetEmployeeLeaveBalancesAsync(Guid employeeId, int year)
     {
+        var tenantId = GetTenantId();
         var balances = await _leaveBalanceRepository
             .GetQueryable()
             .Include(lb => lb.LeaveType)
             .Include(lb => lb.Employee)
-            .Where(lb => lb.EmployeeId == employeeId && lb.Year == year)
+            .Where(lb => lb.TenantId == tenantId && lb.EmployeeId == employeeId && lb.Year == year)
             .ToListAsync();
 
         var dtos = balances.ToDtoList();
@@ -541,13 +650,14 @@ public class LeaveService : ILeaveService
 
     public async Task<IEnumerable<LeaveBalanceDto>> GetAllLeaveBalancesAsync(int year, Guid? employeeId, Guid? leaveTypeId)
     {
+        var tenantId = GetTenantId();
         var query = _leaveBalanceRepository
             .GetQueryable()
             .Include(lb => lb.LeaveType)
             .Include(lb => lb.LeaveSubType)
             .Include(lb => lb.Employee)
                 .ThenInclude(e => e.OrganizationUnit)
-            .Where(lb => lb.Year == year);
+            .Where(lb => lb.TenantId == tenantId && lb.Year == year);
 
         if (employeeId.HasValue)
             query = query.Where(lb => lb.EmployeeId == employeeId.Value);
@@ -569,11 +679,13 @@ public class LeaveService : ILeaveService
         // One pass over the balances for leave types flagged mandatory-to-take. Compliance is
         // measured against the entitlement the employee is required to use within the year:
         // taken (UsedDays) ≥ entitled = Compliant; pending covers the gap = Scheduled; else Outstanding.
+        var tenantId = GetTenantId();
         var balances = await _leaveBalanceRepository
             .GetQueryable()
             .Include(lb => lb.LeaveType)
             .Include(lb => lb.Employee)
-            .Where(lb => lb.Year == year
+            .Where(lb => lb.TenantId == tenantId
+                      && lb.Year == year
                       && lb.LeaveType.MandatoryAnnualLeave
                       && lb.LeaveType.IsActive
                       && !lb.Employee.IsDeleted)
@@ -611,13 +723,14 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveBalanceDetailDto?> GetLeaveBalanceDetailAsync(Guid balanceId)
     {
+        var tenantId = GetTenantId();
         var balance = await _leaveBalanceRepository
             .GetQueryable()
             .Include(lb => lb.LeaveType)
             .Include(lb => lb.LeaveSubType)
             .Include(lb => lb.Employee)
                 .ThenInclude(e => e.OrganizationUnit)
-            .FirstOrDefaultAsync(lb => lb.Id == balanceId);
+            .FirstOrDefaultAsync(lb => lb.Id == balanceId && lb.TenantId == tenantId);
 
         if (balance == null) return null;
 
@@ -626,7 +739,8 @@ public class LeaveService : ILeaveService
             .Include(r => r.LeaveType)
             .Include(r => r.RelieverEmployee)
             .Include(r => r.SecondRelieverEmployee)
-            .Where(r => r.EmployeeId == balance.EmployeeId
+            .Where(r => r.TenantId == tenantId
+                     && r.EmployeeId == balance.EmployeeId
                      && r.LeaveTypeId == balance.LeaveTypeId
                      && r.StartDate.Year == balance.Year)
             .OrderByDescending(r => r.RequestDate)
@@ -637,7 +751,8 @@ public class LeaveService : ILeaveService
             .Include(e => e.Employee)
             .Include(e => e.ProcessedByEmployee)
             .Include(e => e.LeaveRequest).ThenInclude(lr => lr.LeaveType)
-            .Where(e => e.EmployeeId == balance.EmployeeId
+            .Where(e => e.TenantId == tenantId
+                     && e.EmployeeId == balance.EmployeeId
                      && e.LeaveTypeId == balance.LeaveTypeId
                      && e.Year == balance.Year)
             .OrderByDescending(e => e.ProcessedDate)
@@ -647,7 +762,7 @@ public class LeaveService : ILeaveService
             .GetQueryable()
             .Include(a => a.PerformedByEmployee)
             .Include(a => a.ReasonCode)
-            .Where(a => a.LeaveBalanceId == balanceId)
+            .Where(a => a.TenantId == tenantId && a.LeaveBalanceId == balanceId)
             .OrderByDescending(a => a.AdjustmentDate)
             .ToListAsync();
 
@@ -682,12 +797,7 @@ public class LeaveService : ILeaveService
 
     public async Task<bool> CancelLeaveRequestAsync(Guid id, string cancellationReason)
     {
-        var request = await _leaveRepository.GetByIdAsync(id);
-
-        if (request == null)
-        {
-            throw new ArgumentException($"Leave request with ID '{id}' not found.");
-        }
+        var request = await GetOwnedLeaveRequestAsync(id);
 
         if (request.Status == LeaveStatus.Cancelled || request.Status == LeaveStatus.Completed)
         {
@@ -715,12 +825,7 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveRequestDto> CloseLeaveRequestAsync(Guid id, CloseLeaveDto dto)
     {
-        var request = await _leaveRepository.GetByIdAsync(id);
-
-        if (request == null)
-        {
-            throw new ArgumentException($"Leave request with ID '{id}' not found.");
-        }
+        var request = await GetOwnedLeaveRequestAsync(id);
 
         if (request.Status != LeaveStatus.Approved)
         {
@@ -753,7 +858,9 @@ public class LeaveService : ILeaveService
 
         // Match any holiday that overlaps the requested range (not only holidays fully inside it),
         // e.g. a Dec 30 – Jan 2 holiday must be counted for a Jan 1 – 5 leave request.
-        var holidays = await _holidayRepository.FindAsync(h => h.DateFrom <= endDate && h.DateTo >= startDate);
+        var tenantId = GetTenantId();
+        var holidays = await _holidayRepository.FindAsync(h =>
+            h.TenantId == tenantId && h.DateFrom <= endDate && h.DateTo >= startDate);
         var holidayDates = new HashSet<DateOnly>();
         foreach (var holiday in holidays)
         {
@@ -798,18 +905,14 @@ public class LeaveService : ILeaveService
             throw new InvalidOperationException("Employee cannot be their own reliever.");
         }
 
-        var reliever = await _employeeRepository.GetByIdAsync(relieverId);
-        if (reliever == null)
-        {
-            throw new ArgumentException($"Reliever with ID '{relieverId}' not found.");
-        }
+        var reliever = await GetOwnedEmployeeAsync(relieverId);
 
         if (reliever.StaffStatus != StaffStatus.Active)
         {
             throw new InvalidOperationException("Reliever must be an active employee.");
         }
 
-        var hasConflict = await _leaveRepository.RelieverHasConflictAsync(relieverId, startDate, endDate);
+        var hasConflict = await RelieverHasConflictAsync(relieverId, startDate, endDate);
 
         if (hasConflict)
         {
@@ -825,7 +928,7 @@ public class LeaveService : ILeaveService
     /// </summary>
     private async Task<Guid?> SuggestRelieverAsync(Guid managerId, DateOnly startDate, DateOnly endDate)
     {
-        var managerHasConflict = await _leaveRepository.RelieverHasConflictAsync(managerId, startDate, endDate);
+        var managerHasConflict = await RelieverHasConflictAsync(managerId, startDate, endDate);
 
         return managerHasConflict ? null : managerId;
     }
@@ -840,9 +943,10 @@ public class LeaveService : ILeaveService
         if (dto.RelieverEmployeeId.HasValue && dto.SecondRelieverEmployeeId.HasValue)
             return;
 
+        var tenantId = GetTenantId();
         var predefined = await _employeeRelieverRepository
             .GetQueryable()
-            .Where(r => r.EmployeeId == dto.EmployeeId && r.IsActive)
+            .Where(r => r.TenantId == tenantId && r.EmployeeId == dto.EmployeeId && r.IsActive)
             .OrderBy(r => r.Priority)
             .ToListAsync();
 
@@ -853,7 +957,7 @@ public class LeaveService : ILeaveService
                 continue;
 
             // Don't auto-assign a reliever who is unavailable (the user can still override on the form).
-            var clash = await _leaveRepository.RelieverHasConflictAsync(pr.RelieverEmployeeId, dto.StartDate, dto.EndDate);
+            var clash = await RelieverHasConflictAsync(pr.RelieverEmployeeId, dto.StartDate, dto.EndDate);
             if (clash) continue;
 
             if (!dto.RelieverEmployeeId.HasValue)
@@ -901,10 +1005,11 @@ public class LeaveService : ILeaveService
     {
         var year = _clock.UtcNow.Year;
         var prefix = $"LV{year}";
+        var tenantId = GetTenantId();
 
         var lastrequest = await _leaveRepository
             .GetQueryable()
-            .Where(lr => lr.RequestNumber.StartsWith(prefix))
+            .Where(lr => lr.TenantId == tenantId && lr.RequestNumber.StartsWith(prefix))
             .OrderByDescending(lr => lr.RequestNumber)
             .FirstOrDefaultAsync();
 
@@ -932,15 +1037,17 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveAdjustmentDto> AddAdjustmentAsync(CreateLeaveAdjustmentDto dto)
     {
+        var tenantId = GetTenantId();
         var balance = await _leaveBalanceRepository
             .GetQueryable()
             .Include(lb => lb.LeaveType)
             .Include(lb => lb.Employee)
-            .FirstOrDefaultAsync(lb => lb.Id == dto.LeaveBalanceId)
+            .FirstOrDefaultAsync(lb => lb.Id == dto.LeaveBalanceId && lb.TenantId == tenantId)
             ?? throw new ArgumentException($"Leave balance with ID '{dto.LeaveBalanceId}' not found.");
 
         var adjustment = new LeaveAdjustment
         {
+            TenantId       = tenantId,
             LeaveBalanceId = dto.LeaveBalanceId,
             EmployeeId     = balance.EmployeeId,
             LeaveTypeId    = balance.LeaveTypeId,
@@ -969,7 +1076,7 @@ public class LeaveService : ILeaveService
             .Include(a => a.LeaveBalance).ThenInclude(lb => lb.LeaveSubType)
             .Include(a => a.PerformedByEmployee)
             .Include(a => a.ReasonCode)
-            .FirstOrDefaultAsync(a => a.Id == adjustment.Id)
+            .FirstOrDefaultAsync(a => a.Id == adjustment.Id && a.TenantId == tenantId)
             ?? adjustment;
 
         return created.ToDto();
@@ -977,6 +1084,9 @@ public class LeaveService : ILeaveService
 
     public async Task<IEnumerable<LeaveAdjustmentDto>> GetAdjustmentsAsync(Guid balanceId)
     {
+        await GetOwnedLeaveBalanceAsync(balanceId);
+
+        var tenantId = GetTenantId();
         var adjustments = await _leaveAdjustmentRepository
             .GetQueryable()
             .Include(a => a.LeaveBalance).ThenInclude(lb => lb.Employee)
@@ -984,7 +1094,7 @@ public class LeaveService : ILeaveService
             .Include(a => a.LeaveBalance).ThenInclude(lb => lb.LeaveSubType)
             .Include(a => a.PerformedByEmployee)
             .Include(a => a.ReasonCode)
-            .Where(a => a.LeaveBalanceId == balanceId)
+            .Where(a => a.TenantId == tenantId && a.LeaveBalanceId == balanceId)
             .OrderByDescending(a => a.AdjustmentDate)
             .ToListAsync();
 
@@ -994,6 +1104,7 @@ public class LeaveService : ILeaveService
     public async Task<IEnumerable<LeaveAdjustmentDto>> GetAllAdjustmentsAsync(
         int year, Guid? employeeId, Guid? leaveTypeId, string? search)
     {
+        var tenantId = GetTenantId();
         var query = _leaveAdjustmentRepository
             .GetQueryable()
             .Include(a => a.LeaveBalance).ThenInclude(lb => lb.Employee)
@@ -1001,7 +1112,7 @@ public class LeaveService : ILeaveService
             .Include(a => a.LeaveBalance).ThenInclude(lb => lb.LeaveSubType)
             .Include(a => a.PerformedByEmployee)
             .Include(a => a.ReasonCode)
-            .Where(a => a.Year == year);
+            .Where(a => a.TenantId == tenantId && a.Year == year);
 
         if (employeeId.HasValue)
             query = query.Where(a => a.EmployeeId == employeeId.Value);
@@ -1021,6 +1132,7 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveAdjustmentDto?> GetAdjustmentByIdAsync(Guid id)
     {
+        var tenantId = GetTenantId();
         var adjustment = await _leaveAdjustmentRepository
             .GetQueryable()
             .Include(a => a.LeaveBalance).ThenInclude(lb => lb.Employee)
@@ -1028,19 +1140,20 @@ public class LeaveService : ILeaveService
             .Include(a => a.LeaveBalance).ThenInclude(lb => lb.LeaveSubType)
             .Include(a => a.PerformedByEmployee)
             .Include(a => a.ReasonCode)
-            .FirstOrDefaultAsync(a => a.Id == id);
+            .FirstOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId);
 
         return adjustment?.ToDto();
     }
 
     public async Task<LeaveAdjustmentDto> CreateStandaloneAdjustmentAsync(CreateLeaveAdjustmentStandaloneDto dto)
     {
-        var leaveType = await _leaveTypeRepository.GetByIdAsync(dto.LeaveTypeId)
-            ?? throw new ArgumentException($"Leave type with ID '{dto.LeaveTypeId}' not found.");
+        var leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        var tenantId = GetTenantId();
 
         var balance = await _leaveBalanceRepository
             .GetQueryable()
             .FirstOrDefaultAsync(lb =>
+                lb.TenantId == tenantId &&
                 lb.EmployeeId  == dto.EmployeeId  &&
                 lb.LeaveTypeId == dto.LeaveTypeId &&
                 lb.Year        == dto.Year);
@@ -1049,6 +1162,7 @@ public class LeaveService : ILeaveService
         {
             balance = new LeaveBalance
             {
+                TenantId        = tenantId,
                 EmployeeId      = dto.EmployeeId,
                 LeaveTypeId     = dto.LeaveTypeId,
                 LeaveSubTypeId  = dto.LeaveSubTypeId,
@@ -1069,6 +1183,7 @@ public class LeaveService : ILeaveService
 
         var adjustment = new LeaveAdjustment
         {
+            TenantId       = tenantId,
             LeaveBalanceId = balance.Id,
             EmployeeId     = dto.EmployeeId,
             LeaveTypeId    = dto.LeaveTypeId,
@@ -1095,7 +1210,7 @@ public class LeaveService : ILeaveService
             .Include(a => a.LeaveBalance).ThenInclude(lb => lb.LeaveSubType)
             .Include(a => a.PerformedByEmployee)
             .Include(a => a.ReasonCode)
-            .FirstOrDefaultAsync(a => a.Id == adjustment.Id)
+            .FirstOrDefaultAsync(a => a.Id == adjustment.Id && a.TenantId == tenantId)
             ?? adjustment;
 
         _logger.LogInformation(
@@ -1107,8 +1222,7 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveAdjustmentDto> UpdateAdjustmentAsync(Guid id, UpdateLeaveAdjustmentDto dto)
     {
-        var adjustment = await _leaveAdjustmentRepository.GetByIdAsync(id)
-            ?? throw new ArgumentException($"Leave adjustment with ID '{id}' not found.");
+        var adjustment = await GetOwnedLeaveAdjustmentAsync(id);
 
         if (dto.Days == 0)
             throw new InvalidOperationException("Adjustment days cannot be zero.");
@@ -1126,6 +1240,7 @@ public class LeaveService : ILeaveService
             await _recalculationService.RecalculateAsync(adjustment.EmployeeId, adjustment.LeaveTypeId, adjustment.Year);
         });
 
+        var tenantId = GetTenantId();
         var updated = await _leaveAdjustmentRepository
             .GetQueryable()
             .Include(a => a.LeaveBalance).ThenInclude(lb => lb.Employee)
@@ -1133,7 +1248,7 @@ public class LeaveService : ILeaveService
             .Include(a => a.LeaveBalance).ThenInclude(lb => lb.LeaveSubType)
             .Include(a => a.PerformedByEmployee)
             .Include(a => a.ReasonCode)
-            .FirstOrDefaultAsync(a => a.Id == id)
+            .FirstOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId)
             ?? adjustment;
 
         _logger.LogInformation("Leave adjustment updated: id={AdjustmentId}", id);
@@ -1142,18 +1257,16 @@ public class LeaveService : ILeaveService
 
     public async Task DeleteAdjustmentAsync(Guid adjustmentId)
     {
-        var adjustment = await _leaveAdjustmentRepository.GetByIdAsync(adjustmentId)
-            ?? throw new ArgumentException($"Leave adjustment with ID '{adjustmentId}' not found.");
+        var adjustment = await GetOwnedLeaveAdjustmentAsync(adjustmentId);
 
-        var balanceForDelete = await _leaveBalanceRepository.GetByIdAsync(adjustment.LeaveBalanceId);
+        var balanceForDelete = await GetOwnedLeaveBalanceAsync(adjustment.LeaveBalanceId);
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
             await _leaveAdjustmentRepository.DeleteAsync(adjustment);
             await _unitOfWork.SaveChangesAsync(ct);
             // Recalculate balance from source data after adjustment deletion
-            if (balanceForDelete != null)
-                await _recalculationService.RecalculateAsync(balanceForDelete.EmployeeId, balanceForDelete.LeaveTypeId, balanceForDelete.Year);
+            await _recalculationService.RecalculateAsync(balanceForDelete.EmployeeId, balanceForDelete.LeaveTypeId, balanceForDelete.Year);
         });
     }
 
@@ -1165,9 +1278,7 @@ public class LeaveService : ILeaveService
         Guid leaveRequestId, Guid uploadedBy, string fileName, string filePath,
         string? contentType, long? fileSizeBytes)
     {
-        var request = await _leaveRepository.GetByIdAsync(leaveRequestId);
-        if (request == null)
-            throw new ArgumentException($"Leave request '{leaveRequestId}' not found.");
+        var request = await GetOwnedLeaveRequestAsync(leaveRequestId);
 
         var attachment = new LeaveRequestAttachment
         {
@@ -1185,27 +1296,38 @@ public class LeaveService : ILeaveService
         await _unitOfWork.SaveChangesAsync();
 
         // Reload with navigation for name
-        var saved = await _attachmentRepository.GetByIdAsync(attachment.Id);
-        return saved?.ToDto() ?? attachment.ToDto();
+        var saved = await GetOwnedAttachmentAsync(attachment.Id);
+        return saved.ToDto();
     }
 
     public async Task<IEnumerable<LeaveRequestAttachmentDto>> GetAttachmentsAsync(Guid leaveRequestId)
     {
-        var all = await _attachmentRepository.FindAsync(
-            a => a.LeaveRequestId == leaveRequestId,
-            a => a.UploadedByEmployee);
+        await GetOwnedLeaveRequestAsync(leaveRequestId);
+
+        var tenantId = GetTenantId();
+        var all = await _attachmentRepository
+            .GetQueryable()
+            .Include(a => a.UploadedByEmployee)
+            .Where(a => a.TenantId == tenantId && a.LeaveRequestId == leaveRequestId)
+            .ToListAsync();
         return all.Select(a => a.ToDto()).ToList();
     }
 
     public async Task<LeaveRequestAttachmentDto?> GetAttachmentByIdAsync(Guid attachmentId)
     {
-        var attachment = await _attachmentRepository.GetByIdAsync(attachmentId);
+        var attachment = await _attachmentRepository
+            .GetQueryable()
+            .Include(a => a.UploadedByEmployee)
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.TenantId == GetTenantId());
         return attachment?.ToDto();
     }
 
     public async Task<bool> DeleteAttachmentAsync(Guid attachmentId)
     {
-        var attachment = await _attachmentRepository.GetByIdAsync(attachmentId);
+        var tenantId = GetTenantId();
+        var attachment = await _attachmentRepository
+            .GetQueryable()
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.TenantId == tenantId);
         if (attachment == null) return false;
 
         await _attachmentRepository.DeleteAsync(attachment);

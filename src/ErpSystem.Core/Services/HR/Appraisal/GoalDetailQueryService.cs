@@ -58,6 +58,7 @@ public sealed class GoalDetailQueryService : IGoalDetailQueryService
 
     private readonly IGenericRepository<EmployeeGoal>       _goalRepo;
     private readonly ICurrentUserService                    _currentUserService;
+    private readonly ICurrentUserProvider                   _currentUserProvider;
     private readonly ILogger<GoalDetailQueryService>        _logger;
 
     // IDateTimeProvider is injected rather than using DateTime.UtcNow directly
@@ -69,13 +70,26 @@ public sealed class GoalDetailQueryService : IGoalDetailQueryService
     public GoalDetailQueryService(
         IGenericRepository<EmployeeGoal>    goalRepo,
         ICurrentUserService                 currentUserService,
+        ICurrentUserProvider                currentUserProvider,
         IDateTimeProvider                   clock,
         ILogger<GoalDetailQueryService>     logger)
     {
         _goalRepo           = goalRepo;
         _currentUserService = currentUserService;
+        _currentUserProvider = currentUserProvider;
         _clock              = clock;
         _logger             = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     // =========================================================================
@@ -99,31 +113,17 @@ public sealed class GoalDetailQueryService : IGoalDetailQueryService
             return null;
         }
 
+        var tenantId = GetTenantId();
+
         _logger.LogDebug(
             "GoalDetailQueryService.GetGoalDetailAsync: goalId={GoalId}, managerId={ManagerId}",
             goalId, managerId);
-
-        // ── 2. Single query: find goal + security check + full projection ──────
-        //
-        // The WHERE clause: g.Id == goalId AND g.Employee.ManagerId == managerId
-        //   — enforces manager-to-direct-report security IN SQL, not in memory.
-        //   — returns null for both "not found" and "found but not authorised",
-        //     which is intentional (no information leak about goal existence).
-        //
-        // AsNoTracking(): this is a pure read path; change tracking is wasteful.
-        //
-        // Select() projection:
-        //   — Only the columns needed by GoalDetailDto are fetched.
-        //   — Navigation entity titles are resolved via nested null-coalescing
-        //     sub-selects; EF Core emits LEFT JOINs.
-        //   — Activity counts come from correlated COUNT subqueries, translated
-        //     by EF Core to SQL COUNT(*) / MAX() correlated sub-selects.
-        //     No collections are loaded as IEnumerable.
 
         var dto = await _goalRepo.GetQueryable()
             .AsNoTracking()
             .Where(g =>
                 g.Id == goalId                       // goal must exist
+                && g.TenantId == tenantId
                 && !g.IsDeleted                      // soft-delete boundary
                 && g.Employee.ManagerId == managerId // SECURITY: direct report only
             )

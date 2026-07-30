@@ -16,38 +16,62 @@ namespace ErpSystem.Core.Services.HR;
 public class AppraisalSettingsService : IAppraisalSettingsService
 {
     private readonly IGenericRepository<AppraisalSettings> _settingsRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalSettingsService> _logger;
 
     public AppraisalSettingsService(
         IGenericRepository<AppraisalSettings> settingsRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalSettingsService> logger)
     {
         _settingsRepository = settingsRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<AppraisalSettingsDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An appraisal settings record owned by another tenant is reported as missing rather than forbidden,
+    // so the endpoints do not confirm that the id exists elsewhere.
+    private async Task<AppraisalSettings> GetOwnedAsync(Guid id)
     {
         var entity = await _settingsRepository.GetByIdAsync(id);
-        
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Appraisal settings with ID '{id}' not found.");
+        return entity;
+    }
 
+    public async Task<AppraisalSettingsDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<AppraisalSettingsDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _settingsRepository.GetAllAsync();
+        var tenantId = GetTenantId();
+        var entities = await _settingsRepository.GetQueryable()
+            .Where(s => s.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
         return entities.ToDtoList();
     }
 
     public async Task<PagedResult<AppraisalSettingsDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _settingsRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _settingsRepository.GetQueryable().Where(s => s.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query.OrderByDescending(s => s.CreatedAt)
@@ -66,9 +90,11 @@ public class AppraisalSettingsService : IAppraisalSettingsService
 
     public async Task<AppraisalSettingsDto> CreateAsync(CreateAppraisalSettingsDto createDto, CancellationToken cancellationToken = default)
     {
-        // Unique name check
-        var nameExists = await _settingsRepository.GetQueryable(s => s.SettingsName == createDto.SettingsName)
-            .AnyAsync(cancellationToken);
+        var tenantId = GetTenantId();
+
+        // Unique name check — scoped per tenant so one tenant's names do not block another's.
+        var nameExists = await _settingsRepository.GetQueryable()
+            .AnyAsync(s => s.TenantId == tenantId && s.SettingsName == createDto.SettingsName, cancellationToken);
         if (nameExists)
             throw new InvalidOperationException($"An appraisal settings named '{createDto.SettingsName}' already exists.");
 
@@ -85,6 +111,7 @@ public class AppraisalSettingsService : IAppraisalSettingsService
             throw new InvalidOperationException($"Total evaluation weights must equal 1.0. Current total: {totalWeight:F2}");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
 
         await _settingsRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -96,14 +123,12 @@ public class AppraisalSettingsService : IAppraisalSettingsService
 
     public async Task<AppraisalSettingsDto> UpdateAsync(UpdateAppraisalSettingsDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _settingsRepository.GetByIdAsync(updateDto.Id);
-        
-        if (entity == null)
-            throw new ArgumentException($"Appraisal settings with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
+        var tenantId = GetTenantId();
 
-        // Unique name check (exclude self)
-        var nameExists = await _settingsRepository.GetQueryable(s => s.SettingsName == updateDto.SettingsName && s.Id != updateDto.Id)
-            .AnyAsync(cancellationToken);
+        // Unique name check (exclude self) — scoped per tenant.
+        var nameExists = await _settingsRepository.GetQueryable()
+            .AnyAsync(s => s.TenantId == tenantId && s.SettingsName == updateDto.SettingsName && s.Id != updateDto.Id, cancellationToken);
         if (nameExists)
             throw new InvalidOperationException($"An appraisal settings named '{updateDto.SettingsName}' already exists.");
 
@@ -131,14 +156,11 @@ public class AppraisalSettingsService : IAppraisalSettingsService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _settingsRepository.GetByIdAsync(id);
-        
-        if (entity == null)
-            throw new ArgumentException($"Appraisal settings with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
-        // Check if settings are being used by any cycles
+        // Check if settings are being used by any cycles in this tenant.
         var cyclesCount = await _settingsRepository.GetQueryable()
-            .Where(s => s.Id == id)
+            .Where(s => s.TenantId == entity.TenantId && s.Id == id)
             .SelectMany(s => s.AppraisalCycles)
             .CountAsync(cancellationToken);
 
@@ -157,8 +179,11 @@ public class AppraisalSettingsService : IAppraisalSettingsService
 
     public async Task<AppraisalSettingsDto?> GetDefaultSettingsAsync(CancellationToken cancellationToken = default)
     {
-        // Return the most recently created settings as default
+        var tenantId = GetTenantId();
+
+        // Return the most recently created settings for this tenant as default.
         var entity = await _settingsRepository.GetQueryable()
+            .Where(s => s.TenantId == tenantId)
             .OrderByDescending(s => s.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -167,10 +192,7 @@ public class AppraisalSettingsService : IAppraisalSettingsService
 
     public async Task<bool> ValidateWeightsAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _settingsRepository.GetByIdAsync(id);
-        
-        if (entity == null)
-            throw new ArgumentException($"Appraisal settings with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         var totalWeight = entity.SelfEvaluationWeight + entity.PeerEvaluationWeight + entity.ManagerEvaluationWeight;
         var isValid = Math.Abs(totalWeight - 1.0m) <= 0.01m;
@@ -185,4 +207,3 @@ public class AppraisalSettingsService : IAppraisalSettingsService
 }
 
 #endregion Appraisal Settings
-

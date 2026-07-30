@@ -106,8 +106,12 @@ public class TrainingRequestsController : ControllerBase
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveTrainingRequestDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.RequestId = id;
-        await _service.ApproveAsync(dto, ct);
+        await _service.ApproveAsync(dto, employeeId.Value, ct);
         return Ok(new { message = "Training request approved." });
     }
 
@@ -115,8 +119,12 @@ public class TrainingRequestsController : ControllerBase
     public async Task<IActionResult> Reject(Guid id, [FromBody] RejectTrainingRequestDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.RequestId = id;
-        await _service.RejectAsync(dto, ct);
+        await _service.RejectAsync(dto, employeeId.Value, ct);
         return Ok(new { message = "Training request rejected." });
     }
 }

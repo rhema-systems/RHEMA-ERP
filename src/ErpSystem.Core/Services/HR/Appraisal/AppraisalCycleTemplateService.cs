@@ -14,27 +14,64 @@ namespace ErpSystem.Core.Services.HR;
 public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
 {
     private readonly IGenericRepository<AppraisalCycleTemplate> _cycleTemplateRepository;
+    private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IGenericRepository<AppraisalTemplate> _templateRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalCycleTemplateService> _logger;
 
     public AppraisalCycleTemplateService(
         IGenericRepository<AppraisalCycleTemplate> cycleTemplateRepository,
+        IGenericRepository<AppraisalCycle> cycleRepository,
         IGenericRepository<Employee> employeeRepository,
         IGenericRepository<AppraisalTemplate> templateRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalCycleTemplateService> logger)
     {
         _cycleTemplateRepository = cycleTemplateRepository;
+        _cycleRepository = cycleRepository;
         _employeeRepository = employeeRepository;
         _templateRepository = templateRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A cycle template assignment owned by another tenant is reported as missing rather than forbidden,
+    // so the endpoints do not confirm that the id exists elsewhere.
+    private async Task<AppraisalCycleTemplate> GetOwnedAsync(Guid id)
+    {
+        var entity = await _cycleTemplateRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Appraisal cycle template assignment with ID '{id}' not found.");
+        return entity;
+    }
+
+    // An appraisal cycle owned by another tenant is reported as missing rather than forbidden.
+    private async Task<AppraisalCycle> GetOwnedCycleAsync(Guid cycleId)
+    {
+        var entity = await _cycleRepository.GetByIdAsync(cycleId);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
+        return entity;
+    }
+
     public async Task<AppraisalCycleTemplateDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _cycleTemplateRepository.GetQueryable()
             .Include(ct => ct.AppraisalCycle)
             .Include(ct => ct.AppraisalTemplate)
@@ -43,7 +80,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
                 .ThenInclude(t => t.OrganizationUnit)
             .Include(ct => ct.AppraisalTemplate)
                 .ThenInclude(t => t.Position)
-            .FirstOrDefaultAsync(ct => ct.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(ct => ct.Id == id && ct.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Appraisal cycle template assignment with ID '{id}' not found.");
@@ -53,7 +90,11 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
 
     public async Task<IEnumerable<AppraisalCycleTemplateDto>> GetByCycleIdAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
-        var entities = await _cycleTemplateRepository.GetQueryable(ct => ct.AppraisalCycleId == cycleId && ct.IsActive)
+        await GetOwnedCycleAsync(cycleId);
+        var tenantId = GetTenantId();
+
+        var entities = await _cycleTemplateRepository.GetQueryable()
+            .Where(ct => ct.TenantId == tenantId && ct.AppraisalCycleId == cycleId && ct.IsActive)
             .Include(ct => ct.AppraisalTemplate)
                 .ThenInclude(t => t.OrganizationLevel)
             .Include(ct => ct.AppraisalTemplate)
@@ -68,7 +109,9 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
 
     public async Task<IEnumerable<AppraisalCycleTemplateDto>> GetByTemplateIdAsync(Guid templateId, CancellationToken cancellationToken = default)
     {
-        var entities = await _cycleTemplateRepository.GetQueryable(ct => ct.AppraisalTemplateId == templateId)
+        var tenantId = GetTenantId();
+        var entities = await _cycleTemplateRepository.GetQueryable()
+            .Where(ct => ct.TenantId == tenantId && ct.AppraisalTemplateId == templateId)
             .Include(ct => ct.AppraisalCycle)
             .Include(ct => ct.AppraisalTemplate)
                 .ThenInclude(t => t.OrganizationLevel)
@@ -85,7 +128,9 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
     /// <summary>Throws if the template is not Approved — only approved templates may be assigned to a cycle.</summary>
     private async Task AssertTemplateApprovedAsync(Guid templateId, CancellationToken cancellationToken)
     {
-        var template = await _templateRepository.GetByIdAsync(templateId)
+        var tenantId = GetTenantId();
+        var template = await _templateRepository.GetQueryable()
+            .FirstOrDefaultAsync(t => t.Id == templateId && t.TenantId == tenantId, cancellationToken)
             ?? throw new ArgumentException($"Appraisal template with ID '{templateId}' not found.");
 
         if (template.ApprovalStatus != TemplateApprovalStatus.Approved)
@@ -95,9 +140,11 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
 
     public async Task<AppraisalCycleTemplateDto> CreateAsync(CreateAppraisalCycleTemplateDto createDto, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCycleAsync(createDto.AppraisalCycleId);
         await AssertTemplateApprovedAsync(createDto.AppraisalTemplateId, cancellationToken);
 
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         await _cycleTemplateRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -109,9 +156,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
 
     public async Task<AppraisalCycleTemplateDto> UpdateAsync(UpdateAppraisalCycleTemplateDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _cycleTemplateRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Cycle template assignment with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         updateDto.UpdateEntity(entity);
 
@@ -125,9 +170,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _cycleTemplateRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Cycle template assignment with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _cycleTemplateRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -141,6 +184,8 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
         IEnumerable<CreateAppraisalCycleTemplateDto> assignments,
         CancellationToken cancellationToken = default)
     {
+        await GetOwnedCycleAsync(cycleId);
+        var tenantId = GetTenantId();
         var created = new List<AppraisalCycleTemplate>();
 
         foreach (var dto in assignments)
@@ -148,6 +193,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
             await AssertTemplateApprovedAsync(dto.AppraisalTemplateId, cancellationToken);
             var entity = dto.ToEntity();
             entity.AppraisalCycleId = cycleId;
+            entity.TenantId = tenantId;
             await _cycleTemplateRepository.AddAsync(entity);
             created.Add(entity);
         }
@@ -157,7 +203,8 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
         _logger.LogInformation("Bulk assigned {Count} templates to cycle {CycleId}", created.Count, cycleId);
 
         var ids = created.Select(e => e.Id).ToList();
-        var result = await _cycleTemplateRepository.GetQueryable(ct => ids.Contains(ct.Id))
+        var result = await _cycleTemplateRepository.GetQueryable()
+            .Where(ct => ct.TenantId == tenantId && ids.Contains(ct.Id))
             .Include(ct => ct.AppraisalTemplate)
                 .ThenInclude(t => t.OrganizationLevel)
             .Include(ct => ct.AppraisalTemplate)
@@ -177,15 +224,18 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
     public async Task<AppraisalTemplateDto?> ResolveTemplateForEmployeeAsync(
         Guid cycleId, Guid employeeId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCycleAsync(cycleId);
+        var tenantId = GetTenantId();
+
         var employee = await _employeeRepository.GetQueryable()
-            .FirstOrDefaultAsync(e => e.Id == employeeId, cancellationToken);
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == tenantId, cancellationToken);
 
         if (employee == null)
             throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
 
         // Load templates with their scope navigation so resolution can compare against employee attributes.
-        var assignments = await _cycleTemplateRepository.GetQueryable(
-            ct => ct.AppraisalCycleId == cycleId && ct.IsActive)
+        var assignments = await _cycleTemplateRepository.GetQueryable()
+            .Where(ct => ct.TenantId == tenantId && ct.AppraisalCycleId == cycleId && ct.IsActive)
             .Include(ct => ct.AppraisalTemplate)
                 .ThenInclude(t => t.OrganizationLevel)
             .Include(ct => ct.AppraisalTemplate)

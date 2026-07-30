@@ -15,8 +15,8 @@ namespace ErpSystem.Core.Services.HR;
 
 /// <summary>
 /// Read-only projection of the existing org hierarchies into the uniform
-/// <see cref="OrganogramNodeDto"/> shape. Tenant scoping and soft-delete are handled by the
-/// DbContext global query filters, so queries here do not re-filter on TenantId / IsDeleted.
+/// <see cref="OrganogramNodeDto"/> shape. Tenant scoping is applied explicitly because the
+/// ApplicationDbContext is registered without a tenant (global filters are inert).
 /// </summary>
 public class OrganogramService : IOrganogramService
 {
@@ -27,6 +27,7 @@ public class OrganogramService : IOrganogramService
     private readonly IGenericRepository<Employee> _employees;
     private readonly IGenericRepository<Location> _locations;
     private readonly IGenericRepository<Team> _teams;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<OrganogramService> _logger;
 
     public OrganogramService(
@@ -35,6 +36,7 @@ public class OrganogramService : IOrganogramService
         IGenericRepository<Employee> employees,
         IGenericRepository<Location> locations,
         IGenericRepository<Team> teams,
+        ICurrentUserProvider currentUserProvider,
         ILogger<OrganogramService> logger)
     {
         _units = units;
@@ -42,19 +44,41 @@ public class OrganogramService : IOrganogramService
         _employees = employees;
         _locations = locations;
         _teams = teams;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
     }
 
     public async Task<OrganogramResponseDto> GetUnitsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var units = await _units.GetQueryable()
+            .Where(u => u.TenantId == tenantId)
             .Include(u => u.OrganizationLevel)
             .Include(u => u.HeadEmployee)
             .OrderBy(u => u.Sequence)
             .ToListAsync(cancellationToken);
 
         var headcount = await _employees.GetQueryable()
-            .Where(e => e.OrganizationUnitId != null)
+            .Where(e => e.TenantId == tenantId && e.OrganizationUnitId != null)
             .GroupBy(e => e.OrganizationUnitId)
             .Select(g => new { UnitId = g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
@@ -87,13 +111,16 @@ public class OrganogramService : IOrganogramService
 
     public async Task<OrganogramResponseDto> GetPositionsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var positions = await _positions.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
             .Include(p => p.OrganizationUnit)
             .Include(p => p.StaffLevel)
             .OrderBy(p => p.Level)
             .ToListAsync(cancellationToken);
 
         var filled = await _employees.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
             .GroupBy(e => e.PositionId)
             .Select(g => new { PositionId = g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
@@ -127,7 +154,9 @@ public class OrganogramService : IOrganogramService
 
     public async Task<OrganogramResponseDto> GetPeopleAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var employees = await _employees.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
             .Include(e => e.Position)
             .Include(e => e.OrganizationUnit)
             .ToListAsync(cancellationToken);
@@ -161,8 +190,9 @@ public class OrganogramService : IOrganogramService
 
     public async Task<OrganogramResponseDto> GetLocationsAsync(Guid structureId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var locations = await _locations.GetQueryable()
-            .Where(l => l.StructureId == structureId)
+            .Where(l => l.TenantId == tenantId && l.StructureId == structureId)
             .Include(l => l.LocationLevel)
             .OrderBy(l => l.Sequence)
             .ToListAsync(cancellationToken);
@@ -190,7 +220,9 @@ public class OrganogramService : IOrganogramService
 
     public async Task<OrganogramResponseDto> GetTeamsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var teams = await _teams.GetQueryable()
+            .Where(t => t.TenantId == tenantId)
             .Include(t => t.TeamLead)
             .Include(t => t.OrganizationUnit)
             .ToListAsync(cancellationToken);

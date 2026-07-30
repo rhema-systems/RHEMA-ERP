@@ -16,6 +16,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
     private readonly IGenericRepository<TrainingSchedule> _scheduleRepository;
     private readonly IGenericRepository<TrainingProgram> _programRepository;
     private readonly IGenericRepository<TrainingCompletion> _completionRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TrainingServiceBondService> _logger;
 
@@ -25,6 +26,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
         IGenericRepository<TrainingSchedule> scheduleRepository,
         IGenericRepository<TrainingProgram> programRepository,
         IGenericRepository<TrainingCompletion> completionRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TrainingServiceBondService> logger)
     {
@@ -33,12 +35,35 @@ public class TrainingServiceBondService : ITrainingServiceBondService
         _scheduleRepository = scheduleRepository;
         _programRepository = programRepository;
         _completionRepository = completionRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    private IQueryable<TrainingServiceBond> BondsWithDetails() =>
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A bond owned by another tenant is reported as missing rather than forbidden, so the endpoints do not
+    // confirm that the id exists elsewhere.
+    private async Task<TrainingServiceBond> GetOwnedAsync(Guid id)
+    {
+        var entity = await _bondRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Training service bond with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<TrainingServiceBond> BondsWithDetails(Guid tenantId) =>
         _bondRepository.GetQueryable()
+            .Where(b => b.TenantId == tenantId)
             .Include(b => b.Nomination)
             .Include(b => b.Employee)
             .Include(b => b.Program)
@@ -48,7 +73,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task<IEnumerable<TrainingServiceBondDto>> GetAllAsync(TrainingBondStatus? status = null, CancellationToken cancellationToken = default)
     {
-        var query = BondsWithDetails();
+        var query = BondsWithDetails(GetTenantId());
         if (status.HasValue)
             query = query.Where(b => b.Status == status.Value);
 
@@ -60,7 +85,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task<TrainingServiceBondDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await BondsWithDetails().FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
+        var entity = await BondsWithDetails(GetTenantId()).FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
         if (entity == null)
             throw new ArgumentException($"Training service bond with ID '{id}' not found.");
         return entity.ToDto();
@@ -68,13 +93,13 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task<TrainingServiceBondDto?> GetByNominationAsync(Guid nominationId, CancellationToken cancellationToken = default)
     {
-        var entity = await BondsWithDetails().FirstOrDefaultAsync(b => b.NominationId == nominationId, cancellationToken);
+        var entity = await BondsWithDetails(GetTenantId()).FirstOrDefaultAsync(b => b.NominationId == nominationId, cancellationToken);
         return entity?.ToDto();
     }
 
     public async Task<IEnumerable<TrainingServiceBondDto>> GetByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var bonds = await BondsWithDetails()
+        var bonds = await BondsWithDetails(GetTenantId())
             .Where(b => b.EmployeeId == employeeId)
             .OrderByDescending(b => b.CreatedAt)
             .ToListAsync(cancellationToken);
@@ -83,7 +108,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task<IEnumerable<TrainingServiceBondDto>> GetActiveAsync(CancellationToken cancellationToken = default)
     {
-        var bonds = await BondsWithDetails()
+        var bonds = await BondsWithDetails(GetTenantId())
             .Where(b => b.Status == TrainingBondStatus.Active)
             .OrderBy(b => b.BondEndDate)
             .ToListAsync(cancellationToken);
@@ -94,19 +119,24 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task<TrainingServiceBondDto> CreateAsync(CreateTrainingServiceBondDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         var nomination = await _nominationRepository.GetByIdAsync(dto.NominationId);
-        if (nomination == null)
+        if (nomination == null || nomination.TenantId != current)
             throw new ArgumentException($"Training nomination with ID '{dto.NominationId}' not found.");
 
-        var existing = await _bondRepository.GetQueryable().AnyAsync(b => b.NominationId == dto.NominationId, cancellationToken);
+        var existing = await _bondRepository.GetQueryable()
+            .AnyAsync(b => b.TenantId == current && b.NominationId == dto.NominationId, cancellationToken);
         if (existing)
             throw new InvalidOperationException("This nomination already has a service bond.");
 
-        var programId = await ResolveProgramIdAsync(nomination.ScheduleId, cancellationToken);
+        var programId = await ResolveProgramIdAsync(nomination.ScheduleId, current, cancellationToken);
 
         var entity = new TrainingServiceBond
         {
-            TenantId = tenantId,
+            TenantId = current,
             NominationId = dto.NominationId,
             EmployeeId = nomination.EmployeeId,
             ProgramId = programId,
@@ -128,9 +158,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task<TrainingServiceBondDto> UpdateAsync(Guid id, UpdateTrainingServiceBondDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _bondRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Training service bond with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.Status != TrainingBondStatus.PendingAcceptance)
             throw new InvalidOperationException("Bond terms can only be edited while the bond is pending acceptance.");
@@ -153,9 +181,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task<TrainingServiceBondDto> AcceptAsync(AcceptTrainingServiceBondDto dto, Guid actingEmployeeId, bool onBehalf, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _bondRepository.GetByIdAsync(dto.BondId);
-        if (entity == null)
-            throw new ArgumentException($"Training service bond with ID '{dto.BondId}' not found.");
+        var entity = await GetOwnedAsync(dto.BondId);
 
         if (entity.Status != TrainingBondStatus.PendingAcceptance)
             throw new InvalidOperationException($"Bond cannot be accepted because it is {entity.Status}.");
@@ -164,7 +190,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
             throw new InvalidOperationException("You can only accept your own service bond.");
 
         var start = (dto.BondStartDate?.Date)
-                    ?? (await GetCompletionDateAsync(entity.NominationId, cancellationToken))
+                    ?? (await GetCompletionDateAsync(entity.NominationId, entity.TenantId, cancellationToken))
                     ?? DateTime.UtcNow.Date;
 
         entity.AcceptedByEmployee = true;
@@ -186,9 +212,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task<TrainingServiceBondDto> RecordExitAsync(RecordBondExitDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _bondRepository.GetByIdAsync(dto.BondId);
-        if (entity == null)
-            throw new ArgumentException($"Training service bond with ID '{dto.BondId}' not found.");
+        var entity = await GetOwnedAsync(dto.BondId);
 
         if (entity.Status != TrainingBondStatus.Active)
             throw new InvalidOperationException($"Only an active bond can record an exit (current status: {entity.Status}).");
@@ -229,9 +253,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task<TrainingServiceBondDto> WaiveAsync(WaiveTrainingServiceBondDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _bondRepository.GetByIdAsync(dto.BondId);
-        if (entity == null)
-            throw new ArgumentException($"Training service bond with ID '{dto.BondId}' not found.");
+        var entity = await GetOwnedAsync(dto.BondId);
 
         if (entity.Status is TrainingBondStatus.Settled or TrainingBondStatus.Cancelled or TrainingBondStatus.Fulfilled)
             throw new InvalidOperationException($"A {entity.Status} bond cannot be waived.");
@@ -252,9 +274,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task<TrainingServiceBondDto> SettleAsync(SettleTrainingServiceBondDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _bondRepository.GetByIdAsync(dto.BondId);
-        if (entity == null)
-            throw new ArgumentException($"Training service bond with ID '{dto.BondId}' not found.");
+        var entity = await GetOwnedAsync(dto.BondId);
 
         if (entity.Status != TrainingBondStatus.Breached)
             throw new InvalidOperationException("Only a breached bond (with repayment owed) can be settled.");
@@ -275,9 +295,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _bondRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Training service bond with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.Status is not (TrainingBondStatus.PendingAcceptance or TrainingBondStatus.Cancelled))
             throw new InvalidOperationException("Only a pending or cancelled bond can be deleted.");
@@ -291,21 +309,28 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task EnsureBondForNominationAsync(Guid nominationId, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
-        var already = await _bondRepository.GetQueryable().AnyAsync(b => b.NominationId == nominationId, cancellationToken);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var already = await _bondRepository.GetQueryable()
+            .AnyAsync(b => b.TenantId == current && b.NominationId == nominationId, cancellationToken);
         if (already) return;
 
         var nomination = await _nominationRepository.GetByIdAsync(nominationId);
-        if (nomination == null) return;
+        if (nomination == null || nomination.TenantId != current) return;
 
         var schedule = await _scheduleRepository.GetByIdAsync(nomination.ScheduleId);
-        if (schedule == null) return;
+        if (schedule == null || schedule.TenantId != current) return;
 
+        // The bond duration, amount and currency are copied off the program, so a cross-tenant program
+        // would not just leak: it would stamp another tenant's figures onto this bond.
         var program = await _programRepository.GetByIdAsync(schedule.ProgramId);
-        if (program == null || !program.RequiresServiceBond) return;
+        if (program == null || program.TenantId != current || !program.RequiresServiceBond) return;
 
         var entity = new TrainingServiceBond
         {
-            TenantId = tenantId,
+            TenantId = current,
             NominationId = nominationId,
             EmployeeId = nomination.EmployeeId,
             ProgramId = program.Id,
@@ -325,8 +350,10 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     public async Task CancelForNominationAsync(Guid nominationId, Guid userId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+
         var entity = await _bondRepository.GetQueryable()
-            .FirstOrDefaultAsync(b => b.NominationId == nominationId, cancellationToken);
+            .FirstOrDefaultAsync(b => b.TenantId == tenantId && b.NominationId == nominationId, cancellationToken);
         if (entity == null || entity.Status != TrainingBondStatus.PendingAcceptance) return;
 
         entity.Status = TrainingBondStatus.Cancelled;
@@ -339,18 +366,20 @@ public class TrainingServiceBondService : ITrainingServiceBondService
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
-    private async Task<Guid> ResolveProgramIdAsync(Guid scheduleId, CancellationToken cancellationToken)
+    private async Task<Guid> ResolveProgramIdAsync(Guid scheduleId, Guid tenantId, CancellationToken cancellationToken)
     {
         var schedule = await _scheduleRepository.GetByIdAsync(scheduleId);
-        if (schedule == null)
+        if (schedule == null || schedule.TenantId != tenantId)
             throw new ArgumentException($"Training schedule with ID '{scheduleId}' not found.");
         return schedule.ProgramId;
     }
 
-    private async Task<DateTime?> GetCompletionDateAsync(Guid nominationId, CancellationToken cancellationToken)
+    // The completion date becomes the bond start (and therefore its end date), so an unscoped lookup would
+    // date the bond off another tenant's completion record.
+    private async Task<DateTime?> GetCompletionDateAsync(Guid nominationId, Guid tenantId, CancellationToken cancellationToken)
     {
         var completion = await _completionRepository.GetQueryable()
-            .Where(c => c.NominationId == nominationId)
+            .Where(c => c.TenantId == tenantId && c.NominationId == nominationId)
             .OrderByDescending(c => c.CompletionDate)
             .FirstOrDefaultAsync(cancellationToken);
         return completion?.CompletionDate.Date;

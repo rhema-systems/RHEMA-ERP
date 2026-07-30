@@ -1,5 +1,6 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -12,26 +13,62 @@ public class TrainingBudgetService : ITrainingBudgetService
 {
     private readonly ITrainingBudgetRepository _budgetRepository;
     private readonly ITrainingBudgetTransactionRepository _transactionRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TrainingBudgetService> _logger;
 
     public TrainingBudgetService(
         ITrainingBudgetRepository budgetRepository,
         ITrainingBudgetTransactionRepository transactionRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TrainingBudgetService> logger)
     {
         _budgetRepository = budgetRepository;
         _transactionRepository = transactionRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // Callers supply the tenant alongside the DTO (the HR house convention). Reject anything other than
+    // the authenticated tenant so a supplied id can never widen the scope of a write.
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    // A budget from another tenant is reported as missing rather than forbidden, so the endpoints do not
+    // confirm that the id exists elsewhere.
+    private async Task<TrainingBudget> GetOwnedBudgetAsync(Guid id)
+    {
+        var entity = await _budgetRepository.GetForTenantAsync(id, GetTenantId());
+
+        if (entity == null)
+            throw new ArgumentException($"Training budget with ID '{id}' not found.");
+
+        return entity;
     }
 
     // ── Budget queries ────────────────────────────────────────────────────────
 
     public async Task<TrainingBudgetDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _budgetRepository.GetWithFullDetailsAsync(id);
+        var entity = await _budgetRepository.GetWithFullDetailsAsync(id, GetTenantId());
 
         if (entity == null)
             throw new ArgumentException($"Training budget with ID '{id}' not found.");
@@ -41,43 +78,43 @@ public class TrainingBudgetService : ITrainingBudgetService
 
     public async Task<TrainingBudgetDto?> GetByBudgetCodeAsync(string budgetCode, CancellationToken cancellationToken = default)
     {
-        var entity = await _budgetRepository.GetByBudgetCodeAsync(budgetCode);
+        var entity = await _budgetRepository.GetByBudgetCodeAsync(budgetCode, GetTenantId());
         return entity?.ToDto();
     }
 
     public async Task<IEnumerable<TrainingBudgetSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _budgetRepository.GetAllAsync();
+        var entities = await _budgetRepository.GetAllForTenantAsync(GetTenantId());
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingBudgetSummaryDto>> GetByYearAsync(int year, CancellationToken cancellationToken = default)
     {
-        var entities = await _budgetRepository.GetByYearAsync(year);
+        var entities = await _budgetRepository.GetByYearAsync(year, GetTenantId());
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingBudgetSummaryDto>> GetByYearAndQuarterAsync(int year, int? quarter, CancellationToken cancellationToken = default)
     {
-        var entities = await _budgetRepository.GetByYearAndQuarterAsync(year, quarter);
+        var entities = await _budgetRepository.GetByYearAndQuarterAsync(year, quarter, GetTenantId());
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingBudgetSummaryDto>> GetApprovedAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _budgetRepository.GetApprovedAsync();
+        var entities = await _budgetRepository.GetApprovedAsync(GetTenantId());
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingBudgetSummaryDto>> GetOverBudgetAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _budgetRepository.GetWithExceededBudgetAsync();
+        var entities = await _budgetRepository.GetWithExceededBudgetAsync(GetTenantId());
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TrainingBudgetSummaryDto>> GetByOrganizationUnitIdAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
     {
-        var entities = await _budgetRepository.GetByOrganizationUnitAsync(organizationUnitId);
+        var entities = await _budgetRepository.GetByOrganizationUnitAsync(organizationUnitId, GetTenantId());
         return entities.ToSummaryDtoList();
     }
 
@@ -85,7 +122,7 @@ public class TrainingBudgetService : ITrainingBudgetService
 
     public async Task<TrainingBudgetDto> CreateAsync(CreateTrainingBudgetDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var entity = dto.ToEntity(RequireCurrentTenant(tenantId), createdByUserId);
         entity.Status = TrainingBudgetStatus.Draft;
 
         await _budgetRepository.AddAsync(entity);
@@ -98,10 +135,7 @@ public class TrainingBudgetService : ITrainingBudgetService
 
     public async Task<TrainingBudgetDto> UpdateAsync(UpdateTrainingBudgetDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _budgetRepository.GetByIdAsync(dto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training budget with ID '{dto.Id}' not found.");
+        var entity = await GetOwnedBudgetAsync(dto.Id);
 
         if (entity.Status == TrainingBudgetStatus.Approved || entity.Status == TrainingBudgetStatus.Closed)
             throw new InvalidOperationException("Cannot update an approved or closed training budget.");
@@ -118,10 +152,7 @@ public class TrainingBudgetService : ITrainingBudgetService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _budgetRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Training budget with ID '{id}' not found.");
+        var entity = await GetOwnedBudgetAsync(id);
 
         if (entity.Status != TrainingBudgetStatus.Draft)
             throw new InvalidOperationException("Only draft training budgets can be deleted.");
@@ -136,26 +167,23 @@ public class TrainingBudgetService : ITrainingBudgetService
 
     // ── Budget workflow ───────────────────────────────────────────────────────
 
-    public async Task<bool> ApproveAsync(ApproveTrainingBudgetDto dto, CancellationToken cancellationToken = default)
+    public async Task<bool> ApproveAsync(ApproveTrainingBudgetDto dto, Guid approvedById, CancellationToken cancellationToken = default)
     {
-        var entity = await _budgetRepository.GetByIdAsync(dto.BudgetId);
-
-        if (entity == null)
-            throw new ArgumentException($"Training budget with ID '{dto.BudgetId}' not found.");
+        var entity = await GetOwnedBudgetAsync(dto.BudgetId);
 
         if (entity.Status != TrainingBudgetStatus.Draft)
             throw new InvalidOperationException($"Training budget cannot be approved from status '{entity.Status}'.");
 
         entity.Status = TrainingBudgetStatus.Approved;
-        entity.ApprovedById = dto.ApprovedById;
-        entity.ApprovalDate = dto.ApprovalDate;
+        entity.ApprovedById = approvedById;
+        entity.ApprovalDate = DateTime.UtcNow;
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = dto.ApprovedById.ToString();
+        entity.UpdatedBy = approvedById.ToString();
 
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Training budget {BudgetId} approved by {ApprovedById}", dto.BudgetId, dto.ApprovedById);
+        _logger.LogInformation("Training budget {BudgetId} approved by {ApprovedById}", dto.BudgetId, approvedById);
 
         return true;
     }
@@ -164,15 +192,13 @@ public class TrainingBudgetService : ITrainingBudgetService
 
     public async Task<TrainingBudgetTransactionDto> RecordTransactionAsync(CreateTrainingBudgetTransactionDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var budget = await _budgetRepository.GetByIdAsync(dto.BudgetId);
-
-        if (budget == null)
-            throw new ArgumentException($"Training budget with ID '{dto.BudgetId}' not found.");
+        var resolvedTenantId = RequireCurrentTenant(tenantId);
+        var budget = await GetOwnedBudgetAsync(dto.BudgetId);
 
         if (budget.Status != TrainingBudgetStatus.Approved && budget.Status != TrainingBudgetStatus.Active)
             throw new InvalidOperationException("Transactions can only be recorded against approved or active budgets.");
 
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var entity = dto.ToEntity(resolvedTenantId, createdByUserId);
 
         // Maintain the running spend so RemainingAmount and the over-budget report stay accurate.
         // Positive Amount = debit/spend, negative = credit/refund.
@@ -198,13 +224,13 @@ public class TrainingBudgetService : ITrainingBudgetService
 
     public async Task<IEnumerable<TrainingBudgetTransactionDto>> GetTransactionsAsync(Guid budgetId, CancellationToken cancellationToken = default)
     {
-        var entities = await _transactionRepository.GetByBudgetIdAsync(budgetId);
+        var entities = await _transactionRepository.GetByBudgetIdAsync(budgetId, GetTenantId());
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<TrainingBudgetTransactionDto>> GetTransactionsByDateRangeAsync(Guid budgetId, DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {
-        var entities = await _transactionRepository.GetByDateRangeAsync(budgetId, from, to);
+        var entities = await _transactionRepository.GetByDateRangeAsync(budgetId, from, to, GetTenantId());
         return entities.Select(e => e.ToDto()).ToList();
     }
 }

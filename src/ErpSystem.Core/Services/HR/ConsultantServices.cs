@@ -26,64 +26,111 @@ public class ConsultantClientService : IConsultantClientService
 {
     private readonly IConsultantClientRepository _repository;
     private readonly IClientEngagementRepository _engagementRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ConsultantClientService> _logger;
 
     public ConsultantClientService(
         IConsultantClientRepository repository,
         IClientEngagementRepository engagementRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ConsultantClientService> logger)
     {
         _repository = repository;
         _engagementRepository = engagementRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<ConsultantClient> GetOwnedClientAsync(Guid id)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Client '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<ClientEngagement> GetOwnedEngagementAsync(Guid id)
+    {
+        var entity = await _engagementRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Engagement '{id}' not found.");
+        return entity;
+    }
+
     public async Task<ConsultantClientDto> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetWithFullDetailsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Client '{id}' not found.");
         return entity.ToDto();
     }
 
     public async Task<ConsultantClientDto?> GetByClientCodeAsync(string clientCode, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByClientCodeAsync(clientCode);
+        var tenantId = GetTenantId();
+        var entity = await _repository.GetQueryable()
+            .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.ClientCode == clientCode && !c.IsDeleted, ct);
         return entity?.ToDto();
     }
 
     public async Task<IEnumerable<ConsultantClientSummaryDto>> GetAllAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetAllAsync();
+        var tenantId = GetTenantId();
+        var entities = await _repository.FindAsync(c => c.TenantId == tenantId && !c.IsDeleted);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ConsultantClientSummaryDto>> GetActiveClientsAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetActiveClientsAsync();
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetActiveClientsAsync())
+            .Where(c => c.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ConsultantClientSummaryDto>> GetByIndustryAsync(string industry, CancellationToken ct = default)
     {
-        var entities = await _repository.FindAsync(c => c.Industry == industry && !c.IsDeleted);
+        var tenantId = GetTenantId();
+        var entities = await _repository.FindAsync(c => c.TenantId == tenantId && c.Industry == industry && !c.IsDeleted);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<ConsultantClientDto> GetWithEngagementsAsync(Guid id, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetWithFullDetailsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Client '{id}' not found.");
         return entity.ToDto();
     }
 
     public async Task<PagedResult<ConsultantClientSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(c => c.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderBy(c => c.ClientName)
@@ -102,11 +149,14 @@ public class ConsultantClientService : IConsultantClientService
 
     public async Task<ConsultantClientDto> CreateAsync(CreateConsultantClientDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        var existing = await _repository.GetByClientCodeAsync(dto.ClientCode);
-        if (existing != null)
+        var resolvedTenantId = RequireCurrentTenant(tenantId);
+
+        var codeExists = await _repository.GetQueryable()
+            .AnyAsync(c => c.TenantId == resolvedTenantId && c.ClientCode == dto.ClientCode && !c.IsDeleted, ct);
+        if (codeExists)
             throw new InvalidOperationException($"A client with code '{dto.ClientCode}' already exists.");
 
-        var entity = dto.ToEntity(tenantId, userId);
+        var entity = dto.ToEntity(resolvedTenantId, userId);
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
@@ -116,9 +166,7 @@ public class ConsultantClientService : IConsultantClientService
 
     public async Task<ConsultantClientDto> UpdateAsync(UpdateConsultantClientDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Client '{dto.Id}' not found.");
+        var entity = await GetOwnedClientAsync(dto.Id);
 
         entity.UpdateEntity(dto, userId);
         await _repository.UpdateAsync(entity);
@@ -128,13 +176,12 @@ public class ConsultantClientService : IConsultantClientService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Client '{id}' not found.");
+        var entity = await GetOwnedClientAsync(id);
+        var tenantId = GetTenantId();
 
         var hasActiveEngagements = await _engagementRepository
             .GetQueryable()
-            .AnyAsync(e => e.ClientId == id && e.Status == ClientEngagementStatus.Active && !e.IsDeleted, ct);
+            .AnyAsync(e => e.TenantId == tenantId && e.ClientId == id && e.Status == ClientEngagementStatus.Active && !e.IsDeleted, ct);
 
         if (hasActiveEngagements)
             throw new InvalidOperationException("Cannot delete a client that has active engagements.");
@@ -146,8 +193,11 @@ public class ConsultantClientService : IConsultantClientService
 
     public async Task<ClientEngagementDto> AddEngagementAsync(CreateClientEngagementDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        var engagement = dto.ToEntity(tenantId, userId);
-        engagement.EngagementCode = await GenerateEngagementCodeAsync(ct);
+        var resolvedTenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedClientAsync(dto.ClientId);
+
+        var engagement = dto.ToEntity(resolvedTenantId, userId);
+        engagement.EngagementCode = await GenerateEngagementCodeAsync(resolvedTenantId, ct);
         await _engagementRepository.AddAsync(engagement);
         await _unitOfWork.SaveChangesAsync(ct);
 
@@ -157,23 +207,22 @@ public class ConsultantClientService : IConsultantClientService
 
     public async Task<IEnumerable<ClientEngagementSummaryDto>> GetEngagementsAsync(Guid clientId, CancellationToken ct = default)
     {
-        var entities = await _engagementRepository.GetByClientIdAsync(clientId);
-        return entities.ToSummaryDtoList();
+        await GetOwnedClientAsync(clientId);
+        var tenantId = GetTenantId();
+        return (await _engagementRepository.GetByClientIdAsync(clientId))
+            .Where(e => e.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<ClientEngagementDto> GetEngagementByIdAsync(Guid engagementId, CancellationToken ct = default)
     {
-        var entity = await _engagementRepository.GetByIdAsync(engagementId);
-        if (entity == null)
-            throw new ArgumentException($"Engagement '{engagementId}' not found.");
+        var entity = await GetOwnedEngagementAsync(engagementId);
         return entity.ToDto();
     }
 
     public async Task<ClientEngagementDto> UpdateEngagementAsync(UpdateClientEngagementDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _engagementRepository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Engagement '{dto.Id}' not found.");
+        var entity = await GetOwnedEngagementAsync(dto.Id);
 
         entity.UpdateEntity(dto, userId);
         await _engagementRepository.UpdateAsync(entity);
@@ -183,9 +232,7 @@ public class ConsultantClientService : IConsultantClientService
 
     public async Task<bool> DeleteEngagementAsync(Guid engagementId, CancellationToken ct = default)
     {
-        var entity = await _engagementRepository.GetByIdAsync(engagementId);
-        if (entity == null)
-            throw new ArgumentException($"Engagement '{engagementId}' not found.");
+        var entity = await GetOwnedEngagementAsync(engagementId);
 
         if (entity.Status == ClientEngagementStatus.Active)
             throw new InvalidOperationException("An active engagement cannot be deleted.");
@@ -195,9 +242,10 @@ public class ConsultantClientService : IConsultantClientService
         return true;
     }
 
-    private async Task<string> GenerateEngagementCodeAsync(CancellationToken ct)
+    private async Task<string> GenerateEngagementCodeAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _engagementRepository.GetQueryable().CountAsync(ct);
+        var count = await _engagementRepository.GetQueryable()
+            .CountAsync(e => e.TenantId == tenantId, ct);
         return $"ENG-{DateTime.UtcNow:yyyy}-{(count + 1):D5}";
     }
 }
@@ -213,72 +261,113 @@ public class ConsultantClientService : IConsultantClientService
 public class ClientEngagementService : IClientEngagementService
 {
     private readonly IClientEngagementRepository _repository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ClientEngagementService> _logger;
 
     public ClientEngagementService(
         IClientEngagementRepository repository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ClientEngagementService> logger)
     {
         _repository = repository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<ClientEngagementDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<ClientEngagement> GetOwnedEngagementAsync(Guid id)
     {
         var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Engagement '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<ClientEngagementDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await GetOwnedEngagementAsync(id);
         return entity.ToDto();
     }
 
     public async Task<ClientEngagementDto?> GetByEngagementCodeAsync(string engagementCode, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByEngagementCodeAsync(engagementCode);
+        var tenantId = GetTenantId();
+        var entity = await _repository.GetQueryable()
+            .FirstOrDefaultAsync(e => e.TenantId == tenantId && e.EngagementCode == engagementCode && !e.IsDeleted, ct);
         return entity?.ToDto();
     }
 
     public async Task<IEnumerable<ClientEngagementSummaryDto>> GetByClientIdAsync(Guid clientId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByClientIdAsync(clientId);
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetByClientIdAsync(clientId))
+            .Where(e => e.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ClientEngagementSummaryDto>> GetByConsultantIdAsync(Guid consultantEmployeeId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByConsultantIdAsync(consultantEmployeeId);
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetByConsultantIdAsync(consultantEmployeeId))
+            .Where(e => e.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ClientEngagementSummaryDto>> GetByStatusAsync(ClientEngagementStatus status, CancellationToken ct = default)
     {
-        var entities = await _repository.FindAsync(e => e.Status == status && !e.IsDeleted);
+        var tenantId = GetTenantId();
+        var entities = await _repository.FindAsync(e => e.TenantId == tenantId && e.Status == status && !e.IsDeleted);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ClientEngagementSummaryDto>> GetActiveEngagementsAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetActiveEngagementsAsync();
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetActiveEngagementsAsync())
+            .Where(e => e.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ClientEngagementSummaryDto>> GetByBillingCycleAsync(BillingCycle cycle, CancellationToken ct = default)
     {
-        var entities = await _repository.FindAsync(e => e.BillingCycle == cycle && !e.IsDeleted);
+        var tenantId = GetTenantId();
+        var entities = await _repository.FindAsync(e => e.TenantId == tenantId && e.BillingCycle == cycle && !e.IsDeleted);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ClientEngagementSummaryDto>> GetEngagementsEndingWithinAsync(int days, CancellationToken ct = default)
     {
-        var entities = await _repository.GetExpiringSoonAsync(days);
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetExpiringSoonAsync(days))
+            .Where(e => e.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<PagedResult<ClientEngagementSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(e => e.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(e => e.StartDate)
@@ -297,7 +386,8 @@ public class ClientEngagementService : IClientEngagementService
 
     public async Task<ClientEngagementDto> CreateAsync(CreateClientEngagementDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        var entity = dto.ToEntity(tenantId, userId);
+        var resolvedTenantId = RequireCurrentTenant(tenantId);
+        var entity = dto.ToEntity(resolvedTenantId, userId);
         entity.EngagementCode = $"ENG-{DateTime.UtcNow:yyyy}-{Guid.NewGuid().ToString()[..8].ToUpper()}";
         entity.Status = ClientEngagementStatus.Draft;
         await _repository.AddAsync(entity);
@@ -309,9 +399,7 @@ public class ClientEngagementService : IClientEngagementService
 
     public async Task<ClientEngagementDto> UpdateAsync(UpdateClientEngagementDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Engagement '{dto.Id}' not found.");
+        var entity = await GetOwnedEngagementAsync(dto.Id);
 
         if (entity.Status is ClientEngagementStatus.Completed or ClientEngagementStatus.Terminated)
             throw new InvalidOperationException("A completed or terminated engagement cannot be edited.");
@@ -324,9 +412,7 @@ public class ClientEngagementService : IClientEngagementService
 
     public async Task<ClientEngagementDto> ActivateAsync(Guid engagementId, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(engagementId);
-        if (entity == null)
-            throw new ArgumentException($"Engagement '{engagementId}' not found.");
+        var entity = await GetOwnedEngagementAsync(engagementId);
 
         if (entity.Status != ClientEngagementStatus.Draft)
             throw new InvalidOperationException("Only draft engagements can be activated.");
@@ -344,9 +430,7 @@ public class ClientEngagementService : IClientEngagementService
 
     public async Task<ClientEngagementDto> CompleteAsync(Guid engagementId, DateOnly actualEndDate, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(engagementId);
-        if (entity == null)
-            throw new ArgumentException($"Engagement '{engagementId}' not found.");
+        var entity = await GetOwnedEngagementAsync(engagementId);
 
         if (entity.Status != ClientEngagementStatus.Active)
             throw new InvalidOperationException("Only active engagements can be completed.");
@@ -365,9 +449,7 @@ public class ClientEngagementService : IClientEngagementService
 
     public async Task<ClientEngagementDto> SuspendAsync(Guid engagementId, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(engagementId);
-        if (entity == null)
-            throw new ArgumentException($"Engagement '{engagementId}' not found.");
+        var entity = await GetOwnedEngagementAsync(engagementId);
 
         if (entity.Status != ClientEngagementStatus.Active)
             throw new InvalidOperationException("Only active engagements can be suspended.");
@@ -385,9 +467,7 @@ public class ClientEngagementService : IClientEngagementService
 
     public async Task<ClientEngagementDto> ResumeAsync(Guid engagementId, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(engagementId);
-        if (entity == null)
-            throw new ArgumentException($"Engagement '{engagementId}' not found.");
+        var entity = await GetOwnedEngagementAsync(engagementId);
 
         if (entity.Status != ClientEngagementStatus.Suspended)
             throw new InvalidOperationException("Only suspended engagements can be resumed.");
@@ -409,9 +489,7 @@ public class ClientEngagementService : IClientEngagementService
         Guid userId,
         CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(engagementId);
-        if (entity == null)
-            throw new ArgumentException($"Engagement '{engagementId}' not found.");
+        var entity = await GetOwnedEngagementAsync(engagementId);
 
         if (entity.Status is not (ClientEngagementStatus.Active or ClientEngagementStatus.Suspended))
             throw new InvalidOperationException("Only active or suspended engagements can be terminated.");
@@ -437,9 +515,7 @@ public class ClientEngagementService : IClientEngagementService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Engagement '{id}' not found.");
+        var entity = await GetOwnedEngagementAsync(id);
 
         if (entity.Status == ClientEngagementStatus.Active)
             throw new InvalidOperationException("An active engagement cannot be deleted.");
@@ -465,6 +541,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
     private readonly IConsultantTimesheetRepository _repository;
     private readonly IConsultantTimesheetEntryRepository _entryRepository;
     private readonly IClientTimesheetConfirmationRepository _confirmationRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ConsultantTimesheetService> _logger;
     private readonly IEmailService _email;
@@ -474,6 +551,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         IConsultantTimesheetRepository repository,
         IConsultantTimesheetEntryRepository entryRepository,
         IClientTimesheetConfirmationRepository confirmationRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ConsultantTimesheetService> logger,
         IEmailService email,
@@ -482,6 +560,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         _repository = repository;
         _entryRepository = entryRepository;
         _confirmationRepository = confirmationRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
         _email = email;
@@ -490,69 +569,121 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
             _portalBaseUrl = "http://localhost:5085";
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<ConsultantTimesheet> GetOwnedTimesheetAsync(Guid id)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Timesheet '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<ConsultantTimesheetEntry> GetOwnedEntryAsync(Guid id)
+    {
+        var entity = await _entryRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Timesheet entry '{id}' not found.");
+        return entity;
+    }
+
     public async Task<ConsultantTimesheetDto> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetWithFullDetailsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Timesheet '{id}' not found.");
         return entity.ToDto();
     }
 
     public async Task<ConsultantTimesheetDto?> GetByTimesheetNumberAsync(string timesheetNumber, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByTimesheetNumberAsync(timesheetNumber);
+        var tenantId = GetTenantId();
+        var entity = await _repository.GetQueryable()
+            .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.TimesheetNumber == timesheetNumber && !t.IsDeleted, ct);
         return entity?.ToDto();
     }
 
     public async Task<IEnumerable<ConsultantTimesheetSummaryDto>> GetByConsultantIdAsync(Guid consultantEmployeeId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByConsultantIdAsync(consultantEmployeeId);
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetByConsultantIdAsync(consultantEmployeeId))
+            .Where(t => t.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ConsultantTimesheetSummaryDto>> GetByEngagementIdAsync(Guid engagementId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByEngagementIdAsync(engagementId);
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetByEngagementIdAsync(engagementId))
+            .Where(t => t.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ConsultantTimesheetSummaryDto>> GetByStatusAsync(TimesheetStatus status, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetByStatusAsync(status))
+            .Where(t => t.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ConsultantTimesheetSummaryDto>> GetByPeriodAsync(DateOnly from, DateOnly to, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByPeriodAsync(from, to);
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetByPeriodAsync(from, to))
+            .Where(t => t.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ConsultantTimesheetSummaryDto>> GetPendingApprovalAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetByStatusAsync(TimesheetStatus.Submitted);
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetByStatusAsync(TimesheetStatus.Submitted))
+            .Where(t => t.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ConsultantTimesheetSummaryDto>> GetPendingClientConfirmationAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetByStatusAsync(TimesheetStatus.SentToClient);
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetByStatusAsync(TimesheetStatus.SentToClient))
+            .Where(t => t.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ConsultantTimesheetSummaryDto>> GetApprovedForInvoicingAsync(Guid? clientId = null, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         IEnumerable<ConsultantTimesheet> entities;
         if (clientId.HasValue)
             entities = await _repository.GetReadyForInvoicingAsync(clientId.Value);
         else
             entities = await _repository.GetByStatusAsync(TimesheetStatus.ClientConfirmed);
-        return entities.ToSummaryDtoList();
+        return entities.Where(t => t.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<ConsultantTimesheetSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(t => t.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(t => t.PeriodStartDate)
@@ -571,8 +702,9 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<ConsultantTimesheetDto> CreateAsync(CreateConsultantTimesheetDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        var entity = dto.ToEntity(tenantId, userId);
-        entity.TimesheetNumber = await GenerateTimesheetNumberAsync(ct);
+        var resolvedTenantId = RequireCurrentTenant(tenantId);
+        var entity = dto.ToEntity(resolvedTenantId, userId);
+        entity.TimesheetNumber = await GenerateTimesheetNumberAsync(resolvedTenantId, ct);
         entity.Status = TimesheetStatus.Draft;
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -583,9 +715,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<ConsultantTimesheetDto> UpdateAsync(UpdateConsultantTimesheetDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Timesheet '{dto.Id}' not found.");
+        var entity = await GetOwnedTimesheetAsync(dto.Id);
 
         if (entity.Status != TimesheetStatus.Draft && entity.Status != TimesheetStatus.Rejected)
             throw new InvalidOperationException("Only draft or rejected timesheets can be edited.");
@@ -598,9 +728,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<ConsultantTimesheetDto> SubmitAsync(Guid timesheetId, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(timesheetId);
-        if (entity == null)
-            throw new ArgumentException($"Timesheet '{timesheetId}' not found.");
+        var entity = await GetOwnedTimesheetAsync(timesheetId);
 
         if (entity.Status != TimesheetStatus.Draft && entity.Status != TimesheetStatus.Rejected)
             throw new InvalidOperationException("Only draft or rejected timesheets can be submitted.");
@@ -619,9 +747,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<ConsultantTimesheetDto> ApproveAsync(Guid timesheetId, string? comments, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(timesheetId);
-        if (entity == null)
-            throw new ArgumentException($"Timesheet '{timesheetId}' not found.");
+        var entity = await GetOwnedTimesheetAsync(timesheetId);
 
         if (entity.Status != TimesheetStatus.Submitted)
             throw new InvalidOperationException("Only submitted timesheets can be approved.");
@@ -640,9 +766,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<ConsultantTimesheetDto> RejectAsync(Guid timesheetId, string rejectionReason, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(timesheetId);
-        if (entity == null)
-            throw new ArgumentException($"Timesheet '{timesheetId}' not found.");
+        var entity = await GetOwnedTimesheetAsync(timesheetId);
 
         if (entity.Status != TimesheetStatus.Submitted)
             throw new InvalidOperationException("Only submitted timesheets can be rejected.");
@@ -661,9 +785,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Timesheet '{id}' not found.");
+        var entity = await GetOwnedTimesheetAsync(id);
 
         if (entity.Status == TimesheetStatus.Approved)
             throw new InvalidOperationException("An approved timesheet cannot be deleted.");
@@ -675,7 +797,10 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<ConsultantTimesheetEntryDto> AddEntryAsync(CreateConsultantTimesheetEntryDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        var entity = dto.ToEntity(tenantId, userId);
+        var resolvedTenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedTimesheetAsync(dto.TimesheetId);
+
+        var entity = dto.ToEntity(resolvedTenantId, userId);
         await _entryRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
         return entity.ToDto();
@@ -683,15 +808,15 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<IEnumerable<ConsultantTimesheetEntryDto>> GetEntriesAsync(Guid timesheetId, CancellationToken ct = default)
     {
+        await GetOwnedTimesheetAsync(timesheetId);
+        var tenantId = GetTenantId();
         var entities = await _entryRepository.GetByTimesheetIdAsync(timesheetId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<ConsultantTimesheetEntryDto> UpdateEntryAsync(UpdateConsultantTimesheetEntryDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _entryRepository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Timesheet entry '{dto.Id}' not found.");
+        var entity = await GetOwnedEntryAsync(dto.Id);
 
         entity.UpdateEntity(dto, userId);
         await _entryRepository.UpdateAsync(entity);
@@ -701,9 +826,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<bool> DeleteEntryAsync(Guid entryId, CancellationToken ct = default)
     {
-        var entity = await _entryRepository.GetByIdAsync(entryId);
-        if (entity == null)
-            throw new ArgumentException($"Timesheet entry '{entryId}' not found.");
+        var entity = await GetOwnedEntryAsync(entryId);
 
         await _entryRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -717,9 +840,8 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         Guid sentById,
         CancellationToken ct = default)
     {
-        var timesheet = await _repository.GetByIdAsync(timesheetId);
-        if (timesheet == null)
-            throw new ArgumentException($"Timesheet '{timesheetId}' not found.");
+        var resolvedTenantId = RequireCurrentTenant(tenantId);
+        var timesheet = await GetOwnedTimesheetAsync(timesheetId);
 
         if (timesheet.Status != TimesheetStatus.Approved)
             throw new InvalidOperationException("Only approved timesheets can be sent to the client for confirmation.");
@@ -737,7 +859,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
             TokenExpiryDate = expiry
         };
 
-        var confirmation = sendDto.ToEntity(tenantId, sentById);
+        var confirmation = sendDto.ToEntity(resolvedTenantId, sentById);
         await _confirmationRepository.AddAsync(confirmation);
 
         timesheet.Status = TimesheetStatus.SentToClient;
@@ -770,15 +892,14 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         Guid sentById,
         CancellationToken ct = default)
     {
-        var timesheet = await _repository.GetByIdAsync(timesheetId);
-        if (timesheet == null)
-            throw new ArgumentException($"Timesheet '{timesheetId}' not found.");
+        var timesheet = await GetOwnedTimesheetAsync(timesheetId);
 
         if (timesheet.Status != TimesheetStatus.SentToClient)
             throw new InvalidOperationException("Only timesheets awaiting client confirmation can be resent.");
 
+        var tenantId = GetTenantId();
         var confirmations = await _confirmationRepository.GetByTimesheetIdAsync(timesheetId);
-        var confirmation = confirmations.FirstOrDefault();
+        var confirmation = confirmations.FirstOrDefault(c => c.TenantId == tenantId);
         if (confirmation == null)
             throw new InvalidOperationException("No confirmation request exists for this timesheet.");
 
@@ -1051,13 +1172,16 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
     public async Task<ClientTimesheetConfirmationDto?> GetConfirmationAsync(Guid timesheetId, CancellationToken ct = default)
     {
+        await GetOwnedTimesheetAsync(timesheetId);
+        var tenantId = GetTenantId();
         var entities = await _confirmationRepository.GetByTimesheetIdAsync(timesheetId);
-        return entities.FirstOrDefault()?.ToDto();
+        return entities.FirstOrDefault(c => c.TenantId == tenantId)?.ToDto();
     }
 
-    private async Task<string> GenerateTimesheetNumberAsync(CancellationToken ct)
+    private async Task<string> GenerateTimesheetNumberAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable().CountAsync(ct);
+        var count = await _repository.GetQueryable()
+            .CountAsync(t => t.TenantId == tenantId, ct);
         return $"TS-{DateTime.UtcNow:yyyyMM}-{(count + 1):D5}";
     }
 
@@ -1285,6 +1409,7 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
     private readonly ITimesheetInvoiceRepository _repository;
     private readonly ITimesheetInvoiceLinkRepository _linkRepository;
     private readonly IConsultantTimesheetRepository _timesheetRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TimesheetInvoiceService> _logger;
 
@@ -1292,67 +1417,109 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
         ITimesheetInvoiceRepository repository,
         ITimesheetInvoiceLinkRepository linkRepository,
         IConsultantTimesheetRepository timesheetRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TimesheetInvoiceService> logger)
     {
         _repository = repository;
         _linkRepository = linkRepository;
         _timesheetRepository = timesheetRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<TimesheetInvoice> GetOwnedInvoiceAsync(Guid id)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Invoice '{id}' not found.");
+        return entity;
+    }
+
     public async Task<TimesheetInvoiceDto> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repository.GetWithLinkedTimesheetsAsync(id);
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Invoice '{id}' not found.");
         return entity.ToDto();
     }
 
     public async Task<TimesheetInvoiceDto?> GetByInvoiceNumberAsync(string invoiceNumber, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByInvoiceNumberAsync(invoiceNumber);
+        var tenantId = GetTenantId();
+        var entity = await _repository.GetQueryable()
+            .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.InvoiceNumber == invoiceNumber && !i.IsDeleted, ct);
         return entity?.ToDto();
     }
 
     public async Task<IEnumerable<TimesheetInvoiceSummaryDto>> GetByEngagementIdAsync(Guid engagementId, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetQueryable()
-            .Where(i => i.LinkedTimesheets.Any(l => l.Timesheet != null && l.Timesheet.EngagementId == engagementId))
-            .ToListAsync();
+            .Where(i => i.TenantId == tenantId
+                && i.LinkedTimesheets.Any(l => l.Timesheet != null && l.Timesheet.EngagementId == engagementId))
+            .ToListAsync(ct);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TimesheetInvoiceSummaryDto>> GetByClientIdAsync(Guid clientId, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByClientIdAsync(clientId);
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetByClientIdAsync(clientId))
+            .Where(i => i.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TimesheetInvoiceSummaryDto>> GetByStatusAsync(TimesheetInvoiceStatus status, CancellationToken ct = default)
     {
-        var entities = await _repository.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetByStatusAsync(status))
+            .Where(i => i.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TimesheetInvoiceSummaryDto>> GetOverdueInvoicesAsync(CancellationToken ct = default)
     {
-        var entities = await _repository.GetOverdueInvoicesAsync();
-        return entities.ToSummaryDtoList();
+        var tenantId = GetTenantId();
+        return (await _repository.GetOverdueInvoicesAsync())
+            .Where(i => i.TenantId == tenantId)
+            .ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<TimesheetInvoiceSummaryDto>> GetByPeriodAsync(DateOnly from, DateOnly to, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetQueryable()
-            .Where(i => i.BillingPeriodStart >= from && i.BillingPeriodEnd <= to)
+            .Where(i => i.TenantId == tenantId && i.BillingPeriodStart >= from && i.BillingPeriodEnd <= to)
             .ToListAsync(ct);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<TimesheetInvoiceSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(i => i.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(i => i.IssuedDate)
@@ -1371,15 +1538,21 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
 
     public async Task<TimesheetInvoiceDto> GenerateAsync(CreateTimesheetInvoiceDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
+        var resolvedTenantId = RequireCurrentTenant(tenantId);
+
         IEnumerable<ConsultantTimesheet> approvedTimesheets;
         if (dto.TimesheetIds.Any())
         {
             var allTs = await _timesheetRepository.GetByClientIdAsync(dto.ClientId);
-            approvedTimesheets = allTs.Where(t => dto.TimesheetIds.Contains(t.Id) && t.Status == TimesheetStatus.ClientConfirmed);
+            approvedTimesheets = allTs.Where(t =>
+                t.TenantId == resolvedTenantId
+                && dto.TimesheetIds.Contains(t.Id)
+                && t.Status == TimesheetStatus.ClientConfirmed);
         }
         else
         {
-            approvedTimesheets = await _timesheetRepository.GetReadyForInvoicingAsync(dto.ClientId);
+            approvedTimesheets = (await _timesheetRepository.GetReadyForInvoicingAsync(dto.ClientId))
+                .Where(t => t.TenantId == resolvedTenantId);
         }
         var timesheetList = approvedTimesheets.ToList();
 
@@ -1387,8 +1560,8 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
             throw new InvalidOperationException("No client-confirmed timesheets available for invoicing.");
 
         var totalHours = timesheetList.Sum(t => t.TotalHours);
-        var entity = dto.ToEntity(tenantId, userId);
-        entity.InvoiceNumber = await GenerateInvoiceNumberAsync(ct);
+        var entity = dto.ToEntity(resolvedTenantId, userId);
+        entity.InvoiceNumber = await GenerateInvoiceNumberAsync(resolvedTenantId, ct);
         entity.Status = TimesheetInvoiceStatus.Draft;
         entity.TotalHours = totalHours;
         entity.SubTotal = totalHours * dto.HourlyRate;
@@ -1404,7 +1577,7 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
             var link = new TimesheetInvoiceLink
             {
                 Id = Guid.NewGuid(),
-                TenantId = tenantId,
+                TenantId = resolvedTenantId,
                 InvoiceId = entity.Id,
                 TimesheetId = ts.Id,
                 Hours = ts.TotalHours,
@@ -1428,9 +1601,7 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
 
     public async Task<TimesheetInvoiceDto> UpdateAsync(UpdateTimesheetInvoiceDto dto, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(dto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Invoice '{dto.Id}' not found.");
+        var entity = await GetOwnedInvoiceAsync(dto.Id);
 
         if (entity.Status != TimesheetInvoiceStatus.Draft)
             throw new InvalidOperationException("Only draft invoices can be edited.");
@@ -1443,9 +1614,7 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
 
     public async Task<TimesheetInvoiceDto> SendAsync(Guid invoiceId, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(invoiceId);
-        if (entity == null)
-            throw new ArgumentException($"Invoice '{invoiceId}' not found.");
+        var entity = await GetOwnedInvoiceAsync(invoiceId);
 
         if (entity.Status != TimesheetInvoiceStatus.Draft)
             throw new InvalidOperationException("Only draft invoices can be sent.");
@@ -1464,9 +1633,7 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
 
     public async Task<TimesheetInvoiceDto> MarkPaidAsync(Guid invoiceId, DateOnly paidDate, decimal paidAmount, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(invoiceId);
-        if (entity == null)
-            throw new ArgumentException($"Invoice '{invoiceId}' not found.");
+        var entity = await GetOwnedInvoiceAsync(invoiceId);
 
         if (entity.Status != TimesheetInvoiceStatus.Sent && entity.Status != TimesheetInvoiceStatus.Overdue)
             throw new InvalidOperationException("Only sent or overdue invoices can be marked as paid.");
@@ -1487,9 +1654,7 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
 
     public async Task<TimesheetInvoiceDto> VoidAsync(Guid invoiceId, string reason, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(invoiceId);
-        if (entity == null)
-            throw new ArgumentException($"Invoice '{invoiceId}' not found.");
+        var entity = await GetOwnedInvoiceAsync(invoiceId);
 
         if (entity.Status == TimesheetInvoiceStatus.Paid)
             throw new InvalidOperationException("A paid invoice cannot be voided.");
@@ -1508,9 +1673,7 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _repository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Invoice '{id}' not found.");
+        var entity = await GetOwnedInvoiceAsync(id);
 
         if (entity.Status == TimesheetInvoiceStatus.Paid)
             throw new InvalidOperationException("A paid invoice cannot be deleted.");
@@ -1520,9 +1683,10 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
         return true;
     }
 
-    private async Task<string> GenerateInvoiceNumberAsync(CancellationToken ct)
+    private async Task<string> GenerateInvoiceNumberAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable().CountAsync(ct);
+        var count = await _repository.GetQueryable()
+            .CountAsync(i => i.TenantId == tenantId, ct);
         return $"INV-{DateTime.UtcNow:yyyyMM}-{(count + 1):D5}";
     }
 }

@@ -36,31 +36,44 @@ public sealed class CompanyProfileProvider : ICompanyProfileProvider
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this provider scopes reads to
+    // the authenticated tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUser.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
     public async Task<CompanyProfile> GetAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var profile = await _repo
             .GetQueryable()
             .Include(p => p.Country)
             .Include(p => p.CountryOfIncorporation)
             .AsNoTracking()
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefaultAsync(p => p.TenantId == tenantId, cancellationToken);
 
         if (profile is not null)
             return profile;
 
         _logger.LogDebug(
-            "CompanyProfileProvider: no profile row for current tenant; resolving defaults from Tenant + config.");
+            "CompanyProfileProvider: no profile row for tenant {TenantId}; resolving defaults from Tenant + config.",
+            tenantId);
 
         // The Tenant table is not tenant-filtered (it *is* the tenant); fetch the current one directly.
         var tenant = await _tenantRepo
             .GetQueryable()
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.Id == _currentUser.TenantId, cancellationToken);
+            .FirstOrDefaultAsync(t => t.Id == tenantId, cancellationToken);
 
         return new CompanyProfile
         {
-            TenantId              = _currentUser.TenantId,
+            TenantId              = tenantId,
             LegalName             = tenant?.Name
                                     ?? _configuration["Company:Name"]
                                     ?? _configuration["ApplicationName"]

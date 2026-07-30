@@ -27,6 +27,8 @@ These are backfilled automatically by the migrations (no-op when empty):
 | `EmployeePositions.OrganizationUnitId` / `OrganizationLevelId` | AddHRModule | Orphaned positions are pointed at a created/reused per-tenant **"Unassigned" (code `UNASSIGNED`)** OrganizationStructure → Level → Unit. Re-assign to real units afterwards. |
 | `Employees.CanBeAssignedToMaintenance` | AddHRModule | Set `true` for employees whose `Department.Code = 'MAINT'` (reproduces the old computed rule). |
 | `LeaveTypes.IsActive`, `LeaveSubTypes.IsActive`, `KpiDefinitions.IsActive`, `AppraisalGradeDefinitions.IsActive` | both | Set `true` for all pre-existing rows (they were implicitly active before the flag existed). |
+| `LeaveRequests.ApprovalDate` | AddHRModule | Copied into the new `ApprovedDate` before the legacy column is dropped. (`RejectionDate` is **not** renamed into it, so a rejection time is never mislabelled as an approval time.) |
+| `LeaveRequests.ApprovedByEmployeeId` | AddHRModule | Translated into the new `ApprovedById`. The legacy column held an `Employees.Id`; the new one holds a `Users.Id`, so the approver is resolved via `Users.EmployeeId` within the same tenant. Approvers with no linked user account **halt** the migration (see below). |
 
 ---
 
@@ -54,7 +56,9 @@ replacement schema, then remove the source rows (or the columns' data) so the gu
 | `WorkStations` (any rows) | `DepartmentId`/`StationType` dropped; required `CountryId` added. Re-map. |
 | `PublicHolidays` (any rows) | Required `HolidayCalendarId` added (new empty `HolidayCalendars`). Create a calendar and assign. |
 | `ShiftAssignments.StartDate` | Dropped — preserve if needed. |
-| `LeaveRequests.ApprovalDate` / `ApprovalNotes` | Dropped — preserve approval history if needed. |
+| `Employees.ShiftId` | Renamed to `HireRecordId`, which points at the unrelated hire-record model. Preserve the shift assignment (alongside the `Shifts` re-map above) and clear the column. |
+| `LeaveRequests.ApprovedByEmployeeId` with no matching user | The approver is carried into `ApprovedById` via `Users.EmployeeId` in the same tenant. Any approver without such an account cannot be represented — link the employee to a user account, or record the approver externally and clear the column. |
+| `LeaveRequests.ApprovalNotes` / `RejectionDate` | Dropped — the new model keeps only `RejectionReason`. Preserve externally if needed. (`ApprovalDate` is backfilled automatically; see above.) |
 | `LeavePlans.DepartmentId` | Dropped. |
 | `LeaveBalances.AdjustmentReason` | Dropped. |
 | `EmployeePositions.MinSalary` / `MaxSalary` / `Requirements` / `Responsibilities` | Dropped — no target column in the new model. |

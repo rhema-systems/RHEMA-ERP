@@ -101,8 +101,12 @@ public class TrainingPlansController : ControllerBase
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveTrainingPlanDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.PlanId = id;
-        await _service.ApproveAsync(dto, ct);
+        await _service.ApproveAsync(dto, employeeId.Value, ct);
         return Ok(new { message = "Training plan approved." });
     }
 

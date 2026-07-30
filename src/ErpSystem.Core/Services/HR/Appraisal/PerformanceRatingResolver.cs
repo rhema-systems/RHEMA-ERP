@@ -15,11 +15,26 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 public class PerformanceRatingResolver : IPerformanceRatingResolver
 {
     private readonly IGenericRepository<AppraisalGradeDefinition> _gradeRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private List<(decimal Min, decimal Max, PerformanceRating Rating)>? _bands;
 
-    public PerformanceRatingResolver(IGenericRepository<AppraisalGradeDefinition> gradeRepository)
+    public PerformanceRatingResolver(
+        IGenericRepository<AppraisalGradeDefinition> gradeRepository,
+        ICurrentUserProvider currentUserProvider)
     {
         _gradeRepository = gradeRepository;
+        _currentUserProvider = currentUserProvider;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<PerformanceRating?> ResolveAsync(decimal? score, CancellationToken cancellationToken = default)
@@ -53,8 +68,10 @@ public class PerformanceRatingResolver : IPerformanceRatingResolver
     {
         if (_bands != null) return _bands;
 
+        var tenantId = GetTenantId();
         var defs = await _gradeRepository.GetQueryable()
-            .Where(g => g.IsActive
+            .Where(g => g.TenantId == tenantId
+                        && g.IsActive
                         && g.MappedRating != null
                         && g.OverallMinScore != null
                         && g.OverallMaxScore != null)

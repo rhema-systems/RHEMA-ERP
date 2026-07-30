@@ -19,6 +19,7 @@ public class LeaveTypeService : ILeaveTypeService
     private readonly IGenericRepository<LeaveAccrualPolicy> _accrualPolicyRepository;
     private readonly IGenericRepository<LeaveTypeAllowance> _leaveTypeAllowanceRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<LeaveTypeService> _logger;
 
@@ -30,6 +31,7 @@ public class LeaveTypeService : ILeaveTypeService
         IGenericRepository<LeaveAccrualPolicy> accrualPolicyRepository,
         IGenericRepository<LeaveTypeAllowance> leaveTypeAllowanceRepository,
         IGenericRepository<Employee> employeeRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<LeaveTypeService> logger)
     {
@@ -40,15 +42,70 @@ public class LeaveTypeService : ILeaveTypeService
         _accrualPolicyRepository = accrualPolicyRepository;
         _leaveTypeAllowanceRepository = leaveTypeAllowanceRepository;
         _employeeRepository = employeeRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A leave type owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<LeaveType> GetOwnedLeaveTypeAsync(Guid id)
+    {
+        var entity = await _leaveTypeRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave type '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LeaveSubType> GetOwnedSubTypeAsync(Guid id)
+    {
+        var entity = await _leaveSubTypeRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave sub-type '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LeaveCategoryAllocation> GetOwnedAllocationAsync(Guid id)
+    {
+        var entity = await _allocationRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave category allocation '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LeaveTypeEligibility> GetOwnedEligibilityAsync(Guid id)
+    {
+        var entity = await _eligibilityRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Eligibility rule '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<LeaveAccrualPolicy> GetOwnedAccrualPolicyAsync(Guid id)
+    {
+        var entity = await _accrualPolicyRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Accrual policy '{id}' not found.");
+        return entity;
     }
 
     // ─── Leave Type ──────────────────────────────────────────────────────────
 
     public async Task<IEnumerable<LeaveTypeDto>> GetAllLeaveTypesAsync(bool activeOnly = true)
     {
-        var query = _leaveTypeRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _leaveTypeRepository.GetQueryable().Where(lt => lt.TenantId == tenantId);
         if (activeOnly)
             query = query.Where(lt => lt.IsActive);
         var items = await query.OrderBy(lt => lt.Name).ToListAsync();
@@ -57,17 +114,13 @@ public class LeaveTypeService : ILeaveTypeService
 
     public async Task<LeaveTypeDto> GetLeaveTypeByIdAsync(Guid id)
     {
-        var entity = await _leaveTypeRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave type '{id}' not found.");
+        var entity = await GetOwnedLeaveTypeAsync(id);
         return entity.ToDto();
     }
 
     public async Task<LeaveTypeDetailDto> GetLeaveTypeDetailAsync(Guid id)
     {
-        var entity = await _leaveTypeRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave type '{id}' not found.");
+        var entity = await GetOwnedLeaveTypeAsync(id);
 
         return new LeaveTypeDetailDto
         {
@@ -102,7 +155,7 @@ public class LeaveTypeService : ILeaveTypeService
             AccrualPolicies = (await GetAccrualPoliciesAsync(id)).ToList(),
             AllowanceComponentIds = await _leaveTypeAllowanceRepository
                 .GetQueryable()
-                .Where(la => la.LeaveTypeId == id)
+                .Where(la => la.TenantId == GetTenantId() && la.LeaveTypeId == id)
                 .Select(la => la.PayComponentId)
                 .ToListAsync()
         };
@@ -110,14 +163,18 @@ public class LeaveTypeService : ILeaveTypeService
 
     public async Task<LeaveTypeDto> CreateLeaveTypeAsync(CreateLeaveTypeDto dto)
     {
+        var tenantId = GetTenantId();
+
         if (!string.IsNullOrWhiteSpace(dto.Code))
         {
-            var existing = await _leaveTypeRepository.GetByCodeAsync(dto.Code);
-            if (existing != null)
+            var existing = await _leaveTypeRepository.GetQueryable()
+                .AnyAsync(lt => lt.TenantId == tenantId && lt.Code == dto.Code);
+            if (existing)
                 throw new InvalidOperationException($"A leave type with code '{dto.Code}' already exists.");
         }
 
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         await _leaveTypeRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
@@ -130,14 +187,14 @@ public class LeaveTypeService : ILeaveTypeService
 
     public async Task<LeaveTypeDto> UpdateLeaveTypeAsync(Guid id, UpdateLeaveTypeDto dto)
     {
-        var entity = await _leaveTypeRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave type '{id}' not found.");
+        var entity = await GetOwnedLeaveTypeAsync(id);
+        var tenantId = entity.TenantId;
 
         if (!string.IsNullOrWhiteSpace(dto.Code) && dto.Code != entity.Code)
         {
-            var existing = await _leaveTypeRepository.GetByCodeAsync(dto.Code);
-            if (existing != null && existing.Id != id)
+            var duplicate = await _leaveTypeRepository.GetQueryable()
+                .AnyAsync(lt => lt.TenantId == tenantId && lt.Code == dto.Code && lt.Id != id);
+            if (duplicate)
                 throw new InvalidOperationException($"A leave type with code '{dto.Code}' already exists.");
         }
 
@@ -175,9 +232,10 @@ public class LeaveTypeService : ILeaveTypeService
     /// <summary>Replaces the leave type's allowance-component links with the supplied set.</summary>
     private async Task SyncAllowanceLinksAsync(Guid leaveTypeId, List<Guid> componentIds)
     {
+        var tenantId = GetTenantId();
         var existing = await _leaveTypeAllowanceRepository
             .GetQueryable()
-            .Where(la => la.LeaveTypeId == leaveTypeId)
+            .Where(la => la.TenantId == tenantId && la.LeaveTypeId == leaveTypeId)
             .ToListAsync();
 
         var desired = (componentIds ?? new List<Guid>()).Distinct().ToList();
@@ -189,6 +247,7 @@ public class LeaveTypeService : ILeaveTypeService
         foreach (var add in desired.Where(d => !existingIds.Contains(d)))
             await _leaveTypeAllowanceRepository.AddAsync(new LeaveTypeAllowance
             {
+                TenantId = tenantId,
                 LeaveTypeId = leaveTypeId,
                 PayComponentId = add
             });
@@ -196,9 +255,7 @@ public class LeaveTypeService : ILeaveTypeService
 
     public async Task DeactivateLeaveTypeAsync(Guid id)
     {
-        var entity = await _leaveTypeRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave type '{id}' not found.");
+        var entity = await GetOwnedLeaveTypeAsync(id);
 
         entity.IsActive = false;
         await _leaveTypeRepository.UpdateAsync(entity);
@@ -210,10 +267,12 @@ public class LeaveTypeService : ILeaveTypeService
 
     public async Task<IEnumerable<LeaveSubTypeDto>> GetSubTypesAsync(Guid leaveTypeId)
     {
+        await GetOwnedLeaveTypeAsync(leaveTypeId);
+        var tenantId = GetTenantId();
         var items = await _leaveSubTypeRepository
             .GetQueryable()
             .Include(st => st.LeaveType)
-            .Where(st => st.LeaveTypeId == leaveTypeId)
+            .Where(st => st.TenantId == tenantId && st.LeaveTypeId == leaveTypeId)
             .OrderBy(st => st.SubTypeName)
             .ToListAsync();
         return items.ToDtoList();
@@ -221,25 +280,24 @@ public class LeaveTypeService : ILeaveTypeService
 
     public async Task<LeaveSubTypeDto> CreateSubTypeAsync(CreateLeaveSubTypeDto dto)
     {
-        var leaveType = await _leaveTypeRepository.GetByIdAsync(dto.LeaveTypeId);
-        if (leaveType == null)
-            throw new ArgumentException($"Leave type '{dto.LeaveTypeId}' not found.");
+        var leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         if (!leaveType.HasSubTypes)
             throw new InvalidOperationException("This leave type is not configured to have sub-types.");
 
+        var tenantId = GetTenantId();
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         await _leaveSubTypeRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return (await _leaveSubTypeRepository.GetQueryable()
             .Include(st => st.LeaveType)
-            .FirstOrDefaultAsync(st => st.Id == entity.Id))!.ToDto();
+            .FirstOrDefaultAsync(st => st.TenantId == tenantId && st.Id == entity.Id))!.ToDto();
     }
 
     public async Task<LeaveSubTypeDto> UpdateSubTypeAsync(Guid id, CreateLeaveSubTypeDto dto)
     {
-        var entity = await _leaveSubTypeRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave sub-type '{id}' not found.");
+        var entity = await GetOwnedSubTypeAsync(id);
+        var tenantId = entity.TenantId;
 
         entity.SubTypeName = dto.SubTypeName;
         entity.Description = dto.Description;
@@ -250,14 +308,12 @@ public class LeaveTypeService : ILeaveTypeService
         await _unitOfWork.SaveChangesAsync();
         return (await _leaveSubTypeRepository.GetQueryable()
             .Include(st => st.LeaveType)
-            .FirstOrDefaultAsync(st => st.Id == id))!.ToDto();
+            .FirstOrDefaultAsync(st => st.TenantId == tenantId && st.Id == id))!.ToDto();
     }
 
     public async Task DeleteSubTypeAsync(Guid id)
     {
-        var entity = await _leaveSubTypeRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave sub-type '{id}' not found.");
+        var entity = await GetOwnedSubTypeAsync(id);
 
         await _leaveSubTypeRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -267,12 +323,14 @@ public class LeaveTypeService : ILeaveTypeService
 
     public async Task<IEnumerable<LeaveCategoryAllocationDto>> GetAllocationsAsync(Guid leaveTypeId)
     {
+        await GetOwnedLeaveTypeAsync(leaveTypeId);
+        var tenantId = GetTenantId();
         var items = await _allocationRepository
             .GetQueryable()
             .Include(a => a.LeaveType)
             .Include(a => a.LeaveSubType)
             .Include(a => a.StaffLevel)
-            .Where(a => a.LeaveTypeId == leaveTypeId)
+            .Where(a => a.TenantId == tenantId && a.LeaveTypeId == leaveTypeId)
             .OrderBy(a => a.StaffLevelId)
             .ThenBy(a => a.EffectiveFrom)
             .ToListAsync();
@@ -281,21 +339,24 @@ public class LeaveTypeService : ILeaveTypeService
 
     public async Task<LeaveCategoryAllocationDto> CreateAllocationAsync(CreateLeaveCategoryAllocationDto dto)
     {
+        await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        var tenantId = GetTenantId();
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         await _allocationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return (await _allocationRepository.GetQueryable()
             .Include(a => a.LeaveType)
             .Include(a => a.LeaveSubType)
             .Include(a => a.StaffLevel)
-            .FirstOrDefaultAsync(a => a.Id == entity.Id))!.ToDto();
+            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == entity.Id))!.ToDto();
     }
 
     public async Task<LeaveCategoryAllocationDto> UpdateAllocationAsync(Guid id, CreateLeaveCategoryAllocationDto dto)
     {
-        var entity = await _allocationRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave category allocation '{id}' not found.");
+        var entity = await GetOwnedAllocationAsync(id);
+        await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        var tenantId = entity.TenantId;
 
         entity.LeaveTypeId = dto.LeaveTypeId;
         entity.LeaveSubTypeId = dto.LeaveSubTypeId;
@@ -310,14 +371,12 @@ public class LeaveTypeService : ILeaveTypeService
             .Include(a => a.LeaveType)
             .Include(a => a.LeaveSubType)
             .Include(a => a.StaffLevel)
-            .FirstOrDefaultAsync(a => a.Id == id))!.ToDto();
+            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id))!.ToDto();
     }
 
     public async Task DeleteAllocationAsync(Guid id)
     {
-        var entity = await _allocationRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Leave category allocation '{id}' not found.");
+        var entity = await GetOwnedAllocationAsync(id);
 
         await _allocationRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -327,20 +386,25 @@ public class LeaveTypeService : ILeaveTypeService
 
     public async Task<IEnumerable<LeaveTypeEligibilityDto>> GetEligibilityRulesAsync(Guid leaveTypeId)
     {
+        await GetOwnedLeaveTypeAsync(leaveTypeId);
+        var tenantId = GetTenantId();
         var items = await _eligibilityRepository
             .GetQueryable()
             .Include(e => e.LeaveType)
             .Include(e => e.OrganizationLevel)
             .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
-            .Where(e => e.LeaveTypeId == leaveTypeId)
+            .Where(e => e.TenantId == tenantId && e.LeaveTypeId == leaveTypeId)
             .ToListAsync();
         return items.ToDtoList();
     }
 
     public async Task<LeaveTypeEligibilityDto> CreateEligibilityRuleAsync(CreateLeaveTypeEligibilityDto dto)
     {
+        await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        var tenantId = GetTenantId();
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         await _eligibilityRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return (await _eligibilityRepository.GetQueryable()
@@ -348,14 +412,12 @@ public class LeaveTypeService : ILeaveTypeService
             .Include(e => e.OrganizationLevel)
             .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
-            .FirstOrDefaultAsync(e => e.Id == entity.Id))!.ToDto();
+            .FirstOrDefaultAsync(e => e.TenantId == tenantId && e.Id == entity.Id))!.ToDto();
     }
 
     public async Task DeleteEligibilityRuleAsync(Guid id)
     {
-        var entity = await _eligibilityRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Eligibility rule '{id}' not found.");
+        var entity = await GetOwnedEligibilityAsync(id);
 
         await _eligibilityRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -365,29 +427,34 @@ public class LeaveTypeService : ILeaveTypeService
 
     public async Task<IEnumerable<LeaveAccrualPolicyDto>> GetAccrualPoliciesAsync(Guid leaveTypeId)
     {
+        await GetOwnedLeaveTypeAsync(leaveTypeId);
+        var tenantId = GetTenantId();
         var items = await _accrualPolicyRepository
             .GetQueryable()
             .Include(a => a.LeaveType)
-            .Where(a => a.LeaveTypeId == leaveTypeId)
+            .Where(a => a.TenantId == tenantId && a.LeaveTypeId == leaveTypeId)
             .ToListAsync();
         return items.ToDtoList();
     }
 
     public async Task<LeaveAccrualPolicyDto> CreateAccrualPolicyAsync(CreateLeaveAccrualPolicyDto dto)
     {
+        await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        var tenantId = GetTenantId();
         var entity = dto.ToEntity();
+        entity.TenantId = tenantId;
         await _accrualPolicyRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         return (await _accrualPolicyRepository.GetQueryable()
             .Include(a => a.LeaveType)
-            .FirstOrDefaultAsync(a => a.Id == entity.Id))!.ToDto();
+            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == entity.Id))!.ToDto();
     }
 
     public async Task<LeaveAccrualPolicyDto> UpdateAccrualPolicyAsync(Guid id, CreateLeaveAccrualPolicyDto dto)
     {
-        var entity = await _accrualPolicyRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Accrual policy '{id}' not found.");
+        var entity = await GetOwnedAccrualPolicyAsync(id);
+        await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        var tenantId = entity.TenantId;
 
         entity.LeaveTypeId = dto.LeaveTypeId;
         entity.Frequency = dto.Frequency;
@@ -401,14 +468,12 @@ public class LeaveTypeService : ILeaveTypeService
         await _unitOfWork.SaveChangesAsync();
         return (await _accrualPolicyRepository.GetQueryable()
             .Include(a => a.LeaveType)
-            .FirstOrDefaultAsync(a => a.Id == id))!.ToDto();
+            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id))!.ToDto();
     }
 
     public async Task DeleteAccrualPolicyAsync(Guid id)
     {
-        var entity = await _accrualPolicyRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Accrual policy '{id}' not found.");
+        var entity = await GetOwnedAccrualPolicyAsync(id);
 
         await _accrualPolicyRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -418,9 +483,12 @@ public class LeaveTypeService : ILeaveTypeService
 
     public async Task<bool> IsEmployeeEligibleAsync(Guid leaveTypeId, Guid employeeId)
     {
+        await GetOwnedLeaveTypeAsync(leaveTypeId);
+        var tenantId = GetTenantId();
+
         var rules = await _eligibilityRepository
             .GetQueryable()
-            .Where(r => r.LeaveTypeId == leaveTypeId)
+            .Where(r => r.TenantId == tenantId && r.LeaveTypeId == leaveTypeId)
             .ToListAsync();
 
         // No rules configured → every employee is eligible
@@ -428,7 +496,7 @@ public class LeaveTypeService : ILeaveTypeService
             return true;
 
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
-        if (employee == null)
+        if (employee == null || employee.TenantId != tenantId)
             return false;
 
         // Employee is eligible when they match at least one rule

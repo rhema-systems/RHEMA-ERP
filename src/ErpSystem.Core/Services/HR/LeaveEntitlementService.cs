@@ -21,6 +21,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
     private readonly IGenericRepository<LeaveType> _leaveTypeRepository;
     private readonly IGenericRepository<LeaveSubType> _leaveSubTypeRepository;
     private readonly IGenericRepository<LeaveCategoryAllocation> _allocationRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<LeaveEntitlementService> _logger;
 
@@ -29,6 +30,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         IGenericRepository<LeaveType> leaveTypeRepository,
         IGenericRepository<LeaveSubType> leaveSubTypeRepository,
         IGenericRepository<LeaveCategoryAllocation> allocationRepository,
+        ICurrentUserProvider currentUserProvider,
         IDateTimeProvider clock,
         ILogger<LeaveEntitlementService> logger)
     {
@@ -36,26 +38,48 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         _leaveTypeRepository = leaveTypeRepository;
         _leaveSubTypeRepository = leaveSubTypeRepository;
         _allocationRepository = allocationRepository;
+        _currentUserProvider = currentUserProvider;
         _clock = clock;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A leave type owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<LeaveType> GetOwnedLeaveTypeAsync(Guid id)
+    {
+        var entity = await _leaveTypeRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Leave type '{id}' not found.");
+        return entity;
     }
 
     public async Task<decimal> ResolveAnnualEntitlementAsync(
         Guid employeeId, Guid leaveTypeId, Guid? leaveSubTypeId, int year, CancellationToken ct = default)
     {
-        var leaveType = await _leaveTypeRepository.GetByIdAsync(leaveTypeId)
-            ?? throw new ArgumentException($"Leave type '{leaveTypeId}' not found.");
+        var tenantId = GetTenantId();
+        var leaveType = await GetOwnedLeaveTypeAsync(leaveTypeId);
 
         // 1) Sub-type cap takes precedence when set.
         if (leaveSubTypeId.HasValue)
         {
             var subType = await _leaveSubTypeRepository.GetByIdAsync(leaveSubTypeId.Value);
-            if (subType?.MaxDaysAllowed is int cap)
+            if (subType?.TenantId == tenantId && subType.MaxDaysAllowed is int cap)
                 return ApplyCeiling(leaveType, cap);
         }
 
         // 2) Effective-dated allocation for the employee's staff level.
-        var staffLevelId = await GetEmployeeStaffLevelIdAsync(employeeId, ct);
+        var staffLevelId = await GetEmployeeStaffLevelIdAsync(employeeId, tenantId, ct);
         if (staffLevelId.HasValue)
         {
             var yearStart = new DateOnly(year, 1, 1);
@@ -63,7 +87,8 @@ public class LeaveEntitlementService : ILeaveEntitlementService
 
             var allocation = await _allocationRepository
                 .GetQueryable()
-                .Where(a => a.LeaveTypeId == leaveTypeId
+                .Where(a => a.TenantId == tenantId
+                         && a.LeaveTypeId == leaveTypeId
                          && a.StaffLevelId == staffLevelId.Value
                          && a.LeaveSubTypeId == leaveSubTypeId
                          && a.EffectiveFrom <= yearEnd
@@ -89,11 +114,12 @@ public class LeaveEntitlementService : ILeaveEntitlementService
     public async Task<decimal> GetAccruedAsOfAsync(
         Guid employeeId, Guid leaveTypeId, Guid? leaveSubTypeId, int year, DateOnly? asOf = null, CancellationToken ct = default)
     {
+        var tenantId = GetTenantId();
         var annual = await ResolveAnnualEntitlementAsync(employeeId, leaveTypeId, leaveSubTypeId, year, ct);
 
         var policy = await _leaveTypeRepository
             .GetQueryable()
-            .Where(lt => lt.Id == leaveTypeId)
+            .Where(lt => lt.TenantId == tenantId && lt.Id == leaveTypeId)
             .SelectMany(lt => lt.AccrualPolicies)
             .Where(p => p.IsActive && p.Frequency != AccrualFrequency.None)
             .FirstOrDefaultAsync(ct);
@@ -103,7 +129,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
             return annual;
 
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
-        var dateEmployed = employee?.DateEmployed;
+        var dateEmployed = employee?.TenantId == tenantId ? employee.DateEmployed : null;
 
         var yearStart = new DateOnly(year, 1, 1);
         var yearEnd = new DateOnly(year, 12, 31);
@@ -138,8 +164,8 @@ public class LeaveEntitlementService : ILeaveEntitlementService
     public async Task<bool> IsAccessibleAsync(
         Guid employeeId, Guid leaveTypeId, DateOnly? asOf = null, CancellationToken ct = default)
     {
-        var leaveType = await _leaveTypeRepository.GetByIdAsync(leaveTypeId)
-            ?? throw new ArgumentException($"Leave type '{leaveTypeId}' not found.");
+        var tenantId = GetTenantId();
+        var leaveType = await GetOwnedLeaveTypeAsync(leaveTypeId);
 
         var minMonths = leaveType.MinServiceMonthsToAccess ?? 0;
         if (minMonths <= 0)
@@ -147,7 +173,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
 
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
         // No hire date on record → don't block; treat as accessible.
-        if (employee?.DateEmployed is not DateOnly hired)
+        if (employee?.TenantId != tenantId || employee.DateEmployed is not DateOnly hired)
             return true;
 
         var accessibleFrom = hired.AddMonths(minMonths);
@@ -157,15 +183,15 @@ public class LeaveEntitlementService : ILeaveEntitlementService
     public async Task<LeaveEntitlementSnapshot> GetSnapshotAsync(
         Guid employeeId, Guid leaveTypeId, Guid? leaveSubTypeId, int year, DateOnly? asOf = null, CancellationToken ct = default)
     {
-        var leaveType = await _leaveTypeRepository.GetByIdAsync(leaveTypeId)
-            ?? throw new ArgumentException($"Leave type '{leaveTypeId}' not found.");
+        var tenantId = GetTenantId();
+        var leaveType = await GetOwnedLeaveTypeAsync(leaveTypeId);
 
         var annual = await ResolveAnnualEntitlementAsync(employeeId, leaveTypeId, leaveSubTypeId, year, ct);
         var accrued = await GetAccruedAsOfAsync(employeeId, leaveTypeId, leaveSubTypeId, year, asOf, ct);
 
         var hasPolicy = await _leaveTypeRepository
             .GetQueryable()
-            .Where(lt => lt.Id == leaveTypeId)
+            .Where(lt => lt.TenantId == tenantId && lt.Id == leaveTypeId)
             .SelectMany(lt => lt.AccrualPolicies)
             .AnyAsync(p => p.IsActive && p.Frequency != AccrualFrequency.None, ct);
 
@@ -174,7 +200,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         if (minMonths > 0)
         {
             var employee = await _employeeRepository.GetByIdAsync(employeeId);
-            if (employee?.DateEmployed is DateOnly hired)
+            if (employee?.TenantId == tenantId && employee.DateEmployed is DateOnly hired)
                 accessibleFrom = hired.AddMonths(minMonths);
         }
 
@@ -190,11 +216,11 @@ public class LeaveEntitlementService : ILeaveEntitlementService
 
     // ===== helpers =====
 
-    private async Task<Guid?> GetEmployeeStaffLevelIdAsync(Guid employeeId, CancellationToken ct)
+    private async Task<Guid?> GetEmployeeStaffLevelIdAsync(Guid employeeId, Guid tenantId, CancellationToken ct)
     {
         return await _employeeRepository
             .GetQueryable()
-            .Where(e => e.Id == employeeId)
+            .Where(e => e.TenantId == tenantId && e.Id == employeeId)
             .Select(e => e.Position != null ? e.Position.StaffLevelId : null)
             .FirstOrDefaultAsync(ct);
     }

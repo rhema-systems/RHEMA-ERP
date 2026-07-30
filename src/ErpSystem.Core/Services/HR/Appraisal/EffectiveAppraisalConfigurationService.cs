@@ -20,32 +20,69 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigurationService
 {
     private readonly IGenericRepository<Employee> _employeeRepository;
+    private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
     private readonly IGenericRepository<AppraisalCycleTemplate> _cycleTemplateRepository;
     private readonly IGenericRepository<AppraisalTemplate> _templateRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<PerformanceAppraisalCriterionConfig> _criterionConfigRepository;
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<EffectiveAppraisalConfigurationService> _logger;
 
     public EffectiveAppraisalConfigurationService(
         IGenericRepository<Employee> employeeRepository,
+        IGenericRepository<AppraisalCycle> cycleRepository,
         IGenericRepository<AppraisalCycleTemplate> cycleTemplateRepository,
         IGenericRepository<AppraisalTemplate> templateRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IGenericRepository<PerformanceAppraisalCriterionConfig> criterionConfigRepository,
         IGenericRepository<EmployeeGoal> goalRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<EffectiveAppraisalConfigurationService> logger)
     {
         _employeeRepository = employeeRepository;
+        _cycleRepository = cycleRepository;
         _cycleTemplateRepository = cycleTemplateRepository;
         _templateRepository = templateRepository;
         _appraisalRepository = appraisalRepository;
         _criterionConfigRepository = criterionConfigRepository;
         _goalRepository = goalRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid employeeId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var employee = await _employeeRepository.GetQueryable()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == tenantId, cancellationToken);
+        if (employee == null)
+            throw new ArgumentException($"Employee {employeeId} not found");
+        return employee;
+    }
+
+    private async Task<AppraisalCycle> GetOwnedCycleAsync(Guid cycleId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var cycle = await _cycleRepository.GetQueryable()
+            .FirstOrDefaultAsync(c => c.Id == cycleId && c.TenantId == tenantId, cancellationToken);
+        if (cycle == null)
+            throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
+        return cycle;
     }
 
     /// <inheritdoc/>
@@ -54,9 +91,10 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         Guid cycleId,
         CancellationToken cancellationToken = default)
     {
+        await GetOwnedCycleAsync(cycleId, cancellationToken);
+
         // 1. Load employee (need PositionId, OrganizationUnitId, OrganizationLevelId)
-        var employee = await _employeeRepository.GetByIdAsync(employeeId)
-            ?? throw new ArgumentException($"Employee {employeeId} not found");
+        var employee = await GetOwnedEmployeeAsync(employeeId, cancellationToken);
 
         // 2. Resolve the template for this employee in this cycle
         var resolvedTemplate = await ResolveTemplateAsync(employee, cycleId, cancellationToken);
@@ -65,8 +103,12 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         var template = await LoadTemplateAsync(resolvedTemplate.AppraisalTemplateId, cancellationToken);
 
         // 4. Load locked employee goals for KPI target resolution
-        var lockedGoals = await _goalRepository.GetQueryable(
-                g => g.EmployeeId == employeeId && g.AppraisalCycleId == cycleId && g.IsLocked)
+        var tenantId = GetTenantId();
+        var lockedGoals = await _goalRepository.GetQueryable()
+            .Where(g => g.TenantId == tenantId
+                     && g.EmployeeId == employeeId
+                     && g.AppraisalCycleId == cycleId
+                     && g.IsLocked)
             .ToListAsync(cancellationToken);
 
         // 5. Build the effective config
@@ -81,8 +123,9 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         Guid? templateId = null,
         CancellationToken cancellationToken = default)
     {
-        var employee = await _employeeRepository.GetByIdAsync(employeeId)
-            ?? throw new ArgumentException($"Employee {employeeId} not found");
+        await GetOwnedCycleAsync(cycleId, cancellationToken);
+        var employee = await GetOwnedEmployeeAsync(employeeId, cancellationToken);
+        var tenantId = GetTenantId();
 
         // If the caller supplies a templateId (e.g. from GenerateAppraisalsAsync), use it
         // directly to anchor the snapshot.  Otherwise fall back to full resolution.
@@ -101,8 +144,11 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
 
         var template = await LoadTemplateAsync(effectiveTemplateId, cancellationToken);
 
-        var lockedGoals = await _goalRepository.GetQueryable(
-                g => g.EmployeeId == employeeId && g.AppraisalCycleId == cycleId && g.IsLocked)
+        var lockedGoals = await _goalRepository.GetQueryable()
+            .Where(g => g.TenantId == tenantId
+                     && g.EmployeeId == employeeId
+                     && g.AppraisalCycleId == cycleId
+                     && g.IsLocked)
             .ToListAsync(cancellationToken);
 
         var effectiveConfig = BuildEffectiveConfig(employeeId, cycleId, template, lockedGoals);
@@ -137,8 +183,9 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
 
     private async Task<AppraisalTemplate> LoadTemplateAsync(Guid templateId, CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
         return await _templateRepository.GetQueryable()
-            .Where(t => t.Id == templateId)
+            .Where(t => t.Id == templateId && t.TenantId == tenantId)
             .Include(t => t.Sections)
                 .ThenInclude(s => s.TemplateItems)
                     .ThenInclude(ti => ti.Competency)
@@ -163,9 +210,12 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         Guid cycleId,
         CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
+
         // Load all active templates for the cycle with their scope navigations.
         var allForCycle = await _cycleTemplateRepository
-            .GetQueryable(t => t.AppraisalCycleId == cycleId && t.IsActive)
+            .GetQueryable()
+            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == cycleId && t.IsActive)
             .Include(t => t.AppraisalTemplate)
             .ToListAsync(cancellationToken);
 

@@ -35,6 +35,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     private readonly IGenericRepository<PerformanceAppraisalCriterionConfig> _criterionConfigRepository;
     private readonly IGenericRepository<EmployeeGoalAppraisalAssessment> _goalAssessmentRepository;
     private readonly ITalentRatingSyncService _talentRatingSync;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<PerformanceAppraisal> _logger;
 
@@ -59,7 +60,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         IGenericRepository<AppraisalKpiEvaluationSnapshot> kpiEvaluationSnapshotRepository,
         IGenericRepository<PerformanceAppraisalCriterionConfig> criterionConfigRepository,
         IGenericRepository<EmployeeGoalAppraisalAssessment> goalAssessmentRepository,
-        ITalentRatingSyncService talentRatingSync)
+        ITalentRatingSyncService talentRatingSync,
+        ICurrentUserProvider currentUserProvider)
     {
         _appraisalRepository = appraisalRepository;
         _unitOfWork = unitOfWork;
@@ -82,11 +84,65 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         _criterionConfigRepository = criterionConfigRepository;
         _goalAssessmentRepository = goalAssessmentRepository;
         _talentRatingSync = talentRatingSync;
+        _currentUserProvider = currentUserProvider;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An appraisal owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<PerformanceAppraisal> GetOwnedAppraisalAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _appraisalRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Performance appraisal with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<AppraisalAppeal> GetOwnedAppealAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _appealRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Appeal with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<PerformanceAppraisal> TenantAppraisalQuery()
+    {
+        var tenantId = GetTenantId();
+        return _appraisalRepository.GetQueryable().Where(a => a.TenantId == tenantId);
+    }
+
+    private IQueryable<AppraisalAppeal> TenantAppealQuery()
+    {
+        var tenantId = GetTenantId();
+        return _appealRepository.GetQueryable().Where(a => a.TenantId == tenantId);
+    }
+
+    private IQueryable<EvaluatorEvaluation> TenantEvaluationQuery()
+    {
+        var tenantId = GetTenantId();
+        return _evaluatorEvaluationRepository.GetQueryable().Where(e => e.TenantId == tenantId);
+    }
+
+    private IQueryable<CriterionScore> TenantCriterionScoreQuery()
+    {
+        var tenantId = GetTenantId();
+        return _criterionScoreRepository.GetQueryable().Where(cs => cs.TenantId == tenantId);
     }
 
     public async Task<bool> CalculateOverallScoreAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
                                                 .Include(p => p.EvaluatorEvaluations)
                                                     .ThenInclude(e => e.CriterionScores)
                                                 .FirstOrDefaultAsync(p => p.Id == appraisalId, cancellationToken);
@@ -146,8 +202,10 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     public async Task<PerformanceAppraisalDto> CreateAsync(CreatePerformanceAppraisalDto createDto, CancellationToken cancellationToken = default)
     {
         // ── Data integrity: one appraisal per employee per cycle ──────────────
+        var tenantId = GetTenantId();
         var duplicate = await _appraisalRepository.ExistsAsync(
-            a => a.EmployeeId == createDto.EmployeeId
+            a => a.TenantId == tenantId
+              && a.EmployeeId == createDto.EmployeeId
               && a.AppraisalCycleId == createDto.AppraisalCycleId);
 
         if (duplicate)
@@ -156,6 +214,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 "Only one appraisal per employee per cycle is permitted.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
 
         entity.AppraisalNumber = await GenerateAppraisalNumberAsync(createDto.Year, cancellationToken);
         entity.Status = AppraisalStatus.Draft;
@@ -170,12 +229,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _appraisalRepository.GetByIdAsync(id);
-
-        if (entity == null)
-        {
-            throw new ArgumentException($"Performance appraisal with ID '{id}' not found.");
-        }
+        var entity = await GetOwnedAppraisalAsync(id, cancellationToken);
 
         await _appraisalRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -187,12 +241,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<AppraisalAppealDto> FileAppealAsync(CreateAppraisalAppealDto appealDto, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetByIdAsync(appealDto.PerformanceAppraisalId);
-
-        if (appraisal == null)
-        {
-            throw new ArgumentException($"Performance appraisal with ID '{appealDto.PerformanceAppraisalId}' not found.");
-        }
+        var appraisal = await GetOwnedAppraisalAsync(appealDto.PerformanceAppraisalId, cancellationToken);
 
         // Create new appeal entity
         var appealEntity = new AppraisalAppeal
@@ -236,13 +285,14 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<IEnumerable<PerformanceAppraisalDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var performanceAppraisals = await _appraisalRepository.GetAllAsync();
-        return performanceAppraisals.ToDtoList();
+        return performanceAppraisals.Where(a => a.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<IEnumerable<PerformanceAppraisalDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var entities = await _appraisalRepository.GetQueryable()
+        var entities = await TenantAppraisalQuery()
                                                 .Include(p => p.Employee)
                                                     .ThenInclude(e => e.Department)
                                                 .Include(p => p.Employee)
@@ -256,7 +306,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<PerformanceAppraisalDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _appraisalRepository.GetQueryable()
+        var entity = await TenantAppraisalQuery()
                                             .Include(p => p.Employee)
                                                 .ThenInclude(e => e.Department)
                                             .Include(p => p.Employee)
@@ -264,16 +314,14 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                                             .FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
 
         if (entity == null)
-        {
             throw new ArgumentException($"Performance appraisal with ID '{id}' not found.");
-        }
 
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<PerformanceAppraisalDto>> GetByStatusAsync(AppraisalStatus status, CancellationToken cancellationToken = default)
     {
-        var entities = await _appraisalRepository.GetQueryable(p => p.Status == status)
+        var entities = await TenantAppraisalQuery().Where(p => p.Status == status)
                                                 .Include(p => p.Employee)
                                                     .ThenInclude(e => e.Department)
                                                 .Include(p => p.Employee)
@@ -285,7 +333,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<IEnumerable<PerformanceAppraisalDto>> GetByYearAsync(int year, CancellationToken cancellationToken = default)
     {
-        var entities = await _appraisalRepository.GetQueryable(p => p.Year == year)
+        var entities = await TenantAppraisalQuery().Where(p => p.Year == year)
                                                 .Include(p => p.Employee)
                                                     .ThenInclude(e => e.Department)
                                                 .Include(p => p.Employee)
@@ -297,7 +345,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<PagedResult<PerformanceAppraisalDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _appraisalRepository.GetQueryable();
+        var query = TenantAppraisalQuery();
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query.OrderByDescending(p => p.CreatedAt)
@@ -318,7 +366,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<bool> ResolveAppealAsync(ResolveAppraisalAppealDto resolveDto, CancellationToken cancellationToken = default)
     {
-        var appeal = await _appealRepository.GetQueryable()
+        var appeal = await TenantAppealQuery()
             .Include(a => a.Items)
             .Include(a => a.PerformanceAppraisal)
             .FirstOrDefaultAsync(a => a.Id == resolveDto.AppealId, cancellationToken);
@@ -367,7 +415,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<PerformanceAppraisalDto> UpdateAsync(UpdatePerformanceAppraisalDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _appraisalRepository.GetQueryable()
+        var entity = await TenantAppraisalQuery()
                                             .Include(p => p.Employee)
                                                 .ThenInclude(e => e.Department)
                                             .Include(p => p.Employee)
@@ -391,10 +439,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<bool> UpdateStatusAsync(UpdateAppraisalStatusDto statusDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _appraisalRepository.GetByIdAsync(statusDto.AppraisalId);
-
-        if (entity == null)
-            throw new ArgumentException($"Performance appraisal with ID '{statusDto.AppraisalId}' not found.");
+        var entity = await GetOwnedAppraisalAsync(statusDto.AppraisalId, cancellationToken);
 
         // ── State machine: enforce valid forward transitions ──────────────────
         // Prevents skipping stages or transitioning backwards.
@@ -431,7 +476,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     private async Task<string> GenerateAppraisalNumberAsync(int year, CancellationToken cancellationToken)
     {
-        var count = await _appraisalRepository.GetQueryable(p => p.Year == year)
+        var count = await TenantAppraisalQuery().Where(p => p.Year == year)
                                             .CountAsync(cancellationToken);
 
         return $"APR-{year}-{(count + 1):D5}";
@@ -442,7 +487,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     public async Task<EvaluatorEvaluationDto> AddEvaluatorEvaluationAsync(Guid appraisalId, CreateEvaluatorEvaluationDto createDto, CancellationToken cancellationToken = default)
     {
         // Validate appraisal exists
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.EvaluatorEvaluations)
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
 
@@ -450,7 +495,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             throw new ArgumentException("Performance appraisal not found");
 
         // Validate evaluator exists
-        var evaluatorExists = await _employeeRepository.ExistsAsync(e => e.Id == createDto.EvaluatorId);
+        var evaluatorExists = await _employeeRepository.ExistsAsync(e => e.TenantId == GetTenantId() && e.Id == createDto.EvaluatorId);
         if (!evaluatorExists)
             throw new ArgumentException("Evaluator not found");
 
@@ -471,13 +516,14 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         }
 
         var entity = createDto.ToEntity();
+        entity.TenantId = appraisal.TenantId;
         entity.AppraisalId = appraisalId;
 
         await _evaluatorEvaluationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Reload with includes
-        entity = await _evaluatorEvaluationRepository.GetQueryable()
+        entity = await TenantEvaluationQuery()
             .Include(e => e.Evaluator)
             .FirstOrDefaultAsync(e => e.Id == entity.Id, cancellationToken);
 
@@ -488,7 +534,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<IEnumerable<EvaluatorEvaluationDto>> GetEvaluatorEvaluationsAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
-        var entities = await _evaluatorEvaluationRepository.GetQueryable(e => e.AppraisalId == appraisalId)
+        var entities = await TenantEvaluationQuery().Where(e => e.AppraisalId == appraisalId)
                                                 .Include(e => e.Evaluator)
                                                 .OrderByDescending(e => e.IsAuthoritative)
                                                 .ThenByDescending(e => e.EvaluatorWeight)
@@ -499,7 +545,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<EvaluatorEvaluationDto> UpdateEvaluatorEvaluationAsync(Guid appraisalId, UpdateEvaluatorEvaluationDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _evaluatorEvaluationRepository.GetQueryable()
+        var entity = await TenantEvaluationQuery()
             .Include(e => e.Evaluator)
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.EvaluatorEvaluations)
@@ -528,7 +574,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<bool> DeleteEvaluatorEvaluationAsync(Guid appraisalId, Guid evaluationId, CancellationToken cancellationToken = default)
     {
-        var entity = await _evaluatorEvaluationRepository.GetQueryable()
+        var entity = await TenantEvaluationQuery()
                                                         .FirstOrDefaultAsync(e => e.Id == evaluationId && e.AppraisalId == appraisalId, cancellationToken);
 
         if (entity == null)
@@ -549,7 +595,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     public async Task<CriterionScoreDto> AddCriterionScoreAsync(Guid evaluationId, CreateCriterionScoreDto createDto, CancellationToken cancellationToken = default)
     {
         // Validate evaluation exists and get criteria mapping info
-        var evaluation = await _evaluatorEvaluationRepository.GetQueryable()
+        var evaluation = await TenantEvaluationQuery()
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.Employee)
                     .ThenInclude(emp => emp.Position)
@@ -561,7 +607,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
         // Validate template item is configured for this appraisal
         var templateItemConfigExists = await _criterionConfigRepository.ExistsAsync(
-            c => c.PerformanceAppraisalId == evaluation.AppraisalId && c.TemplateItemId == createDto.TemplateItemId);
+            c => c.TenantId == GetTenantId() && c.PerformanceAppraisalId == evaluation.AppraisalId && c.TemplateItemId == createDto.TemplateItemId);
         if (!templateItemConfigExists)
             throw new ArgumentException("Appraisal template item not found or not configured for this appraisal");
 
@@ -573,6 +619,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         }
 
         var entity = createDto.ToEntity();
+        entity.TenantId = evaluation.TenantId;
         entity.EvaluatorEvaluationId = evaluationId;
 
         // Calculate weighted score per spec
@@ -582,7 +629,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Reload with includes
-        entity = await _criterionScoreRepository.GetQueryable()
+        entity = await TenantCriterionScoreQuery()
                                                 .Include(cs => cs.TemplateItem)
                                                 .FirstOrDefaultAsync(cs => cs.Id == entity.Id, cancellationToken);
 
@@ -593,7 +640,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<IEnumerable<CriterionScoreDto>> GetCriterionScoresAsync(Guid evaluationId, CancellationToken cancellationToken = default)
     {
-        var entities = await _criterionScoreRepository.GetQueryable(cs => cs.EvaluatorEvaluationId == evaluationId)
+        var entities = await TenantCriterionScoreQuery().Where(cs => cs.EvaluatorEvaluationId == evaluationId)
                                             .Include(cs => cs.TemplateItem)
                                             .OrderBy(cs => cs.TemplateItemId)
                                             .ToListAsync(cancellationToken);
@@ -603,7 +650,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<CriterionScoreDto> UpdateCriterionScoreAsync(Guid evaluationId, UpdateCriterionScoreDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _criterionScoreRepository.GetQueryable()
+        var entity = await TenantCriterionScoreQuery()
             .Include(cs => cs.TemplateItem)
             .Include(cs => cs.EvaluatorEvaluation)
                 .ThenInclude(e => e.Appraisal)
@@ -628,7 +675,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<bool> DeleteCriterionScoreAsync(Guid evaluationId, Guid scoreId, CancellationToken cancellationToken = default)
     {
-        var entity = await _criterionScoreRepository.GetQueryable()
+        var entity = await TenantCriterionScoreQuery()
             .FirstOrDefaultAsync(cs => cs.Id == scoreId && cs.EvaluatorEvaluationId == evaluationId, cancellationToken);
 
         if (entity == null)
@@ -683,7 +730,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<AppraisalEmployeeResponseDto> AddEmployeeResponseAsync(Guid appraisalId, CreateAppraisalEmployeeResponseDto createDto, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle).ThenInclude(c => c.AppraisalSettings)
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
         if (appraisal == null)
@@ -696,11 +743,12 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         if (createDto.TemplateItemId.HasValue)
         {
             var templateItemConfigExists = await _criterionConfigRepository.ExistsAsync(
-                c => c.PerformanceAppraisalId == appraisalId && c.TemplateItemId == createDto.TemplateItemId.Value);
+                c => c.TenantId == GetTenantId() && c.PerformanceAppraisalId == appraisalId && c.TemplateItemId == createDto.TemplateItemId.Value);
             // FK constraint will also enforce validity
         }
 
         var entity = createDto.ToEntity();
+        entity.TenantId = appraisal.TenantId;
         entity.AppraisalId = appraisalId;
 
         await _employeeResponseRepository.AddAsync(entity);
@@ -708,7 +756,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
         entity = await _employeeResponseRepository.GetQueryable()
             .Include(r => r.TemplateItem)
-            .FirstOrDefaultAsync(r => r.Id == entity.Id, cancellationToken);
+            .FirstOrDefaultAsync(r => r.Id == entity.Id && r.TenantId == GetTenantId(), cancellationToken);
 
         _logger.LogInformation("Employee response added successfully: {Id}", entity!.Id);
 
@@ -717,7 +765,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<IEnumerable<AppraisalEmployeeResponseDto>> GetEmployeeResponsesAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
-        var entities = await _employeeResponseRepository.GetQueryable(r => r.AppraisalId == appraisalId)
+        var tenantId = GetTenantId();
+        var entities = await _employeeResponseRepository.GetQueryable(r => r.AppraisalId == appraisalId && r.TenantId == tenantId)
                                                         .Include(r => r.TemplateItem)
                                                         .ToListAsync(cancellationToken);
 
@@ -730,12 +779,13 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<AppraisalAttachmentDto> AddAttachmentAsync(Guid appraisalId, CreateAppraisalAttachmentDto createDto, CancellationToken cancellationToken = default)
     {
-        var appraisalExists = await _appraisalRepository.ExistsAsync(a => a.Id == appraisalId);
+        var appraisalExists = await _appraisalRepository.ExistsAsync(a => a.TenantId == GetTenantId() && a.Id == appraisalId);
         
         if (!appraisalExists)
             throw new ArgumentException("Performance appraisal not found");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
         entity.PerformanceAppraisalId = appraisalId;
 
         await _appraisalAttachmentRepository.AddAsync(entity);
@@ -748,7 +798,9 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     public async Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
-        var entities = await _appraisalAttachmentRepository.GetQueryable(a => a.PerformanceAppraisalId == appraisalId)
+        var tenantId = GetTenantId();
+        var entities = await _appraisalAttachmentRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId && a.PerformanceAppraisalId == appraisalId)
                                                 .OrderByDescending(a => a.UploadDate)
                                                 .ToListAsync(cancellationToken);
 
@@ -761,7 +813,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     public async Task<IEnumerable<MyAppraisalDto>> GetMyAppraisalsAsync(Guid employeeId, string? cycleFilter = null, CancellationToken cancellationToken = default)
     {
         // Get all appraisals where the employee is the subject
-        var appraisalsQuery = _appraisalRepository.GetQueryable()
+        var tenantId = GetTenantId();
+        var appraisalsQuery = TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.Employee)
@@ -795,7 +848,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         // Get all peer nominations where this employee is a peer evaluator
         var peerNominations = await _peerNominationRepository
             .GetQueryable()
-            .Where(pn => pn.PeerEmployeeId == employeeId)
+            .Where(pn => pn.TenantId == tenantId && pn.PeerEmployeeId == employeeId)
             .ToListAsync(cancellationToken);
 
         var peerAppraisalIds = peerNominations.Select(pn => pn.AppraisalId).ToHashSet();
@@ -937,7 +990,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     public async Task<SelfEvaluationContextDto> GetSelfEvaluationContextAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
         // Get appraisal with all related data
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.Employee)
@@ -1006,7 +1059,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     public async Task<SelfEvaluationResultDto> SaveSelfEvaluationAsync(SaveSelfEvaluationDto saveDto, CancellationToken cancellationToken = default)
     {
         // Get appraisal
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.Employee)
@@ -1104,6 +1157,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 
                 evaluatorEvaluation = new EvaluatorEvaluation
                 {
+                    TenantId = appraisal.TenantId,
                     AppraisalId = appraisal.Id,
                     EvaluatorId = saveDto.EmployeeId,
                     EvaluatorRole = EvaluatorRole.Self,
@@ -1145,7 +1199,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 foreach (var itemInput in saveDto.ItemScores)
                 {
                     // Check if criterion score already exists
-                    var existingScore = await _criterionScoreRepository.GetQueryable()
+                    var existingScore = await TenantCriterionScoreQuery()
                         .FirstOrDefaultAsync(cs => cs.EvaluatorEvaluationId == evaluatorEvaluation.Id
                                                  && cs.TemplateItemId == itemInput.TemplateItemId,
                                            cancellationToken);
@@ -1155,6 +1209,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                         // Create new criterion score
                         var newScore = new CriterionScore
                         {
+                            TenantId = appraisal.TenantId,
                             EvaluatorEvaluationId = evaluatorEvaluation.Id,
                             TemplateItemId = itemInput.TemplateItemId,
                             NumericScore = itemInput.NumericScore,
@@ -1186,7 +1241,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             if (!saveDto.IsDraft)
             {
                 // Need to reload the evaluator evaluation with all criterion scores to calculate TotalScore
-                var evalWithScores = await _evaluatorEvaluationRepository.GetQueryable()
+                var evalWithScores = await TenantEvaluationQuery()
                     .Include(e => e.CriterionScores)
                     .FirstOrDefaultAsync(e => e.Id == evaluatorEvaluation.Id, cancellationToken);
                 
@@ -1230,6 +1285,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                     {
                         await _customQuestionResponseRepository.AddAsync(new AppraisalCustomQuestionResponse
                         {
+                            TenantId = appraisal.TenantId,
                             PerformanceAppraisalId = appraisal.Id,
                             TemplateItemId         = input.TemplateItemId,
                             ResponseText           = input.ResponseText,
@@ -1324,7 +1380,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<ViewSubmittedEvaluationDto> GetViewSubmittedEvaluationAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.Employee)
                 .ThenInclude(e => e.Position)
             .Include(a => a.Employee.Department)
@@ -1361,19 +1417,20 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         // KPI targets are now managed via EmployeeGoal - not loaded here.
 
         // Load attachments (read-only list)
+        var tenantId = GetTenantId();
         var attachments = await _appraisalAttachmentRepository.GetQueryable()
-            .Where(a => a.PerformanceAppraisalId == appraisalId)
+            .Where(a => a.TenantId == tenantId && a.PerformanceAppraisalId == appraisalId)
             .ToListAsync(cancellationToken);
 
         // Check peer/manager review progress (visual-only)
-        var peerEvaluations = await _evaluatorEvaluationRepository.GetQueryable()
+        var peerEvaluations = await TenantEvaluationQuery()
             .Where(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.Peer)
             .ToListAsync(cancellationToken);
 
-        var managerEvaluation = await _evaluatorEvaluationRepository.GetQueryable()
+        var managerEvaluation = await TenantEvaluationQuery()
             .FirstOrDefaultAsync(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.Manager, cancellationToken);
 
-        var hrEvaluation = await _evaluatorEvaluationRepository.GetQueryable()
+        var hrEvaluation = await TenantEvaluationQuery()
             .FirstOrDefaultAsync(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.HR, cancellationToken);
 
         return new ViewSubmittedEvaluationDto
@@ -1461,8 +1518,9 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         Guid templateItemId, Guid appraisalId, Guid? positionId, CancellationToken cancellationToken = default)
     {
         // ── Snapshot path (preferred) ────────────────────────────────────────
+        var tenantId = GetTenantId();
         var snapshot = await _criterionConfigRepository.GetQueryable()
-            .Where(c => c.PerformanceAppraisalId == appraisalId && c.TemplateItemId == templateItemId)
+            .Where(c => c.TenantId == tenantId && c.PerformanceAppraisalId == appraisalId && c.TemplateItemId == templateItemId)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (snapshot != null)
@@ -1484,8 +1542,9 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         Guid templateItemId, Guid appraisalId, Guid? positionId, CancellationToken cancellationToken = default)
     {
         // ── Snapshot path (preferred) ────────────────────────────────────────
+        var tenantId = GetTenantId();
         var snapshot = await _criterionConfigRepository.GetQueryable()
-            .Where(c => c.PerformanceAppraisalId == appraisalId && c.TemplateItemId == templateItemId)
+            .Where(c => c.TenantId == tenantId && c.PerformanceAppraisalId == appraisalId && c.TemplateItemId == templateItemId)
             .Include(c => c.GradeRanges)
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -1532,7 +1591,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 // Peer submitted: check threshold; if all governance steps are skipped → Completed
                 if (currentStatus == AppraisalStatus.Active)
                 {
-                    var submittedPeers = await _evaluatorEvaluationRepository.GetQueryable()
+                    var submittedPeers = await TenantEvaluationQuery()
                         .Where(e => e.AppraisalId == appraisal.Id
                                  && e.EvaluatorRole == EvaluatorRole.Peer
                                  && e.SubmittedDate.HasValue)
@@ -1603,7 +1662,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         CancellationToken cancellationToken = default)
     {
         // Load manager evaluation with all related data
-        var managerEvaluation = await _evaluatorEvaluationRepository.GetQueryable()
+        var managerEvaluation = await TenantEvaluationQuery()
             .Include(e => e.CriterionScores)
             .Include(e => e.Appraisal)
             .Where(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.Manager)
@@ -1674,7 +1733,9 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     public async Task<IEnumerable<TeamAppraisalCycleSummaryDto>> GetTeamAppraisalCyclesAsync(Guid managerId, CancellationToken cancellationToken = default)
     {
         // Get all cycles where this manager has direct reports with appraisals
+        var tenantId = GetTenantId();
         var cycles = await _appraisalCycleRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
             .Include(c => c.PerformanceAppraisals)
                 .ThenInclude(a => a.Employee)
             .Include(c => c.PerformanceAppraisals)
@@ -1719,7 +1780,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<IEnumerable<TeamMemberAppraisalDto>> GetTeamMemberAppraisalsAsync(Guid cycleId, Guid managerId, CancellationToken cancellationToken = default)
     {
-        var appraisals = await _appraisalRepository.GetQueryable()
+        var appraisals = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.Employee)
@@ -1769,7 +1830,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<ManagerEvaluationContextDto> GetManagerEvaluationContextAsync(Guid appraisalId, Guid managerId, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.Employee)
                 .ThenInclude(e => e.Position)
             .Include(a => a.Employee)
@@ -1884,7 +1945,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<ManagerEvaluationResultDto> SaveManagerEvaluationAsync(SaveManagerEvaluationDto saveDto, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.Employee)
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
@@ -1970,7 +2031,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             if (!itemInput.NumericScore.HasValue && !itemInput.ActualValue.HasValue)
                 continue;
 
-            var existingScore = await _criterionScoreRepository.GetQueryable()
+            var existingScore = await TenantCriterionScoreQuery()
                 .FirstOrDefaultAsync(cs => cs.EvaluatorEvaluationId == managerEvaluation.Id
                                         && cs.TemplateItemId == itemInput.TemplateItemId,
                                       cancellationToken);
@@ -2025,7 +2086,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             managerEvaluation.SubmittedDate = DateTime.UtcNow;
             
             // Calculate and set TotalScore only when submitting (not draft)
-            var evalWithScores = await _evaluatorEvaluationRepository.GetQueryable()
+            var evalWithScores = await TenantEvaluationQuery()
                 .Include(e => e.CriterionScores)
                 .FirstOrDefaultAsync(e => e.Id == managerEvaluation.Id, cancellationToken);
             
@@ -2141,7 +2202,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<ManagerPeerEvaluationReviewDto> GetManagerPeerEvaluationReviewAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c!.AppraisalSettings)
             .Include(a => a.EvaluatorEvaluations.Where(e => e.EvaluatorRole == EvaluatorRole.Peer))
@@ -2220,10 +2281,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task AcknowledgeAppraisalAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetByIdAsync(appraisalId);
-        
-        if (appraisal == null)
-            throw new ArgumentException($"Appraisal with ID '{appraisalId}' not found.");
+        var appraisal = await GetOwnedAppraisalAsync(appraisalId, cancellationToken);
         
         if (appraisal.EmployeeId != employeeId)
             throw new UnauthorizedAccessException("You can only acknowledge your own appraisal.");
@@ -2248,7 +2306,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     public async Task<AppealPageDataDto> GetAppealPageDataAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default)
     {
         // Load appraisal with evaluations and scores
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
             .Include(a => a.CriterionConfigs)
             .Include(a => a.EvaluatorEvaluations)
@@ -2332,10 +2390,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<AppraisalAppealDto> SubmitAppealAsync(SubmitAppealDto submitDto, Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetByIdAsync(submitDto.AppraisalId);
-        
-        if (appraisal == null)
-            throw new ArgumentException($"Appraisal with ID '{submitDto.AppraisalId}' not found.");
+        var appraisal = await GetOwnedAppraisalAsync(submitDto.AppraisalId, cancellationToken);
         
         if (appraisal.EmployeeId != employeeId)
             throw new UnauthorizedAccessException("You can only appeal your own appraisal.");
@@ -2420,7 +2475,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<AppealStatusViewDto> GetAppealStatusAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
         
@@ -2434,7 +2489,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             throw new InvalidOperationException("No appeal has been filed for this appraisal.");
         
         // Load the appeal with related data
-        var appeal = await _appealRepository.GetQueryable()
+        var appeal = await TenantAppealQuery()
             .Include(a => a.Items)
             .Include(a => a.Reviewer)
             .FirstOrDefaultAsync(a => a.PerformanceAppraisalId == appraisalId, cancellationToken);
@@ -2452,12 +2507,12 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 // It's a competency
                 var competency = await _appraisalCompetencyRepository.GetByIdAsync(
                     (await _criterionConfigRepository.GetQueryable()
-                        .Where(cc => cc.TemplateItemId == item.TemplateItemId.Value)
+                        .Where(cc => cc.TenantId == GetTenantId() && cc.TemplateItemId == item.TemplateItemId.Value)
                         .Select(cc => cc.TemplateItem.CompetencyId)
                         .FirstOrDefaultAsync(cancellationToken)) ?? Guid.Empty);
 
                 // Get the criterion score
-                var score = await _criterionScoreRepository.GetQueryable()
+                var score = await TenantCriterionScoreQuery()
                     .Include(cs => cs.EvaluatorEvaluation)
                     .FirstOrDefaultAsync(cs => 
                         cs.TemplateItemId == item.TemplateItemId.Value && 
@@ -2501,7 +2556,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<List<AppealListItemDto>> GetAppealsListAsync(Guid? cycleId = null, AppraisalAppealStatus? status = null, CancellationToken cancellationToken = default)
     {
-        var query = _appealRepository.GetQueryable()
+        var query = TenantAppealQuery()
             .Include(a => a.PerformanceAppraisal)
                 .ThenInclude(pa => pa.Employee)
             .Include(a => a.PerformanceAppraisal)
@@ -2546,7 +2601,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     public async Task<AppealReviewDto> GetAppealReviewDataAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
         // Load appraisal with basic info
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(pa => pa.Employee)
                 .ThenInclude(e => e.OrganizationUnit)
             .Include(pa => pa.AppraisalCycle)
@@ -2560,7 +2615,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             throw new InvalidOperationException("No appeal exists for this appraisal");
 
         // Load the appeal
-        var appeal = await _appealRepository.GetQueryable()
+        var appeal = await TenantAppealQuery()
             .Include(a => a.Items)
             .FirstOrDefaultAsync(a => a.PerformanceAppraisalId == appraisalId, cancellationToken);
 
@@ -2578,12 +2633,12 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         var employee = await _employeeRepository.GetQueryable()
             .Include(e => e.Position)
             .Include(e => e.OrganizationUnit)
-            .FirstOrDefaultAsync(e => e.Id == appraisal.EmployeeId, cancellationToken);
+            .FirstOrDefaultAsync(e => e.TenantId == GetTenantId() && e.Id == appraisal.EmployeeId, cancellationToken);
 
         var positionTitle = employee?.Position?.Title;
 
         // Load evaluator evaluations to get individual scores
-        var evaluations = await _evaluatorEvaluationRepository.GetQueryable()
+        var evaluations = await TenantEvaluationQuery()
             .Where(e => e.AppraisalId == appraisalId && e.SubmittedDate.HasValue)
             .ToListAsync(cancellationToken);
 
@@ -2628,7 +2683,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             if (item.TemplateItemId.HasValue)
             {
                 // Load criteria details
-                var scores = await _criterionScoreRepository.GetQueryable()
+                var scores = await TenantCriterionScoreQuery()
                     .Include(cs => cs.EvaluatorEvaluation)
                     .Where(cs => cs.TemplateItemId == item.TemplateItemId.Value && cs.EvaluatorEvaluation.AppraisalId == appraisalId)
                     .ToListAsync(cancellationToken);
@@ -2664,7 +2719,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task ResolveAppealAsync(Guid appraisalId, ResolveAppealDto resolveDto, Guid reviewerId, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(pa => pa.AppraisalCycle)
                 .ThenInclude(ac => ac!.AppraisalSettings)
             .FirstOrDefaultAsync(pa => pa.Id == appraisalId, cancellationToken);
@@ -2675,7 +2730,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         if (!appraisal.HasAppeal)
             throw new InvalidOperationException("No appeal exists for this appraisal");
 
-        var appeal = await _appealRepository.GetQueryable()
+        var appeal = await TenantAppealQuery()
             .FirstOrDefaultAsync(a => a.PerformanceAppraisalId == appraisalId, cancellationToken);
 
         if (appeal == null)
@@ -2702,7 +2757,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             {
                 foreach (var mod in resolveDto.CriteriaModifications)
                 {
-                    var scores = await _criterionScoreRepository.GetQueryable()
+                    var scores = await TenantCriterionScoreQuery()
                         .Include(cs => cs.EvaluatorEvaluation)
                         .Where(cs => cs.TemplateItemId == mod.TemplateItemId && 
                                    cs.EvaluatorEvaluation.AppraisalId == appraisalId &&
@@ -2804,7 +2859,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<PostRemandReviewDto> GetPostRemandReviewDataAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.Employee)
                 .ThenInclude(e => e.Position)
             .Include(a => a.Employee.OrganizationUnit)
@@ -2838,7 +2893,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             throw new InvalidOperationException("Pre-remand snapshot not found");
 
         // Get current manager evaluation (post-remand state)
-        var currentManagerEval = await _evaluatorEvaluationRepository.GetQueryable()
+        var currentManagerEval = await TenantEvaluationQuery()
             .Include(e => e.CriterionScores)
                 .ThenInclude(cs => cs.TemplateItem)
                     .ThenInclude(ti => ti.Competency)
@@ -2943,7 +2998,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         Guid reviewerId,
         CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.Appeals)
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
 
@@ -2965,7 +3020,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             throw new InvalidOperationException("No appeal found");
 
         // Verify manager has completed re-evaluation
-        var managerEval = await _evaluatorEvaluationRepository.GetQueryable()
+        var managerEval = await TenantEvaluationQuery()
             .Where(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.Manager)
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -3004,7 +3059,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<EmployeeAppealOutcomeDto> GetEmployeeAppealOutcomeAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.Employee)
                 .ThenInclude(e => e.Position)
             .Include(a => a.Employee.OrganizationUnit)
@@ -3046,7 +3101,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             .FirstOrDefaultAsync(cancellationToken);
 
         // Get final manager evaluation
-        var managerEval = await _evaluatorEvaluationRepository.GetQueryable()
+        var managerEval = await TenantEvaluationQuery()
             .Include(e => e.CriterionScores)
                 .ThenInclude(cs => cs.TemplateItem)
                     .ThenInclude(ti => ti.Competency)
@@ -3141,7 +3196,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     public async Task<bool> ProgressToHRReviewAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
         // Get the appraisal with necessary related data
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.EvaluatorEvaluations)
@@ -3226,7 +3281,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         if (configuredId.HasValue && configuredId.Value != Guid.Empty)
         {
             var configured = await _employeeRepository.GetQueryable()
-                .FirstOrDefaultAsync(e => e.Id == configuredId.Value && e.StaffStatus == StaffStatus.Active, cancellationToken);
+                .FirstOrDefaultAsync(e => e.TenantId == GetTenantId() && e.Id == configuredId.Value && e.StaffStatus == StaffStatus.Active, cancellationToken);
             if (configured != null)
             {
                 _logger.LogInformation("Assigned configured HR reviewer {EmployeeId} for appraisal {AppraisalId}", configured.Id, appraisal.Id);
@@ -3239,7 +3294,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         var hrCandidates = await _employeeRepository.GetQueryable()
             .Include(e => e.Position)
             .Include(e => e.OrganizationUnit)
-            .Where(e => e.StaffStatus == StaffStatus.Active)
+            .Where(e => e.TenantId == GetTenantId() && e.StaffStatus == StaffStatus.Active)
             .Where(e =>
                 (e.Position != null && (e.Position.Title.Contains("HR") || e.Position.Title.Contains("Human Resource"))) ||
                 (e.OrganizationUnit != null && e.OrganizationUnit.Name.Contains("HR")))
@@ -3253,7 +3308,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         }
 
         var candidateIds = hrCandidates.Select(c => c.Id).ToList();
-        var openLoads = await _evaluatorEvaluationRepository.GetQueryable()
+        var openLoads = await TenantEvaluationQuery()
             .Where(ev => ev.EvaluatorRole == EvaluatorRole.HR && ev.SubmittedDate == null && candidateIds.Contains(ev.EvaluatorId))
             .GroupBy(ev => ev.EvaluatorId)
             .Select(g => new { EvaluatorId = g.Key, Count = g.Count() })
@@ -3275,7 +3330,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<HRReviewDto> GetHRReviewAsync(Guid appraisalId, Guid? requestingEmployeeId = null, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.Employee)
                 .ThenInclude(e => e.Position)
             .Include(a => a.Employee)
@@ -3457,7 +3512,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<IEnumerable<HRReviewListItemDto>> GetHRReviewListAsync(Guid? cycleId = null, string? status = null, CancellationToken cancellationToken = default)
     {
-        var query = _appraisalRepository.GetQueryable()
+        var query = TenantAppraisalQuery()
             .Include(a => a.Employee)
                 .ThenInclude(e => e.Position)
             .Include(a => a.Employee)
@@ -3549,7 +3604,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<HRReviewDto> ApproveAndFinalizeAsync(Guid appraisalId, ApproveAppraisalDto dto, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.EvaluatorEvaluations)
@@ -3600,7 +3655,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         // surface as a 500 on an otherwise-successful finalization.
         try
         {
-            var finalScore = (await _appraisalRepository.GetByIdAsync(appraisalId))?.OverallScore;
+            var finalScore = (await GetOwnedAppraisalAsync(appraisalId, cancellationToken)).OverallScore;
             await _talentRatingSync.SyncFromAppraisalAsync(appraisal.EmployeeId, finalScore, cancellationToken);
         }
         catch (Exception ex)
@@ -3619,7 +3674,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     public async Task<HRReviewDto> ReturnToManagerAsync(Guid appraisalId, ReturnAppraisalDto dto, CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetQueryable()
+        var appraisal = await TenantAppraisalQuery()
             .Include(a => a.EvaluatorEvaluations)
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
 

@@ -12,28 +12,63 @@ public class ComplianceTrainingService : IComplianceTrainingService
 {
     private readonly IComplianceTrainingRequirementRepository _requirementRepository;
     private readonly IEmployeeComplianceRecordRepository _recordRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ComplianceTrainingService> _logger;
 
     public ComplianceTrainingService(
         IComplianceTrainingRequirementRepository requirementRepository,
         IEmployeeComplianceRecordRepository recordRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ComplianceTrainingService> logger)
     {
         _requirementRepository = requirementRepository;
         _recordRepository = recordRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A requirement owned by another tenant is reported as missing rather than forbidden, so the endpoints
+    // do not confirm that the id exists elsewhere.
+    private async Task<ComplianceTrainingRequirement> GetOwnedRequirementAsync(Guid id)
+    {
+        var entity = await _requirementRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Compliance training requirement with ID '{id}' not found.");
+        return entity;
+    }
+
+    // A record owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<EmployeeComplianceRecord> GetOwnedRecordAsync(Guid id)
+    {
+        var entity = await _recordRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee compliance record with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Requirement queries ───────────────────────────────────────────────────
 
     public async Task<ComplianceTrainingRequirementDto> GetRequirementByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _requirementRepository.GetWithFullDetailsAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Compliance training requirement with ID '{id}' not found.");
 
         return entity.ToDto();
@@ -41,27 +76,34 @@ public class ComplianceTrainingService : IComplianceTrainingService
 
     public async Task<IEnumerable<ComplianceTrainingRequirementSummaryDto>> GetAllRequirementsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requirementRepository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ComplianceTrainingRequirementSummaryDto>> GetActiveRequirementsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requirementRepository.GetActiveAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<ComplianceTrainingRequirementSummaryDto>> GetRequirementsByProgramAsync(Guid programId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requirementRepository.GetByProgramIdAsync(programId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── Requirement CRUD ──────────────────────────────────────────────────────
 
     public async Task<ComplianceTrainingRequirementDto> CreateRequirementAsync(CreateComplianceTrainingRequirementDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = dto.ToEntity(tenantId, createdByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        var entity = dto.ToEntity(current, createdByUserId);
 
         await _requirementRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -73,10 +115,7 @@ public class ComplianceTrainingService : IComplianceTrainingService
 
     public async Task<ComplianceTrainingRequirementDto> UpdateRequirementAsync(UpdateComplianceTrainingRequirementDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requirementRepository.GetByIdAsync(dto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Compliance training requirement with ID '{dto.Id}' not found.");
+        var entity = await GetOwnedRequirementAsync(dto.Id);
 
         entity.UpdateEntity(dto, updatedByUserId);
         entity.UpdatedAt = DateTime.UtcNow;
@@ -90,10 +129,7 @@ public class ComplianceTrainingService : IComplianceTrainingService
 
     public async Task<bool> DeleteRequirementAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _requirementRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Compliance training requirement with ID '{id}' not found.");
+        var entity = await GetOwnedRequirementAsync(id);
 
         await _requirementRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -107,46 +143,47 @@ public class ComplianceTrainingService : IComplianceTrainingService
 
     public async Task<EmployeeComplianceRecordDto> GetRecordByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _recordRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Employee compliance record with ID '{id}' not found.");
-
+        var entity = await GetOwnedRecordAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<EmployeeComplianceRecordDto>> GetRecordsForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _recordRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<EmployeeComplianceRecordSummaryDto>> GetRecordsForRequirementAsync(Guid requirementId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _recordRepository.GetByRequirementIdAsync(requirementId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<EmployeeComplianceRecordSummaryDto>> GetNonCompliantRecordsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _recordRepository.GetNonCompliantAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<EmployeeComplianceRecordSummaryDto>> GetOverdueRecordsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _recordRepository.GetOverdueAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── Employee compliance record workflow ───────────────────────────────────
 
     public async Task<EmployeeComplianceRecordDto> AssignRequirementToEmployeeAsync(Guid employeeId, Guid requirementId, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var requirement = await _requirementRepository.GetByIdAsync(requirementId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        if (requirement == null)
-            throw new ArgumentException($"Compliance training requirement with ID '{requirementId}' not found.");
+        await GetOwnedRequirementAsync(requirementId);
 
         var existing = await _recordRepository.GetEmployeeRecordAsync(employeeId, requirementId);
 
@@ -156,7 +193,7 @@ public class ComplianceTrainingService : IComplianceTrainingService
         var entity = new EmployeeComplianceRecord
         {
             Id = Guid.NewGuid(),
-            TenantId = tenantId,
+            TenantId = current,
             EmployeeId = employeeId,
             RequirementId = requirementId,
             Status = ComplianceStatus.NonCompliant,
@@ -175,15 +212,12 @@ public class ComplianceTrainingService : IComplianceTrainingService
 
     public async Task<EmployeeComplianceRecordDto> ExemptEmployeeAsync(ExemptEmployeeComplianceDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _recordRepository.GetByIdAsync(dto.RecordId);
-
-        if (entity == null)
-            throw new ArgumentException($"Employee compliance record with ID '{dto.RecordId}' not found.");
+        var entity = await GetOwnedRecordAsync(dto.RecordId);
 
         entity.IsExempt = true;
         entity.ExemptionReason = dto.ExemptionReason;
-        entity.ExemptedById = dto.ExemptedById;
-        entity.ExemptionDate = dto.ExemptionDate;
+        entity.ExemptedById = updatedByUserId;
+        entity.ExemptionDate = DateTime.UtcNow;
         entity.ExemptionExpiryDate = dto.ExemptionExpiryDate;
         entity.Status = ComplianceStatus.NotApplicable;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -199,10 +233,7 @@ public class ComplianceTrainingService : IComplianceTrainingService
 
     public async Task<EmployeeComplianceRecordDto> MarkFulfilledAsync(Guid recordId, Guid nominationId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _recordRepository.GetByIdAsync(recordId);
-
-        if (entity == null)
-            throw new ArgumentException($"Employee compliance record with ID '{recordId}' not found.");
+        var entity = await GetOwnedRecordAsync(recordId);
 
         var completedOn = DateTime.UtcNow;
         entity.FulfillingNominationId = nominationId;
@@ -212,7 +243,7 @@ public class ComplianceTrainingService : IComplianceTrainingService
         // Recompute the next due date from the requirement's recurrence so overdue/expiring
         // queries behave correctly after fulfilment (previously left stale).
         var requirement = await _requirementRepository.GetByIdAsync(entity.RequirementId);
-        if (requirement != null)
+        if (requirement != null && requirement.TenantId == entity.TenantId)
         {
             entity.NextDueDate = ComputeNextDueDate(completedOn, requirement.Frequency, requirement.CustomFrequencyDays);
             entity.GracePeriodExpiry = entity.NextDueDate.HasValue && requirement.GracePeriodDays.HasValue

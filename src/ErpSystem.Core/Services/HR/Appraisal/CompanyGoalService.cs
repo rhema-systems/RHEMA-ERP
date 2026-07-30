@@ -16,6 +16,7 @@ public class CompanyGoalService : ICompanyGoalService
     private readonly IGenericRepository<CompanyGoal> _companyGoalRepository;
     private readonly IGenericRepository<UnitGoal> _unitGoalRepository;
     private readonly IGenericRepository<EmployeeGoal> _employeeGoalRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CompanyGoalService> _logger;
 
@@ -23,19 +24,48 @@ public class CompanyGoalService : ICompanyGoalService
         IGenericRepository<CompanyGoal> companyGoalRepository,
         IGenericRepository<UnitGoal> unitGoalRepository,
         IGenericRepository<EmployeeGoal> employeeGoalRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<CompanyGoalService> logger)
     {
         _companyGoalRepository = companyGoalRepository;
         _unitGoalRepository = unitGoalRepository;
         _employeeGoalRepository = employeeGoalRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A company goal owned by another tenant is reported as missing rather than forbidden, so the endpoints
+    // do not confirm that the id exists elsewhere.
+    private async Task<CompanyGoal> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _companyGoalRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Company goal with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<CompanyGoal> BaseQuery()
+    {
+        var tenantId = GetTenantId();
+        return _companyGoalRepository.GetQueryable().Where(g => g.TenantId == tenantId);
+    }
+
     public async Task<CompanyGoalDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _companyGoalRepository.GetQueryable()
+        var entity = await BaseQuery()
             .Include(g => g.AppraisalCycle)
             .Include(g => g.StrategicGoal)
             .FirstOrDefaultAsync(g => g.Id == id, cancellationToken);
@@ -48,7 +78,8 @@ public class CompanyGoalService : ICompanyGoalService
 
     public async Task<IEnumerable<CompanyGoalDto>> GetByCycleIdAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
-        var entities = await _companyGoalRepository.GetQueryable(g => g.AppraisalCycleId == cycleId)
+        var entities = await BaseQuery()
+            .Where(g => g.AppraisalCycleId == cycleId)
             .Include(g => g.AppraisalCycle)
             .OrderBy(g => g.Priority)
             .ThenBy(g => g.Title)
@@ -59,7 +90,7 @@ public class CompanyGoalService : ICompanyGoalService
 
     public async Task<PagedResult<CompanyGoalDto>> GetPagedAsync(int pageNumber, int pageSize, Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        var query = _companyGoalRepository.GetQueryable()
+        var query = BaseQuery()
             .Include(g => g.AppraisalCycle)
             .AsQueryable();
 
@@ -82,7 +113,8 @@ public class CompanyGoalService : ICompanyGoalService
 
     public async Task<IEnumerable<CompanyGoalDto>> GetVisibleGoalsAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
-        var entities = await _companyGoalRepository.GetQueryable(g => g.AppraisalCycleId == cycleId && g.IsVisible)
+        var entities = await BaseQuery()
+            .Where(g => g.AppraisalCycleId == cycleId && g.IsVisible)
             .Include(g => g.AppraisalCycle)
             .OrderBy(g => g.Priority)
             .ThenBy(g => g.Title)
@@ -94,6 +126,7 @@ public class CompanyGoalService : ICompanyGoalService
     public async Task<CompanyGoalDto> CreateAsync(CreateCompanyGoalDto createDto, CancellationToken cancellationToken = default)
     {
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         await _companyGoalRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -105,9 +138,7 @@ public class CompanyGoalService : ICompanyGoalService
 
     public async Task<CompanyGoalDto> UpdateAsync(UpdateCompanyGoalDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _companyGoalRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Company goal with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
 
         updateDto.UpdateEntity(entity);
 
@@ -121,9 +152,7 @@ public class CompanyGoalService : ICompanyGoalService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _companyGoalRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Company goal with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id, cancellationToken);
 
         await _companyGoalRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -134,9 +163,7 @@ public class CompanyGoalService : ICompanyGoalService
 
     public async Task<bool> SetVisibilityAsync(Guid id, bool isVisible, CancellationToken cancellationToken = default)
     {
-        var entity = await _companyGoalRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Company goal with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id, cancellationToken);
 
         entity.IsVisible = isVisible;
         await _companyGoalRepository.UpdateAsync(entity);
@@ -148,21 +175,25 @@ public class CompanyGoalService : ICompanyGoalService
 
     public async Task<CompanyGoalCascadeStatsDto> GetCascadeStatsAsync(Guid goalId, CancellationToken cancellationToken = default)
     {
-        var goal = await _companyGoalRepository.GetByIdAsync(goalId);
-        if (goal == null)
-            throw new ArgumentException($"Company goal with ID '{goalId}' not found.");
+        var goal = await GetOwnedAsync(goalId, cancellationToken);
+        var tenantId = GetTenantId();
 
-        var unitGoalsCount = await _unitGoalRepository.GetQueryable(u => u.ParentCompanyGoalId == goalId)
+        var unitGoalsCount = await _unitGoalRepository.GetQueryable(u =>
+                u.TenantId == tenantId && u.ParentCompanyGoalId == goalId)
             .CountAsync(cancellationToken);
 
         // Employee goals can be linked directly to company goal via ParentGoalId
         var employeeGoalsCount = await _employeeGoalRepository.GetQueryable(
-            e => e.ParentGoalId == goalId && e.ParentType == GoalParentType.Company)
+            e => e.TenantId == tenantId
+              && e.ParentGoalId == goalId
+              && e.ParentType == GoalParentType.Company)
             .CountAsync(cancellationToken);
 
         var avgProgress = await _employeeGoalRepository.GetQueryable(
-            e => e.ParentGoalId == goalId && e.ParentType == GoalParentType.Company && 
-                 (e.Status == GoalStatus.Approved || e.Status == GoalStatus.InProgress))
+            e => e.TenantId == tenantId
+              && e.ParentGoalId == goalId
+              && e.ParentType == GoalParentType.Company
+              && (e.Status == GoalStatus.Approved || e.Status == GoalStatus.InProgress))
             .AverageAsync(e => (decimal?)e.ProgressPercent, cancellationToken);
 
         return new CompanyGoalCascadeStatsDto
@@ -186,7 +217,8 @@ public class CompanyGoalService : ICompanyGoalService
         int pageSize,
         CancellationToken cancellationToken = default)
     {
-        var query = _companyGoalRepository.GetQueryable(g => g.AppraisalCycleId == cycleId)
+        var query = BaseQuery()
+            .Where(g => g.AppraisalCycleId == cycleId)
             .AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -246,7 +278,8 @@ public class CompanyGoalService : ICompanyGoalService
         Guid cycleId,
         CancellationToken cancellationToken = default)
     {
-        var baseQuery = _companyGoalRepository.GetQueryable(g => g.AppraisalCycleId == cycleId)
+        var baseQuery = BaseQuery()
+            .Where(g => g.AppraisalCycleId == cycleId)
             .AsNoTracking();
 
         var totalGoals    = await baseQuery.CountAsync(cancellationToken);

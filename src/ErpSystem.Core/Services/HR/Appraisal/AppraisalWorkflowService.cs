@@ -77,6 +77,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly IGenericRepository<AppraisalManualAdvanceLog> _advanceLogRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<AppraisalWorkflowService> _logger;
 
     public AppraisalWorkflowService(
@@ -88,6 +89,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         IGenericRepository<EmployeeGoal> goalRepository,
         IGenericRepository<AppraisalManualAdvanceLog> advanceLogRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<AppraisalWorkflowService> logger)
     {
         _appraisalRepository  = appraisalRepository;
@@ -98,7 +100,29 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         _goalRepository       = goalRepository;
         _advanceLogRepository = advanceLogRepository;
         _unitOfWork           = unitOfWork;
+        _currentUserProvider  = currentUserProvider;
         _logger               = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // An appraisal owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<PerformanceAppraisal> GetOwnedAppraisalAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _appraisalRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Appraisal '{id}' not found.", nameof(id));
+        return entity;
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -214,9 +238,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         AppraisalStatus newStatus,
         CancellationToken cancellationToken = default)
     {
-        var appraisal = await _appraisalRepository.GetByIdAsync(appraisalId)
-            ?? throw new ArgumentException(
-                $"Appraisal '{appraisalId}' not found.", nameof(appraisalId));
+        var appraisal = await GetOwnedAppraisalAsync(appraisalId, cancellationToken);
 
         var from = appraisal.Status;
 
@@ -302,8 +324,9 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
 
     private async Task<PerformanceAppraisal> LoadWithNavigationsAsync(Guid appraisalId, CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
         var appraisal = await _appraisalRepository
-            .GetQueryable(a => a.Id == appraisalId)
+            .GetQueryable(a => a.Id == appraisalId && a.TenantId == tenantId)
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c!.AppraisalSettings)
             .Include(a => a.Goals)
@@ -657,8 +680,10 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     {
         var result = new DeadlineEnforcementResult();
 
+        var tenantId = GetTenantId();
         var appraisals = await _appraisalRepository
-            .GetQueryable(a => a.AppraisalCycleId == cycleId
+            .GetQueryable(a => a.TenantId == tenantId
+                            && a.AppraisalCycleId == cycleId
                             && a.Status != AppraisalStatus.Completed
                             && a.Status != AppraisalStatus.Closed
                             && a.Status != AppraisalStatus.Appealed)

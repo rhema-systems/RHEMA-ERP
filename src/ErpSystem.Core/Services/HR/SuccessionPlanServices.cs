@@ -26,6 +26,7 @@ public class SuccessionPlanService : ISuccessionPlanService
     private readonly ISuccessionPlanHistoryRepository _historyRepository;
     private readonly ISuccessionDocumentRepository _documentRepository;
     private readonly ICompanyHrPolicyProvider _hrPolicyProvider;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SuccessionPlanService> _logger;
 
@@ -36,6 +37,7 @@ public class SuccessionPlanService : ISuccessionPlanService
         ISuccessionPlanHistoryRepository historyRepository,
         ISuccessionDocumentRepository documentRepository,
         ICompanyHrPolicyProvider hrPolicyProvider,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<SuccessionPlanService> logger)
     {
@@ -45,16 +47,73 @@ public class SuccessionPlanService : ISuccessionPlanService
         _historyRepository = historyRepository;
         _documentRepository = documentRepository;
         _hrPolicyProvider = hrPolicyProvider;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<SuccessionPlanDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<SuccessionPlan> GetOwnedPlanAsync(Guid id)
+    {
+        var entity = await _planRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Succession plan with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionPlan> GetOwnedPlanWithDetailsAsync(Guid id)
     {
         var entity = await _planRepository.GetWithFullDetailsAsync(id);
-
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Succession plan with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionCompetencyRequirement> GetOwnedCompetencyRequirementAsync(Guid id)
+    {
+        var entity = await _competencyRequirementRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Competency requirement with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionAction> GetOwnedActionAsync(Guid id)
+    {
+        var entity = await _actionRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Succession action with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionDocument> GetOwnedDocumentAsync(Guid id)
+    {
+        var entity = await _documentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Document with ID '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<SuccessionPlanDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedPlanWithDetailsAsync(id);
 
         var dto = entity.ToDto();
         var settings = await _hrPolicyProvider.GetAsync(cancellationToken);
@@ -86,19 +145,24 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<SuccessionPlanDto?> GetByPlanNumberAsync(string planNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _planRepository.GetByPlanNumberAsync(planNumber);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != tenantId)
+            return null;
+        return entity.ToDto();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetAllAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetAllAsync()).Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<SuccessionPlanSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _planRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _planRepository.GetQueryable().Where(p => p.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -119,81 +183,105 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<SuccessionPlanDto?> GetActiveVersionForPositionAsync(Guid positionId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _planRepository.GetActiveVersionForPositionAsync(positionId);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != tenantId)
+            return null;
+        return entity.ToDto();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetAllVersionsForPositionAsync(Guid positionId, CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetAllVersionsForPositionAsync(positionId);
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetAllVersionsForPositionAsync(positionId))
+            .Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetByStatusAsync(SuccessionPlanStatus status, CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetByStatusAsync(status);
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetByStatusAsync(status)).Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetByYearAsync(int planYear, CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetByYearAsync(planYear);
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetByYearAsync(planYear)).Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetByYearAndStatusAsync(int planYear, SuccessionPlanStatus status, CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetByYearAndStatusAsync(planYear, status);
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetByYearAndStatusAsync(planYear, status))
+            .Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetByCriticalityAsync(PositionCriticality criticality, CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetByCriticalityAsync(criticality);
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetByCriticalityAsync(criticality))
+            .Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetByRiskLevelAsync(SuccessionRisk riskLevel, CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetByRiskLevelAsync(riskLevel);
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetByRiskLevelAsync(riskLevel))
+            .Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetDueForReviewAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetDueForReviewAsync(daysAhead);
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetDueForReviewAsync(daysAhead))
+            .Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetWithNoReadyNowSuccessorAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetWithNoReadyNowSuccessorAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetWithNoReadyNowSuccessorAsync())
+            .Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetWithNoSuccessorsAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetWithNoSuccessorsAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetWithNoSuccessorsAsync())
+            .Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetByIncumbentAsync(Guid incumbentEmployeeId, CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetByIncumbentAsync(incumbentEmployeeId);
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetByIncumbentAsync(incumbentEmployeeId))
+            .Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetWithImpendingVacancyAsync(int daysAhead = 90, CancellationToken cancellationToken = default)
     {
-        var entities = await _planRepository.GetWithImpendingVacancyAsync(daysAhead);
+        var tenantId = GetTenantId();
+        var entities = (await _planRepository.GetWithImpendingVacancyAsync(daysAhead))
+            .Where(p => p.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<SuccessionPlanDto> CreateAsync(CreateSuccessionPlanDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
-        entity.PlanNumber = await GeneratePlanNumberAsync(cancellationToken);
-        entity.VersionNumber = await _planRepository.GetNextVersionNumberAsync(createDto.PositionId);
+        entity.PlanNumber = await GeneratePlanNumberAsync(tenantId, cancellationToken);
+        entity.VersionNumber = await GetNextVersionNumberForPositionAsync(tenantId, createDto.PositionId, cancellationToken);
         entity.IsActiveVersion = true;
         entity.Status = SuccessionPlanStatus.Draft;
 
@@ -207,10 +295,7 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<SuccessionPlanDto> UpdateAsync(UpdateSuccessionPlanDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _planRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Succession plan with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedPlanAsync(updateDto.Id);
 
         if (entity.Status == SuccessionPlanStatus.Approved)
             throw new InvalidOperationException("An approved succession plan cannot be edited. Create a new version instead.");
@@ -227,10 +312,7 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _planRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Succession plan with ID '{id}' not found.");
+        var entity = await GetOwnedPlanAsync(id);
 
         if (entity.Status == SuccessionPlanStatus.Approved)
             throw new InvalidOperationException("An approved succession plan cannot be deleted.");
@@ -245,10 +327,7 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<bool> SubmitForReviewAsync(Guid planId, Guid submittedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _planRepository.GetByIdAsync(planId);
-
-        if (entity == null)
-            throw new ArgumentException($"Succession plan with ID '{planId}' not found.");
+        var entity = await GetOwnedPlanAsync(planId);
 
         if (entity.Status != SuccessionPlanStatus.Draft)
             throw new InvalidOperationException("Only draft succession plans can be submitted for review.");
@@ -266,10 +345,7 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<bool> ReviewAsync(ReviewSuccessionPlanDto reviewDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _planRepository.GetByIdAsync(reviewDto.PlanId);
-
-        if (entity == null)
-            throw new ArgumentException($"Succession plan with ID '{reviewDto.PlanId}' not found.");
+        var entity = await GetOwnedPlanAsync(reviewDto.PlanId);
 
         if (entity.Status != SuccessionPlanStatus.UnderReview)
             throw new InvalidOperationException("Only plans under review can be reviewed.");
@@ -289,10 +365,7 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<bool> ApproveAsync(ApproveSuccessionPlanDto approveDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _planRepository.GetByIdAsync(approveDto.PlanId);
-
-        if (entity == null)
-            throw new ArgumentException($"Succession plan with ID '{approveDto.PlanId}' not found.");
+        var entity = await GetOwnedPlanAsync(approveDto.PlanId);
 
         if (entity.Status != SuccessionPlanStatus.UnderReview)
             throw new InvalidOperationException("Only plans under review can be approved.");
@@ -302,9 +375,10 @@ public class SuccessionPlanService : ISuccessionPlanService
         entity.Status = SuccessionPlanStatus.Approved;
         entity.IsActiveVersion = true;
 
-        // Supersede any previously approved active version for the same position
+        // Supersede any previously approved active version for the same position (same tenant)
         var previousVersions = await _planRepository.GetQueryable()
-            .Where(p => p.PositionId == entity.PositionId &&
+            .Where(p => p.TenantId == entity.TenantId &&
+                        p.PositionId == entity.PositionId &&
                         p.Id != entity.Id &&
                         p.IsActiveVersion &&
                         !p.IsDeleted)
@@ -331,7 +405,8 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<IEnumerable<CompetencyLookupDto>> GetAllActiveCompetenciesAsync(CancellationToken cancellationToken = default)
     {
-        var competencies = await _unitOfWork.Repository<Competency>().FindAsync(c => c.IsActive);
+        var tenantId = GetTenantId();
+        var competencies = await _unitOfWork.Repository<Competency>().FindAsync(c => c.TenantId == tenantId && c.IsActive);
         return competencies
             .OrderBy(c => c.Name)
             .Select(c => new CompetencyLookupDto
@@ -346,6 +421,8 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<SuccessionCompetencyRequirementDto> AddCompetencyRequirementAsync(CreateSuccessionCompetencyRequirementDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(createDto.SuccessionPlanId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _competencyRequirementRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -354,16 +431,16 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<IEnumerable<SuccessionCompetencyRequirementDto>> GetCompetencyRequirementsAsync(Guid planId, CancellationToken cancellationToken = default)
     {
-        var entities = await _competencyRequirementRepository.GetByPlanIdAsync(planId);
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
+        var entities = (await _competencyRequirementRepository.GetByPlanIdAsync(planId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<SuccessionCompetencyRequirementDto> UpdateCompetencyRequirementAsync(UpdateSuccessionCompetencyRequirementDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _competencyRequirementRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Competency requirement with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedCompetencyRequirementAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -375,10 +452,7 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<bool> DeleteCompetencyRequirementAsync(Guid requirementId, CancellationToken cancellationToken = default)
     {
-        var entity = await _competencyRequirementRepository.GetByIdAsync(requirementId);
-
-        if (entity == null)
-            throw new ArgumentException($"Competency requirement with ID '{requirementId}' not found.");
+        var entity = await GetOwnedCompetencyRequirementAsync(requirementId);
 
         await _competencyRequirementRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -392,6 +466,8 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<SuccessionActionDto> AddActionAsync(CreateSuccessionActionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(createDto.SuccessionPlanId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await EnsureNoDependencyCycleAsync(entity.Id, entity.DependsOnActionId, cancellationToken);
         await _actionRepository.AddAsync(entity);
@@ -401,16 +477,15 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<IEnumerable<SuccessionActionSummaryDto>> GetActionsForPlanAsync(Guid planId, CancellationToken cancellationToken = default)
     {
-        var entities = await _actionRepository.GetByPlanIdAsync(planId);
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
+        var entities = (await _actionRepository.GetByPlanIdAsync(planId)).Where(a => a.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<SuccessionActionDto> UpdateActionAsync(UpdateSuccessionActionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _actionRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Succession action with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedActionAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await EnsureNoDependencyCycleAsync(entity.Id, entity.DependsOnActionId, cancellationToken);
@@ -423,10 +498,7 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<bool> DeleteActionAsync(Guid actionId, CancellationToken cancellationToken = default)
     {
-        var entity = await _actionRepository.GetByIdAsync(actionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Succession action with ID '{actionId}' not found.");
+        var entity = await GetOwnedActionAsync(actionId);
 
         await _actionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -440,14 +512,20 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<IEnumerable<SuccessionPlanHistorySummaryDto>> GetHistoryAsync(Guid planId, CancellationToken cancellationToken = default)
     {
-        var entities = await _historyRepository.GetByPlanIdAsync(planId);
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
+        var entities = (await _historyRepository.GetByPlanIdAsync(planId)).Where(h => h.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<SuccessionPlanHistoryDto?> GetLatestSnapshotAsync(Guid planId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
         var entity = await _historyRepository.GetLatestSnapshotAsync(planId);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != tenantId)
+            return null;
+        return entity.ToDto();
     }
 
     #endregion
@@ -456,6 +534,9 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        if (createDto.SuccessionPlanId.HasValue)
+            await GetOwnedPlanAsync(createDto.SuccessionPlanId.Value);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
@@ -465,22 +546,24 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsForPlanAsync(Guid planId, CancellationToken cancellationToken = default)
     {
-        var entities = await _documentRepository.GetByPlanIdAsync(planId);
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
+        var entities = (await _documentRepository.GetByPlanIdAsync(planId)).Where(d => d.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<SuccessionDocumentDto>> GetConfidentialDocumentsAsync(Guid planId, CancellationToken cancellationToken = default)
     {
-        var entities = await _documentRepository.GetConfidentialDocumentsAsync(planId);
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
+        var entities = (await _documentRepository.GetConfidentialDocumentsAsync(planId))
+            .Where(d => d.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _documentRepository.GetByIdAsync(documentId);
-
-        if (entity == null)
-            throw new ArgumentException($"Document with ID '{documentId}' not found.");
+        var entity = await GetOwnedDocumentAsync(documentId);
 
         await _documentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -490,9 +573,12 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     public async Task<SuccessionDashboardDto> GetDashboardAsync(int? planYear = null, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+
         // ── Build base plan query (active versions only) ───────────────────────
         var planQuery = _planRepository.GetQueryable()
-            .Where(p => p.IsActiveVersion
+            .Where(p => p.TenantId == tenantId
+                     && p.IsActiveVersion
                      && p.Status != SuccessionPlanStatus.Archived
                      && p.Status != SuccessionPlanStatus.Rejected);
 
@@ -517,7 +603,7 @@ public class SuccessionPlanService : ISuccessionPlanService
             .ToListAsync(cancellationToken);
 
         // ── Actions ───────────────────────────────────────────────────────────
-        var actionQuery = _actionRepository.GetQueryable();
+        var actionQuery = _actionRepository.GetQueryable().Where(a => a.TenantId == tenantId);
         if (planYear.HasValue)
         {
             var planIds = plans.Select(p => p.Id).ToHashSet();
@@ -543,7 +629,7 @@ public class SuccessionPlanService : ISuccessionPlanService
         // ── Talent pool members (all active) ───────────────────────────────────
         var memberRepo = _unitOfWork.Repository<TalentPoolMember>();
         var members = await memberRepo.GetProjectedAsync(
-            m => m.RemovedDate == null,
+            m => m.TenantId == tenantId && m.RemovedDate == null,
             m => new { m.Readiness });
 
         // ── KPI counts ─────────────────────────────────────────────────────────
@@ -664,7 +750,8 @@ public class SuccessionPlanService : ISuccessionPlanService
 
         // ── Coverage trend across plan-years (independent of the year filter) ──────
         var trendRaw = await _planRepository.GetQueryable()
-            .Where(p => p.IsActiveVersion
+            .Where(p => p.TenantId == tenantId
+                     && p.IsActiveVersion
                      && p.Status != SuccessionPlanStatus.Archived
                      && p.Status != SuccessionPlanStatus.Rejected)
             .GroupBy(p => p.PlanYear)
@@ -814,18 +901,29 @@ public class SuccessionPlanService : ISuccessionPlanService
                 break; // a pre-existing cycle elsewhere — stop to avoid looping forever
 
             var current = await _actionRepository.GetByIdAsync(currentId.Value);
-            currentId = current?.DependsOnActionId;
+            if (current == null || current.TenantId != GetTenantId())
+                break;
+            currentId = current.DependsOnActionId;
         }
     }
 
-    private async Task<string> GeneratePlanNumberAsync(CancellationToken cancellationToken)
+    private async Task<int> GetNextVersionNumberForPositionAsync(Guid tenantId, Guid positionId, CancellationToken cancellationToken)
+    {
+        var maxVersion = await _planRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId && p.PositionId == positionId && !p.IsDeleted)
+            .Select(p => (int?)p.VersionNumber)
+            .MaxAsync(cancellationToken) ?? 0;
+        return maxVersion + 1;
+    }
+
+    private async Task<string> GeneratePlanNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var settings = await _hrPolicyProvider.GetAsync(cancellationToken);
         var prefix = string.IsNullOrWhiteSpace(settings.SuccessionPlanNumberPrefix)
             ? "SP"
             : settings.SuccessionPlanNumberPrefix.Trim();
 
-        var count = await _planRepository.CountAsync();
+        var count = await _planRepository.GetQueryable().CountAsync(p => p.TenantId == tenantId, cancellationToken);
         return $"{prefix}-{DateTime.UtcNow.Year}-{(count + 1):D4}";
     }
 
@@ -833,6 +931,7 @@ public class SuccessionPlanService : ISuccessionPlanService
     {
         var history = new SuccessionPlanHistory
         {
+            TenantId = plan.TenantId,
             SuccessionPlanId = plan.Id,
             VersionNumber = plan.VersionNumber,
             PlanYear = plan.PlanYear,
@@ -867,6 +966,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
     private readonly ISuccessionCandidateGapRepository _gapRepository;
     private readonly ISuccessionDevelopmentActivityRepository _activityRepository;
     private readonly ISuccessionDocumentRepository _documentRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SuccessionCandidateService> _logger;
 
@@ -885,6 +985,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         IGenericRepository<SuccessionCandidateFeedback> feedbackRepository,
         IGenericRepository<PositionCompetency> positionCompetencyRepository,
         IGenericRepository<EmployeeCompetency> employeeCompetencyRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<SuccessionCandidateService> logger)
     {
@@ -897,16 +998,89 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         _feedbackRepository = feedbackRepository;
         _positionCompetencyRepository = positionCompetencyRepository;
         _employeeCompetencyRepository = employeeCompetencyRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<SuccessionCandidateDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<SuccessionCandidate> GetOwnedCandidateAsync(Guid id)
+    {
+        var entity = await _candidateRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Succession candidate with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionCandidate> GetOwnedCandidateWithDetailsAsync(Guid id)
     {
         var entity = await _candidateRepository.GetWithFullDetailsAsync(id);
-
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Succession candidate with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionPlan> GetOwnedPlanAsync(Guid id)
+    {
+        var entity = await _planRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Succession plan with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionCandidateGap> GetOwnedGapAsync(Guid id)
+    {
+        var entity = await _gapRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Competency gap with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionDevelopmentActivity> GetOwnedActivityAsync(Guid id)
+    {
+        var entity = await _activityRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Development activity with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionDocument> GetOwnedDocumentAsync(Guid id)
+    {
+        var entity = await _documentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Document with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionCandidateFeedback> GetOwnedFeedbackAsync(Guid id)
+    {
+        var entity = await _feedbackRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Feedback with ID '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<SuccessionCandidateDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedCandidateWithDetailsAsync(id);
 
         var dto = entity.ToDto();
         if (entity.Employee != null)
@@ -920,7 +1094,10 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<IEnumerable<SuccessionCandidateSummaryDto>> GetByPlanIdAsync(Guid planId, CancellationToken cancellationToken = default)
     {
-        var entities = (await _candidateRepository.GetByPlanIdAsync(planId)).ToList();
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
+        var entities = (await _candidateRepository.GetByPlanIdAsync(planId))
+            .Where(c => c.TenantId == tenantId).ToList();
         var dtos = entities.ToSummaryDtoList().ToList();
 
         var settings = await _hrPolicyProvider.GetAsync(cancellationToken);
@@ -935,42 +1112,62 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<IEnumerable<SuccessionCandidateSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var entities = await _candidateRepository.GetByEmployeeIdAsync(employeeId);
+        var tenantId = GetTenantId();
+        var entities = (await _candidateRepository.GetByEmployeeIdAsync(employeeId))
+            .Where(c => c.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionCandidateSummaryDto>> GetByReadinessAsync(Guid planId, ReadinessLevel readiness, CancellationToken cancellationToken = default)
     {
-        var entities = await _candidateRepository.GetByReadinessAsync(planId, readiness);
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
+        var entities = (await _candidateRepository.GetByReadinessAsync(planId, readiness))
+            .Where(c => c.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionCandidateSummaryDto>> GetReadyNowCandidatesForPlanAsync(Guid planId, CancellationToken cancellationToken = default)
     {
-        var entities = await _candidateRepository.GetReadyNowCandidatesForPlanAsync(planId);
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
+        var entities = (await _candidateRepository.GetReadyNowCandidatesForPlanAsync(planId))
+            .Where(c => c.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<SuccessionCandidateSummaryDto>> GetEmergencyCandidatesForPlanAsync(Guid planId, CancellationToken cancellationToken = default)
     {
-        var entities = await _candidateRepository.GetEmergencyCandidatesForPlanAsync(planId);
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
+        var entities = (await _candidateRepository.GetEmergencyCandidatesForPlanAsync(planId))
+            .Where(c => c.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<SuccessionCandidateDto?> GetSelectedCandidateForPlanAsync(Guid planId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
         var entity = await _candidateRepository.GetSelectedCandidateForPlanAsync(planId);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != tenantId)
+            return null;
+        return entity.ToDto();
     }
 
     public async Task<IEnumerable<SuccessionCandidateSummaryDto>> GetByRetentionRiskAsync(Guid planId, RetentionRisk minimumRisk, CancellationToken cancellationToken = default)
     {
-        var entities = await _candidateRepository.GetByRetentionRiskAsync(planId, minimumRisk);
+        await GetOwnedPlanAsync(planId);
+        var tenantId = GetTenantId();
+        var entities = (await _candidateRepository.GetByRetentionRiskAsync(planId, minimumRisk))
+            .Where(c => c.TenantId == tenantId);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<SuccessionCandidateDto> CreateAsync(CreateSuccessionCandidateDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(createDto.SuccessionPlanId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _candidateRepository.AddAsync(entity);
@@ -985,10 +1182,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<SuccessionCandidateDto> UpdateAsync(UpdateSuccessionCandidateDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Succession candidate with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedCandidateAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1002,10 +1196,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Succession candidate with ID '{id}' not found.");
+        var entity = await GetOwnedCandidateAsync(id);
 
         var planId = entity.SuccessionPlanId;
 
@@ -1021,10 +1212,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<bool> AssessAsync(AssessCandidateDto assessDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(assessDto.CandidateId);
-
-        if (entity == null)
-            throw new ArgumentException($"Succession candidate with ID '{assessDto.CandidateId}' not found.");
+        var entity = await GetOwnedCandidateAsync(assessDto.CandidateId);
 
         entity.AssessedById = assessDto.AssessedById;
         entity.AssessmentDate = assessDto.AssessmentDate;
@@ -1044,17 +1232,14 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<bool> SelectCandidateAsync(Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _candidateRepository.GetByIdAsync(candidateId);
-
-        if (entity == null)
-            throw new ArgumentException($"Succession candidate with ID '{candidateId}' not found.");
+        var entity = await GetOwnedCandidateAsync(candidateId);
 
         if (!entity.IsRecommended)
             throw new InvalidOperationException("Only recommended candidates can be selected.");
 
-        // Deselect any currently selected candidate for this plan
+        // Deselect any currently selected candidate for this plan (same tenant)
         var previouslySelected = await _candidateRepository.GetSelectedCandidateForPlanAsync(entity.SuccessionPlanId);
-        if (previouslySelected != null && previouslySelected.Id != candidateId)
+        if (previouslySelected != null && previouslySelected.TenantId == entity.TenantId && previouslySelected.Id != candidateId)
         {
             previouslySelected.IsSelected = false;
             previouslySelected.SelectionDate = null;
@@ -1093,11 +1278,15 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         // operation so it is safe if the execution strategy re-runs it.
         const int tempOffset = 100000;
 
+        var tenantId = GetTenantId();
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
             var entities = await _candidateRepository.GetQueryable()
-                .Where(c => ids.Contains(c.Id))
+                .Where(c => c.TenantId == tenantId && ids.Contains(c.Id))
                 .ToListAsync(ct);
+
+            if (entities.Count != ids.Distinct().Count())
+                throw new ArgumentException("One or more succession candidates were not found.");
 
             var byId = entities.ToDictionary(e => e.Id);
 
@@ -1129,6 +1318,8 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<SuccessionCandidateGapDto> AddCompetencyGapAsync(CreateSuccessionCandidateGapDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedCandidateAsync(createDto.CandidateId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _gapRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1137,22 +1328,25 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<IEnumerable<SuccessionCandidateGapDto>> GetCompetencyGapsAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
-        var entities = await _gapRepository.GetByCandidateIdAsync(candidateId);
+        await GetOwnedCandidateAsync(candidateId);
+        var tenantId = GetTenantId();
+        var entities = (await _gapRepository.GetByCandidateIdAsync(candidateId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<SuccessionCandidateGapDto>> GetUnaddressedGapsAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
-        var entities = await _gapRepository.GetUnaddressedGapsAsync(candidateId);
+        await GetOwnedCandidateAsync(candidateId);
+        var tenantId = GetTenantId();
+        var entities = (await _gapRepository.GetUnaddressedGapsAsync(candidateId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<SuccessionCandidateGapDto> UpdateCompetencyGapAsync(UpdateSuccessionCandidateGapDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _gapRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Competency gap with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedGapAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1164,10 +1358,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<bool> DeleteCompetencyGapAsync(Guid gapId, CancellationToken cancellationToken = default)
     {
-        var entity = await _gapRepository.GetByIdAsync(gapId);
-
-        if (entity == null)
-            throw new ArgumentException($"Competency gap with ID '{gapId}' not found.");
+        var entity = await GetOwnedGapAsync(gapId);
 
         await _gapRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1177,9 +1368,8 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<IEnumerable<SuccessionCandidateGapDto>> GenerateGapsFromPositionAsync(Guid candidateId, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var candidate = await _candidateRepository.GetWithFullDetailsAsync(candidateId);
-        if (candidate == null)
-            throw new ArgumentException($"Succession candidate with ID '{candidateId}' not found.");
+        tenantId = RequireCurrentTenant(tenantId);
+        var candidate = await GetOwnedCandidateWithDetailsAsync(candidateId);
 
         var positionId = candidate.SuccessionPlan?.PositionId ?? Guid.Empty;
         if (positionId == Guid.Empty)
@@ -1187,7 +1377,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
         // Required proficiency levels for the target position.
         var required = await _positionCompetencyRepository.GetQueryable()
-            .Where(pc => pc.PositionId == positionId && !pc.IsDeleted)
+            .Where(pc => pc.TenantId == tenantId && pc.PositionId == positionId && !pc.IsDeleted)
             .Select(pc => new { pc.CompetencyId, pc.RequiredProficiencyLevel })
             .ToListAsync(cancellationToken);
         if (required.Count == 0)
@@ -1195,7 +1385,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
         // The employee's own assessed competency levels.
         var currentLevels = await _employeeCompetencyRepository.GetQueryable()
-            .Where(ec => ec.EmployeeId == candidate.EmployeeId && !ec.IsDeleted)
+            .Where(ec => ec.TenantId == tenantId && ec.EmployeeId == candidate.EmployeeId && !ec.IsDeleted)
             .Select(ec => new { ec.CompetencyId, ec.CurrentProficiencyLevel })
             .ToListAsync(cancellationToken);
         var currentByCompetency = currentLevels
@@ -1204,7 +1394,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
         // Skip competencies already tracked as a gap for this candidate.
         var existing = (await _gapRepository.GetQueryable()
-            .Where(g => g.CandidateId == candidateId && !g.IsDeleted)
+            .Where(g => g.TenantId == tenantId && g.CandidateId == candidateId && !g.IsDeleted)
             .Select(g => g.CompetencyId)
             .ToListAsync(cancellationToken)).ToHashSet();
 
@@ -1234,7 +1424,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         var createdIds = created.Select(c => c.Id).ToList();
         var saved = await _gapRepository.GetQueryable()
             .Include(g => g.Competency)
-            .Where(g => createdIds.Contains(g.Id))
+            .Where(g => g.TenantId == tenantId && createdIds.Contains(g.Id))
             .ToListAsync(cancellationToken);
 
         _logger.LogInformation("Generated {Count} position-based competency gaps for candidate {CandidateId}", saved.Count, candidateId);
@@ -1247,9 +1437,11 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<IEnumerable<SuccessionCandidateFeedbackDto>> GetFeedbackAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedCandidateAsync(candidateId);
+        var tenantId = GetTenantId();
         var items = await _feedbackRepository.GetQueryable()
             .Include(f => f.Reviewer)
-            .Where(f => f.CandidateId == candidateId && !f.IsDeleted)
+            .Where(f => f.TenantId == tenantId && f.CandidateId == candidateId && !f.IsDeleted)
             .OrderByDescending(f => f.CreatedAt)
             .ToListAsync(cancellationToken);
 
@@ -1258,9 +1450,8 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<SuccessionCandidateFeedbackDto> AddFeedbackAsync(Guid candidateId, CreateSuccessionCandidateFeedbackDto createDto, Guid tenantId, Guid reviewerEmployeeId, CancellationToken cancellationToken = default)
     {
-        var candidate = await _candidateRepository.GetByIdAsync(candidateId);
-        if (candidate == null)
-            throw new ArgumentException($"Succession candidate with ID '{candidateId}' not found.");
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedCandidateAsync(candidateId);
 
         var entity = new SuccessionCandidateFeedback
         {
@@ -1278,7 +1469,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         // Reload with reviewer for the response.
         var saved = await _feedbackRepository.GetQueryable()
             .Include(f => f.Reviewer)
-            .FirstOrDefaultAsync(f => f.Id == entity.Id, cancellationToken);
+            .FirstOrDefaultAsync(f => f.TenantId == tenantId && f.Id == entity.Id, cancellationToken);
 
         _logger.LogInformation("Feedback added to candidate {CandidateId} by {ReviewerId}", candidateId, reviewerEmployeeId);
         return (saved ?? entity).ToDto();
@@ -1286,9 +1477,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<bool> DeleteFeedbackAsync(Guid feedbackId, CancellationToken cancellationToken = default)
     {
-        var entity = await _feedbackRepository.GetByIdAsync(feedbackId);
-        if (entity == null)
-            throw new ArgumentException($"Feedback with ID '{feedbackId}' not found.");
+        var entity = await GetOwnedFeedbackAsync(feedbackId);
 
         await _feedbackRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1304,6 +1493,8 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         if (createDto.CandidateId == null)
             throw new ArgumentException("CandidateId is required when adding a development activity through the candidate service.");
 
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedCandidateAsync(createDto.CandidateId.Value);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _activityRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1312,16 +1503,16 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<IEnumerable<SuccessionDevelopmentActivitySummaryDto>> GetDevelopmentActivitiesAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
-        var entities = await _activityRepository.GetByCandidateIdAsync(candidateId);
+        await GetOwnedCandidateAsync(candidateId);
+        var tenantId = GetTenantId();
+        var entities = (await _activityRepository.GetByCandidateIdAsync(candidateId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<SuccessionDevelopmentActivityDto> UpdateDevelopmentActivityAsync(UpdateSuccessionDevelopmentActivityDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _activityRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Development activity with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedActivityAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1333,10 +1524,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<bool> DeleteDevelopmentActivityAsync(Guid activityId, CancellationToken cancellationToken = default)
     {
-        var entity = await _activityRepository.GetByIdAsync(activityId);
-
-        if (entity == null)
-            throw new ArgumentException($"Development activity with ID '{activityId}' not found.");
+        var entity = await GetOwnedActivityAsync(activityId);
 
         await _activityRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1350,6 +1538,11 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        if (createDto.CandidateId.HasValue)
+            await GetOwnedCandidateAsync(createDto.CandidateId.Value);
+        if (createDto.SuccessionPlanId.HasValue)
+            await GetOwnedPlanAsync(createDto.SuccessionPlanId.Value);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
@@ -1359,16 +1552,16 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     public async Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
-        var entities = await _documentRepository.GetByCandidateIdAsync(candidateId);
+        await GetOwnedCandidateAsync(candidateId);
+        var tenantId = GetTenantId();
+        var entities = (await _documentRepository.GetByCandidateIdAsync(candidateId))
+            .Where(d => d.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _documentRepository.GetByIdAsync(documentId);
-
-        if (entity == null)
-            throw new ArgumentException($"Document with ID '{documentId}' not found.");
+        var entity = await GetOwnedDocumentAsync(documentId);
 
         await _documentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1383,7 +1576,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
     private async Task RecalculatePlanDerivedFieldsAsync(Guid planId, CancellationToken cancellationToken)
     {
         var plan = await _planRepository.GetWithFullDetailsAsync(planId);
-        if (plan != null)
+        if (plan != null && plan.TenantId == GetTenantId())
         {
             plan.RecalculateDerivedFields();
             await _planRepository.UpdateAsync(plan);
@@ -1406,64 +1599,118 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
 {
     private readonly ISuccessionDevelopmentActivityRepository _activityRepository;
     private readonly ISuccessionDevelopmentMilestoneRepository _milestoneRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SuccessionDevelopmentActivityService> _logger;
 
     public SuccessionDevelopmentActivityService(
         ISuccessionDevelopmentActivityRepository activityRepository,
         ISuccessionDevelopmentMilestoneRepository milestoneRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<SuccessionDevelopmentActivityService> logger)
     {
         _activityRepository = activityRepository;
         _milestoneRepository = milestoneRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<SuccessionDevelopmentActivityDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<SuccessionDevelopmentActivity> GetOwnedActivityAsync(Guid id)
+    {
+        var entity = await _activityRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Development activity with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionDevelopmentActivity> GetOwnedActivityWithDetailsAsync(Guid id)
     {
         var entity = await _activityRepository.GetWithFullDetailsAsync(id);
-
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Development activity with ID '{id}' not found.");
+        return entity;
+    }
 
+    private async Task<SuccessionDevelopmentMilestone> GetOwnedMilestoneAsync(Guid id)
+    {
+        var entity = await _milestoneRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Development milestone with ID '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<SuccessionDevelopmentActivityDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedActivityWithDetailsAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<SuccessionDevelopmentActivitySummaryDto>> GetByCandidateIdAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
-        var entities = await _activityRepository.GetByCandidateIdAsync(candidateId);
+        var tenantId = GetTenantId();
+        var entities = (await _activityRepository.GetByCandidateIdAsync(candidateId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<SuccessionDevelopmentActivityDto>> GetFullByCandidateIdAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
-        var entities = await _activityRepository.GetByCandidateIdAsync(candidateId);
+        var tenantId = GetTenantId();
+        var entities = (await _activityRepository.GetByCandidateIdAsync(candidateId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<SuccessionDevelopmentActivitySummaryDto>> GetByTalentPoolMemberIdAsync(Guid memberId, CancellationToken cancellationToken = default)
     {
-        var entities = await _activityRepository.GetByTalentPoolMemberIdAsync(memberId);
+        var tenantId = GetTenantId();
+        var entities = (await _activityRepository.GetByTalentPoolMemberIdAsync(memberId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<SuccessionDevelopmentActivityDto>> GetFullByTalentPoolMemberIdAsync(Guid memberId, CancellationToken cancellationToken = default)
     {
-        var entities = await _activityRepository.GetByTalentPoolMemberIdAsync(memberId);
+        var tenantId = GetTenantId();
+        var entities = (await _activityRepository.GetByTalentPoolMemberIdAsync(memberId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<SuccessionDevelopmentActivitySummaryDto>> GetByStatusAsync(DevelopmentActivityStatus status, CancellationToken cancellationToken = default)
     {
-        var entities = await _activityRepository.GetByStatusAsync(status);
+        var tenantId = GetTenantId();
+        var entities = (await _activityRepository.GetByStatusAsync(status))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<SuccessionDevelopmentActivitySummaryDto>> GetOverdueActivitiesAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _activityRepository.GetOverdueActivitiesAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _activityRepository.GetOverdueActivitiesAsync())
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
@@ -1475,6 +1722,7 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
         if (createDto.CandidateId != null && createDto.TalentPoolMemberId != null)
             throw new ArgumentException("A development activity cannot be linked to both a candidate and a talent pool member.");
 
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _activityRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1486,10 +1734,7 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
 
     public async Task<SuccessionDevelopmentActivityDto> UpdateAsync(UpdateSuccessionDevelopmentActivityDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _activityRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Development activity with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedActivityAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1501,10 +1746,7 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _activityRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Development activity with ID '{id}' not found.");
+        var entity = await GetOwnedActivityAsync(id);
 
         if (entity.Status == DevelopmentActivityStatus.InProgress)
             throw new InvalidOperationException("An in-progress development activity cannot be deleted. Cancel it first.");
@@ -1521,6 +1763,8 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
 
     public async Task<SuccessionDevelopmentMilestoneDto> AddMilestoneAsync(CreateSuccessionDevelopmentMilestoneDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedActivityAsync(createDto.ActivityId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _milestoneRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1529,22 +1773,24 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
 
     public async Task<IEnumerable<SuccessionDevelopmentMilestoneDto>> GetMilestonesAsync(Guid activityId, CancellationToken cancellationToken = default)
     {
-        var entities = await _milestoneRepository.GetByActivityIdAsync(activityId);
+        await GetOwnedActivityAsync(activityId);
+        var tenantId = GetTenantId();
+        var entities = (await _milestoneRepository.GetByActivityIdAsync(activityId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<SuccessionDevelopmentMilestoneDto>> GetOverdueMilestonesAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _milestoneRepository.GetOverdueMilestonesAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _milestoneRepository.GetOverdueMilestonesAsync())
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<SuccessionDevelopmentMilestoneDto> UpdateMilestoneAsync(UpdateSuccessionDevelopmentMilestoneDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _milestoneRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Development milestone with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedMilestoneAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1556,10 +1802,7 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
 
     public async Task<bool> CompleteMilestoneAsync(Guid milestoneId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _milestoneRepository.GetByIdAsync(milestoneId);
-
-        if (entity == null)
-            throw new ArgumentException($"Development milestone with ID '{milestoneId}' not found.");
+        var entity = await GetOwnedMilestoneAsync(milestoneId);
 
         if (entity.IsCompleted)
             throw new InvalidOperationException("This milestone is already completed.");
@@ -1577,10 +1820,7 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
 
     public async Task<bool> DeleteMilestoneAsync(Guid milestoneId, CancellationToken cancellationToken = default)
     {
-        var entity = await _milestoneRepository.GetByIdAsync(milestoneId);
-
-        if (entity == null)
-            throw new ArgumentException($"Development milestone with ID '{milestoneId}' not found.");
+        var entity = await GetOwnedMilestoneAsync(milestoneId);
 
         await _milestoneRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1605,6 +1845,7 @@ public class TalentPoolService : ITalentPoolService
     private readonly ITalentPoolMemberRepository _memberRepository;
     private readonly ISuccessionDevelopmentActivityRepository _activityRepository;
     private readonly ISuccessionDocumentRepository _documentRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TalentPoolService> _logger;
 
@@ -1613,6 +1854,7 @@ public class TalentPoolService : ITalentPoolService
         ITalentPoolMemberRepository memberRepository,
         ISuccessionDevelopmentActivityRepository activityRepository,
         ISuccessionDocumentRepository documentRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TalentPoolService> logger)
     {
@@ -1620,23 +1862,81 @@ public class TalentPoolService : ITalentPoolService
         _memberRepository = memberRepository;
         _activityRepository = activityRepository;
         _documentRepository = documentRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<TalentPoolDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<TalentPool> GetOwnedPoolAsync(Guid id)
     {
         var entity = await _poolRepository.GetByIdAsync(id);
-
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Talent pool with ID '{id}' not found.");
+        return entity;
+    }
 
+    private async Task<TalentPool> GetOwnedPoolWithMembersAsync(Guid id)
+    {
+        var entity = await _poolRepository.GetWithMembersAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Talent pool with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<TalentPoolMember> GetOwnedMemberAsync(Guid id)
+    {
+        var entity = await _memberRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Talent pool member with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<TalentPoolMember> GetOwnedMemberWithDetailsAsync(Guid id)
+    {
+        var entity = await _memberRepository.GetWithFullDetailsAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Talent pool member with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<SuccessionDocument> GetOwnedDocumentAsync(Guid id)
+    {
+        var entity = await _documentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Document with ID '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<TalentPoolDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedPoolAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<TalentPoolSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _poolRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
             .Include(p => p.PoolType)
             .Include(p => p.Owner)
             .Include(p => p.Members)
@@ -1647,7 +1947,8 @@ public class TalentPoolService : ITalentPoolService
 
     public async Task<PagedResult<TalentPoolSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _poolRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _poolRepository.GetQueryable().Where(p => p.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -1670,34 +1971,37 @@ public class TalentPoolService : ITalentPoolService
 
     public async Task<IEnumerable<TalentPoolSummaryDto>> GetByPoolTypeAsync(Guid poolTypeId, CancellationToken cancellationToken = default)
     {
-        var entities = await _poolRepository.GetByPoolTypeAsync(poolTypeId);
+        var tenantId = GetTenantId();
+        var entities = (await _poolRepository.GetByPoolTypeAsync(poolTypeId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<TalentPoolSummaryDto>> GetActivePoolsAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _poolRepository.GetActivePoolsAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _poolRepository.GetActivePoolsAsync())
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<TalentPoolSummaryDto>> GetByOwnerAsync(Guid ownerEmployeeId, CancellationToken cancellationToken = default)
     {
-        var entities = await _poolRepository.GetByOwnerAsync(ownerEmployeeId);
+        var tenantId = GetTenantId();
+        var entities = (await _poolRepository.GetByOwnerAsync(ownerEmployeeId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<TalentPoolDto> GetWithMembersAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _poolRepository.GetWithMembersAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent pool with ID '{id}' not found.");
-
+        var entity = await GetOwnedPoolWithMembersAsync(id);
         return entity.ToDto();
     }
 
     public async Task<TalentPoolDto> CreateAsync(CreateTalentPoolDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _poolRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1709,10 +2013,7 @@ public class TalentPoolService : ITalentPoolService
 
     public async Task<TalentPoolDto> UpdateAsync(UpdateTalentPoolDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _poolRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent pool with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedPoolAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1726,10 +2027,7 @@ public class TalentPoolService : ITalentPoolService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _poolRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent pool with ID '{id}' not found.");
+        var entity = await GetOwnedPoolAsync(id);
 
         await _poolRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1743,9 +2041,12 @@ public class TalentPoolService : ITalentPoolService
 
     public async Task<TalentPoolMemberDto> AddMemberAsync(CreateTalentPoolMemberDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPoolAsync(createDto.TalentPoolId);
+
         // Check if employee is already an active member of this pool
         var existing = await _memberRepository.GetMembershipAsync(createDto.TalentPoolId, createDto.EmployeeId);
-        if (existing != null && existing.IsActive)
+        if (existing != null && existing.TenantId == tenantId && existing.IsActive)
             throw new InvalidOperationException("This employee is already an active member of the talent pool.");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
@@ -1761,26 +2062,22 @@ public class TalentPoolService : ITalentPoolService
 
     public async Task<IEnumerable<TalentPoolMemberSummaryDto>> GetMembersAsync(Guid poolId, CancellationToken cancellationToken = default)
     {
-        var entities = await _memberRepository.GetByTalentPoolIdAsync(poolId);
+        await GetOwnedPoolAsync(poolId);
+        var tenantId = GetTenantId();
+        var entities = (await _memberRepository.GetByTalentPoolIdAsync(poolId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<TalentPoolMemberDto> GetMemberByIdAsync(Guid memberId, CancellationToken cancellationToken = default)
     {
-        var entity = await _memberRepository.GetWithFullDetailsAsync(memberId);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent pool member with ID '{memberId}' not found.");
-
+        var entity = await GetOwnedMemberWithDetailsAsync(memberId);
         return entity.ToDto();
     }
 
     public async Task<TalentPoolMemberDto> UpdateMemberAsync(UpdateTalentPoolMemberDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _memberRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent pool member with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedMemberAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -1792,10 +2089,7 @@ public class TalentPoolService : ITalentPoolService
 
     public async Task<bool> RemoveMemberAsync(Guid memberId, string removalReason, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _memberRepository.GetByIdAsync(memberId);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent pool member with ID '{memberId}' not found.");
+        var entity = await GetOwnedMemberAsync(memberId);
 
         if (!entity.IsActive)
             throw new InvalidOperationException("This member is already inactive.");
@@ -1814,13 +2108,18 @@ public class TalentPoolService : ITalentPoolService
 
     public async Task<IEnumerable<TalentPoolMemberSummaryDto>> GetMembersByReadinessAsync(Guid poolId, ReadinessLevel readiness, CancellationToken cancellationToken = default)
     {
-        var entities = await _memberRepository.GetByReadinessAsync(poolId, readiness);
+        await GetOwnedPoolAsync(poolId);
+        var tenantId = GetTenantId();
+        var entities = (await _memberRepository.GetByReadinessAsync(poolId, readiness))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<TalentPoolMemberSummaryDto>> GetMembersDueForReviewAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
-        var entities = await _memberRepository.GetDueForReviewAsync(daysAhead);
+        var tenantId = GetTenantId();
+        var entities = (await _memberRepository.GetDueForReviewAsync(daysAhead))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
@@ -1833,6 +2132,8 @@ public class TalentPoolService : ITalentPoolService
         if (createDto.TalentPoolMemberId == null)
             throw new ArgumentException("TalentPoolMemberId is required when adding a development activity through the talent pool service.");
 
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedMemberAsync(createDto.TalentPoolMemberId.Value);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _activityRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1841,7 +2142,10 @@ public class TalentPoolService : ITalentPoolService
 
     public async Task<IEnumerable<SuccessionDevelopmentActivitySummaryDto>> GetDevelopmentActivitiesForMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
     {
-        var entities = await _activityRepository.GetByTalentPoolMemberIdAsync(memberId);
+        await GetOwnedMemberAsync(memberId);
+        var tenantId = GetTenantId();
+        var entities = (await _activityRepository.GetByTalentPoolMemberIdAsync(memberId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
@@ -1851,6 +2155,9 @@ public class TalentPoolService : ITalentPoolService
 
     public async Task<SuccessionDocumentDto> AddDocumentForMemberAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        if (createDto.TalentPoolMemberId.HasValue)
+            await GetOwnedMemberAsync(createDto.TalentPoolMemberId.Value);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
@@ -1860,16 +2167,16 @@ public class TalentPoolService : ITalentPoolService
 
     public async Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsForMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
     {
-        var entities = await _documentRepository.GetByTalentPoolMemberIdAsync(memberId);
+        await GetOwnedMemberAsync(memberId);
+        var tenantId = GetTenantId();
+        var entities = (await _documentRepository.GetByTalentPoolMemberIdAsync(memberId))
+            .Where(d => d.TenantId == tenantId);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _documentRepository.GetByIdAsync(documentId);
-
-        if (entity == null)
-            throw new ArgumentException($"Document with ID '{documentId}' not found.");
+        var entity = await GetOwnedDocumentAsync(documentId);
 
         await _documentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1893,6 +2200,7 @@ public class TalentReviewSessionService : ITalentReviewSessionService
     private readonly ITalentReviewSessionRepository _sessionRepository;
     private readonly ITalentReviewRatingRepository _ratingRepository;
     private readonly ITalentPoolMemberRepository _memberRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TalentReviewSessionService> _logger;
 
@@ -1900,35 +2208,78 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         ITalentReviewSessionRepository sessionRepository,
         ITalentReviewRatingRepository ratingRepository,
         ITalentPoolMemberRepository memberRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TalentReviewSessionService> logger)
     {
         _sessionRepository = sessionRepository;
         _ratingRepository = ratingRepository;
         _memberRepository = memberRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
-    public async Task<TalentReviewSessionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<TalentReviewSession> GetOwnedSessionAsync(Guid id)
     {
         var entity = await _sessionRepository.GetByIdAsync(id);
-
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Talent review session with ID '{id}' not found.");
+        return entity;
+    }
 
+    private async Task<TalentReviewSession> GetOwnedSessionWithRatingsAsync(Guid id)
+    {
+        var entity = await _sessionRepository.GetWithRatingsAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Talent review session with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<TalentReviewRating> GetOwnedRatingAsync(Guid id)
+    {
+        var entity = await _ratingRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Talent review rating with ID '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<TalentReviewSessionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedSessionAsync(id);
         return entity.ToDto();
     }
 
     public async Task<IEnumerable<TalentReviewSessionSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _sessionRepository.GetAllAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _sessionRepository.GetAllAsync()).Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<PagedResult<TalentReviewSessionSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _sessionRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _sessionRepository.GetQueryable().Where(s => s.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -1948,40 +2299,45 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
     public async Task<IEnumerable<TalentReviewSessionSummaryDto>> GetByYearAsync(int reviewYear, CancellationToken cancellationToken = default)
     {
-        var entities = await _sessionRepository.GetByYearAsync(reviewYear);
+        var tenantId = GetTenantId();
+        var entities = (await _sessionRepository.GetByYearAsync(reviewYear))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<TalentReviewSessionSummaryDto>> GetByOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
     {
-        var entities = await _sessionRepository.GetByOrganizationUnitAsync(organizationUnitId);
+        var tenantId = GetTenantId();
+        var entities = (await _sessionRepository.GetByOrganizationUnitAsync(organizationUnitId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<TalentReviewSessionSummaryDto>> GetFinalizedSessionsAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _sessionRepository.GetFinalizedSessionsAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _sessionRepository.GetFinalizedSessionsAsync())
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<TalentReviewSessionSummaryDto>> GetPendingSessionsAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _sessionRepository.GetPendingSessionsAsync();
+        var tenantId = GetTenantId();
+        var entities = (await _sessionRepository.GetPendingSessionsAsync())
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<TalentReviewSessionDto> GetWithRatingsAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _sessionRepository.GetWithRatingsAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent review session with ID '{id}' not found.");
-
+        var entity = await GetOwnedSessionWithRatingsAsync(id);
         return entity.ToDto();
     }
 
     public async Task<TalentReviewSessionDto> CreateAsync(CreateTalentReviewSessionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.IsFinalized = false;
 
@@ -1995,10 +2351,7 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
     public async Task<TalentReviewSessionDto> UpdateAsync(UpdateTalentReviewSessionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _sessionRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent review session with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedSessionAsync(updateDto.Id);
 
         if (entity.IsFinalized)
             throw new InvalidOperationException("A finalized talent review session cannot be edited.");
@@ -2013,10 +2366,7 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
     public async Task<bool> FinalizeAsync(FinalizeTalentReviewSessionDto finalizeDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _sessionRepository.GetByIdAsync(finalizeDto.SessionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent review session with ID '{finalizeDto.SessionId}' not found.");
+        var entity = await GetOwnedSessionAsync(finalizeDto.SessionId);
 
         if (entity.IsFinalized)
             throw new InvalidOperationException("This talent review session is already finalized.");
@@ -2036,10 +2386,7 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _sessionRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent review session with ID '{id}' not found.");
+        var entity = await GetOwnedSessionAsync(id);
 
         if (entity.IsFinalized)
             throw new InvalidOperationException("A finalized talent review session cannot be deleted.");
@@ -2056,21 +2403,21 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
     public async Task<TalentReviewRatingDto> AddRatingAsync(CreateTalentReviewRatingDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
-        var session = await _sessionRepository.GetByIdAsync(createDto.SessionId);
-
-        if (session == null)
-            throw new ArgumentException($"Talent review session with ID '{createDto.SessionId}' not found.");
+        tenantId = RequireCurrentTenant(tenantId);
+        var session = await GetOwnedSessionAsync(createDto.SessionId);
 
         if (session.IsFinalized)
             throw new InvalidOperationException("Cannot add ratings to a finalized talent review session.");
 
         // Check if this employee already has a rating in this session
         var existing = await _ratingRepository.GetBySessionAndEmployeeAsync(createDto.SessionId, createDto.EmployeeId);
-        if (existing != null)
+        if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("This employee already has a rating in this session. Update the existing rating instead.");
 
-        // Look up previous rating for trend tracking
+        // Look up previous rating for trend tracking (same tenant)
         var previousRating = await _ratingRepository.GetLatestConfirmedRatingForEmployeeAsync(createDto.EmployeeId);
+        if (previousRating != null && previousRating.TenantId != tenantId)
+            previousRating = null;
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
@@ -2091,52 +2438,69 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
     public async Task<IEnumerable<TalentReviewRatingSummaryDto>> GetRatingsForSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
-        var entities = await _ratingRepository.GetBySessionIdAsync(sessionId);
+        await GetOwnedSessionAsync(sessionId);
+        var tenantId = GetTenantId();
+        var entities = (await _ratingRepository.GetBySessionIdAsync(sessionId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<TalentReviewRatingSummaryDto>> GetRatingsForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var entities = await _ratingRepository.GetByEmployeeIdAsync(employeeId);
+        var tenantId = GetTenantId();
+        var entities = (await _ratingRepository.GetByEmployeeIdAsync(employeeId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<TalentReviewRatingSummaryDto>> GetByNineBoxPositionAsync(Guid sessionId, PerformanceRating performance, PotentialRating potential, CancellationToken cancellationToken = default)
     {
-        var entities = await _ratingRepository.GetByNineBoxPositionAsync(sessionId, performance, potential);
+        await GetOwnedSessionAsync(sessionId);
+        var tenantId = GetTenantId();
+        var entities = (await _ratingRepository.GetByNineBoxPositionAsync(sessionId, performance, potential))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<TalentReviewRatingDto?> GetRatingByIdAsync(Guid ratingId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _ratingRepository.GetByIdAsync(ratingId);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != tenantId)
+            return null;
+        return entity.ToDto();
     }
 
     public async Task<TalentReviewRatingDto?> GetLatestConfirmedRatingForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _ratingRepository.GetLatestConfirmedRatingForEmployeeAsync(employeeId);
-        return entity?.ToDto();
+        if (entity == null || entity.TenantId != tenantId)
+            return null;
+        return entity.ToDto();
     }
 
     public async Task<IEnumerable<TalentReviewRatingSummaryDto>> GetCalibratedRatingsAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
-        var entities = await _ratingRepository.GetCalibratedRatingsAsync(sessionId);
+        await GetOwnedSessionAsync(sessionId);
+        var tenantId = GetTenantId();
+        var entities = (await _ratingRepository.GetCalibratedRatingsAsync(sessionId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<IEnumerable<TalentReviewRatingSummaryDto>> GetPendingCalibrationAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
-        var entities = await _ratingRepository.GetPendingCalibrationAsync(sessionId);
+        await GetOwnedSessionAsync(sessionId);
+        var tenantId = GetTenantId();
+        var entities = (await _ratingRepository.GetPendingCalibrationAsync(sessionId))
+            .Where(e => e.TenantId == tenantId);
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
     public async Task<TalentReviewRatingDto> UpdateRatingAsync(UpdateTalentReviewRatingDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _ratingRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent review rating with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedRatingAsync(updateDto.Id);
 
         if (entity.CalibrationConfirmed)
             throw new InvalidOperationException("A calibration-confirmed rating cannot be modified.");
@@ -2151,10 +2515,7 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
     public async Task<bool> ConfirmCalibrationAsync(ConfirmCalibrationDto confirmDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _ratingRepository.GetByIdAsync(confirmDto.RatingId);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent review rating with ID '{confirmDto.RatingId}' not found.");
+        var entity = await GetOwnedRatingAsync(confirmDto.RatingId);
 
         if (entity.CalibrationConfirmed)
             throw new InvalidOperationException("Calibration is already confirmed for this rating.");
@@ -2170,7 +2531,7 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         if (entity.TalentPoolMemberId.HasValue)
         {
             var member = await _memberRepository.GetByIdAsync(entity.TalentPoolMemberId.Value);
-            if (member != null)
+            if (member != null && member.TenantId == GetTenantId())
             {
                 member.LatestPerformanceRating = entity.Performance;
                 member.LatestPotentialRating = entity.Potential;
@@ -2188,10 +2549,7 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
     public async Task<bool> DeleteRatingAsync(Guid ratingId, CancellationToken cancellationToken = default)
     {
-        var entity = await _ratingRepository.GetByIdAsync(ratingId);
-
-        if (entity == null)
-            throw new ArgumentException($"Talent review rating with ID '{ratingId}' not found.");
+        var entity = await GetOwnedRatingAsync(ratingId);
 
         if (entity.CalibrationConfirmed)
             throw new InvalidOperationException("A calibration-confirmed rating cannot be deleted.");

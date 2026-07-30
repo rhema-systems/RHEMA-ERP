@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Models.HR;
 using Microsoft.Extensions.Logging;
@@ -11,16 +12,38 @@ public sealed class GeofenceVerificationService : IGeofenceVerificationService
 {
     private readonly IEmployeeRepository _employeeRepository;
     private readonly IGeofenceZoneRepository _geofenceZoneRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<GeofenceVerificationService> _logger;
 
     public GeofenceVerificationService(
         IEmployeeRepository employeeRepository,
         IGeofenceZoneRepository geofenceZoneRepository,
+        ICurrentUserProvider currentUserProvider,
         ILogger<GeofenceVerificationService> logger)
     {
         _employeeRepository = employeeRepository;
         _geofenceZoneRepository = geofenceZoneRepository;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
     }
 
     public async Task<GeofenceVerificationResult> VerifyPunchAsync(
@@ -30,6 +53,7 @@ public sealed class GeofenceVerificationService : IGeofenceVerificationService
         double? longitude,
         CancellationToken ct = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var hasGps = latitude.HasValue && longitude.HasValue;
 
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
@@ -51,7 +75,9 @@ public sealed class GeofenceVerificationService : IGeofenceVerificationService
                 message: "Employee has no work location assigned — geofence check skipped.");
         }
 
-        var zones = (await _geofenceZoneRepository.GetByLocationIdAsync(employee.LocationId.Value)).ToList();
+        var zones = (await _geofenceZoneRepository.GetByLocationIdAsync(employee.LocationId.Value))
+            .Where(z => z.TenantId == tenantId)
+            .ToList();
         var zone = zones.FirstOrDefault();
 
         if (zone == null)

@@ -14,22 +14,52 @@ namespace ErpSystem.Core.Services.HR;
 public class GoalLibraryService : IGoalLibraryService
 {
     private readonly IGenericRepository<GoalLibrary> _goalLibraryRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<GoalLibraryService> _logger;
 
     public GoalLibraryService(
         IGenericRepository<GoalLibrary> goalLibraryRepository,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<GoalLibraryService> logger)
     {
         _goalLibraryRepository = goalLibraryRepository;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A library item owned by another tenant is reported as missing rather than forbidden, so the endpoints
+    // do not confirm that the id exists elsewhere.
+    private async Task<GoalLibrary> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _goalLibraryRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Goal library item with ID '{id}' not found.");
+        return entity;
+    }
+
+    private IQueryable<GoalLibrary> BaseQuery()
+    {
+        var tenantId = GetTenantId();
+        return _goalLibraryRepository.GetQueryable().Where(g => g.TenantId == tenantId);
+    }
+
     public async Task<GoalLibraryDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalLibraryRepository.GetQueryable()
+        var entity = await BaseQuery()
             .Include(g => g.OrganizationLevel)
             .Include(g => g.OrganizationUnit)
             .Include(g => g.Position)
@@ -43,7 +73,7 @@ public class GoalLibraryService : IGoalLibraryService
 
     public async Task<IEnumerable<GoalLibraryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _goalLibraryRepository.GetQueryable()
+        var entities = await BaseQuery()
             .Include(g => g.OrganizationLevel)
             .Include(g => g.OrganizationUnit)
             .Include(g => g.Position)
@@ -55,7 +85,7 @@ public class GoalLibraryService : IGoalLibraryService
 
     public async Task<PagedResult<GoalLibraryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _goalLibraryRepository.GetQueryable()
+        var query = BaseQuery()
             .Include(g => g.OrganizationLevel)
             .Include(g => g.OrganizationUnit)
             .Include(g => g.Position)
@@ -75,7 +105,8 @@ public class GoalLibraryService : IGoalLibraryService
 
     public async Task<IEnumerable<GoalLibraryDto>> GetByPositionIdAsync(Guid positionId, CancellationToken cancellationToken = default)
     {
-        var entities = await _goalLibraryRepository.GetQueryable(g => g.PositionId == positionId && g.IsActive)
+        var entities = await BaseQuery()
+            .Where(g => g.PositionId == positionId && g.IsActive)
             .Include(g => g.Position)
             .OrderBy(g => g.Title)
             .ToListAsync(cancellationToken);
@@ -85,7 +116,8 @@ public class GoalLibraryService : IGoalLibraryService
 
     public async Task<IEnumerable<GoalLibraryDto>> GetByOrganizationUnitIdAsync(Guid orgUnitId, CancellationToken cancellationToken = default)
     {
-        var entities = await _goalLibraryRepository.GetQueryable(g => g.OrganizationUnitId == orgUnitId && g.IsActive)
+        var entities = await BaseQuery()
+            .Where(g => g.OrganizationUnitId == orgUnitId && g.IsActive)
             .Include(g => g.OrganizationUnit)
             .OrderBy(g => g.Title)
             .ToListAsync(cancellationToken);
@@ -95,7 +127,8 @@ public class GoalLibraryService : IGoalLibraryService
 
     public async Task<IEnumerable<GoalLibraryDto>> GetActiveItemsAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _goalLibraryRepository.GetQueryable(g => g.IsActive)
+        var entities = await BaseQuery()
+            .Where(g => g.IsActive)
             .Include(g => g.OrganizationLevel)
             .Include(g => g.OrganizationUnit)
             .Include(g => g.Position)
@@ -108,6 +141,7 @@ public class GoalLibraryService : IGoalLibraryService
     public async Task<GoalLibraryDto> CreateAsync(CreateGoalLibraryDto createDto, CancellationToken cancellationToken = default)
     {
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         await _goalLibraryRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -119,9 +153,7 @@ public class GoalLibraryService : IGoalLibraryService
 
     public async Task<GoalLibraryDto> UpdateAsync(UpdateGoalLibraryDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalLibraryRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null)
-            throw new ArgumentException($"Goal library item with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
 
         updateDto.UpdateEntity(entity);
 
@@ -135,9 +167,7 @@ public class GoalLibraryService : IGoalLibraryService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalLibraryRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Goal library item with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id, cancellationToken);
 
         await _goalLibraryRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -148,9 +178,7 @@ public class GoalLibraryService : IGoalLibraryService
 
     public async Task<bool> SetActiveStatusAsync(Guid id, bool isActive, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalLibraryRepository.GetByIdAsync(id);
-        if (entity == null)
-            throw new ArgumentException($"Goal library item with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id, cancellationToken);
 
         entity.IsActive = isActive;
         await _goalLibraryRepository.UpdateAsync(entity);
@@ -162,15 +190,18 @@ public class GoalLibraryService : IGoalLibraryService
 
     public async Task<int> GetEmployeeGoalUsageCountAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var count = await _goalLibraryRepository.GetQueryable(g => g.Id == id)
-            .SelectMany(g => g.EmployeeGoals)
+        await GetOwnedAsync(id, cancellationToken);
+        var tenantId = GetTenantId();
+        var count = await BaseQuery()
+            .Where(g => g.Id == id)
+            .SelectMany(g => g.EmployeeGoals.Where(eg => eg.TenantId == tenantId))
             .CountAsync(cancellationToken);
         return count;
     }
 
     public async Task<GoalLibraryDetailsDto> GetDetailsAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _goalLibraryRepository.GetQueryable()
+        var entity = await BaseQuery()
             .Include(g => g.OrganizationLevel)
             .Include(g => g.OrganizationUnit)
             .Include(g => g.Position)
@@ -179,8 +210,10 @@ public class GoalLibraryService : IGoalLibraryService
         if (entity == null)
             throw new ArgumentException($"Goal library item with ID '{id}' not found.");
 
-        var usageQuery = _goalLibraryRepository.GetQueryable(g => g.Id == id)
-            .SelectMany(g => g.EmployeeGoals);
+        var tenantId = GetTenantId();
+        var usageQuery = BaseQuery()
+            .Where(g => g.Id == id)
+            .SelectMany(g => g.EmployeeGoals.Where(eg => eg.TenantId == tenantId));
 
         var totalGoals = await usageQuery.CountAsync(cancellationToken);
         var uniqueEmployees = await usageQuery.Select(eg => eg.EmployeeId).Distinct().CountAsync(cancellationToken);
@@ -209,8 +242,11 @@ public class GoalLibraryService : IGoalLibraryService
 
     public async Task<GoalLibraryUsageStatsDto> GetUsageStatsAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var usageQuery = _goalLibraryRepository.GetQueryable(g => g.Id == id)
-            .SelectMany(g => g.EmployeeGoals);
+        await GetOwnedAsync(id, cancellationToken);
+        var tenantId = GetTenantId();
+        var usageQuery = BaseQuery()
+            .Where(g => g.Id == id)
+            .SelectMany(g => g.EmployeeGoals.Where(eg => eg.TenantId == tenantId));
 
         return new GoalLibraryUsageStatsDto
         {
@@ -231,7 +267,7 @@ public class GoalLibraryService : IGoalLibraryService
         CancellationToken cancellationToken = default)
     {
         // ── Base query — AsNoTracking, no entity materialisation
-        var query = _goalLibraryRepository.GetQueryable().AsNoTracking();
+        var query = BaseQuery().AsNoTracking();
 
         // ── Scope filters (passed from the consumer context; respects caller intent)
         if (activeOnly)
@@ -288,8 +324,11 @@ public class GoalLibraryService : IGoalLibraryService
 
     public async Task<PagedResult<GoalLibraryUsageRowDto>> GetUsagePagedAsync(Guid id, int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var usageQuery = _goalLibraryRepository.GetQueryable(g => g.Id == id)
-            .SelectMany(g => g.EmployeeGoals)
+        await GetOwnedAsync(id, cancellationToken);
+        var tenantId = GetTenantId();
+        var usageQuery = BaseQuery()
+            .Where(g => g.Id == id)
+            .SelectMany(g => g.EmployeeGoals.Where(eg => eg.TenantId == tenantId))
             .Include(eg => eg.Employee)
             .Include(eg => eg.AppraisalCycle)
             .OrderBy(eg => eg.Employee.LastName)

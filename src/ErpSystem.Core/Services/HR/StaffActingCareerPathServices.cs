@@ -1,6 +1,7 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -19,44 +20,72 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 {
     private readonly IStaffActingAppointmentRepository _repo;
     private readonly IStaffMovementRepository _movementRepo;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffActingAppointmentService> _logger;
 
     public StaffActingAppointmentService(
         IStaffActingAppointmentRepository repo,
         IStaffMovementRepository movementRepo,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffActingAppointmentService> logger)
     {
         _repo         = repo;
         _movementRepo = movementRepo;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork   = unitOfWork;
         _logger       = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<StaffActingAppointment> GetOwnedAsync(Guid id)
+    {
+        var entity = await _repo.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Acting appointment with ID '{id}' was not found.");
+        return entity;
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
 
     public async Task<StaffActingAppointmentDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _repo.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Acting appointment with ID '{id}' was not found.");
-
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<StaffActingAppointmentDto?> GetByAppointmentNumberAsync(string appointmentNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repo.GetByAppointmentNumberAsync(appointmentNumber);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<StaffActingAppointmentDto> GetWithDetailsAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repo.GetWithDetailsAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Acting appointment with ID '{id}' was not found.");
 
         return entity.ToDto();
@@ -64,13 +93,15 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
     public async Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repo.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<StaffActingAppointmentSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _repo.GetQueryable().Where(a => !a.IsDeleted);
+        var tenantId = GetTenantId();
+        var query = _repo.GetQueryable().Where(a => a.TenantId == tenantId && !a.IsDeleted);
 
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query
@@ -90,44 +121,51 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
     public async Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repo.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetByStatusAsync(StaffActingStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repo.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetActiveAppointmentsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repo.GetActiveAppointmentsAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetByActingPositionAsync(Guid positionId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repo.GetByActingPositionAsync(positionId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetExpiringAppointmentsAsync(int daysAhead = 14, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repo.GetExpiringAppointmentsAsync(daysAhead);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetConvertedToPermanentAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repo.GetConvertedToPermanentAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── CRUD & Workflow ───────────────────────────────────────────────────────
 
     public async Task<StaffActingAppointmentDto> CreateAsync(CreateStaffActingAppointmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.AppointmentNumber = await GenerateAppointmentNumberAsync(cancellationToken);
         entity.Status            = StaffActingStatus.Active;
@@ -142,10 +180,7 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
     public async Task<StaffActingAppointmentDto> UpdateAsync(UpdateStaffActingAppointmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _repo.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Acting appointment with ID '{updateDto.Id}' was not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         if (entity.Status == StaffActingStatus.Completed)
             throw new InvalidOperationException("A completed acting appointment cannot be edited.");
@@ -160,10 +195,7 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
     public async Task<bool> CompleteAsync(CompleteStaffActingAppointmentDto dto, Guid completedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _repo.GetByIdAsync(dto.AppointmentId);
-
-        if (entity == null)
-            throw new ArgumentException($"Acting appointment with ID '{dto.AppointmentId}' was not found.");
+        var entity = await GetOwnedAsync(dto.AppointmentId);
 
         if (entity.Status == StaffActingStatus.Completed)
             throw new InvalidOperationException("This acting appointment is already completed.");
@@ -185,10 +217,7 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
         Guid updatedByUserId,
         CancellationToken cancellationToken = default)
     {
-        var entity = await _repo.GetByIdAsync(dto.AppointmentId);
-
-        if (entity == null)
-            throw new ArgumentException($"Acting appointment with ID '{dto.AppointmentId}' was not found.");
+        var entity = await GetOwnedAsync(dto.AppointmentId);
 
         if (entity.Status is not (StaffActingStatus.Active or StaffActingStatus.Extended))
             throw new InvalidOperationException("Only active or extended acting appointments can be extended.");
@@ -217,10 +246,7 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
     public async Task<bool> ConvertToPermanentAsync(ConvertActingToPermanentDto dto, Guid convertedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _repo.GetByIdAsync(dto.AppointmentId);
-
-        if (entity == null)
-            throw new ArgumentException($"Acting appointment with ID '{dto.AppointmentId}' was not found.");
+        var entity = await GetOwnedAsync(dto.AppointmentId);
 
         if (entity.ConvertedToPermanent)
             throw new InvalidOperationException("This acting appointment has already been converted to a permanent appointment.");
@@ -228,8 +254,9 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
         if (dto.ConversionMovementId == Guid.Empty)
             throw new InvalidOperationException("A promotion movement is required before converting to permanent.");
 
+        var tenantId = GetTenantId();
         var promotionMovement = await _movementRepo.GetByIdAsync(dto.ConversionMovementId);
-        if (promotionMovement is null || promotionMovement.IsDeleted)
+        if (promotionMovement is null || promotionMovement.IsDeleted || promotionMovement.TenantId != tenantId)
             throw new InvalidOperationException("The selected promotion movement was not found.");
 
         if (promotionMovement.MovementType != StaffMovementType.Promotion)
@@ -256,10 +283,7 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _repo.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Acting appointment with ID '{id}' was not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.Status == StaffActingStatus.Active)
             throw new InvalidOperationException("An active acting appointment cannot be deleted. Complete or cancel it first.");
@@ -274,9 +298,10 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
     private async Task<string> GenerateAppointmentNumberAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var prefix     = $"ACT-{DateTime.UtcNow:yyyyMMdd}";
         var countToday = await _repo.GetQueryable()
-            .Where(a => a.AppointmentNumber.StartsWith(prefix))
+            .Where(a => a.TenantId == tenantId && a.AppointmentNumber.StartsWith(prefix))
             .CountAsync(cancellationToken);
 
         return $"{prefix}-{(countToday + 1):D4}";
@@ -294,34 +319,61 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 public class EmployeeCareerPathService : IEmployeeCareerPathService
 {
     private readonly IEmployeeCareerPathRepository _repo;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<EmployeeCareerPathService> _logger;
 
     public EmployeeCareerPathService(
         IEmployeeCareerPathRepository repo,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<EmployeeCareerPathService> logger)
     {
         _repo       = repo;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger     = logger;
     }
 
-    public async Task<EmployeeCareerPathDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
+    }
+
+    private async Task<EmployeeCareerPath> GetOwnedAsync(Guid id)
     {
         var entity = await _repo.GetByIdAsync(id);
-
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Career path record with ID '{id}' was not found.");
+        return entity;
+    }
 
+    public async Task<EmployeeCareerPathDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
         return entity.ToDto();
     }
 
     public async Task<EmployeeCareerPathDto> GetWithDetailsAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repo.GetWithDetailsAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Career path record with ID '{id}' was not found.");
 
         return entity.ToDto();
@@ -329,42 +381,50 @@ public class EmployeeCareerPathService : IEmployeeCareerPathService
 
     public async Task<IEnumerable<EmployeeCareerPathSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repo.GetByEmployeeIdAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<EmployeeCareerPathDto?> GetCurrentPositionAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repo.GetCurrentPositionAsync(employeeId);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<EmployeeCareerPathSummaryDto>> GetByOrganizationUnitIdAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repo.GetByOrganizationUnitIdAsync(organizationUnitId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<EmployeeCareerPathDto?> GetByMovementIdAsync(Guid movementId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _repo.GetByMovementIdAsync(movementId);
-        return entity?.ToDto();
+        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<EmployeeCareerPathSummaryDto>> GetBySalaryGradeIdAsync(Guid salaryGradeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repo.GetBySalaryGradeIdAsync(salaryGradeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<EmployeeCareerPathSummaryDto>> GetCurrentOccupantsForUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repo.GetCurrentOccupantsForUnitAsync(organizationUnitId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<EmployeeCareerPathDto> CreateAsync(CreateEmployeeCareerPathDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+
         if (createDto.IsCurrent)
             await ClosePreviousCurrentPositionAsync(createDto.EmployeeId, createDto.StartDate, createdByUserId, cancellationToken);
 
@@ -380,10 +440,7 @@ public class EmployeeCareerPathService : IEmployeeCareerPathService
 
     public async Task<EmployeeCareerPathDto> UpdateAsync(UpdateEmployeeCareerPathDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _repo.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Career path record with ID '{updateDto.Id}' was not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -395,10 +452,7 @@ public class EmployeeCareerPathService : IEmployeeCareerPathService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _repo.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Career path record with ID '{id}' was not found.");
+        var entity = await GetOwnedAsync(id);
 
         await _repo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -414,9 +468,10 @@ public class EmployeeCareerPathService : IEmployeeCareerPathService
     /// </summary>
     private async Task ClosePreviousCurrentPositionAsync(Guid employeeId, DateTime newStartDate, Guid updatedByUserId, CancellationToken cancellationToken)
     {
+        var tenantId = GetTenantId();
         var currentPosition = await _repo.GetCurrentPositionAsync(employeeId);
 
-        if (currentPosition == null) return;
+        if (currentPosition == null || currentPosition.TenantId != tenantId) return;
 
         currentPosition.IsCurrent = false;
         currentPosition.EndDate   = newStartDate.AddDays(-1);

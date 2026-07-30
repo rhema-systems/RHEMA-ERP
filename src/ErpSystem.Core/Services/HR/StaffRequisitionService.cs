@@ -26,6 +26,7 @@ public class StaffRequisitionService : IStaffRequisitionService
     private readonly IStaffRequisitionCommentRepository _commentRepository;
     private readonly IStaffRequisitionHistoryRepository _historyRepository;
     private readonly ICompanyHrPolicyProvider _policyProvider;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffRequisitionService> _logger;
 
@@ -36,6 +37,7 @@ public class StaffRequisitionService : IStaffRequisitionService
         IStaffRequisitionCommentRepository commentRepository,
         IStaffRequisitionHistoryRepository historyRepository,
         ICompanyHrPolicyProvider policyProvider,
+        ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffRequisitionService> logger)
     {
@@ -45,8 +47,54 @@ public class StaffRequisitionService : IStaffRequisitionService
         _commentRepository = commentRepository;
         _historyRepository = historyRepository;
         _policyProvider = policyProvider;
+        _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A requisition owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<StaffRequisition> GetOwnedAsync(Guid id)
+    {
+        var entity = await _requisitionRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Staff requisition with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffRequisitionCost> GetOwnedCostAsync(Guid id)
+    {
+        var entity = await _costRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Requisition cost with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffRequisitionAttachment> GetOwnedAttachmentAsync(Guid id)
+    {
+        var entity = await _attachmentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Requisition attachment with ID '{id}' not found.");
+        return entity;
+    }
+
+    private async Task<StaffRequisitionComment> GetOwnedCommentAsync(Guid id)
+    {
+        var entity = await _commentRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Requisition comment with ID '{id}' not found.");
+        return entity;
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
@@ -55,7 +103,7 @@ public class StaffRequisitionService : IStaffRequisitionService
     {
         var entity = await _requisitionRepository.GetWithSummaryNavAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Staff requisition with ID '{id}' not found.");
 
         return entity.ToDto();
@@ -63,13 +111,15 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<StaffRequisitionDetailDto?> GetDetailAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _requisitionRepository.GetWithFullDetailsAsync(id);
-        return entity?.ToDetailDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDetailDto();
     }
 
     public async Task<StaffRequisitionStatusSummaryDto> GetStatusSummaryAsync(CancellationToken cancellationToken = default)
     {
-        var query = _requisitionRepository.GetSummaryQueryable();
+        var tenantId = GetTenantId();
+        var query = _requisitionRepository.GetSummaryQueryable().Where(r => r.TenantId == tenantId);
         var counts = await query
             .GroupBy(r => r.Status)
             .Select(g => new { Status = g.Key, Count = g.Count() })
@@ -94,13 +144,17 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<StaffRequisitionDto?> GetByRequisitionNumberAsync(string requisitionNumber, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await _requisitionRepository.GetByRequisitionNumberAsync(requisitionNumber);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _requisitionRepository.GetSummaryQueryable().ToListAsync(cancellationToken);
+        var tenantId = GetTenantId();
+        var entities = await _requisitionRepository.GetSummaryQueryable()
+            .Where(r => r.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
@@ -108,7 +162,8 @@ public class StaffRequisitionService : IStaffRequisitionService
     {
         (pageNumber, pageSize) = PagingGuard.Clamp(pageNumber, pageSize);
 
-        var query = _requisitionRepository.GetSummaryQueryable();
+        var tenantId = GetTenantId();
+        var query = _requisitionRepository.GetSummaryQueryable().Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -128,79 +183,94 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetByOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requisitionRepository.GetByOrganizationUnitAsync(organizationUnitId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetByLocationAsync(Guid locationId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requisitionRepository.GetByLocationAsync(locationId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetByPositionAsync(Guid positionId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requisitionRepository.GetByPositionAsync(positionId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetByStatusAsync(StaffRequisitionStatus status, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requisitionRepository.GetByStatusAsync(status);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetByTypeAsync(StaffRequisitionType type, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requisitionRepository.GetByTypeAsync(type);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetByRequestedByAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requisitionRepository.GetByRequestedByAsync(employeeId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetPendingReviewAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requisitionRepository.GetPendingReviewAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetOpenRequisitionsAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requisitionRepository.GetOpenRequisitionsAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetOverdueAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requisitionRepository.GetOverdueAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetByJobVacancyAsync(Guid jobVacancyId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requisitionRepository.GetByJobVacancyAsync(jobVacancyId);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffRequisitionSummaryDto>> GetUpcomingStartDateAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _requisitionRepository.GetUpcomingStartDateAsync(daysAhead);
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
     public async Task<StaffRequisitionDto> CreateAsync(CreateStaffRequisitionDto createDto, Guid tenantId, Guid requestedByUserId, CancellationToken cancellationToken = default)
     {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
         if (!createDto.AllowInternalCandidates && !createDto.AllowExternalCandidates)
             throw new ArgumentException("At least one of Allow Internal Candidates or Allow External Candidates must be selected.");
 
-        var entity = createDto.ToEntity(tenantId, requestedByUserId);
-        entity.RequisitionNumber = await GenerateRequisitionNumberAsync(tenantId, cancellationToken);
+        var entity = createDto.ToEntity(current, requestedByUserId);
+        entity.RequisitionNumber = await GenerateRequisitionNumberAsync(current, cancellationToken);
 
         await _requisitionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -215,10 +285,7 @@ public class StaffRequisitionService : IStaffRequisitionService
         if (!updateDto.AllowInternalCandidates && !updateDto.AllowExternalCandidates)
             throw new ArgumentException("At least one of Allow Internal Candidates or Allow External Candidates must be selected.");
 
-        var entity = await _requisitionRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff requisition with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedAsync(updateDto.Id);
 
         if (entity.Status != StaffRequisitionStatus.Draft && entity.Status != StaffRequisitionStatus.Rejected)
             throw new InvalidOperationException("Only Draft or Rejected requisitions can be edited.");
@@ -235,10 +302,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _requisitionRepository.GetByIdAsync(id);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff requisition with ID '{id}' not found.");
+        var entity = await GetOwnedAsync(id);
 
         if (entity.Status != StaffRequisitionStatus.Draft)
             throw new InvalidOperationException("Only Draft requisitions can be deleted.");
@@ -255,10 +319,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<bool> SubmitAsync(SubmitStaffRequisitionDto submitDto, Guid submittedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requisitionRepository.GetByIdAsync(submitDto.RequisitionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff requisition with ID '{submitDto.RequisitionId}' not found.");
+        var entity = await GetOwnedAsync(submitDto.RequisitionId);
 
         if (entity.Status != StaffRequisitionStatus.Draft && entity.Status != StaffRequisitionStatus.Rejected)
             throw new InvalidOperationException("Only Draft or Rejected requisitions can be submitted.");
@@ -281,10 +342,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<bool> ApproveAsync(ApproveStaffRequisitionDto approveDto, Guid approvedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requisitionRepository.GetByIdAsync(approveDto.RequisitionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff requisition with ID '{approveDto.RequisitionId}' not found.");
+        var entity = await GetOwnedAsync(approveDto.RequisitionId);
 
         if (entity.Status != StaffRequisitionStatus.Submitted && entity.Status != StaffRequisitionStatus.UnderReview)
             throw new InvalidOperationException("Only Submitted or UnderReview requisitions can be approved.");
@@ -314,10 +372,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<bool> RejectAsync(RejectStaffRequisitionDto rejectDto, Guid rejectedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requisitionRepository.GetByIdAsync(rejectDto.RequisitionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff requisition with ID '{rejectDto.RequisitionId}' not found.");
+        var entity = await GetOwnedAsync(rejectDto.RequisitionId);
 
         if (entity.Status != StaffRequisitionStatus.Submitted && entity.Status != StaffRequisitionStatus.UnderReview)
             throw new InvalidOperationException("Only Submitted or UnderReview requisitions can be rejected.");
@@ -338,10 +393,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<bool> PutOnHoldAsync(HoldStaffRequisitionDto holdDto, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requisitionRepository.GetByIdAsync(holdDto.RequisitionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff requisition with ID '{holdDto.RequisitionId}' not found.");
+        var entity = await GetOwnedAsync(holdDto.RequisitionId);
 
         var nonHoldableStatuses = new[]
         {
@@ -369,10 +421,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<bool> CancelAsync(CancelStaffRequisitionDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requisitionRepository.GetByIdAsync(cancelDto.RequisitionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff requisition with ID '{cancelDto.RequisitionId}' not found.");
+        var entity = await GetOwnedAsync(cancelDto.RequisitionId);
 
         if (entity.Status == StaffRequisitionStatus.Cancelled || entity.Status == StaffRequisitionStatus.Fulfilled)
             throw new InvalidOperationException($"A requisition in '{entity.Status}' status cannot be cancelled.");
@@ -396,10 +445,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<bool> FulfillAsync(FulfillStaffRequisitionDto fulfillDto, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requisitionRepository.GetByIdAsync(fulfillDto.RequisitionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff requisition with ID '{fulfillDto.RequisitionId}' not found.");
+        var entity = await GetOwnedAsync(fulfillDto.RequisitionId);
 
         if (entity.Status != StaffRequisitionStatus.Approved && entity.Status != StaffRequisitionStatus.PartiallyFulfilled)
             throw new InvalidOperationException("Only Approved or PartiallyFulfilled requisitions can be fulfilled.");
@@ -429,10 +475,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<bool> LinkToVacancyAsync(LinkStaffRequisitionToVacancyDto linkDto, Guid userId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requisitionRepository.GetByIdAsync(linkDto.RequisitionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff requisition with ID '{linkDto.RequisitionId}' not found.");
+        var entity = await GetOwnedAsync(linkDto.RequisitionId);
 
         entity.JobVacancyId = linkDto.JobVacancyId;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -451,7 +494,13 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<StaffRequisitionCostDto> AddCostAsync(CreateStaffRequisitionCostDto createDto, Guid tenantId, Guid recordedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, recordedByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedAsync(createDto.RequisitionId);
+
+        var entity = createDto.ToEntity(current, recordedByUserId);
         await _costRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -459,27 +508,31 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<IEnumerable<StaffRequisitionCostDto>> GetCostsAsync(Guid requisitionId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(requisitionId);
+        var tenantId = GetTenantId();
         var entities = await _costRepository.GetByRequisitionIdAsync(requisitionId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<decimal> GetTotalCostAsync(Guid requisitionId, CancellationToken cancellationToken = default)
     {
-        return await _costRepository.GetTotalCostAsync(requisitionId);
+        await GetOwnedAsync(requisitionId);
+        var tenantId = GetTenantId();
+        var entities = await _costRepository.GetByRequisitionIdAsync(requisitionId);
+        return entities.Where(e => e.TenantId == tenantId).Sum(e => e.Amount * e.ExchangeRate);
     }
 
     public async Task<IEnumerable<StaffRequisitionCostDto>> GetCostsByCategoryAsync(Guid requisitionId, StaffRequisitionCostCategory category, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(requisitionId);
+        var tenantId = GetTenantId();
         var entities = await _costRepository.GetByRequisitionAndCategoryAsync(requisitionId, category);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffRequisitionCostDto> UpdateCostAsync(UpdateStaffRequisitionCostDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _costRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Requisition cost with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedCostAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -491,10 +544,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<bool> DeleteCostAsync(Guid costId, CancellationToken cancellationToken = default)
     {
-        var entity = await _costRepository.GetByIdAsync(costId);
-
-        if (entity == null)
-            throw new ArgumentException($"Requisition cost with ID '{costId}' not found.");
+        var entity = await GetOwnedCostAsync(costId);
 
         await _costRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -506,7 +556,13 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<StaffRequisitionAttachmentDto> AddAttachmentAsync(CreateStaffRequisitionAttachmentDto createDto, Guid tenantId, Guid uploadedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, uploadedByUserId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedAsync(createDto.RequisitionId);
+
+        var entity = createDto.ToEntity(current, uploadedByUserId);
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -514,22 +570,22 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<IEnumerable<StaffRequisitionAttachmentDto>> GetAttachmentsAsync(Guid requisitionId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(requisitionId);
+        var tenantId = GetTenantId();
         var entities = await _attachmentRepository.GetByRequisitionIdAsync(requisitionId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffRequisitionAttachmentDto>> GetAttachmentsByUploaderAsync(Guid uploadedByUserId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _attachmentRepository.GetByUploadedByAsync(uploadedByUserId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _attachmentRepository.GetByIdAsync(attachmentId);
-
-        if (entity == null)
-            throw new ArgumentException($"Requisition attachment with ID '{attachmentId}' not found.");
+        var entity = await GetOwnedAttachmentAsync(attachmentId);
 
         await _attachmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -541,7 +597,13 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<StaffRequisitionCommentDto> AddCommentAsync(CreateStaffRequisitionCommentDto createDto, Guid tenantId, Guid authorId, CancellationToken cancellationToken = default)
     {
-        var entity = createDto.ToEntity(tenantId, authorId);
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedAsync(createDto.RequisitionId);
+
+        var entity = createDto.ToEntity(current, authorId);
         await _commentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -549,34 +611,37 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<IEnumerable<StaffRequisitionCommentDto>> GetCommentsAsync(Guid requisitionId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(requisitionId);
+        var tenantId = GetTenantId();
         var entities = await _commentRepository.GetThreadedByRequisitionIdAsync(requisitionId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffRequisitionCommentDto>> GetAllCommentsAsync(Guid requisitionId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(requisitionId);
+        var tenantId = GetTenantId();
         var entities = await _commentRepository.GetAllByRequisitionIdAsync(requisitionId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffRequisitionCommentDto>> GetCommentsByAuthorAsync(Guid authorId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _commentRepository.GetByAuthorAsync(authorId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffRequisitionCommentDto>> GetCommentRepliesAsync(Guid parentCommentId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _commentRepository.GetRepliesAsync(parentCommentId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffRequisitionCommentDto> UpdateCommentAsync(UpdateStaffRequisitionCommentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _commentRepository.GetByIdAsync(updateDto.Id);
-
-        if (entity == null)
-            throw new ArgumentException($"Requisition comment with ID '{updateDto.Id}' not found.");
+        var entity = await GetOwnedCommentAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -588,10 +653,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<bool> DeleteCommentAsync(Guid commentId, CancellationToken cancellationToken = default)
     {
-        var entity = await _commentRepository.GetByIdAsync(commentId);
-
-        if (entity == null)
-            throw new ArgumentException($"Requisition comment with ID '{commentId}' not found.");
+        var entity = await GetOwnedCommentAsync(commentId);
 
         await _commentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -603,24 +665,25 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     public async Task<IEnumerable<StaffRequisitionHistoryDto>> GetHistoryAsync(Guid requisitionId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(requisitionId);
+        var tenantId = GetTenantId();
         var entities = await _historyRepository.GetByRequisitionIdAsync(requisitionId);
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffRequisitionHistoryDto?> GetLatestHistoryAsync(Guid requisitionId, CancellationToken cancellationToken = default)
     {
+        await GetOwnedAsync(requisitionId);
+        var tenantId = GetTenantId();
         var entity = await _historyRepository.GetLatestAsync(requisitionId);
-        return entity?.ToDto();
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
     // ── Budget-aware requisitions ───────────────────────────────────────────────
 
     public async Task<RequisitionBudgetCheckDto> CheckBudgetAsync(Guid requisitionId, CancellationToken cancellationToken = default)
     {
-        var entity = await _requisitionRepository.GetByIdAsync(requisitionId);
-
-        if (entity == null)
-            throw new ArgumentException($"Staff requisition with ID '{requisitionId}' not found.");
+        var entity = await GetOwnedAsync(requisitionId);
 
         return await BuildBudgetCheckAsync(entity, cancellationToken);
     }
@@ -648,7 +711,8 @@ public class StaffRequisitionService : IStaffRequisitionService
         // Match the position's budget line for the fiscal year. Prefer an Active/Approved budget.
         var line = await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable()
             .Include(l => l.ManpowerBudget)
-            .Where(l => l.PositionId == entity.PositionId
+            .Where(l => l.TenantId == entity.TenantId
+                     && l.PositionId == entity.PositionId
                      && !l.IsDeleted
                      && l.ManpowerBudget != null
                      && !l.ManpowerBudget.IsDeleted
