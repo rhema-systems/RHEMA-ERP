@@ -1009,16 +1009,55 @@ public sealed class ProcurementFrameworkCallOffService :
         await ExecuteAsync(async () =>
         {
             var now = DateTime.UtcNow;
-            var candidates = await Balances.GetQueryable(item =>
-                    item.TenantId == _currentUser.TenantId && !item.IsDeleted)
-                .Include(item => item.Agreement).ThenInclude(item => item.Extensions)
+            var publishedAgreements = await _unitOfWork
+                .Repository<ProcurementFrameworkAgreement>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.Status == ProcurementFrameworkAgreementStatus.Published &&
+                    item.EffectiveFromUtc <= now &&
+                    !item.IsDeleted)
+                .Include(item => item.Extensions.Where(child => !child.IsDeleted))
                 .ToListAsync(cancellationToken);
+            var currentAgreementIds =
+                ProcurementFrameworkCallOffCommercialRules
+                    .SelectCurrentEffectiveRevisions(
+                        publishedAgreements.Select(ToAgreementRevisionState),
+                        now)
+                    .Select(item => item.AgreementId)
+                    .ToHashSet();
+            var currentAgreements = publishedAgreements
+                .Where(item => currentAgreementIds.Contains(item.Id))
+                .ToList();
+            var balances = await Balances.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    currentAgreementIds.Contains(item.AgreementId) &&
+                    !item.IsDeleted)
+                .ToDictionaryAsync(item => item.AgreementId, cancellationToken);
+            var createdBalance = false;
+            foreach (var agreement in currentAgreements)
+            {
+                if (balances.TryGetValue(agreement.Id, out var balance))
+                {
+                    balance.Agreement = agreement;
+                    agreement.Balance = balance;
+                    continue;
+                }
+
+                balance = CreateBalance(agreement, now);
+                await Balances.AddAsync(balance);
+                balances.Add(agreement.Id, balance);
+                createdBalance = true;
+            }
+            if (createdBalance)
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
             var familySummaries = await ResolveRevisionFamilySummariesAsync(
-                candidates.Select(item => item.Agreement),
+                currentAgreements,
                 now,
                 cancellationToken);
-            foreach (var balance in candidates)
+            foreach (var agreement in currentAgreements)
             {
+                var balance = balances[agreement.Id];
                 if (!familySummaries.TryGetValue(
                         balance.AgreementId,
                         out var familySummary) ||
@@ -1439,23 +1478,8 @@ public sealed class ProcurementFrameworkCallOffService :
             .SingleOrDefaultAsync(cancellationToken);
         if (balance is null)
         {
-            balance = new ProcurementFrameworkAgreementBalance
-            {
-                Id = Guid.NewGuid(),
-                TenantId = _currentUser.TenantId,
-                AgreementId = agreement.Id,
-                CurrencyCode = agreement.CurrencyCode,
-                CeilingAmount = agreement.CeilingAmount,
-                CommittedAmount = 0m,
-                IssuedAmount = 0m,
-                AvailableAmount = agreement.CeilingAmount,
-                CreatedAt = now,
-                CreatedBy = ActorName,
-                CreatedById = _currentUser.UserId
-            };
-            Capture(balance);
+            balance = CreateBalance(agreement, now);
             await Balances.AddAsync(balance);
-            agreement.Balance = balance;
         }
         else if (balance.CeilingAmount != agreement.CeilingAmount ||
                  !string.Equals(balance.CurrencyCode, agreement.CurrencyCode,
@@ -1464,6 +1488,30 @@ public sealed class ProcurementFrameworkCallOffService :
             throw Conflict("FRAMEWORK_CALL_OFF_BALANCE_LINEAGE_INVALID",
                 "The agreement balance does not match the immutable ceiling and currency.");
         }
+        return balance;
+    }
+
+    private ProcurementFrameworkAgreementBalance CreateBalance(
+        ProcurementFrameworkAgreement agreement,
+        DateTime now)
+    {
+        var balance = new ProcurementFrameworkAgreementBalance
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _currentUser.TenantId,
+            AgreementId = agreement.Id,
+            Agreement = agreement,
+            CurrencyCode = agreement.CurrencyCode,
+            CeilingAmount = agreement.CeilingAmount,
+            CommittedAmount = 0m,
+            IssuedAmount = 0m,
+            AvailableAmount = agreement.CeilingAmount,
+            CreatedAt = now,
+            CreatedBy = ActorName,
+            CreatedById = _currentUser.UserId
+        };
+        Capture(balance);
+        agreement.Balance = balance;
         return balance;
     }
 

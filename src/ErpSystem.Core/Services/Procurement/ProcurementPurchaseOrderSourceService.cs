@@ -1207,12 +1207,23 @@ public sealed class ProcurementPurchaseOrderSourceService :
         Guid? requisitionId,
         CancellationToken cancellationToken)
     {
-        var awards = await _unitOfWork.Repository<TenderAward>()
+        var awardsQuery = _unitOfWork.Repository<TenderAward>()
             .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
                 item.PurchaseOrderId == null &&
-                (item.Status == "Awarded" || item.Status == "ContractSigned"))
+                (item.Status == "Awarded" || item.Status == "ContractSigned"));
+        if (requisitionId.HasValue)
+        {
+            awardsQuery = awardsQuery.Where(item =>
+                item.Tender.TenantId == _currentUser.TenantId &&
+                !item.Tender.IsDeleted &&
+                item.Tender.SourcePurchaseRequisitionId == requisitionId.Value);
+        }
+        var awards = await awardsQuery
             .AsNoTracking().ToListAsync(cancellationToken);
+        var supplierNames = await LoadSupplierNamesAsync(
+            awards.Select(item => item.BusinessPartnerId),
+            cancellationToken);
         foreach (var award in awards)
         {
             try
@@ -1222,8 +1233,10 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 if (requisitionId.HasValue &&
                     resolution.PurchaseRequisitionId != requisitionId.Value)
                     continue;
-                result.Add(await MapOptionAsync(
-                    resolution, award.AwardedAmount, cancellationToken));
+                result.Add(MapOption(
+                    resolution,
+                    award.AwardedAmount,
+                    supplierNames));
             }
             catch (ProcurementPurchaseOrderSourceValidationException)
             {
@@ -1237,11 +1250,22 @@ public sealed class ProcurementPurchaseOrderSourceService :
         Guid? requisitionId,
         CancellationToken cancellationToken)
     {
-        var contracts = await _unitOfWork.Repository<Contract>()
+        var contractsQuery = _unitOfWork.Repository<Contract>()
             .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
-                item.Status == "Active")
+                item.Status == "Active");
+        if (requisitionId.HasValue)
+        {
+            contractsQuery = contractsQuery.Where(item =>
+                item.Tender.TenantId == _currentUser.TenantId &&
+                !item.Tender.IsDeleted &&
+                item.Tender.SourcePurchaseRequisitionId == requisitionId.Value);
+        }
+        var contracts = await contractsQuery
             .AsNoTracking().ToListAsync(cancellationToken);
+        var supplierNames = await LoadSupplierNamesAsync(
+            contracts.Select(item => item.BusinessPartnerId),
+            cancellationToken);
         foreach (var contract in contracts)
         {
             try
@@ -1267,8 +1291,10 @@ public sealed class ProcurementPurchaseOrderSourceService :
                     contract.ContractValue - committedAmount);
                 if (remainingAmount <= 0)
                     continue;
-                result.Add(await MapOptionAsync(
-                    resolution, remainingAmount, cancellationToken));
+                result.Add(MapOption(
+                    resolution,
+                    remainingAmount,
+                    supplierNames));
             }
             catch (ProcurementPurchaseOrderSourceValidationException)
             {
@@ -1282,21 +1308,39 @@ public sealed class ProcurementPurchaseOrderSourceService :
         Guid? requisitionId,
         CancellationToken cancellationToken)
     {
-        var controls = await _unitOfWork.Repository<ProcurementExceptionalSourcingControl>()
+        var controlsQuery = _unitOfWork
+            .Repository<ProcurementExceptionalSourcingControl>()
             .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
                 item.Status >= ProcurementExceptionalSourcingControlStatus.Awarded &&
                 item.Status <= ProcurementExceptionalSourcingControlStatus.Filed &&
-                item.AwardBidId != null)
+                item.AwardBidId != null);
+        if (requisitionId.HasValue)
+        {
+            controlsQuery = controlsQuery.Where(item =>
+                item.Tender.TenantId == _currentUser.TenantId &&
+                !item.Tender.IsDeleted &&
+                item.Tender.SourcePurchaseRequisitionId == requisitionId.Value);
+        }
+        var controls = await controlsQuery
             .AsNoTracking().ToListAsync(cancellationToken);
+        var awardBidIds = controls
+            .Select(item => item.AwardBidId!.Value)
+            .Distinct()
+            .ToArray();
+        var bids = await _unitOfWork.Repository<TenderBid>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                awardBidIds.Contains(item.Id) &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        var supplierNames = await LoadSupplierNamesAsync(
+            bids.Values.Select(item => item.BusinessPartnerId),
+            cancellationToken);
         foreach (var control in controls)
         {
-            var bid = await _unitOfWork.Repository<TenderBid>()
-                .GetQueryable(item =>
-                    item.TenantId == _currentUser.TenantId &&
-                    item.Id == control.AwardBidId!.Value && !item.IsDeleted)
-                .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
-            if (bid is null)
+            if (!bids.TryGetValue(control.AwardBidId!.Value, out var bid))
                 continue;
             try
             {
@@ -1308,8 +1352,10 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 if (requisitionId.HasValue &&
                     resolution.PurchaseRequisitionId != requisitionId.Value)
                     continue;
-                result.Add(await MapOptionAsync(
-                    resolution, control.NegotiatedAmount, cancellationToken));
+                result.Add(MapOption(
+                    resolution,
+                    control.NegotiatedAmount,
+                    supplierNames));
             }
             catch (ProcurementPurchaseOrderSourceValidationException)
             {
@@ -1318,17 +1364,14 @@ public sealed class ProcurementPurchaseOrderSourceService :
         }
     }
 
-    private async Task<ProcurementPurchaseOrderSourceOptionDto> MapOptionAsync(
+    private static ProcurementPurchaseOrderSourceOptionDto MapOption(
         ProcurementPurchaseOrderSourceResolution source,
         decimal? approvedAmount,
-        CancellationToken cancellationToken)
+        IReadOnlyDictionary<Guid, string> supplierNames)
     {
-        var supplierName = await _unitOfWork.Repository<BusinessPartner>()
-            .GetQueryable(item =>
-                item.TenantId == _currentUser.TenantId &&
-                item.Id == source.BusinessPartnerId && !item.IsDeleted)
-            .Select(item => item.PartnerName)
-            .SingleOrDefaultAsync(cancellationToken) ?? "Supplier";
+        var supplierName = supplierNames.GetValueOrDefault(
+            source.BusinessPartnerId,
+            "Supplier");
         return new ProcurementPurchaseOrderSourceOptionDto
         {
             SourceType = source.SourceType,
@@ -1345,6 +1388,26 @@ public sealed class ProcurementPurchaseOrderSourceService :
             ApprovedAmount = approvedAmount,
             CurrencyCode = source.CurrencyCode
         };
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, string>> LoadSupplierNamesAsync(
+        IEnumerable<Guid> supplierIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = supplierIds.Distinct().ToArray();
+        if (ids.Length == 0)
+            return new Dictionary<Guid, string>();
+
+        return await _unitOfWork.Repository<BusinessPartner>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                ids.Contains(item.Id) &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .ToDictionaryAsync(
+                item => item.Id,
+                item => item.PartnerName,
+                cancellationToken);
     }
 
     private async Task<(PurchaseRequisition Requisition, ProcurementSourcingCase SourcingCase)>

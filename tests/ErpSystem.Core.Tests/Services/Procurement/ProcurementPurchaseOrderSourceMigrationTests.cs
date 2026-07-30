@@ -149,6 +149,22 @@ public sealed class ProcurementPurchaseOrderSourceMigrationTests
     }
 
     [Fact]
+    public void CommercialHardStopAllowsExistingRfqOrdersToBecomeTerminal()
+    {
+        var sql = Sql(new TDC0403CommercialCapacityHardStops());
+
+        sql.Should().Contain(
+            "LEFT JOIN deleted prior");
+        sql.Should().Contain(
+            "prior.Id = i.Id");
+        sql.Should().Contain(
+            "prior.Id IS NULL OR");
+        sql.Should().Contain(
+            "i.Status NOT IN ('Cancelled', 'Rejected')");
+        sql.Should().Contain("THROW 51222");
+    }
+
+    [Fact]
     public void CommercialHardStopSerializesAndEnforcesContractCapacity()
     {
         var sql = Sql(new TDC0403CommercialCapacityHardStops());
@@ -167,11 +183,21 @@ public sealed class ProcurementPurchaseOrderSourceMigrationTests
             "actual.Quantity > approved.Quantity");
         sql.Should().Contain(
             "actual.LineTotal > approved.LineTotal");
+        Count(
+                sql,
+                "purchaseOrder.ProcurementSourceId AS ContractId,")
+            .Should().Be(
+                2,
+                "both contract header and item triggers must use the same description identity as tender award lines");
         sql.Should().Contain("THROW 51224");
         sql.Should().Contain("THROW 51225");
         sql.Should().Contain("THROW 51228");
         sql.Should().NotContain("DISABLE TRIGGER");
     }
+
+    private static int Count(string value, string fragment) =>
+        (value.Length - value.Replace(fragment, string.Empty).Length) /
+        fragment.Length;
 
     private static string Sql(Migration migration)
     {

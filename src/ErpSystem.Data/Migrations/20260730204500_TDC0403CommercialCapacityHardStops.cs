@@ -40,11 +40,21 @@ public partial class TDC0403CommercialCapacityHardStops : Migration
                 IF EXISTS (
                     SELECT 1
                     FROM inserted i
+                    LEFT JOIN deleted prior
+                      ON prior.Id = i.Id
+                     AND prior.TenantId = i.TenantId
                     LEFT JOIN RequestForQuotations rfq
                       ON rfq.Id = i.ProcurementSourceId
                      AND rfq.TenantId = i.TenantId
                      AND rfq.IsDeleted = 0
                     WHERE i.ProcurementSourceType = 0
+                      -- A retained source may legitimately become stale after
+                      -- the order was created. Always validate inserts, but do
+                      -- not prevent an existing order from entering a terminal
+                      -- state solely so that it can be contained.
+                      AND (
+                          prior.Id IS NULL OR
+                          i.Status NOT IN ('Cancelled', 'Rejected'))
                       AND (
                            rfq.Id IS NULL
                         OR UPPER(LTRIM(RTRIM(ISNULL(i.Currency, '')))) <>
@@ -393,18 +403,11 @@ public partial class TDC0403CommercialCapacityHardStops : Migration
                         SELECT
                             purchaseOrder.TenantId,
                             purchaseOrder.ProcurementSourceId AS ContractId,
-                            CASE
-                                WHEN item.InventoryItemId IS NOT NULL
-                                    THEN CONCAT(
-                                        'inventory:',
-                                        LOWER(CONVERT(
-                                            varchar(36),
-                                            item.InventoryItemId)))
-                                ELSE CONCAT(
-                                    'description:',
-                                    LOWER(LTRIM(RTRIM(
-                                        ISNULL(item.ItemDescription, '')))))
-                            END AS LineIdentity,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(item.ItemDescription, '')))))
+                                AS LineIdentity,
                             ISNULL(NULLIF(
                                 UPPER(LTRIM(RTRIM(item.UnitOfMeasure))),
                                 ''), 'EA') AS UnitOfMeasure,
@@ -429,18 +432,10 @@ public partial class TDC0403CommercialCapacityHardStops : Migration
                         GROUP BY
                             purchaseOrder.TenantId,
                             purchaseOrder.ProcurementSourceId,
-                            CASE
-                                WHEN item.InventoryItemId IS NOT NULL
-                                    THEN CONCAT(
-                                        'inventory:',
-                                        LOWER(CONVERT(
-                                            varchar(36),
-                                            item.InventoryItemId)))
-                                ELSE CONCAT(
-                                    'description:',
-                                    LOWER(LTRIM(RTRIM(
-                                        ISNULL(item.ItemDescription, '')))))
-                            END,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(item.ItemDescription, ''))))),
                             ISNULL(NULLIF(
                                 UPPER(LTRIM(RTRIM(item.UnitOfMeasure))),
                                 ''), 'EA'),
@@ -734,18 +729,11 @@ public partial class TDC0403CommercialCapacityHardStops : Migration
                         SELECT
                             purchaseOrder.TenantId,
                             purchaseOrder.ProcurementSourceId AS ContractId,
-                            CASE
-                                WHEN item.InventoryItemId IS NOT NULL
-                                    THEN CONCAT(
-                                        'inventory:',
-                                        LOWER(CONVERT(
-                                            varchar(36),
-                                            item.InventoryItemId)))
-                                ELSE CONCAT(
-                                    'description:',
-                                    LOWER(LTRIM(RTRIM(
-                                        ISNULL(item.ItemDescription, '')))))
-                            END AS LineIdentity,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(item.ItemDescription, '')))))
+                                AS LineIdentity,
                             ISNULL(NULLIF(
                                 UPPER(LTRIM(RTRIM(item.UnitOfMeasure))),
                                 ''), 'EA') AS UnitOfMeasure,
@@ -777,18 +765,10 @@ public partial class TDC0403CommercialCapacityHardStops : Migration
                         GROUP BY
                             purchaseOrder.TenantId,
                             purchaseOrder.ProcurementSourceId,
-                            CASE
-                                WHEN item.InventoryItemId IS NOT NULL
-                                    THEN CONCAT(
-                                        'inventory:',
-                                        LOWER(CONVERT(
-                                            varchar(36),
-                                            item.InventoryItemId)))
-                                ELSE CONCAT(
-                                    'description:',
-                                    LOWER(LTRIM(RTRIM(
-                                        ISNULL(item.ItemDescription, '')))))
-                            END,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(item.ItemDescription, ''))))),
                             ISNULL(NULLIF(
                                 UPPER(LTRIM(RTRIM(item.UnitOfMeasure))),
                                 ''), 'EA'),
