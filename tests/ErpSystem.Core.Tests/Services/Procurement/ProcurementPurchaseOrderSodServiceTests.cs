@@ -117,6 +117,55 @@ public sealed class ProcurementPurchaseOrderSodServiceTests
     }
 
     [Fact]
+    public async Task CreatorCannotApproveReceiptInspectionAndDenialUsesExactAction()
+    {
+        var creator = Guid.NewGuid();
+        await using var fixture = new Fixture(
+            Guid.NewGuid(),
+            creator,
+            creator);
+
+        var action = () => fixture.Service.EnforceReceiptActionAsync(
+            fixture.PurchaseOrder,
+            ProcurementPurchaseOrderSodRules.ApproveReceiptInspection,
+            "tdc0503-inspection-approval");
+
+        var exception = await action.Should()
+            .ThrowAsync<ProcurementPurchaseOrderSodBlockedException>();
+        exception.Which.Code.Should().Be("PO_SOD_RECEIPT_BLOCKED");
+        exception.Which.Readiness.ReceiptActionCoverage.Should()
+            .Equal(ProcurementPurchaseOrderSodRules.ReceiptActionCoverage);
+        fixture.ControlEvents.Should().ContainSingle(item =>
+            item.Action ==
+                ProcurementPurchaseOrderSodRules.ApproveReceiptInspection &&
+            item.RuleCode == "RCV-004" &&
+            item.RuleVersion == "TDC-0503" &&
+            item.Result == ProcurementControlEventResult.Denied);
+    }
+
+    [Fact]
+    public async Task IndependentActorMayConfirmReplacementReceipt()
+    {
+        await using var fixture = new Fixture(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid());
+
+        var readiness = await fixture.Service.EnforceReceiptActionAsync(
+            fixture.PurchaseOrder,
+            ProcurementPurchaseOrderSodRules.ConfirmReplacementReceipt,
+            "tdc0503-replacement");
+
+        readiness.CanReceive.Should().BeTrue();
+        readiness.ReceiptActionCoverage.Should().HaveCount(9);
+        fixture.ControlEvents.Should().ContainSingle(item =>
+            item.Action ==
+                ProcurementPurchaseOrderSodRules.ConfirmReplacementReceipt &&
+            item.RuleVersion == "TDC-0503" &&
+            item.Result == ProcurementControlEventResult.Allowed);
+    }
+
+    [Fact]
     public async Task AutomaticApprovalIsRejectedEvenForIndependentActor()
     {
         await using var fixture = new Fixture(

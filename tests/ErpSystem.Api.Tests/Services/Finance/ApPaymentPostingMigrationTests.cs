@@ -2,6 +2,7 @@ using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
@@ -9,6 +10,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -190,8 +192,8 @@ public sealed class ApPaymentPostingMigrationTests
 
         var act = () => service.PostAsync(fixture.Payment.Id);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("AP payment allocation references an invoice from another tenant.");
+        await act.Should().ThrowAsync<KeyNotFoundException>()
+            .WithMessage($"Vendor invoice with Id '{otherInvoice.Id}' not found.");
     }
 
     [Fact]
@@ -294,7 +296,7 @@ public sealed class ApPaymentPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task PostedApPayment_ShouldNotBeMutated()
+    public async Task PostedApPayment_ShouldUseBalancedControlledVoidInsteadOfMutation()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -307,14 +309,34 @@ public sealed class ApPaymentPostingMigrationTests
             new() { VendorInvoiceId = fixture.Invoice.Id, AllocatedAmount = 1m }
         });
         var reverse = () => service.ReverseAllocationAsync(fixture.Allocation.Id, "test reversal");
-        var voidPayment = () => service.VoidPaymentAsync(fixture.Payment.Id, "test void");
 
         await allocate.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Posted vendor payments cannot be allocated. Use a reversal, void, or adjustment workflow.");
         await reverse.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Posted vendor payment allocations cannot be reversed by mutation. Use a reversal, void, or adjustment workflow.");
-        await voidPayment.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posted vendor payments cannot be voided by mutation until AP payment reversal posting is implemented.");
+
+        var first = await service.VoidPaymentAsync(fixture.Payment.Id, "test void");
+        var second = await service.VoidPaymentAsync(fixture.Payment.Id, "idempotent retry");
+
+        first.Status.Should().Be(VendorPaymentStatus.Voided);
+        second.Status.Should().Be(VendorPaymentStatus.Voided);
+        var original = await db.JournalEntries
+            .Include(item => item.ReversalJournalEntry)
+                .ThenInclude(item => item!.Transactions)
+            .SingleAsync(item => item.Id == first.JournalEntryId);
+        original.IsReversed.Should().BeTrue();
+        original.ReversalJournalEntryId.Should().NotBeNull();
+        original.ReversalJournalEntry!.IsBalanced.Should().BeTrue();
+        original.ReversalJournalEntry.TotalDebitAmount.Should().Be(original.TotalCreditAmount);
+        original.ReversalJournalEntry.TotalCreditAmount.Should().Be(original.TotalDebitAmount);
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorPayment" && item.PostingAction == "Reverse")).Should().Be(1);
+        (await db.Set<VendorPaymentAllocation>().CountAsync(item =>
+            item.IsReversal && item.OriginalAllocationId == fixture.Allocation.Id)).Should().Be(1);
+        var restoredInvoice = await db.Set<VendorInvoice>().SingleAsync(item => item.Id == fixture.Invoice.Id);
+        restoredInvoice.PaidAmount.Should().Be(0m);
+        restoredInvoice.Status.Should().Be(VendorInvoiceStatus.Approved);
+        (await db.AuditLogs.CountAsync(item => item.Action == FinanceAuditEvents.ApPaymentReversed)).Should().Be(1);
     }
 
     private static ApplicationDbContext CreateContext()
@@ -347,6 +369,35 @@ public sealed class ApPaymentPostingMigrationTests
         var subledgerPostingMock = new Mock<ISubledgerPostingService>();
         var tenantSettings = new Mock<ITenantSettingsService>();
         tenantSettings.Setup(x => x.GetBaseCurrencyAsync()).ReturnsAsync("GHS");
+        var invoicePaymentSod = new Mock<IProcurementInvoicePaymentSodService>();
+        invoicePaymentSod
+            .Setup(x => x.RevalidatePaymentAuthorizationAsync(
+                It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var procurementControlEvents = new Mock<IProcurementControlEventService>();
+        procurementControlEvents
+            .Setup(x => x.RecordAsync(
+                It.IsAny<ProcurementControlEventWriteRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementControlEventWriteRequest request, CancellationToken _) =>
+                new ProcurementControlEventDto
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    EventKey = request.EventKey,
+                    EventType = request.EventType,
+                    Action = request.Action,
+                    Result = request.Result,
+                    SourceType = request.SourceType,
+                    SourceId = request.SourceId,
+                    SourceReference = request.SourceReference ?? string.Empty,
+                    CorrelationId = request.CorrelationId,
+                    OccurredAtUtc = request.OccurredAtUtc == default
+                        ? DateTime.UtcNow
+                        : request.OccurredAtUtc,
+                    RecordedAtUtc = DateTime.UtcNow,
+                    IntegrityValid = true
+                });
 
         var service = new VendorPaymentService(
             new UnitOfWork(db),
@@ -356,7 +407,9 @@ public sealed class ApPaymentPostingMigrationTests
             Mock.Of<IDocumentNumberingService>(),
             Mock.Of<IWorkflowService>(),
             postingEngine,
-            auditService);
+            auditService,
+            procurementControlEvents: procurementControlEvents.Object,
+            invoicePaymentSod: invoicePaymentSod.Object);
 
         return (service, subledgerPostingMock);
     }
@@ -444,8 +497,8 @@ public sealed class ApPaymentPostingMigrationTests
             CreatedBy = "seed"
         };
 
-        invoice.PaidAmount = allocationAmount;
-        invoice.Status = allocationAmount >= invoice.TotalAmount ? VendorInvoiceStatus.Paid : VendorInvoiceStatus.PartiallyPaid;
+        invoice.PaidAmount = 0m;
+        invoice.Status = VendorInvoiceStatus.Approved;
 
         db.Set<VendorPayment>().Add(payment);
         db.Set<VendorPaymentAllocation>().Add(allocation);

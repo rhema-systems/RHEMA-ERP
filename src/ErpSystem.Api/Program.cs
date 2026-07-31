@@ -280,6 +280,8 @@ builder.Services.AddScoped<ErpSystem.Api.Services.TransferDocumentService>();
 
 // Add Purchase Receipt (PO GRN) PDF service
 builder.Services.AddScoped<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>();
+builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptDocumentService>(provider =>
+    provider.GetRequiredService<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>());
 
 // Add Award Letter Service for PDF award letter generation
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardLetterService, ErpSystem.Api.Services.AwardLetterService>();

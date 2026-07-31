@@ -351,6 +351,20 @@ public class LandedCostService : ILandedCostService
                 ItemName = inventoryItem?.Name ?? poItem.ItemDescription,
                 OrderedQuantity = baseOrdered,
                 ReceivedQuantity = baseReceived,
+                PreviouslyReceiptedQuantitySnapshot =
+                    receiptItem.PreviouslyReceiptedQuantitySnapshot *
+                    conversionToBase,
+                ToleranceQuantitySnapshot =
+                    receiptItem.ToleranceQuantitySnapshot *
+                    conversionToBase,
+                MaximumReceivableQuantitySnapshot =
+                    receiptItem.MaximumReceivableQuantitySnapshot *
+                    conversionToBase,
+                RemainingQuantityBeforeReceiptSnapshot =
+                    receiptItem.RemainingQuantityBeforeReceiptSnapshot *
+                    conversionToBase,
+                ReceiptLineIntegrityHash =
+                    receiptItem.ReceiptLineIntegrityHash,
                 AcceptedQuantity = baseAccepted,
                 RejectedQuantity = baseRejected,
                 UnitCost = baseUnitCost,
@@ -402,6 +416,17 @@ public class LandedCostService : ILandedCostService
             ReceivedById = receipt.ReceivedById,
             InspectedById = receipt.InspectedById,
             Notes = string.IsNullOrWhiteSpace(receipt.Notes) ? $"Created from Procurement Receipt {receipt.ReceiptNumber}" : receipt.Notes,
+            IdempotencyKey =
+                $"procurement-receipt:{receipt.Id:N}",
+            CorrelationId = receipt.CorrelationId,
+            ReceiptTolerancePercent =
+                receipt.ReceiptTolerancePercent,
+            ReceiptSourceSnapshotJson =
+                receipt.ReceiptSourceSnapshotJson,
+            ReceiptSourceIntegrityHash =
+                receipt.ReceiptSourceIntegrityHash,
+            ReceiptSourceValidatedAtUtc =
+                receipt.ReceiptSourceValidatedAtUtc,
             StockUpdated = true,
             TotalItems = grnItems.Count,
             TotalQuantityReceived = grnItems.Sum(i => i.ReceivedQuantity),
@@ -441,6 +466,18 @@ public class LandedCostService : ILandedCostService
                 revive.ReceivedById = createdGrn.ReceivedById;
                 revive.InspectedById = createdGrn.InspectedById;
                 revive.Notes = createdGrn.Notes;
+                revive.IdempotencyKey =
+                    createdGrn.IdempotencyKey;
+                revive.CorrelationId =
+                    createdGrn.CorrelationId;
+                revive.ReceiptTolerancePercent =
+                    createdGrn.ReceiptTolerancePercent;
+                revive.ReceiptSourceSnapshotJson =
+                    createdGrn.ReceiptSourceSnapshotJson;
+                revive.ReceiptSourceIntegrityHash =
+                    createdGrn.ReceiptSourceIntegrityHash;
+                revive.ReceiptSourceValidatedAtUtc =
+                    createdGrn.ReceiptSourceValidatedAtUtc;
                 revive.StockUpdated = createdGrn.StockUpdated;
                 revive.TotalItems = createdGrn.TotalItems;
                 revive.TotalQuantityReceived = createdGrn.TotalQuantityReceived;

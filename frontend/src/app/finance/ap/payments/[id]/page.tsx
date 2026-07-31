@@ -8,6 +8,7 @@ import {
     Printer,
     FileText,
     Loader2,
+    Send,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,18 +24,52 @@ import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
+import { InvoicePaymentSodControl } from '@/components/finance/InvoicePaymentSodControl';
 
 export default function VendorPaymentDetailsPage() {
     const router = useRouter();
     const params = useParams();
     const id = params.id as string;
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
     const [isPosting, setIsPosting] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const { data: payment, isLoading, refetch } = useQuery({
         queryKey: ['vendor-payment', id],
         queryFn: () => accountsPayableService.getPayment(id),
     });
+
+    const {
+        data: sodReadiness,
+        isLoading: isSodLoading,
+        error: sodError,
+        refetch: refetchSod,
+    } = useQuery({
+        queryKey: ['vendor-payment-sod-readiness', id],
+        queryFn: () => accountsPayableService.getPaymentSodReadiness(id),
+        enabled: Boolean(id),
+        retry: false,
+    });
+
+    const handleSubmit = async () => {
+        if (!payment) return;
+        setIsSubmitting(true);
+        try {
+            await accountsPayableService.submitPayment(payment.id);
+            toast({ title: 'Submitted', description: 'Vendor payment sent to the shared authorization workflow.' });
+            await Promise.all([refetch(), refetchSod()]);
+        } catch (error: any) {
+            toast({
+                title: 'Submission failed',
+                description: error.message || 'Unable to submit the vendor payment.',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
 
     const handlePost = async () => {
         if (!payment) return;
@@ -73,6 +108,8 @@ export default function VendorPaymentDetailsPage() {
     const getStatusBadge = (status: string) => {
         switch (status) {
             case 'Draft': return <Badge variant="secondary">Draft</Badge>;
+            case 'PendingAuthorization': return <Badge className="bg-amber-600">Pending Authorization</Badge>;
+            case 'Authorized': return <Badge className="bg-emerald-600">Authorized</Badge>;
             case 'Processed': return <Badge className="bg-blue-600">Processed</Badge>;
             case 'Cleared': return <Badge className="bg-green-600">Cleared</Badge>;
             case 'Voided': return <Badge variant="outline" className="text-muted-foreground">Voided</Badge>;
@@ -95,7 +132,15 @@ export default function VendorPaymentDetailsPage() {
                     </div>
                 </div>
                 <div className="flex space-x-2">
-                    {!payment.journalEntryId && ['Authorized', 'Processed'].includes(payment.status) && (
+                    {payment.status === 'Draft' && !payment.paymentBatchId && hasPermission('Finance.AP.Payments.Process') && (
+                        <Button size="sm" onClick={handleSubmit} disabled={isSubmitting}>
+                            {isSubmitting
+                                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                : <Send className="mr-2 h-4 w-4" />}
+                            Submit for Authorization
+                        </Button>
+                    )}
+                    {!payment.journalEntryId && ['Authorized', 'Processed'].includes(payment.status) && hasPermission('Finance.AP.Payments.Process') && (
                         <Button size="sm" onClick={handlePost} disabled={isPosting}>
                             {isPosting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Post Payment
@@ -111,6 +156,12 @@ export default function VendorPaymentDetailsPage() {
                     )}
                 </div>
             </div>
+
+            <InvoicePaymentSodControl
+                readiness={sodReadiness}
+                isLoading={isSodLoading}
+                error={sodError instanceof Error ? sodError.message : sodError ? 'Unable to load the AP-004 control.' : null}
+            />
 
             <Card className="print:shadow-none print:border-none">
                 <CardHeader className="flex flex-row justify-between items-start border-b pb-8">

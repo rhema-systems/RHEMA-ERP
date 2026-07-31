@@ -15,6 +15,7 @@ using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Estate;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -4376,6 +4377,7 @@ public class ProjectServiceTests
         public Mock<IWorkOrderService> WorkOrderService { get; } = new();
         public Mock<ISalesAgreementService> SalesAgreementService { get; } = new();
         public Mock<ISalesOrderService> SalesOrderService { get; } = new();
+        public Mock<IEstateManagedAssetService> EstateManagedAssetService { get; } = new();
         public Mock<IUnitOfWork> UnitOfWork { get; } = new();
         public Mock<ITenantSettingsService> TenantSettingsService { get; } = new();
         public Mock<ICurrentUserProvider> CurrentUserProvider { get; } = new();
@@ -4716,6 +4718,7 @@ public class ProjectServiceTests
                 WorkOrderService.Object,
                 SalesAgreementService.Object,
                 SalesOrderService.Object,
+                EstateManagedAssetService.Object,
                 UnitOfWork.Object,
                 TenantSettingsService.Object,
                 CurrentUserProvider.Object,

@@ -92,7 +92,7 @@ public interface IGoodsReceiptNoteService
     Task<GoodsReceiptNoteDetailDto?> GetByGRNNumberAsync(string grnNumber);
     Task<GoodsReceiptNoteDto> CreateAsync(CreateGoodsReceiptNoteDto dto, Guid userId);
     Task<bool> SubmitForInspectionAsync(Guid grnId, Guid userId);
-    Task<bool> UpdateInspectionResultAsync(UpdateGRNInspectionDto dto, Guid userId);
+    Task<bool> UpdateInspectionResultAsync(Guid grnId, UpdateGRNInspectionDto dto, Guid userId);
     Task<bool> CompleteInspectionAsync(Guid grnId, Guid userId);
     Task<bool> PostToInventoryAsync(Guid grnId, Guid userId);
     Task<bool> CancelAsync(Guid grnId, string reason, Guid userId);

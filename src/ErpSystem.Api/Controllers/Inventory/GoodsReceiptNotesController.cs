@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -31,6 +32,24 @@ public class GoodsReceiptNotesController : ControllerBase
         return Guid.TryParse(userIdClaim, out var userId) ? userId : Guid.Empty;
     }
 
+    private ObjectResult ReceiptSourceForbidden(
+        ProcurementReceiptSourceAuthorizationException exception) =>
+        StatusCode(StatusCodes.Status403Forbidden, new
+        {
+            code = "RCV_SOURCE_FORBIDDEN",
+            message = exception.Message,
+            correlationId = HttpContext.TraceIdentifier
+        });
+
+    private NotFoundObjectResult ReceiptSourceNotFound(
+        ProcurementReceiptSourceNotFoundException exception) =>
+        NotFound(new
+        {
+            code = exception.Code,
+            message = exception.Message,
+            correlationId = HttpContext.TraceIdentifier
+        });
+
     /// <summary>
     /// Gets all goods receipt notes with optional date filtering
     /// </summary>
@@ -43,6 +62,10 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             var grns = await _grnService.GetAllAsync(fromDate, toDate);
             return Ok(grns);
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
         }
         catch (Exception ex)
         {
@@ -65,6 +88,10 @@ public class GoodsReceiptNotesController : ControllerBase
 
             return Ok(grn);
         }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving goods receipt note {Id}", id);
@@ -86,6 +113,10 @@ public class GoodsReceiptNotesController : ControllerBase
 
             return Ok(grn);
         }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving goods receipt note {GRNNumber}", grnNumber);
@@ -103,6 +134,10 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             var grns = await _grnService.GetByWarehouseAsync(warehouseId);
             return Ok(grns);
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
         }
         catch (Exception ex)
         {
@@ -122,6 +157,10 @@ public class GoodsReceiptNotesController : ControllerBase
             var grns = await _grnService.GetBySupplierAsync(supplierId);
             return Ok(grns);
         }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving goods receipt notes for supplier {SupplierId}", supplierId);
@@ -139,6 +178,10 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             var grns = await _grnService.GetByPurchaseOrderAsync(purchaseOrderId);
             return Ok(grns);
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
         }
         catch (Exception ex)
         {
@@ -158,6 +201,10 @@ public class GoodsReceiptNotesController : ControllerBase
             var grns = await _grnService.GetPendingInspectionAsync();
             return Ok(grns);
         }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving pending inspection GRNs");
@@ -173,9 +220,58 @@ public class GoodsReceiptNotesController : ControllerBase
     {
         try
         {
+            dto.IdempotencyKey ??=
+                Request.Headers["Idempotency-Key"].FirstOrDefault();
             var userId = GetCurrentUserId();
             var grn = await _grnService.CreateAsync(dto, userId);
             return CreatedAtAction(nameof(GetById), new { id = grn.Id }, grn);
+        }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return NotFound(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementReceiptSourceValidationException ex)
+        {
+            return Conflict(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "RCV_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementPurchaseOrderSodBlockedException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementPurchaseOrderSodAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOD_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
         }
         catch (ArgumentException ex)
         {
@@ -203,6 +299,14 @@ public class GoodsReceiptNotesController : ControllerBase
 
             return Ok(new { message = "GRN submitted for inspection successfully" });
         }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return ReceiptSourceNotFound(ex);
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
@@ -227,11 +331,19 @@ public class GoodsReceiptNotesController : ControllerBase
         try
         {
             var userId = GetCurrentUserId();
-            var result = await _grnService.UpdateInspectionResultAsync(dto, userId);
+            var result = await _grnService.UpdateInspectionResultAsync(id, dto, userId);
             if (!result)
                 return BadRequest("Failed to update inspection result");
 
             return Ok(new { message = "Inspection result updated successfully" });
+        }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return ReceiptSourceNotFound(ex);
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
         }
         catch (ArgumentException ex)
         {
@@ -263,6 +375,14 @@ public class GoodsReceiptNotesController : ControllerBase
 
             return Ok(new { message = "Inspection completed successfully" });
         }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return ReceiptSourceNotFound(ex);
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
@@ -293,6 +413,53 @@ public class GoodsReceiptNotesController : ControllerBase
 
             return Ok(new { message = "GRN posted to inventory successfully" });
         }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return NotFound(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementReceiptSourceValidationException ex)
+        {
+            return Conflict(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "RCV_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementPurchaseOrderSodBlockedException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementPurchaseOrderSodAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOD_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
@@ -322,6 +489,14 @@ public class GoodsReceiptNotesController : ControllerBase
                 return BadRequest("Failed to cancel GRN");
 
             return Ok(new { message = "GRN cancelled successfully" });
+        }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return ReceiptSourceNotFound(ex);
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
         }
         catch (ArgumentException ex)
         {

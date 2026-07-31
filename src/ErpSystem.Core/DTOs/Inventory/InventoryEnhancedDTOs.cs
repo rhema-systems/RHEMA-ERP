@@ -231,6 +231,10 @@ public class GoodsReceiptNoteDto
     public DateTime? InspectionDate { get; set; }
     public string? ReceivedByName { get; set; }
     public string? Notes { get; set; }
+    public decimal ReceiptTolerancePercent { get; set; }
+    public string? ReceiptSourceIntegrityHash { get; set; }
+    public DateTime? ReceiptSourceValidatedAtUtc { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
     public string CreatedAtFormatted { get; set; } = string.Empty;
 }
 
@@ -271,6 +275,7 @@ public class CreateGoodsReceiptNoteDto
     public Guid WarehouseId { get; set; }
 
     public Guid? SupplierId { get; set; }
+    [Required]
     public Guid? PurchaseOrderId { get; set; }
     public Guid? ReceivingLocationId { get; set; }
 
@@ -288,12 +293,18 @@ public class CreateGoodsReceiptNoteDto
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
+    [MaxLength(100)]
+    public string? IdempotencyKey { get; set; }
+
     [Required]
     public List<CreateGoodsReceiptNoteItemDto> Items { get; set; } = new();
 }
 
 public class CreateGoodsReceiptNoteItemDto
 {
+    [Required]
+    public Guid PurchaseOrderItemId { get; set; }
+
     [Required]
     public Guid InventoryItemId { get; set; }
 

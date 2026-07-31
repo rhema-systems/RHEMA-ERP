@@ -27,6 +27,8 @@ import {
 export interface PurchaseOrderSodControlProps {
   purchaseOrderId: string;
   status: string;
+  scope?: 'all' | 'receipt';
+  initialReadiness?: ProcurementPurchaseOrderSodReadinessDto | null;
   onReadinessChange?: (
     readiness: ProcurementPurchaseOrderSodReadinessDto | null
   ) => void;
@@ -35,11 +37,15 @@ export interface PurchaseOrderSodControlProps {
 export function PurchaseOrderSodControl({
   purchaseOrderId,
   status,
+  scope = 'all',
+  initialReadiness = null,
   onReadinessChange,
 }: PurchaseOrderSodControlProps) {
   const [readiness, setReadiness] =
-    React.useState<ProcurementPurchaseOrderSodReadinessDto | null>(null);
-  const [loading, setLoading] = React.useState(true);
+    React.useState<ProcurementPurchaseOrderSodReadinessDto | null>(
+      initialReadiness
+    );
+  const [loading, setLoading] = React.useState(initialReadiness === null);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
@@ -65,8 +71,12 @@ export function PurchaseOrderSodControl({
   }, [onReadinessChange, purchaseOrderId]);
 
   React.useEffect(() => {
+    if (initialReadiness) {
+      onReadinessChange?.(initialReadiness);
+      return;
+    }
     void load();
-  }, [load, status]);
+  }, [initialReadiness, load, onReadinessChange, status]);
 
   if (loading) {
     return (
@@ -103,7 +113,11 @@ export function PurchaseOrderSodControl({
     );
   }
 
-  const allAllowed = readiness.checks.every((check) => check.allowed);
+  const visibleChecks = scope === 'receipt'
+    ? readiness.checks.filter((check) => check.key === 'receipt')
+    : readiness.checks;
+  const allAllowed = visibleChecks.length > 0 &&
+    visibleChecks.every((check) => check.allowed);
   return (
     <Card
       data-testid="purchase-order-sod-control"
@@ -118,11 +132,14 @@ export function PurchaseOrderSodControl({
           <div>
             <CardTitle className="flex items-center gap-2">
               <ShieldAlert className="h-5 w-5" />
-              PO segregation of duties
+              {scope === 'receipt'
+                ? 'Receipt segregation of duties'
+                : 'PO segregation of duties'}
             </CardTitle>
             <CardDescription className="mt-1">
-              The source requester and PO creator cannot approve; the PO creator
-              cannot confirm the primary goods receipt.
+              {scope === 'receipt'
+                ? 'The PO creator cannot create, inspect, accept, replace, close, or post the purchase receipt.'
+                : 'The source requester and PO creator cannot approve; the PO creator cannot confirm any governed receipt action.'}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -149,9 +166,22 @@ export function PurchaseOrderSodControl({
           Current actor · evaluated{' '}
           {new Date(readiness.evaluatedAtUtc).toLocaleString()}
         </p>
+        <div className="flex flex-wrap gap-1" aria-label="SOD decision register">
+          {readiness.decisionKeys.map((decisionKey) => (
+            <Badge
+              key={decisionKey}
+              variant="outline"
+              className="font-mono text-[10px]"
+            >
+              {decisionKey}
+            </Badge>
+          ))}
+        </div>
       </CardHeader>
-      <CardContent className="grid gap-3 md:grid-cols-2">
-        {readiness.checks.map((check) => {
+      <CardContent
+        className={scope === 'receipt' ? 'grid gap-3' : 'grid gap-3 md:grid-cols-2'}
+      >
+        {visibleChecks.map((check) => {
           const Icon = check.allowed ? CheckCircle2 : XCircle;
           return (
             <div
@@ -182,6 +212,12 @@ export function PurchaseOrderSodControl({
                   <p className="mt-2 text-[10px] text-muted-foreground">
                     Protected lineage: {check.participantRoles.join(', ')}
                   </p>
+                  {check.key === 'receipt' &&
+                    readiness.receiptActionCoverage?.length > 0 && (
+                    <p className="mt-2 text-[10px] text-muted-foreground">
+                      Enforced actions: {readiness.receiptActionCoverage.join(', ')}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

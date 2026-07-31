@@ -6,6 +6,43 @@ public static class ProcurementPurchaseOrderSodRules
 {
     public const string ApprovalControl = "SOD-INITIATOR-APPROVER";
     public const string ReceiptControl = "SOD-PO-CREATOR-RECEIVER";
+    public const string CreatePurchaseOrderReceipt = "CreatePurchaseOrderReceipt";
+    public const string CreateGoodsReceiptNote = "CreateGoodsReceiptNote";
+    public const string InitializeReceiptInspection = "InitializeReceiptInspection";
+    public const string SaveReceiptInspection = "SaveReceiptInspection";
+    public const string SubmitReceiptInspection = "SubmitReceiptInspection";
+    public const string ApproveReceiptInspection = "ApproveReceiptInspection";
+    public const string ConfirmReplacementReceipt = "ConfirmReplacementReceipt";
+    public const string CloseReceiptInspection = "CloseReceiptInspection";
+    public const string PostGoodsReceiptNoteToInventory =
+        "PostGoodsReceiptNoteToInventory";
+
+    public static IReadOnlyList<string> ReceiptActionCoverage { get; } =
+    [
+        CreatePurchaseOrderReceipt,
+        CreateGoodsReceiptNote,
+        InitializeReceiptInspection,
+        SaveReceiptInspection,
+        SubmitReceiptInspection,
+        ApproveReceiptInspection,
+        ConfirmReplacementReceipt,
+        CloseReceiptInspection,
+        PostGoodsReceiptNoteToInventory
+    ];
+
+    public static string NormalizeReceiptAction(string? value)
+    {
+        var action = value?.Trim();
+        if (ReceiptActionCoverage.Contains(action, StringComparer.Ordinal))
+            return action!;
+        throw new ArgumentException(
+            "The receipt SOD action is not registered.",
+            nameof(value));
+    }
+
+    public static bool IsReceiptAction(string? value) =>
+        value is not null &&
+        ReceiptActionCoverage.Contains(value, StringComparer.Ordinal);
 
     public static IReadOnlyList<Guid> Participants(params Guid?[] values) =>
         values

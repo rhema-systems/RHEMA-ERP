@@ -39,6 +39,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? WriteOffExpenseAccountId { get; set; }
         public Guid? WriteOffRecoveryAccountId { get; set; }
         public bool RequireSubledgerJournalApproval { get; set; }
+        public decimal ApInvoicePriceTolerancePercent { get; set; } = 1m;
+        public decimal ApInvoiceQuantityTolerancePercent { get; set; } = 1m;
 
         /// <summary>
         /// True when posted transactions exist for the tenant.
@@ -79,5 +81,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? WriteOffExpenseAccountId { get; set; }
         public Guid? WriteOffRecoveryAccountId { get; set; }
         public bool? RequireSubledgerJournalApproval { get; set; }
+        public decimal? ApInvoicePriceTolerancePercent { get; set; }
+        public decimal? ApInvoiceQuantityTolerancePercent { get; set; }
     }
 }

@@ -64,4 +64,33 @@ public sealed class ProcurementPurchaseOrderSodRulesTests
         ProcurementPurchaseOrderSodRules.BypassCode(attempt)
             .Should().Be(expected);
     }
+
+    [Theory]
+    [InlineData(ProcurementPurchaseOrderSodRules.CreatePurchaseOrderReceipt)]
+    [InlineData(ProcurementPurchaseOrderSodRules.CreateGoodsReceiptNote)]
+    [InlineData(ProcurementPurchaseOrderSodRules.InitializeReceiptInspection)]
+    [InlineData(ProcurementPurchaseOrderSodRules.SaveReceiptInspection)]
+    [InlineData(ProcurementPurchaseOrderSodRules.SubmitReceiptInspection)]
+    [InlineData(ProcurementPurchaseOrderSodRules.ApproveReceiptInspection)]
+    [InlineData(ProcurementPurchaseOrderSodRules.ConfirmReplacementReceipt)]
+    [InlineData(ProcurementPurchaseOrderSodRules.CloseReceiptInspection)]
+    [InlineData(ProcurementPurchaseOrderSodRules.PostGoodsReceiptNoteToInventory)]
+    public void EveryRegisteredReceiptActionNormalizesExactly(string action)
+    {
+        ProcurementPurchaseOrderSodRules.NormalizeReceiptAction($" {action} ")
+            .Should().Be(action);
+        ProcurementPurchaseOrderSodRules.IsReceiptAction(action)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void UnknownReceiptActionFailsClosed()
+    {
+        var action = () =>
+            ProcurementPurchaseOrderSodRules.NormalizeReceiptAction(
+                "BypassReceiptSod");
+
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*not registered*");
+    }
 }
