@@ -1,9 +1,11 @@
+using System.Data;
 using System.Text.Json;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Services.Estate;
 
 namespace ErpSystem.Core.Services.Projects;
 
@@ -33,15 +35,42 @@ public partial class ProjectService
 
     public async Task<ProjectDevelopmentProfileDto> UpsertDevelopmentProfileAsync(Guid projectId, UpsertProjectDevelopmentProfileDto dto)
     {
-        var project = await RequireProjectAsync(projectId, ProjectAccessOperation.UpdateOverview);
-        var profile = await UpsertDevelopmentProfileEntityAsync(project, dto);
-
-        if (!await HasProjectPhasesAsync(projectId))
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
-            await SeedDefaultConstructionPhasesAsync(projectId);
-        }
+            var transactionStarted = false;
+            try
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+                transactionStarted = true;
+                var project = await RequireProjectAsync(projectId, ProjectAccessOperation.UpdateOverview);
+                var profile = await UpsertDevelopmentProfileEntityAsync(project, dto);
 
-        return MapToDto(profile);
+                if (!await HasProjectPhasesAsync(projectId))
+                {
+                    await SeedDefaultConstructionPhasesAsync(projectId);
+                }
+
+                await _unitOfWork.CommitAsync();
+                transactionStarted = false;
+                return MapToDto(profile);
+            }
+            catch
+            {
+                try
+                {
+                    if (transactionStarted && _unitOfWork.HasActiveTransaction)
+                    {
+                        await _unitOfWork.RollbackAsync();
+                    }
+                }
+                finally
+                {
+                    _unitOfWork.ClearTrackedChanges();
+                }
+
+                throw;
+            }
+        });
     }
 
     public async Task<IEnumerable<ProjectPhaseDto>> GetProjectPhasesAsync(Guid projectId)
@@ -248,7 +277,11 @@ public partial class ProjectService
     {
         var repository = _unitOfWork.Repository<ProjectDevelopmentProfile>();
         var profile = await repository.FirstOrDefaultAsync(x => x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId);
-        dto.LandReference = await ResolveDevelopmentProfileLandReferenceAsync(profile?.LandReference, dto.LandReference);
+        var previousLandReference = profile?.LandReference;
+        dto.LandReference = await ResolveDevelopmentProfileLandReferenceAsync(
+            project.Id,
+            profile?.LandReference,
+            dto.LandReference);
         if (profile == null)
         {
             profile = new ProjectDevelopmentProfile
@@ -271,11 +304,18 @@ public partial class ProjectService
         }
 
         await _unitOfWork.SaveChangesAsync();
+        await SynchronizeProjectLandAssetsAsync(
+            project,
+            previousLandReference,
+            profile.LandReference);
         project.DevelopmentProfile = profile;
         return profile;
     }
 
-    private async Task<string?> ResolveDevelopmentProfileLandReferenceAsync(string? currentLandReference, string? requestedLandReference)
+    private async Task<string?> ResolveDevelopmentProfileLandReferenceAsync(
+        Guid projectId,
+        string? currentLandReference,
+        string? requestedLandReference)
     {
         var normalizedCurrent = TrimOrNull(currentLandReference);
         var normalizedRequested = TrimOrNull(requestedLandReference);
@@ -291,10 +331,14 @@ public partial class ProjectService
         }
 
         // Estate integration: only newly selected or changed land references must resolve to ready Estate land-bank assets.
-        return await ResolveReadyProjectLandReferenceAsync(normalizedRequested);
+        return await ResolveReadyProjectLandReferenceAsync(
+            normalizedRequested,
+            projectId);
     }
 
-    private async Task<string?> ResolveReadyProjectLandReferenceAsync(string? landReference)
+    private async Task<string?> ResolveReadyProjectLandReferenceAsync(
+        string? landReference,
+        Guid? excludedProjectId = null)
     {
         var normalizedReference = TrimOrNull(landReference);
         if (normalizedReference == null)
@@ -302,6 +346,16 @@ public partial class ProjectService
             return null;
         }
 
+        var selection = await RequireReadyProjectLandDemarcationAsync(
+            normalizedReference,
+            excludedProjectId);
+        return selection.LandReference;
+    }
+
+    private async Task<ReadyProjectLandSelection> RequireReadyProjectLandDemarcationAsync(
+        string landReference,
+        Guid? excludedProjectId = null)
+    {
         var readyLandAssets = await _unitOfWork.Repository<EstateManagedAsset>().FindAsync(asset =>
             asset.TenantId == _currentUserProvider.TenantId
             && !asset.IsDeleted
@@ -309,23 +363,225 @@ public partial class ProjectService
             && asset.Status == EstateManagedAssetStatus.LandBank
             && asset.IsReadyForProjectManagement);
 
-        var matchedAsset = readyLandAssets.FirstOrDefault(asset =>
-            MatchesLandReference(asset.AssetCode, normalizedReference)
-            || MatchesLandReference(asset.ProjectCode, normalizedReference)
-            || MatchesLandReference(asset.Name, normalizedReference)
-            || MatchesLandReference(asset.Id.ToString(), normalizedReference));
+        var readyAssetList = readyLandAssets.ToList();
+        var readyAssetIds = readyAssetList.Select(asset => asset.Id).ToList();
+        var verifiedDemarcations = (await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
+                item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted
+                && readyAssetIds.Contains(item.EstateManagedAssetId)
+                && item.BoundaryVerified))
+            .ToList();
+        var assignedLandReferences = (await _unitOfWork.Repository<ProjectDevelopmentProfile>().FindAsync(item =>
+                item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted
+                && item.LandReference != null
+                && (!excludedProjectId.HasValue || item.ProjectId != excludedProjectId.Value)))
+            .Select(item => item.LandReference!.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        if (matchedAsset == null)
+        ReadyProjectLandSelection? selection = null;
+        foreach (var asset in readyAssetList)
         {
-            throw new InvalidOperationException("Project land reference must be a finished demarcated land asset marked ready for project management.");
+            var assetDemarcations = verifiedDemarcations
+                .Where(item => item.EstateManagedAssetId == asset.Id)
+                .OrderBy(item => item.DemarcationNumber)
+                .ToList();
+            foreach (var demarcation in assetDemarcations)
+            {
+                var demarcationReference = EstateLandDemarcationReference.Build(
+                    asset.AssetCode,
+                    demarcation.DemarcationNumber);
+                var isAssigned = assignedLandReferences.Contains(demarcationReference)
+                    || (assetDemarcations.Count == 1
+                        && new[] { asset.AssetCode, asset.ProjectCode, asset.Name, asset.Id.ToString() }
+                            .Any(reference => !string.IsNullOrWhiteSpace(reference)
+                                && assignedLandReferences.Contains(reference.Trim())));
+                if (isAssigned)
+                {
+                    continue;
+                }
+
+                var matchesDemarcation = MatchesLandReference(demarcationReference, landReference)
+                    || MatchesLandReference(demarcation.Id.ToString(), landReference);
+                var matchesSingleWholeParcel = assetDemarcations.Count == 1
+                    && (MatchesLandReference(asset.AssetCode, landReference)
+                        || MatchesLandReference(asset.ProjectCode, landReference)
+                        || MatchesLandReference(asset.Name, landReference)
+                        || MatchesLandReference(asset.Id.ToString(), landReference));
+                if (matchesDemarcation || matchesSingleWholeParcel)
+                {
+                    selection = new ReadyProjectLandSelection(asset, demarcation, demarcationReference);
+                    break;
+                }
+            }
+
+            if (selection != null)
+            {
+                break;
+            }
         }
 
-        return TrimOrNull(matchedAsset.ProjectCode) ?? matchedAsset.AssetCode.Trim();
+        if (selection == null)
+        {
+            throw new InvalidOperationException("Project land reference must be a verified, unused demarcated portion marked ready for project management.");
+        }
+
+        return selection;
+    }
+
+    private async Task<(int ActiveCount, bool HasUnusedPortion, bool AllPortionsVerified)> GetProjectLandAvailabilityAsync(
+        Guid assetId)
+    {
+        var demarcations = (await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
+                item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted
+                && item.EstateManagedAssetId == assetId))
+            .ToList();
+        if (demarcations.Count == 0)
+        {
+            return (0, false, false);
+        }
+
+        var asset = await _unitOfWork.Repository<EstateManagedAsset>().FirstOrDefaultAsync(item =>
+            item.Id == assetId
+            && item.TenantId == _currentUserProvider.TenantId
+            && !item.IsDeleted);
+        if (asset == null)
+        {
+            return (0, false, false);
+        }
+
+        var assignedLandReferences = (await _unitOfWork.Repository<ProjectDevelopmentProfile>().FindAsync(item =>
+                item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted
+                && item.LandReference != null))
+            .Select(item => item.LandReference!.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var hasLegacyWholeParcelAssignment = demarcations.Count == 1
+            && new[] { asset.AssetCode, asset.ProjectCode, asset.Name, asset.Id.ToString() }
+                .Any(reference => !string.IsNullOrWhiteSpace(reference)
+                    && assignedLandReferences.Contains(reference.Trim()));
+        var hasUnusedPortion = demarcations.Any(item =>
+            !assignedLandReferences.Contains(
+                EstateLandDemarcationReference.Build(asset.AssetCode, item.DemarcationNumber))
+            && !hasLegacyWholeParcelAssignment);
+        return (
+            demarcations.Count,
+            hasUnusedPortion,
+            demarcations.All(item => item.BoundaryVerified));
+    }
+
+    private async Task<ReadyProjectLandSelection?> FindProjectLandSelectionAsync(string? landReference)
+    {
+        var normalizedReference = TrimOrNull(landReference);
+        if (normalizedReference == null)
+        {
+            return null;
+        }
+
+        var assets = (await _unitOfWork.Repository<EstateManagedAsset>().FindAsync(asset =>
+                asset.TenantId == _currentUserProvider.TenantId
+                && !asset.IsDeleted
+                && asset.AssetType == EstateManagedAssetType.Land))
+            .ToList();
+        var assetIds = assets.Select(asset => asset.Id).ToList();
+        var demarcations = (await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
+                item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted
+                && item.BoundaryVerified
+                && assetIds.Contains(item.EstateManagedAssetId)))
+            .ToList();
+
+        foreach (var asset in assets)
+        {
+            var assetDemarcations = demarcations
+                .Where(item => item.EstateManagedAssetId == asset.Id)
+                .OrderBy(item => item.DemarcationNumber)
+                .ToList();
+            foreach (var demarcation in assetDemarcations)
+            {
+                var demarcationReference = EstateLandDemarcationReference.Build(
+                    asset.AssetCode,
+                    demarcation.DemarcationNumber);
+                var matchesDemarcation = MatchesLandReference(demarcationReference, normalizedReference)
+                    || MatchesLandReference(demarcation.Id.ToString(), normalizedReference);
+                var matchesLegacyWholeParcel = assetDemarcations.Count == 1
+                    && (MatchesLandReference(asset.AssetCode, normalizedReference)
+                        || MatchesLandReference(asset.ProjectCode, normalizedReference)
+                        || MatchesLandReference(asset.Name, normalizedReference)
+                        || MatchesLandReference(asset.Id.ToString(), normalizedReference));
+                if (matchesDemarcation || matchesLegacyWholeParcel)
+                {
+                    return new ReadyProjectLandSelection(asset, demarcation, demarcationReference);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private async Task SynchronizeProjectLandAssetsAsync(
+        Project project,
+        string? previousLandReference,
+        string? currentLandReference)
+    {
+        var previousSelection = await FindProjectLandSelectionAsync(previousLandReference);
+        var currentSelection = await FindProjectLandSelectionAsync(currentLandReference);
+        var impactedAssets = new[] { previousSelection?.Asset, currentSelection?.Asset }
+            .Where(asset => asset != null)
+            .Cast<EstateManagedAsset>()
+            .GroupBy(asset => asset.Id)
+            .Select(group => group.First())
+            .ToList();
+
+        foreach (var asset in impactedAssets)
+        {
+            var availability = await GetProjectLandAvailabilityAsync(asset.Id);
+            if (availability.HasUnusedPortion)
+            {
+                asset.Status = EstateManagedAssetStatus.LandBank;
+                asset.IsReadyForProjectManagement = asset.IsReadyForProjectManagement
+                    && availability.AllPortionsVerified
+                    && !asset.IsPublishedToExternalPortal;
+                if (asset.ProjectId == project.Id)
+                {
+                    asset.ProjectId = null;
+                    asset.ProjectTitle = null;
+                }
+            }
+            else
+            {
+                asset.Status = EstateManagedAssetStatus.UnderDevelopment;
+                asset.IsReadyForProjectManagement = false;
+                if (availability.ActiveCount == 1
+                    && availability.AllPortionsVerified
+                    && currentSelection?.Asset.Id == asset.Id)
+                {
+                    asset.ProjectId = project.Id;
+                    asset.ProjectTitle = project.Title;
+                }
+            }
+
+            asset.UpdatedAt = DateTime.UtcNow;
+            asset.UpdatedBy = _currentUserProvider.Username;
+            asset.LastModifiedById = _currentUserProvider.UserId;
+            await _unitOfWork.Repository<EstateManagedAsset>().UpdateAsync(asset);
+        }
+
+        if (impactedAssets.Count > 0)
+        {
+            await _unitOfWork.SaveChangesAsync();
+        }
     }
 
     private static bool MatchesLandReference(string? candidate, string reference)
         => !string.IsNullOrWhiteSpace(candidate)
             && string.Equals(candidate.Trim(), reference, StringComparison.OrdinalIgnoreCase);
+
+    private sealed record ReadyProjectLandSelection(
+        EstateManagedAsset Asset,
+        EstateLandDemarcation Demarcation,
+        string LandReference);
 
     private async Task<bool> SeedProjectPhasesFromTemplateAsync(Project project, JsonElement rootElement)
     {

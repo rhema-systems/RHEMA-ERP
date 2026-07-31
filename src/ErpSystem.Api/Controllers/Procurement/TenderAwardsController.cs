@@ -357,6 +357,29 @@ public class TenderAwardsController : ControllerBase
                 result.OrderNumber, dto.TenderAwardId);
             return Ok(result);
         }
+        catch (ProcurementPurchaseOrderSodBlockedException ex)
+        {
+            return Conflict(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId =
+                    Request.Headers["X-Correlation-ID"].FirstOrDefault() ??
+                    HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementPurchaseOrderSodAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOD_FORBIDDEN",
+                message = ex.Message,
+                correlationId =
+                    Request.Headers["X-Correlation-ID"].FirstOrDefault() ??
+                    HttpContext.TraceIdentifier
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);

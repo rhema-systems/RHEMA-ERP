@@ -73,6 +73,11 @@
     <Compile Include="Controllers\Procurement\ProcurementSupplierAvlControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementSupplierRiskControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementSupplierPerformanceScorecardsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementFrameworkAgreementsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementFrameworkCallOffsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementContractActivationsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementContractOperationsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\PurchaseOrdersSodControllerTests.cs" />
     <Compile Include="Controllers\Procurement\SupplierValidationControllerTests.cs" />
     <Compile Include="Controllers\Procurement\SupplierApplicantAccessSecurityTests.cs" />
     <Compile Include="Controllers\Procurement\SupplierApplicantLifecycleControllerTests.cs" />

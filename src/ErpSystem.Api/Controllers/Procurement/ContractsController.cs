@@ -1,4 +1,6 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
 using Microsoft.AspNetCore.Authorization;
@@ -12,13 +14,22 @@ namespace ErpSystem.Api.Controllers.Procurement;
 public class ContractsController : ControllerBase
 {
     private readonly IContractService _contractService;
+    private readonly IControlledFileUploadService _controlledFiles;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<ContractsController> _logger;
 
     public ContractsController(
         IContractService contractService,
+        IControlledFileUploadService controlledFiles,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        ICurrentUserProvider currentUser,
         ILogger<ContractsController> logger)
     {
         _contractService = contractService;
+        _controlledFiles = controlledFiles;
+        _centralDocuments = centralDocuments;
+        _currentUser = currentUser;
         _logger = logger;
     }
 
@@ -576,28 +587,76 @@ public class ContractsController : ControllerBase
                 return BadRequest("No file provided");
             }
 
-            // Create uploads directory if it doesn't exist
-            var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "contracts", contractId.ToString());
-            Directory.CreateDirectory(uploadsPath);
-
-            // Generate unique file name
-            var fileName = $"{Guid.NewGuid()}_{file.FileName}";
-            var filePath = Path.Combine(uploadsPath, fileName);
-
-            // Save file
-            using (var stream = new FileStream(filePath, FileMode.Create))
+            var upload = await _controlledFiles.UploadAsync(
+                new ControlledFileUploadRequest
+                {
+                    TenantId = _currentUser.TenantId,
+                    ActorUserId = _currentUser.UserId,
+                    ActorName = ActorName,
+                    Category = ControlledFileUploadCategories.DocumentManagement,
+                    FileName = Path.GetFileName(file.FileName),
+                    ContentType = string.IsNullOrWhiteSpace(file.ContentType)
+                        ? "application/octet-stream"
+                        : file.ContentType,
+                    FileSize = file.Length,
+                    OpenReadStream = file.OpenReadStream
+                },
+                HttpContext.RequestAborted);
+            CentralDocumentRepositoryLink centralDocument;
+            try
             {
-                await file.CopyToAsync(stream);
+                centralDocument = await _centralDocuments.RegisterAsync(
+                    new CentralDocumentRepositoryRegistration
+                    {
+                        TenantId = _currentUser.TenantId,
+                        ActorUserId = _currentUser.UserId,
+                        ActorName = ActorName,
+                        FileUploadRecordId = upload.Record.Id,
+                        SourceModule = "Procurement",
+                        SourceLabel = "Procurement contract evidence",
+                        SourceEntityType = "Contract",
+                        SourceRecordId = contractId,
+                        SourceRecordReference = contractId.ToString(),
+                        Title = upload.Record.OriginalFileName,
+                        DocumentType = documentType,
+                        MetadataTemplateCode = "PROC-CON-EVD",
+                        AccessProfile = "Procurement restricted",
+                        ChangeSummary = description
+                    },
+                    HttpContext.RequestAborted);
+            }
+            catch
+            {
+                await _controlledFiles.DeleteAsync(
+                    _currentUser.TenantId, upload.Record.Id,
+                    _currentUser.UserId, HttpContext.RequestAborted);
+                throw;
             }
 
-            var document = await _contractService.UploadDocumentAsync(
-                contractId,
-                documentType,
-                file.FileName,
-                filePath,
-                file.ContentType,
-                file.Length,
-                description);
+            ContractDocumentDto document;
+            try
+            {
+                document = await _contractService.UploadDocumentAsync(
+                    contractId,
+                    documentType,
+                    upload.Record.OriginalFileName,
+                    centralDocument.DocumentReference,
+                    upload.Record.ContentType,
+                    upload.Record.FileSize,
+                    description,
+                    upload.Record.Id,
+                    centralDocument.DocumentRecordId,
+                    centralDocument.DocumentVersionId);
+            }
+            catch
+            {
+                await _centralDocuments.DeleteAsync(
+                    _currentUser.TenantId,
+                    centralDocument.DocumentRecordId,
+                    _currentUser.UserId,
+                    HttpContext.RequestAborted);
+                throw;
+            }
 
             return Created($"/api/procurement/Contracts/{contractId}/documents/{document.Id}", document);
         }
@@ -632,6 +691,11 @@ public class ContractsController : ControllerBase
     }
 
     #endregion
+
+    private string ActorName =>
+        string.IsNullOrWhiteSpace(_currentUser.FullName)
+            ? _currentUser.Username
+            : _currentUser.FullName;
 }
 
 /// <summary>

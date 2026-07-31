@@ -56,6 +56,7 @@ public class ContractDto
     public DateTime? CompletedAt { get; set; }
     public DateTime? TerminatedAt { get; set; }
     public string? TerminationReason { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
 
     // Related data
     public List<ContractMilestoneDto> Milestones { get; set; } = new();
@@ -326,6 +327,9 @@ public class ContractDocumentDto
     public string DocumentType { get; set; } = string.Empty;
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
     public string? ContentType { get; set; }
     public long? FileSize { get; set; }
     public string? Description { get; set; }
@@ -357,4 +361,3 @@ public class UpdateContractStatusDto
 
     public string? Notes { get; set; }
 }
-

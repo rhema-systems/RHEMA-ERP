@@ -8,7 +8,11 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
 {
     public void Configure(EntityTypeBuilder<Contract> builder)
     {
-        builder.ToTable("Contracts");
+        builder.ToTable("Contracts", table =>
+        {
+            table.HasTrigger("TR_Contracts_TDC0407ActivationGuard");
+            table.HasTrigger("TR_Contracts_TDC0409CloseoutGuard");
+        });
 
         builder.HasKey(c => c.Id);
 
@@ -25,6 +29,9 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
 
         builder.Property(c => c.Status)
             .HasMaxLength(50);
+
+        builder.Property(c => c.RowVersion)
+            .IsRowVersion();
 
         builder.Property(c => c.ContractValue)
             .HasPrecision(18, 2);
@@ -191,7 +198,8 @@ public class ContractDocumentConfiguration : IEntityTypeConfiguration<ContractDo
 {
     public void Configure(EntityTypeBuilder<ContractDocument> builder)
     {
-        builder.ToTable("ContractDocuments");
+        builder.ToTable("ContractDocuments", table =>
+            table.HasTrigger("TR_ContractDocuments_TDC0407DmsRequired"));
 
         builder.HasKey(d => d.Id);
 
@@ -215,6 +223,21 @@ public class ContractDocumentConfiguration : IEntityTypeConfiguration<ContractDo
         builder.HasIndex(d => d.ContractId);
         builder.HasIndex(d => d.TenantId);
         builder.HasIndex(d => d.DocumentType);
+        builder.HasIndex(d => new { d.TenantId, d.CentralDocumentRecordId });
+
+        builder.HasOne(d => d.FileUploadRecord)
+            .WithMany()
+            .HasForeignKey(d => d.FileUploadRecordId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(d => d.CentralDocumentRecord)
+            .WithMany()
+            .HasForeignKey(d => d.CentralDocumentRecordId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(d => d.CentralDocumentVersion)
+            .WithMany()
+            .HasForeignKey(d => d.CentralDocumentVersionId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
-

@@ -139,6 +139,146 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
         };
     }
 
+    public async Task<ProcurementGhanepsComplianceDto> GetAwardComplianceAsync(
+        ProcurementGhanepsSourceType sourceType,
+        Guid sourceId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_currentUser.IsAuthenticated ||
+            _currentUser.TenantId == Guid.Empty ||
+            _currentUser.UserId == Guid.Empty ||
+            _currentUser.IsExternalUser)
+        {
+            throw Authorization(
+                "An authenticated internal tenant context is required to evaluate GHANEPS compliance.");
+        }
+        var source = await ResolveSourceAsync(
+            sourceType, sourceId, null, cancellationToken);
+        var profile = await ResolveProfileAsync(DateTime.UtcNow, cancellationToken);
+        var mappings = profile.Mappings
+            .Where(item => item.EventFamily ==
+                           ProcurementGhanepsEventFamily.AwardNotification &&
+                           MappingApplies(item, source))
+            .OrderBy(item => item.MappingKey, StringComparer.Ordinal)
+            .ToList();
+        if (mappings.Count == 0)
+        {
+            return new ProcurementGhanepsComplianceDto
+            {
+                SourceType = source.Type,
+                SourceId = source.Id,
+                SourceReference = source.Reference,
+                ConfigurationProfileId = profile.Profile.Id,
+                ConfigurationDecisionId = profile.Decision.Id,
+                ConfigurationValueHash = profile.ValueHash,
+                HasApplicableMapping = false,
+                IsCompliant = false,
+                Code = "PO_GHANEPS_AWARD_MAPPING_MISSING",
+                Message =
+                    "The effective DEC-009 profile has no applicable award-notification mapping for this source."
+            };
+        }
+
+        var events = await EventQuery()
+            .Where(item =>
+                item.SourceType == sourceType &&
+                item.SourceId == sourceId &&
+                item.EventFamily ==
+                ProcurementGhanepsEventFamily.AwardNotification)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var results = mappings.Select(mapping =>
+        {
+            var exchange = events
+                .Where(item =>
+                    item.MappingKey == mapping.MappingKey &&
+                    item.ConfigurationProfileId == profile.Profile.Id &&
+                    item.ConfigurationDecisionId == profile.Decision.Id &&
+                    item.ConfigurationValueHash == profile.ValueHash)
+                .OrderByDescending(item => item.PreparedAtUtc)
+                .ThenByDescending(item => item.CreatedAt)
+                .FirstOrDefault();
+            if (exchange is null)
+            {
+                return new ProcurementGhanepsComplianceMappingDto
+                {
+                    MappingKey = mapping.MappingKey,
+                    AcknowledgementRequired = mapping.AcknowledgementRequired,
+                    ReconciliationRequired = mapping.ReconciliationRequired,
+                    Message =
+                        "No award-notification exchange exists for the current DEC-009 mapping."
+                };
+            }
+
+            var successfulTransfer = exchange.Attempts.Any(item =>
+                item.Outcome == ProcurementGhanepsAttemptOutcome.Succeeded);
+            var acceptedAcknowledgement =
+                !mapping.AcknowledgementRequired ||
+                exchange.Acknowledgements.Any(item =>
+                    item.Outcome ==
+                    ProcurementGhanepsAcknowledgementOutcome.Accepted);
+            var latestReconciliation = exchange.Reconciliations
+                .OrderByDescending(item => item.Sequence)
+                .FirstOrDefault();
+            var completedReconciliation =
+                !mapping.ReconciliationRequired ||
+                latestReconciliation?.Outcome is
+                    ProcurementGhanepsReconciliationOutcome.Matched or
+                    ProcurementGhanepsReconciliationOutcome.Resolved;
+            var evidenceAvailable =
+                !string.IsNullOrWhiteSpace(exchange.EvidenceReference) ||
+                exchange.Attempts.Any(item =>
+                    !string.IsNullOrWhiteSpace(item.EvidenceReference)) ||
+                exchange.Acknowledgements.Any(item =>
+                    !string.IsNullOrWhiteSpace(item.EvidenceReference)) ||
+                exchange.Reconciliations.Any(item =>
+                    !string.IsNullOrWhiteSpace(item.EvidenceReference));
+            var compliant = successfulTransfer &&
+                            acceptedAcknowledgement &&
+                            completedReconciliation &&
+                            evidenceAvailable &&
+                            exchange.Status is not
+                                ProcurementGhanepsExchangeStatus.Failed and not
+                                ProcurementGhanepsExchangeStatus.ReconciliationException;
+            return new ProcurementGhanepsComplianceMappingDto
+            {
+                MappingKey = mapping.MappingKey,
+                AcknowledgementRequired = mapping.AcknowledgementRequired,
+                ReconciliationRequired = mapping.ReconciliationRequired,
+                ExchangeEventId = exchange.Id,
+                EventReference = exchange.EventReference,
+                Status = exchange.Status,
+                SuccessfulTransfer = successfulTransfer,
+                AcceptedAcknowledgement = acceptedAcknowledgement,
+                CompletedReconciliation = completedReconciliation,
+                EvidenceAvailable = evidenceAvailable,
+                IsCompliant = compliant,
+                Message = compliant
+                    ? "The current award-notification exchange has successful transfer and all configured evidence."
+                    : "The current award-notification exchange is missing successful transfer, required acknowledgement/reconciliation, or retained evidence."
+            };
+        }).ToList();
+        var ready = results.All(item => item.IsCompliant);
+        return new ProcurementGhanepsComplianceDto
+        {
+            SourceType = source.Type,
+            SourceId = source.Id,
+            SourceReference = source.Reference,
+            ConfigurationProfileId = profile.Profile.Id,
+            ConfigurationDecisionId = profile.Decision.Id,
+            ConfigurationValueHash = profile.ValueHash,
+            HasApplicableMapping = true,
+            IsCompliant = ready,
+            Code = ready
+                ? "PO_GHANEPS_EVIDENCE_CURRENT"
+                : "PO_GHANEPS_EVIDENCE_INCOMPLETE",
+            Message = ready
+                ? "Every applicable DEC-009 award-notification mapping has current terminal evidence."
+                : "One or more applicable DEC-009 award-notification mappings are incomplete.",
+            Mappings = results
+        };
+    }
+
     public async Task<ProcurementGhanepsExchangeEventDto> GetAsync(
         Guid exchangeEventId,
         CancellationToken cancellationToken = default)

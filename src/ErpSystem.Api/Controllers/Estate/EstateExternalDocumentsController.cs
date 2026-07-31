@@ -383,6 +383,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         }
 
         var requestType = NormalizeListingRequestType(request.RequestType, asset.ExternalListingType);
+        if (requestType == "Purchase" && request.OfferAmount is not > 0)
+        {
+            return BadRequest(new { success = false, message = "Enter a positive bid amount for this land sale." });
+        }
         var applicantName = string.IsNullOrWhiteSpace(request.ApplicantName)
             ? _currentUserService.UserName
             : request.ApplicantName.Trim();
@@ -390,8 +394,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ? _currentUserService.Email ?? _currentUserService.UserName
             : request.Contact.Trim();
         var reference = BuildExternalReference("LISTING");
+        var requestLabel = requestType == "Purchase" ? "Purchase bid" : "Lease request";
         var description = string.IsNullOrWhiteSpace(request.Message)
-            ? $"External portal {requestType.ToLowerInvariant()} request for {asset.AssetCode} - {asset.Name}."
+            ? $"External portal {requestLabel.ToLowerInvariant()} for {asset.AssetCode} - {asset.Name}."
             : request.Message.Trim();
 
         var fieldValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
@@ -414,6 +419,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["listingPrice"] = asset.ExternalListingPrice?.ToString("0.##"),
             ["listingCurrency"] = asset.ExternalListingCurrency,
             ["listingType"] = asset.ExternalListingType,
+            ["offerAmount"] = request.OfferAmount?.ToString("0.##"),
+            ["offerCurrency"] = asset.ExternalListingCurrency,
             ["notes"] = description
         };
 
@@ -422,7 +429,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             var created = await _procedureCaseService.CreateCaseAsync(new CreateProcedureCaseRequest(
                 "PropertyManagement",
                 "EstatePropertyManagementOccupancyAvailability",
-                $"{requestType} request - {asset.Name}",
+                $"{requestLabel} - {asset.Name}",
                 reference,
                 applicantName,
                 "External Portal - Estate Listings",
@@ -863,6 +870,7 @@ public sealed record CreateExternalListingRequest(
     string? RequestType,
     string? ApplicantName,
     string? Contact,
+    decimal? OfferAmount,
     string? Message);
 
 public sealed record ExternalEstateRequestDefinition(

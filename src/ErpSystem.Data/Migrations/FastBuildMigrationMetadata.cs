@@ -1,0 +1,138 @@
+// Lightweight discovery metadata for migrations whose generated target-model
+// designers are intentionally omitted from fast Debug builds. This file is
+// excluded from full Release/verification builds to avoid duplicate attributes.
+
+using ErpSystem.Data;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
+
+namespace ErpSystem.Data.Migrations;
+
+[DbContext(typeof(ApplicationDbContext)), Migration("20260304155434_RecreateHRTables")] partial class RecreateHRTables { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260311184920_AddProjectMaterialCostLedger")] partial class AddProjectMaterialCostLedger { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260311213738_AddProjectDeliverableExternalReviews")] partial class AddProjectDeliverableExternalReviews { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260312013725_AddProjectResourceRoutingRequirements")] partial class AddProjectResourceRoutingRequirements { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260313114533_InitialBaseline")] partial class InitialBaseline { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260313125304_AddAucAccountToFixedAssetCategory")] partial class AddAucAccountToFixedAssetCategory { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260315081834_AddCrmSalesEntities")] partial class AddCrmSalesEntities { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260315150304_AddCrmCampaignEntities")] partial class AddCrmCampaignEntities { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260317115118_AddCrmEntities")] partial class AddCrmEntities { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260317122200_AddCompetitorEntities")] partial class AddCompetitorEntities { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260407033921_AddProjectPackageBoqFoundation")] partial class AddProjectPackageBoqFoundation { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260407040955_AddProjectApprovalRegister")] partial class AddProjectApprovalRegister { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260407043006_AddProjectUnitizationAndVariations")] partial class AddProjectUnitizationAndVariations { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260407115053_AddProjectHandoverAndDefectsFoundation")] partial class AddProjectHandoverAndDefectsFoundation { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260407122056_AddProjectSalesMaintenanceLinkage")] partial class AddProjectSalesMaintenanceLinkage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260407131419_AddProjectUnitReleaseControls")] partial class AddProjectUnitReleaseControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260408011238_AddProjectPhaseLibraryAndStageGates")] partial class AddProjectPhaseLibraryAndStageGates { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260408014926_AddProjectDesignAndSiteControlsFoundation")] partial class AddProjectDesignAndSiteControlsFoundation { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260408030833_AddProjectCommercialAdministrationFoundation")] partial class AddProjectCommercialAdministrationFoundation { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260408034847_AddProjectUnitHierarchyAndPhasedHandoverFoundation")] partial class AddProjectUnitHierarchyAndPhasedHandoverFoundation { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260408042842_AddProjectPostHandoverGovernanceFoundation")] partial class AddProjectPostHandoverGovernanceFoundation { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260408170651_AddProjectBaseCurrencyCode")] partial class AddProjectBaseCurrencyCode { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260415150930_AddProjectBoqBudgetWorksheetFields")] partial class AddProjectBoqBudgetWorksheetFields { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260415195704_AddProjectPhaseTemplateCompletionWeight")] partial class AddProjectPhaseTemplateCompletionWeight { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260416002321_AddProjectInterimValuationMilestoneProgressLinkage")] partial class AddProjectInterimValuationMilestoneProgressLinkage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260416071512_AddProjectUnitTypeTemplates")] partial class AddProjectUnitTypeTemplates { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260507212514_AddExtraEmployeeDetailTables")] partial class AddExtraEmployeeDetailTables { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260507221808_AddHrOraclePayrollMigration")] partial class AddHrOraclePayrollMigration { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260507234813_RenameBank_BankBranchToEmployeeBank_EmployeeBankBranch")] partial class RenameBank_BankBranchToEmployeeBank_EmployeeBankBranch { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260508020458_AddHrPayrollLegacySetupSlices")] partial class AddHrPayrollLegacySetupSlices { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260508063814_AddHrPayrollLegacySetupNextSlices")] partial class AddHrPayrollLegacySetupNextSlices { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260508071435_AddHrPayrollLegacySecurityCompanyGradesTax")] partial class AddHrPayrollLegacySecurityCompanyGradesTax { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260508074802_AddHrPayrollOracleParameterFormFields")] partial class AddHrPayrollOracleParameterFormFields { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509041525_AddHrPayrollComponentOracleFields")] partial class AddHrPayrollComponentOracleFields { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509042233_AddHrPayrollBonusOracleFields")] partial class AddHrPayrollBonusOracleFields { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509051443_AddHrPayrollComponentNextPayPeriodDate")] partial class AddHrPayrollComponentNextPayPeriodDate { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509052030_AddHrPayrollBonusAnnualSalaryPercentToTax")] partial class AddHrPayrollBonusAnnualSalaryPercentToTax { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509054156_FixPayrollComponentUniqueIndexByType")] partial class FixPayrollComponentUniqueIndexByType { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509061247_AddHrPayrollComponentRules")] partial class AddHrPayrollComponentRules { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509063720_AddHrPayrollBonusRules")] partial class AddHrPayrollBonusRules { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509103251_AddHrPayrollBonusPayPeriodDates")] partial class AddHrPayrollBonusPayPeriodDates { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509130729_AddHrPayrollBackpaySetup")] partial class AddHrPayrollBackpaySetup { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509174836_AddHrPayrollSalaryAdvances")] partial class AddHrPayrollSalaryAdvances { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509180129_AddHrPayrollLoanTransactionOracleFields")] partial class AddHrPayrollLoanTransactionOracleFields { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509205441_AddHrPayrollLoanRepaymentScheduleFields")] partial class AddHrPayrollLoanRepaymentScheduleFields { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509220105_AddHrPayrollEmployeeTaxReliefs")] partial class AddHrPayrollEmployeeTaxReliefs { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260509234310_AddHrPayrollPromotionArrears")] partial class AddHrPayrollPromotionArrears { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260510093433_AddHrPayrollOvertimeOpeningContributionTransactions")] partial class AddHrPayrollOvertimeOpeningContributionTransactions { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260513123236_AddHrPayrollBonusExceptions")] partial class AddHrPayrollBonusExceptions { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260513125552_AddHrPayrollSeparateBonusRunFields")] partial class AddHrPayrollSeparateBonusRunFields { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260516113201_AddPayrollPaymentMethodModeAndExchangeRate")] partial class AddPayrollPaymentMethodModeAndExchangeRate { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260518144539_AddPayrollJournalOracleSetupFields")] partial class AddPayrollJournalOracleSetupFields { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260518170000_HardenProtectedSystemRoles")] partial class HardenProtectedSystemRoles { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260518231449_PointTechnicianTeamMembersToEmployees")] partial class PointTechnicianTeamMembersToEmployees { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260519054945_AddJobCardCustomerBusinessPartner")] partial class AddJobCardCustomerBusinessPartner { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260525145918_AddFinancePurchaseOrders")] partial class AddFinancePurchaseOrders { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260525161606_FinanceAppAPTables")] partial class FinanceAppAPTables { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260526080804_AddTaxGroupToPurchaseOrders")] partial class AddTaxGroupToPurchaseOrders { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260526091039_AddSupplierReturns")] partial class AddSupplierReturns { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260529130858_AddOpeningBalanceAutoRoutingToggle")] partial class AddOpeningBalanceAutoRoutingToggle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260607233542_AddProcurementPlanningCyclePublishBudgetLines")] partial class AddProcurementPlanningCyclePublishBudgetLines { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260608180925_AddProcurementStrategicMarketSupplierAnalytics")] partial class AddProcurementStrategicMarketSupplierAnalytics { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260609054619_AddSalesSaleableSourceSetup")] partial class AddSalesSaleableSourceSetup { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260609110243_AddSalesAllocationReservationLedger")] partial class AddSalesAllocationReservationLedger { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260610015529_AddInspectionTemplateFleetMobileAssignments")] partial class AddInspectionTemplateFleetMobileAssignments { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260615015211_AddMaintenanceAssetMovementAndOfflineFleetInspections")] partial class AddMaintenanceAssetMovementAndOfflineFleetInspections { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260615031849_AddInspectionTemplateFailureBillingType")] partial class AddInspectionTemplateFailureBillingType { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260615075340_AddInspectionSheetTypesFleetDefaultsAndInspectionWorkflow")] partial class AddInspectionSheetTypesFleetDefaultsAndInspectionWorkflow { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260628223428_AddOpeningBalanceInvoiceFlags")] partial class AddOpeningBalanceInvoiceFlags { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260707002142_AddWorkflowDefinitionLifecycle")] partial class AddWorkflowDefinitionLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260707074422_AddWorkflowApprovalPolicySets")] partial class AddWorkflowApprovalPolicySets { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260707080937_AddWorkflowGovernanceOperations")] partial class AddWorkflowGovernanceOperations { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260707125943_AddWorkflowEvidenceSignatureAndOperations")] partial class AddWorkflowEvidenceSignatureAndOperations { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260708132921_AddLandAcquisitionWorkflow")] partial class AddLandAcquisitionWorkflow { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260710192812_AddProcedureCases")] partial class AddProcedureCases { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260711011123_LinkProcedureCasesToWorkflowInstances")] partial class LinkProcedureCasesToWorkflowInstances { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260711061802_AddEstateManagedAssets")] partial class AddEstateManagedAssets { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260712075757_AddLandAcquisitionMapAndProjectHandoff")] partial class AddLandAcquisitionMapAndProjectHandoff { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260712082255_AddEstateManagedAssetLandBankFields")] partial class AddEstateManagedAssetLandBankFields { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260712180321_AddEstateStageControlsManualLandAndDocuments")] partial class AddEstateStageControlsManualLandAndDocuments { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260713002824_LinkEstateOwnershipToBusinessPartner")] partial class LinkEstateOwnershipToBusinessPartner { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260715205906_AddCentralDocumentManagement")] partial class AddCentralDocumentManagement { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260715212107_AddEstateDocumentCentralDmsPublication")] partial class AddEstateDocumentCentralDmsPublication { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260715230135_AddCentralDocumentMetadataValues")] partial class AddCentralDocumentMetadataValues { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260720010326_AddRecurringJournalWorkflow")] partial class AddRecurringJournalWorkflow { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260720221046_AddProcurementPolicyDomain")] partial class AddProcurementPolicyDomain { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260721012643_AddProcurementAccessControls")] partial class AddProcurementAccessControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260721083614_AddProcurementControlEvents")] partial class AddProcurementControlEvents { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260721100238_AddProcurementMasterDataChangeControls")] partial class AddProcurementMasterDataChangeControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260721134533_AddProcurementAppSubmissionRegister")] partial class AddProcurementAppSubmissionRegister { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260721194837_AddProcurementSpecificationTemplates")] partial class AddProcurementSpecificationTemplates { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260721220201_AddPurchaseRequisitionGovernanceLinkage")] partial class AddPurchaseRequisitionGovernanceLinkage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260722023908_AddProcurementRequisitionBudgetCommitments")] partial class AddProcurementRequisitionBudgetCommitments { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260722050707_AddProcurementRequisitionAuthorityRoutes")] partial class AddProcurementRequisitionAuthorityRoutes { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260722101519_AddProcurementCalendarLifecycle")] partial class AddProcurementCalendarLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260722130004_AddProcurementSourcingCases")] partial class AddProcurementSourcingCases { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260722173828_AddProcurementMethodSelectionControls")] partial class AddProcurementMethodSelectionControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260723025539_AddProcurementRfqStatutoryControls")] partial class AddProcurementRfqStatutoryControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260723050214_HardenProcurementRfqStatutoryControls")] partial class HardenProcurementRfqStatutoryControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260723071908_AddProcurementTenderStatutoryControls")] partial class AddProcurementTenderStatutoryControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260723120017_AddProcurementExceptionalSourcingControls")] partial class AddProcurementExceptionalSourcingControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260723145650_AddProcurementPrequalificationLifecycle")] partial class AddProcurementPrequalificationLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260723161619_AddProcurementPrequalificationPolicyLineage")] partial class AddProcurementPrequalificationPolicyLineage { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260723184003_AddProcurementTenderDocumentControls")] partial class AddProcurementTenderDocumentControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260723214709_AddProcurementEvaluationCommitteeControls")] partial class AddProcurementEvaluationCommitteeControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260724020403_AddProcurementAwardReadinessControls")] partial class AddProcurementAwardReadinessControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns")] partial class AddProcurementBidderCommunicationsAndSecurityReturns { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260724175059_AddProcurementGhanepsExchangeControls")] partial class AddProcurementGhanepsExchangeControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260724203636_AddProcurementSupplierEvidencePacks")] partial class AddProcurementSupplierEvidencePacks { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260728170930_AddEstateGisIntegration")] partial class AddEstateGisIntegration { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260728192617_AddDurableFileStorageCleanup")] partial class AddDurableFileStorageCleanup { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260728210856_EnforceSupplierApplicantIntegrity")] partial class EnforceSupplierApplicantIntegrity { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260728230211_AddEstateLandDemarcations")] partial class AddEstateLandDemarcations { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260729022744_AddSupplierEvidenceDmsLinks")] partial class AddSupplierEvidenceDmsLinks { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260729124416_TDC0402FrameworkCallOffs")] partial class TDC0402FrameworkCallOffs { }
+
+// [HR-MODULE-PORT] Migrations authored on hrdev. Unlike the hand-written migrations above, these were
+// scaffolded by `dotnet ef migrations add`, so their [Migration] attribute lives in a generated
+// *.Designer.cs rather than inline in the migration class. Fast Debug builds strip those designers, so
+// without these entries the six migrations below are invisible to startup MigrateAsync — including the
+// two that create the HR module itself. Registered per the convention in ErpSystem.Data.csproj.
+[DbContext(typeof(ApplicationDbContext)), Migration("20260720181131_AddHRModule")] partial class AddHRModule { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260720193903_AddHRPerformanceModule")] partial class AddHRPerformanceModule { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260722202144_MergeHrPortWithMasterPayroll")] partial class MergeHrPortWithMasterPayroll { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260723234640_MergeProcurementPhase0")] partial class MergeProcurementPhase0 { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260726181817_MergeFinanceModule")] partial class MergeFinanceModule { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260730222806_MergeEstateAndProcurementPhase3")] partial class MergeEstateAndProcurementPhase3 { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260731143111_MergeProcurementPhase4AndEstateReadiness")] partial class MergeProcurementPhase4AndEstateReadiness { }

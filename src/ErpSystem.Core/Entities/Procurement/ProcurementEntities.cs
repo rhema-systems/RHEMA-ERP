@@ -333,6 +333,25 @@ public class PurchaseOrder : TenantEntity
     [MaxLength(50)]
     public string? SourceRequisitionNumber { get; set; }
 
+    // Mandatory governed source lineage (TDC-0403)
+    public ProcurementPurchaseOrderSourceType? ProcurementSourceType { get; set; }
+    public Guid? ProcurementSourceId { get; set; }
+
+    [MaxLength(100)]
+    public string? ProcurementSourceReference { get; set; }
+
+    public Guid? SourcingReleaseId { get; set; }
+    public Guid? SourcingCaseId { get; set; }
+    public Guid? AwardReadinessDecisionId { get; set; }
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? SourceSnapshotJson { get; set; }
+
+    [MaxLength(64)]
+    public string? SourceIntegrityHash { get; set; }
+
+    public DateTime? SourceValidatedAtUtc { get; set; }
+
     // Source RFQ Reference (when PO is created from an RFQ award)
     public Guid? SourceRfqId { get; set; }
 

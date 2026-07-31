@@ -4,6 +4,14 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!--
+      Debug builds use lightweight migration metadata so routine solution
+      builds do not parse every historical EF target model. Release and custom
+      verification configurations retain the complete migration history.
+      Pass -p:TdcFastEfBuild=false to request a full Debug migration build.
+    -->
+    <TdcFastEfBuild Condition="'$(TdcFastEfBuild)' == '' and '$(Configuration)' == 'Debug' and '$(Tdc0402FocusedEfBuild)' != 'true'">true</TdcFastEfBuild>
+    <TdcFastEfBuild Condition="'$(TdcFastEfBuild)' == ''">false</TdcFastEfBuild>
   </PropertyGroup>
 
   <ItemGroup>
@@ -32,16 +40,21 @@
     <!-- Exclude duplicate migration artifacts (same class name) -->
     <Compile Remove="Migrations\20260207050009_AddSystemExceptionLogs.cs" />
     <Compile Remove="Migrations\20260207050009_AddSystemExceptionLogs.Designer.cs" />
+    <!-- This metadata is compiled only when historical designers are omitted. -->
+    <Compile Remove="Migrations\FastBuildMigrationMetadata.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFastEfBuild)' == 'true'">
     <!--
-      The accumulated EF designer history is about 278 MB of generated C#.
-      This opt-in design-time path keeps the current snapshot and latest
-      migration metadata while avoiding historical designer recompilation.
-      Normal production builds continue to compile the complete history.
+      The accumulated EF designer history exceeds 350 MB of generated C#.
+      Lightweight metadata keeps every migration discoverable by startup
+      MigrateAsync while recent designers retain useful target models.
+      Release/verification builds continue to compile the complete history.
+      When a generated designer is no longer retained here, add its migration
+      attribute to FastBuildMigrationMetadata.cs before merging.
     -->
     <Compile Remove="Migrations\*.Designer.cs" />
+    <Compile Include="Migrations\FastBuildMigrationMetadata.cs" />
     <Compile Include="Migrations\20260725111657_AddProcurementSupplierOnboardingTokens.Designer.cs" />
     <Compile Include="Migrations\20260726101435_AddProcurementSupplierDueDiligence.Designer.cs" />
     <Compile Include="Migrations\20260726174311_AddProcurementSupplierAvlLifecycle.Designer.cs" />
@@ -49,6 +62,22 @@
     <Compile Include="Migrations\20260727005601_AddProcurementSupplierPerformanceScorecards.Designer.cs" />
     <Compile Include="Migrations\20260727101510_AddProcurementSupplierMasterChangeRollout.Designer.cs" />
     <Compile Include="Migrations\20260727113854_AddProcurementSupplierApplicantAccess.Designer.cs" />
+    <Compile Include="Migrations\20260729084856_TDC0401FrameworkAgreements.Designer.cs" />
+    <Compile Include="Migrations\20260730032601_TDC0406PurchaseOrderAmendments.Designer.cs" />
+    <Compile Include="Migrations\20260730132714_TDC0407ContractActivationGate.Designer.cs" />
   </ItemGroup>
+
+  <ItemGroup Condition="'$(Tdc0402FocusedEfBuild)' == 'true'">
+    <!-- TDC-0402 source/model feedback without recompiling historical generated designers. -->
+    <Compile Remove="Migrations\*.Designer.cs" />
+    <Compile Include="Migrations\20260729084856_TDC0401FrameworkAgreements.Designer.cs" />
+    <Compile Include="Migrations\20260729124416_TDC0402FrameworkCallOffs.Designer.cs" />
+  </ItemGroup>
+
+  <Target Name="RejectEfToolingWithFastMigrationBuild"
+          BeforeTargets="GetEFProjectMetadata"
+          Condition="'$(TdcFastEfBuild)' == 'true'">
+    <Error Text="EF tooling requires the complete migration target-model history. Re-run the dotnet ef command with --configuration Release (or build Debug with -p:TdcFastEfBuild=false)." />
+  </Target>
 
 </Project>

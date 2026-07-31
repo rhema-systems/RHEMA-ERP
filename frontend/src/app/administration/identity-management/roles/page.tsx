@@ -136,6 +136,17 @@ const PERMISSION_CATEGORIES = {
     icon: Home,
     permissions: [...PROPERTY_MANAGEMENT_PERMISSIONS],
   },
+  'Estate / Land Management': {
+    icon: Building2,
+    permissions: [
+      {
+        id: 'estate.land.project-readiness',
+        name: 'Mark Land Project Ready',
+        description:
+          'Approve verified land demarcations for project management handoff',
+      },
+    ],
+  },
   'Administration Modules': {
     icon: Wrench,
     permissions: [

@@ -186,6 +186,7 @@ export default function ExternalPropertyListingsPage() {
   const [requestIntent, setRequestIntent] = React.useState<ListingIntent>('Rent');
   const [applicantName, setApplicantName] = React.useState('');
   const [contact, setContact] = React.useState('');
+  const [offerAmount, setOfferAmount] = React.useState('');
   const [message, setMessage] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -229,6 +230,7 @@ export default function ExternalPropertyListingsPage() {
 
   React.useEffect(() => {
     setRequestIntent(defaultIntent(selected));
+    setOfferAmount('');
     setCreatedRequest(null);
   }, [selected?.id, selected?.externalListingType]);
 
@@ -238,6 +240,13 @@ export default function ExternalPropertyListingsPage() {
 
     if (!applicantName.trim() || !contact.trim()) {
       setError('Enter your name and contact before submitting the request.');
+      return;
+    }
+    if (
+      requestIntent === 'Sale' &&
+      (!offerAmount || Number(offerAmount) <= 0)
+    ) {
+      setError('Enter a positive bid amount before submitting your bid.');
       return;
     }
 
@@ -251,6 +260,8 @@ export default function ExternalPropertyListingsPage() {
           requestType: requestIntent,
           applicantName: applicantName.trim(),
           contact: contact.trim(),
+          offerAmount:
+            requestIntent === 'Sale' ? Number(offerAmount) : undefined,
           message: message.trim(),
         }
       );
@@ -271,7 +282,7 @@ export default function ExternalPropertyListingsPage() {
             Property Listings
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Browse available estate units and submit a sale or rent request.
+            Browse available estate units and submit a purchase bid or rental request.
           </p>
         </div>
         <Badge variant="outline" className="w-fit">
@@ -404,7 +415,7 @@ export default function ExternalPropertyListingsPage() {
 
         <Card className="h-fit">
           <CardHeader>
-            <CardTitle className="text-base">Customer request</CardTitle>
+            <CardTitle className="text-base">Customer bid / request</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             {selected ? (
@@ -507,6 +518,20 @@ export default function ExternalPropertyListingsPage() {
                       />
                     </div>
                   </div>
+                  {requestIntent === 'Sale' ? (
+                    <div className="space-y-2">
+                      <Label>Bid amount ({selected.externalListingCurrency || 'GHS'})</Label>
+                      <Input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={offerAmount}
+                        onChange={(event) => setOfferAmount(event.target.value)}
+                        placeholder="Enter your purchase offer"
+                        required
+                      />
+                    </div>
+                  ) : null}
                   <div className="space-y-2">
                     <Label>Message</Label>
                     <Textarea
@@ -522,7 +547,7 @@ export default function ExternalPropertyListingsPage() {
                     ) : (
                       <Send className="mr-2 h-4 w-4" />
                     )}
-                    Submit request
+                    {requestIntent === 'Sale' ? 'Submit bid' : 'Submit request'}
                   </Button>
                 </form>
               </>

@@ -70,6 +70,7 @@ import {
   ArrowRightLeft,
   Repeat2,
   KeyRound,
+  PackageCheck,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -460,6 +461,36 @@ const navigationItems: NavItem[] = [
           { title: 'Evaluations', href: '/procurement/evaluations', icon: Star },
           { title: 'Awards', href: '/procurement/awards', icon: Award },
           { title: 'Contracts', href: '/procurement/contracts', icon: FileText },
+          {
+            title: 'Contract Operations',
+            href: '/procurement/contract-operations',
+            icon: Activity,
+            permissions: ['procurement.reports.read'],
+          },
+          {
+            title: 'Framework Agreements',
+            href: '/procurement/framework-agreements',
+            icon: FileCheck,
+            permissions: [
+              'procurement.records.read',
+              'procurement.contract.manage',
+              'procurement.contract.approve',
+              'procurement.audit.read',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Framework Call-offs',
+            href: '/procurement/framework-call-offs',
+            icon: PackageCheck,
+            permissions: [
+              'procurement.records.read',
+              'procurement.purchase-order.create',
+              'procurement.purchase-order.approve',
+              'procurement.audit.read',
+            ],
+            accessMode: 'any',
+          },
         ],
       },
       {

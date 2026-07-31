@@ -34,6 +34,7 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   estateLandManagementService,
   EstateManagedAssetSourceType,
+  EstateManagedAssetStatus,
   type EstateLandDemarcation,
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
@@ -58,7 +59,6 @@ const GIS_LINK_ROLES = [
   'Land Registry Officer',
   'Survey Officer',
 ];
-
 type LandManagementRecord =
   | { key: string; type: 'asset'; asset: EstateManagedAsset }
   | { key: string; type: 'acquisition'; acquisition: LandAcquisitionItem };
@@ -161,8 +161,11 @@ function DetailRow({
 }
 
 export default function EstateLandManagementPage() {
-  const { hasAnyRole } = useAuth();
+  const { hasAnyRole, hasPermission } = useAuth();
   const canLinkGis = hasAnyRole(GIS_LINK_ROLES);
+  const canMarkProjectReady = hasPermission(
+    'estate.land.project-readiness'
+  );
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [acquisitions, setAcquisitions] = React.useState<LandAcquisitionItem[]>(
     []
@@ -303,6 +306,27 @@ export default function EstateLandManagementPage() {
         ? record.asset.boundaryVerified
         : acquisitionBoundaryVerified(record.acquisition)
   ).length;
+  const selectedAsset = selected?.type === 'asset' ? selected.asset : null;
+  const saleListingDisabledReason = !selectedAsset
+    ? undefined
+    : selectedAsset.status !== EstateManagedAssetStatus.LandBank
+      ? 'Land already assigned to a project cannot be listed for sale.'
+      : selectedDemarcations.some((item) => item.isAssignedToProject)
+        ? 'Land with an assigned demarcation cannot be listed for sale.'
+        : !selectedAsset.boundaryVerified
+          ? 'Verify the main cadastral boundary first.'
+          : selectedAsset.demarcationCount === 0
+            ? 'Add at least one demarcation first.'
+            : selectedAsset.verifiedDemarcationCount !==
+                selectedAsset.demarcationCount
+              ? 'Verify every demarcation first.'
+              : undefined;
+  const saleListingLabel =
+    selectedAsset?.isPublishedToExternalPortal &&
+    (selectedAsset.externalListingType === 'Sale' ||
+      selectedAsset.externalListingType === 'SaleAndRent')
+      ? 'View Sale Listing'
+      : 'List Land for Sale';
 
   const markAssetProjectReady = async (asset: EstateManagedAsset) => {
     const key = `asset:${asset.id}`;
@@ -646,6 +670,25 @@ export default function EstateLandManagementPage() {
                       ? 'Manage Demarcations'
                       : 'Add Demarcation'}
                   </Button>
+                  {saleListingDisabledReason ? (
+                    <Button
+                      variant="outline"
+                      disabled
+                      title={saleListingDisabledReason}
+                    >
+                      <Globe2 className="mr-2 h-4 w-4" />
+                      {saleListingLabel}
+                    </Button>
+                  ) : (
+                    <Button asChild variant="outline">
+                      <Link
+                        href={`/estate/property-management/listings?assetId=${encodeURIComponent(selected.asset.id)}&listingType=Sale`}
+                      >
+                        <Globe2 className="mr-2 h-4 w-4" />
+                        {saleListingLabel}
+                      </Link>
+                    </Button>
+                  )}
                   {selected.asset.isReadyForProjectManagement ? (
                     <Button asChild variant="outline">
                       <Link href="/development/projects">
@@ -657,6 +700,8 @@ export default function EstateLandManagementPage() {
                     <Button
                       variant="outline"
                       disabled={
+                        !canMarkProjectReady ||
+                        selected.asset.isPublishedToExternalPortal ||
                         !selected.asset.boundaryVerified ||
                         selected.asset.demarcationCount === 0 ||
                         selected.asset.verifiedDemarcationCount !==
@@ -665,14 +710,18 @@ export default function EstateLandManagementPage() {
                       }
                       onClick={() => void markAssetProjectReady(selected.asset)}
                       title={
-                        !selected.asset.boundaryVerified
-                          ? 'Verify the main cadastral boundary first.'
-                          : selected.asset.demarcationCount === 0
-                            ? 'Add at least one demarcation first.'
-                            : selected.asset.verifiedDemarcationCount !==
-                                selected.asset.demarcationCount
-                              ? 'Verify every demarcation first.'
-                              : undefined
+                        !canMarkProjectReady
+                          ? 'Requires the Mark Land Project Ready permission assigned in Administration.'
+                          : selected.asset.isPublishedToExternalPortal
+                            ? 'Withdraw the active external land listing before marking this land ready for a project.'
+                            : !selected.asset.boundaryVerified
+                              ? 'Verify the main cadastral boundary first.'
+                              : selected.asset.demarcationCount === 0
+                                ? 'Add at least one demarcation first.'
+                                : selected.asset.verifiedDemarcationCount !==
+                                    selected.asset.demarcationCount
+                                  ? 'Verify every demarcation first.'
+                                  : undefined
                       }
                     >
                       {markingReadyKey === `asset:${selected.asset.id}` ? (

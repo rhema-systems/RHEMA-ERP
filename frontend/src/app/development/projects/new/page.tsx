@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { ReadyLandPortionSelect } from '@/components/projects/ReadyLandPortionSelect';
 import {
   buildProjectCurrencyOptions,
   DEFAULT_PROJECT_CURRENCY,
@@ -31,12 +32,6 @@ import {
   ProjectTypeDto,
   projectService,
 } from '@/services/projectService';
-import {
-  estateLandManagementService,
-  EstateManagedAssetStatus,
-  EstateManagedAssetType,
-  type EstateManagedAsset,
-} from '@/services/estate-land-management.service';
 import { userService } from '@/services/user';
 import type { User } from '@/types';
 import { ArrowLeft, Save } from 'lucide-react';
@@ -73,17 +68,6 @@ const formatBusinessPartnerLabel = (partner: BusinessPartnerDto) =>
 
 const formatContractLabel = (contract: ContractDto) =>
   `${contract.contractNumber} - ${contract.contractTitle}`;
-
-const readyLandReferenceValue = (asset: EstateManagedAsset) =>
-  asset.projectCode?.trim() || asset.assetCode;
-
-const formatReadyLandLabel = (asset: EstateManagedAsset) => {
-  const details = [asset.assetCode, asset.name, asset.location].filter(Boolean).join(' - ');
-  const acquisitionReference = asset.projectCode?.trim();
-  return acquisitionReference && acquisitionReference !== asset.assetCode
-    ? `${acquisitionReference} (${details})`
-    : details;
-};
 
 const resolveCatalogOptions = (entries: ProjectCatalogEntryDto[], fallbackValues: string[], currentValue?: string) => {
   const configured = entries
@@ -210,7 +194,6 @@ export default function NewProjectPage() {
   const [financeBaseCurrency, setFinanceBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const [businessPartners, setBusinessPartners] = useState<BusinessPartnerDto[]>([]);
   const [contracts, setContracts] = useState<ContractDto[]>([]);
-  const [readyLandAssets, setReadyLandAssets] = useState<EstateManagedAsset[]>([]);
   const [methodologyCatalog, setMethodologyCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [fundingSourceCatalog, setFundingSourceCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [form, setForm] = useState<CreateProjectDto>(initialForm);
@@ -288,7 +271,7 @@ export default function NewProjectPage() {
   useEffect(() => {
     const loadSetup = async () => {
       try {
-        const [loadedTypes, loadedPriorities, loadedTemplates, loadedPortfolios, settings, loadedMethodologies, loadedFundingSources, loadedUsers, loadedPartners, loadedContracts, loadedReadyLandAssets, currencyContext] = await Promise.all([
+        const [loadedTypes, loadedPriorities, loadedTemplates, loadedPortfolios, settings, loadedMethodologies, loadedFundingSources, loadedUsers, loadedPartners, loadedContracts, currencyContext] = await Promise.all([
           projectService.getProjectTypes(),
           projectService.getProjectPriorities(),
           projectService.getProjectTemplates(),
@@ -299,14 +282,6 @@ export default function NewProjectPage() {
           userService.searchUsers('').catch(() => []),
           businessPartnerService.getAllPartnersForDropdown().catch(() => businessPartnerService.getActivePartners().catch(() => [])),
           contractService.getActiveContracts().catch(() => []),
-          estateLandManagementService
-            .getManagedAssets({
-              assetType: EstateManagedAssetType.Land,
-              status: EstateManagedAssetStatus.LandBank,
-              take: 500,
-            })
-            .then((assets) => assets.filter((asset) => asset.isReadyForProjectManagement))
-            .catch(() => []),
           loadProjectCurrencyContext(),
         ]);
         setTypes(loadedTypes);
@@ -321,7 +296,6 @@ export default function NewProjectPage() {
         setFinanceBaseCurrency(currencyContext.baseCurrency);
         setBusinessPartners(loadedPartners);
         setContracts(loadedContracts);
-        setReadyLandAssets(loadedReadyLandAssets);
         setForm((prev) => ({
           ...prev,
           projectTypeId: settings.defaultProjectTypeId,
@@ -402,7 +376,11 @@ export default function NewProjectPage() {
       }
 
       setLoading(true);
-      const created = await projectService.createProject(form);
+      const created = await projectService.createProject({
+        ...form,
+        startDate: form.startDate?.trim() || undefined,
+        targetEndDate: form.targetEndDate?.trim() || undefined,
+      });
       toast.success('Project created');
       router.push(`/development/projects/${created.id}`);
     } catch (error: any) {
@@ -737,28 +715,13 @@ export default function NewProjectPage() {
             <Label htmlFor="site-address">Site Address</Label>
             <Textarea id="site-address" rows={2} value={form.developmentProfile?.siteAddress || ''} onChange={(e) => updateDevelopmentProfile({ siteAddress: e.target.value || undefined })} />
           </div>
-          <div className="grid gap-2">
-            <Label>{labelWithRequired('Demarcated Land', requiredFields.has('DevelopmentProfile.LandReference'))}</Label>
-            <Select
-              value={form.developmentProfile?.landReference || 'none'}
-              onValueChange={(value) => updateDevelopmentProfile({ landReference: value === 'none' ? undefined : value })}
-            >
-              <SelectTrigger><SelectValue placeholder="Select ready land" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No land selected</SelectItem>
-                {readyLandAssets.map((asset) => (
-                  <SelectItem key={asset.id} value={readyLandReferenceValue(asset)}>
-                    {formatReadyLandLabel(asset)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {readyLandAssets.length === 0 ? (
-              <div className="text-xs text-muted-foreground">
-                No demarcated land is ready for project management yet.
-              </div>
-            ) : null}
-          </div>
+          <ReadyLandPortionSelect
+            value={form.developmentProfile?.landReference}
+            onValueChange={(landReference) =>
+              updateDevelopmentProfile({ landReference })
+            }
+            required={requiredFields.has('DevelopmentProfile.LandReference')}
+          />
           <div className="grid gap-2">
             <Label htmlFor="funding-arrangement">Funding Arrangement</Label>
             <Input id="funding-arrangement" value={form.developmentProfile?.fundingArrangement || ''} onChange={(e) => updateDevelopmentProfile({ fundingArrangement: e.target.value || undefined })} />

@@ -586,6 +586,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<PurchaseOrderReceiptItem> PurchaseOrderReceiptItems { get; set; }
     public DbSet<PurchaseOrderLandedCostPlan> PurchaseOrderLandedCostPlans { get; set; }
     public DbSet<PurchaseOrderLandedCostPlanItem> PurchaseOrderLandedCostPlanItems { get; set; }
+    public DbSet<ProcurementPurchaseOrderAmendment> ProcurementPurchaseOrderAmendments { get; set; }
+    public DbSet<ProcurementPurchaseOrderCommitmentAdjustment> ProcurementPurchaseOrderCommitmentAdjustments { get; set; }
+    public DbSet<ProcurementPurchaseOrderAmendmentDispatch> ProcurementPurchaseOrderAmendmentDispatches { get; set; }
+    public DbSet<ProcurementPurchaseOrderAmendmentAcknowledgement> ProcurementPurchaseOrderAmendmentAcknowledgements { get; set; }
     public DbSet<PurchaseRequisition> PurchaseRequisitions { get; set; }
     public DbSet<ConsignmentSettlement> ConsignmentSettlements { get; set; }
 
@@ -635,6 +639,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<ProcurementSupplierDueDiligenceReview> ProcurementSupplierDueDiligenceReviews { get; set; }
     public DbSet<ProcurementSupplierDueDiligenceCheck> ProcurementSupplierDueDiligenceChecks { get; set; }
     public DbSet<ProcurementSupplierDueDiligenceEvidenceLink> ProcurementSupplierDueDiligenceEvidenceLinks { get; set; }
+    public DbSet<ProcurementFrameworkAgreement> ProcurementFrameworkAgreements { get; set; }
+    public DbSet<ProcurementFrameworkAgreementCategory> ProcurementFrameworkAgreementCategories { get; set; }
+    public DbSet<ProcurementFrameworkPriceListLine> ProcurementFrameworkPriceListLines { get; set; }
+    public DbSet<ProcurementFrameworkCallOffAuthority> ProcurementFrameworkCallOffAuthorities { get; set; }
+    public DbSet<ProcurementFrameworkAgreementDocument> ProcurementFrameworkAgreementDocuments { get; set; }
+    public DbSet<ProcurementFrameworkAgreementExtension> ProcurementFrameworkAgreementExtensions { get; set; }
+    public DbSet<ProcurementFrameworkCallOff> ProcurementFrameworkCallOffs { get; set; }
+    public DbSet<ProcurementFrameworkCallOffLine> ProcurementFrameworkCallOffLines { get; set; }
+    public DbSet<ProcurementFrameworkAgreementBalance> ProcurementFrameworkAgreementBalances { get; set; }
+    public DbSet<ProcurementFrameworkBalanceMovement> ProcurementFrameworkBalanceMovements { get; set; }
     public DbSet<ProcurementSupplierAvlRegister> ProcurementSupplierAvlRegisters { get; set; }
     public DbSet<ProcurementSupplierAvlEntry> ProcurementSupplierAvlEntries { get; set; }
     public DbSet<ProcurementSupplierAvlEntryStatusHistory> ProcurementSupplierAvlEntryStatusHistories { get; set; }
@@ -726,6 +740,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<ContractMilestone> ContractMilestones { get; set; }
     public DbSet<ContractAmendment> ContractAmendments { get; set; }
     public DbSet<ContractDocument> ContractDocuments { get; set; }
+    public DbSet<ProcurementContractActivation> ProcurementContractActivations { get; set; }
+    public DbSet<ProcurementContractActivationEvidence> ProcurementContractActivationEvidence { get; set; }
+    public DbSet<ProcurementWorksCloseoutAction> ProcurementWorksCloseoutActions { get; set; }
+    public DbSet<ProcurementWorksCloseoutEvidence> ProcurementWorksCloseoutEvidence { get; set; }
 
     // Procurement Planning
     public DbSet<ProcurementPlan> ProcurementPlans { get; set; }
@@ -1071,6 +1089,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceReviewConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceCheckConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierDueDiligenceEvidenceLinkConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkAgreementConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkAgreementCategoryConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkPriceListLineConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkCallOffAuthorityConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkAgreementDocumentConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkAgreementExtensionConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkCallOffConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkCallOffLineConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkAgreementBalanceConfiguration());
+        builder.ApplyConfiguration(new ProcurementFrameworkBalanceMovementConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierAvlRegisterConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierAvlEntryConfiguration());
         builder.ApplyConfiguration(new ProcurementSupplierAvlEntryStatusHistoryConfiguration());
@@ -3159,6 +3187,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ContractMilestoneConfiguration());
         builder.ApplyConfiguration(new ContractAmendmentConfiguration());
         builder.ApplyConfiguration(new ContractDocumentConfiguration());
+        builder.ApplyConfiguration(new ProcurementContractActivationConfiguration());
+        builder.ApplyConfiguration(new ProcurementContractActivationEvidenceConfiguration());
+        builder.ApplyConfiguration(new ProcurementWorksCloseoutActionConfiguration());
+        builder.ApplyConfiguration(new ProcurementWorksCloseoutEvidenceConfiguration());
 
         // Project management configurations
         builder.ApplyConfiguration(new ProjectTypeConfiguration());
@@ -7974,11 +8006,39 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // PurchaseOrder entity
         builder.Entity<PurchaseOrder>(entity =>
         {
+            entity.ToTable("PurchaseOrders", table =>
+            {
+                table.HasTrigger("TR_PurchaseOrders_FrameworkCallOffProtected");
+                table.HasTrigger("TR_PurchaseOrders_ApprovedSourceProtected");
+                table.HasCheckConstraint(
+                    "CK_PurchaseOrders_ApprovedSourceLineage",
+                    "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND [SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL))");
+            });
             entity.HasIndex(po => po.OrderNumber).IsUnique();
             entity.HasIndex(po => po.Status);
             entity.HasIndex(po => po.OrderDate);
             entity.HasIndex(po => po.RequestedById);
             entity.HasIndex(po => po.TenderAwardId);
+            entity.HasIndex(po => po.TenantId);
+            entity.HasIndex(po => new
+            {
+                po.TenantId,
+                po.ProcurementSourceType,
+                po.ProcurementSourceId
+            });
+            entity.HasIndex(po => new
+                {
+                    po.TenantId,
+                    po.ProcurementSourceType,
+                    po.ProcurementSourceId,
+                    po.BusinessPartnerId
+                },
+                "UX_PurchaseOrders_OneTimeApprovedSource")
+                .IsUnique()
+                .HasFilter("[ProcurementSourceType] IN (0, 1, 3)");
+            entity.HasIndex(po => po.SourcingReleaseId);
+            entity.HasIndex(po => po.SourcingCaseId);
+            entity.HasIndex(po => po.AwardReadinessDecisionId);
 
             entity.HasOne(po => po.RequestedBy)
                 .WithMany()
@@ -7989,11 +8049,28 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(po => po.TenderAwardId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne<ProcurementRequisitionSourcingRelease>()
+                .WithMany()
+                .HasForeignKey(po => po.SourcingReleaseId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne<ProcurementSourcingCase>()
+                .WithMany()
+                .HasForeignKey(po => po.SourcingCaseId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne<ProcurementAwardReadinessDecision>()
+                .WithMany()
+                .HasForeignKey(po => po.AwardReadinessDecisionId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         // PurchaseOrderItem entity
         builder.Entity<PurchaseOrderItem>(entity =>
         {
+            entity.ToTable("PurchaseOrderItems", table =>
+                table.HasTrigger("TR_PurchaseOrderItems_FrameworkCallOffProtected"));
             entity.HasIndex(poi => poi.PurchaseOrderId);
             entity.HasIndex(poi => poi.InventoryItemId);
 
@@ -8007,6 +8084,93 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             //     .WithMany(ii => ii.PurchaseOrderItems)
             //     .HasForeignKey(poi => poi.InventoryItemId)
             //     .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProcurementPurchaseOrderAmendment>(entity =>
+        {
+            entity.ToTable("ProcurementPurchaseOrderAmendments", table =>
+                table.HasTrigger("TR_ProcurementPurchaseOrderAmendments_Protected"));
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasIndex(item => new { item.TenantId, item.PurchaseOrderId, item.AmendmentSequence })
+                .IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AmendmentNumber }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.PurchaseOrderId, item.Status });
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.HasIndex(item => item.WorkflowInstanceId);
+            entity.HasOne(item => item.PurchaseOrder)
+                .WithMany()
+                .HasForeignKey(item => item.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ProposedBusinessPartner)
+                .WithMany()
+                .HasForeignKey(item => item.ProposedBusinessPartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.WorkflowDefinition)
+                .WithMany()
+                .HasForeignKey(item => item.WorkflowDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.WorkflowInstance)
+                .WithMany()
+                .HasForeignKey(item => item.WorkflowInstanceId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProcurementPurchaseOrderCommitmentAdjustment>(entity =>
+        {
+            entity.ToTable("ProcurementPurchaseOrderCommitmentAdjustments", table =>
+                table.HasTrigger("TR_ProcurementPurchaseOrderCommitmentAdjustments_Immutable"));
+            entity.HasIndex(item => item.AmendmentId).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.PurchaseOrderId, item.Sequence }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.PurchaseRequisitionId, item.Sequence });
+            entity.HasOne(item => item.Amendment)
+                .WithMany(item => item.CommitmentAdjustments)
+                .HasForeignKey(item => item.AmendmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.PurchaseOrder)
+                .WithMany()
+                .HasForeignKey(item => item.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.PurchaseRequisition)
+                .WithMany()
+                .HasForeignKey(item => item.PurchaseRequisitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ProcurementBudget)
+                .WithMany()
+                .HasForeignKey(item => item.ProcurementBudgetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.BudgetCommitment)
+                .WithMany()
+                .HasForeignKey(item => item.BudgetCommitmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProcurementPurchaseOrderAmendmentDispatch>(entity =>
+        {
+            entity.ToTable("ProcurementPurchaseOrderAmendmentDispatches", table =>
+                table.HasTrigger("TR_ProcurementPurchaseOrderAmendmentDispatches_Immutable"));
+            entity.HasIndex(item => new { item.TenantId, item.AmendmentId, item.Sequence }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.PurchaseOrderId, item.RevisionNumber });
+            entity.HasOne(item => item.Amendment)
+                .WithMany(item => item.Dispatches)
+                .HasForeignKey(item => item.AmendmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.PurchaseOrder)
+                .WithMany()
+                .HasForeignKey(item => item.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProcurementPurchaseOrderAmendmentAcknowledgement>(entity =>
+        {
+            entity.ToTable("ProcurementPurchaseOrderAmendmentAcknowledgements", table =>
+                table.HasTrigger("TR_ProcurementPurchaseOrderAmendmentAcknowledgements_Immutable"));
+            entity.HasIndex(item => new { item.TenantId, item.DispatchId, item.Sequence }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.HasOne(item => item.Dispatch)
+                .WithMany(item => item.Acknowledgements)
+                .HasForeignKey(item => item.DispatchId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // PurchaseOrderReceipt entity

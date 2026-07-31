@@ -1972,9 +1972,6 @@ namespace ErpSystem.Web.Services
                     && item.RequisitionNumber == "PR-DEMO-1001-B"))
             {
                 var orderedPrId = Guid.NewGuid();
-                var purchaseOrderId = Guid.NewGuid();
-                var purchaseOrderItemId = Guid.NewGuid();
-                var receiptId = Guid.NewGuid();
 
                 _context.PurchaseRequisitions.Add(new PurchaseRequisition
                 {
@@ -1984,7 +1981,7 @@ namespace ErpSystem.Web.Services
                     RequisitionDate = now.AddDays(-12),
                     RequestedById = financeOwner.Id,
                     RequiredDate = now.Date.AddDays(4),
-                    Status = "Ordered",
+                    Status = "Approved",
                     Priority = "High",
                     Department = effectiveDepartment.Name,
                     Justification = "Mobile scanners needed for inventory validation and warehouse cutover.",
@@ -1998,72 +1995,6 @@ namespace ErpSystem.Web.Services
                     ApprovedAt = now.AddDays(-11),
                     TotalAmount = 4500m,
                     CreatedAt = now.AddDays(-12),
-                    CreatedBy = "System"
-                });
-
-                _context.PurchaseOrders.Add(new PurchaseOrder
-                {
-                    Id = purchaseOrderId,
-                    TenantId = tenantId,
-                    OrderNumber = "PO-DEMO-1001-01",
-                    BusinessPartnerId = customer.Id,
-                    OrderDate = now.AddDays(-10),
-                    RequiredDate = now.Date.AddDays(3),
-                    Status = "PartiallyReceived",
-                    RequestedById = financeOwner.Id,
-                    ApprovedById = financeOwner.Id,
-                    ApprovedAt = now.AddDays(-10),
-                    SubTotal = 4500m,
-                    TotalAmount = 4500m,
-                    SourceRequisitionId = orderedPrId,
-                    SourceRequisitionNumber = "PR-DEMO-1001-B",
-                    CreatedAt = now.AddDays(-10),
-                    CreatedBy = "System"
-                });
-
-                _context.PurchaseOrderItems.Add(new PurchaseOrderItem
-                {
-                    Id = purchaseOrderItemId,
-                    TenantId = tenantId,
-                    PurchaseOrderId = purchaseOrderId,
-                    InventoryItemId = inventoryItem.Id,
-                    ItemDescription = "Barcode Device Kit",
-                    OrderedQuantity = 6m,
-                    ReceivedQuantity = 6m,
-                    RemainingQuantity = 0m,
-                    UnitOfMeasure = "EA",
-                    UnitPrice = 750m,
-                    LineTotal = 4500m,
-                    LandedUnitCost = 750m,
-                    CreatedAt = now.AddDays(-10),
-                    CreatedBy = "System"
-                });
-
-                _context.PurchaseOrderReceipts.Add(new PurchaseOrderReceipt
-                {
-                    Id = receiptId,
-                    TenantId = tenantId,
-                    PurchaseOrderId = purchaseOrderId,
-                    ReceiptNumber = "RCV-DEMO-1001-01",
-                    ReceiptDate = now.AddDays(-2),
-                    Status = "Received",
-                    ReceivedById = financeOwner.Id,
-                    RequiresInspection = true,
-                    Notes = "Devices received and awaiting final inspection before deployment.",
-                    CreatedAt = now.AddDays(-2),
-                    CreatedBy = "System"
-                });
-
-                _context.PurchaseOrderReceiptItems.Add(new PurchaseOrderReceiptItem
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    ReceiptId = receiptId,
-                    PurchaseOrderItemId = purchaseOrderItemId,
-                    ReceivedQuantity = 6m,
-                    AcceptedQuantity = 6m,
-                    UnitOfMeasure = "EA",
-                    CreatedAt = now.AddDays(-2),
                     CreatedBy = "System"
                 });
             }
@@ -6742,6 +6673,13 @@ namespace ErpSystem.Web.Services
                     DisplayName = "Access External Helpdesk & Complaints",
                     Description = "Access the external helpdesk and complaints backoffice branch",
                     Category = "Helpdesk Branch Access"
+                },
+                new
+                {
+                    Name = "estate.land.project-readiness",
+                    DisplayName = "Mark Land Project Ready",
+                    Description = "Approve verified land demarcations for project management handoff",
+                    Category = "Estate - Land Management"
                 },
                 new
                 {

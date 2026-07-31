@@ -320,3 +320,35 @@ public sealed class ProcurementGhanepsExchangeOverviewDto
     public IReadOnlyList<ProcurementGhanepsExchangeEventDto> Events { get; init; } =
         Array.Empty<ProcurementGhanepsExchangeEventDto>();
 }
+
+public sealed class ProcurementGhanepsComplianceDto
+{
+    public ProcurementGhanepsSourceType SourceType { get; init; }
+    public Guid SourceId { get; init; }
+    public string SourceReference { get; init; } = string.Empty;
+    public Guid ConfigurationProfileId { get; init; }
+    public Guid ConfigurationDecisionId { get; init; }
+    public string ConfigurationValueHash { get; init; } = string.Empty;
+    public bool HasApplicableMapping { get; init; }
+    public bool IsCompliant { get; init; }
+    public string Code { get; init; } = string.Empty;
+    public string Message { get; init; } = string.Empty;
+    public IReadOnlyList<ProcurementGhanepsComplianceMappingDto> Mappings { get; init; } =
+        Array.Empty<ProcurementGhanepsComplianceMappingDto>();
+}
+
+public sealed class ProcurementGhanepsComplianceMappingDto
+{
+    public string MappingKey { get; init; } = string.Empty;
+    public bool AcknowledgementRequired { get; init; }
+    public bool ReconciliationRequired { get; init; }
+    public Guid? ExchangeEventId { get; init; }
+    public string? EventReference { get; init; }
+    public ProcurementGhanepsExchangeStatus? Status { get; init; }
+    public bool SuccessfulTransfer { get; init; }
+    public bool AcceptedAcknowledgement { get; init; }
+    public bool CompletedReconciliation { get; init; }
+    public bool EvidenceAvailable { get; init; }
+    public bool IsCompliant { get; init; }
+    public string Message { get; init; } = string.Empty;
+}

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   Building2,
   CheckCircle2,
@@ -54,6 +55,9 @@ function formatMoney(value?: number, currency = 'GHS') {
 }
 
 export default function EstatePropertyListingsPage() {
+  const searchParams = useSearchParams();
+  const requestedAssetId = searchParams.get('assetId');
+  const requestedListingType = searchParams.get('listingType');
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [documents, setDocuments] = React.useState<EstateManagedAssetDocument[]>(
     []
@@ -86,7 +90,10 @@ export default function EstatePropertyListingsPage() {
       });
       setAssets(data);
       setSelectedId((current) =>
-        current && data.some((asset) => asset.id === current)
+        requestedAssetId &&
+        data.some((asset) => asset.id === requestedAssetId)
+          ? requestedAssetId
+          : current && data.some((asset) => asset.id === current)
           ? current
           : (data[0]?.id ?? null)
       );
@@ -95,7 +102,7 @@ export default function EstatePropertyListingsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [requestedAssetId]);
 
   const loadDocuments = React.useCallback(async (assetId: string) => {
     try {
@@ -114,7 +121,17 @@ export default function EstatePropertyListingsPage() {
 
     setForm({
       isPublishedToExternalPortal: selected.isPublishedToExternalPortal,
-      externalListingType: selected.externalListingType || 'Rent',
+      externalListingType:
+        selected.externalListingType &&
+        selected.externalListingType !== 'None'
+          ? selected.externalListingType
+          : requestedListingType === 'Sale' ||
+              requestedListingType === 'Rent' ||
+              requestedListingType === 'SaleAndRent'
+            ? requestedListingType
+            : selected.assetType === EstateManagedAssetType.Land
+              ? 'Sale'
+              : 'Rent',
       externalListingStatus: selected.externalListingStatus || 'Published',
       externalListingPrice:
         selected.externalListingPrice == null
@@ -124,7 +141,7 @@ export default function EstatePropertyListingsPage() {
       externalListingNotes: selected.externalListingNotes || '',
     });
     void loadDocuments(selected.id);
-  }, [loadDocuments, selected]);
+  }, [loadDocuments, requestedListingType, selected]);
 
   const listingImages = documents.filter((document) => document.isListingImage);
   const publishedCount = assets.filter(
