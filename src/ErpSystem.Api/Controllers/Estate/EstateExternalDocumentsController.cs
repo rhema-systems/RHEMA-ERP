@@ -341,6 +341,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     public async Task<IActionResult> GetListingImage(Guid listingId, Guid documentId, CancellationToken cancellationToken)
     {
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var externallyAvailableAssetIds = WhereExternallyAvailableListings(
+                _db.EstateManagedAssets.AsNoTracking())
+            .Where(item => item.TenantId == tenantId)
+            .Select(item => item.Id);
         var document = await _db.EstateManagedAssetDocuments
             .AsNoTracking()
             .Include(item => item.EstateManagedAsset)
@@ -349,10 +353,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && item.TenantId == tenantId
                 && !item.IsDeleted
                 && item.IsListingImage
-                && item.EstateManagedAsset.IsPublishedToExternalPortal
-                && item.EstateManagedAsset.ExternalListingStatus == "Published"
-                && (item.EstateManagedAsset.Status == EstateManagedAssetStatus.Available
-                    || item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank), cancellationToken);
+                && externallyAvailableAssetIds.Contains(item.EstateManagedAssetId), cancellationToken);
 
         if (document == null)
         {
@@ -417,6 +418,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["requesterType"] = "External customer",
             ["contactReference"] = contact,
             ["listingPrice"] = asset.ExternalListingPrice?.ToString("0.##"),
+            ["salePrice"] = asset.ExternalSalePrice?.ToString("0.##"),
+            ["monthlyRent"] = asset.ExternalMonthlyRent?.ToString("0.##"),
+            ["leaseTermMonths"] = asset.ExternalLeaseTermMonths?.ToString(),
             ["listingCurrency"] = asset.ExternalListingCurrency,
             ["listingType"] = asset.ExternalListingType,
             ["offerAmount"] = request.OfferAmount?.ToString("0.##"),
@@ -714,6 +718,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             asset.AreaUnit,
             asset.ExternalListingType,
             asset.ExternalListingPrice,
+            asset.ExternalSalePrice,
+            asset.ExternalMonthlyRent,
+            asset.ExternalLeaseTermMonths,
             asset.ExternalListingCurrency,
             asset.ExternalListingNotes,
             asset.ExternalPublishedAt,
@@ -763,7 +770,26 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         => query.Where(asset => !asset.IsDeleted
             && asset.IsPublishedToExternalPortal
             && asset.ExternalListingStatus == "Published"
-            && (asset.Status == EstateManagedAssetStatus.Available || asset.Status == EstateManagedAssetStatus.LandBank));
+            && (asset.Status == EstateManagedAssetStatus.Available || asset.Status == EstateManagedAssetStatus.LandBank)
+            && (asset.ExternalListingType == "Sale"
+                || ((asset.ExternalListingType == "Rent"
+                        || asset.ExternalListingType == "SaleAndRent")
+                    && asset.ExternalMonthlyRent.HasValue
+                    && asset.ExternalMonthlyRent > 0
+                    && asset.ExternalLeaseTermMonths.HasValue
+                    && asset.ExternalLeaseTermMonths > 0))
+            && ((asset.AssetType == EstateManagedAssetType.Land
+                    && asset.Status == EstateManagedAssetStatus.LandBank
+                    && !asset.ProjectId.HasValue
+                    && !asset.IsReadyForProjectManagement
+                    && asset.BoundaryVerified
+                    && asset.Demarcations.Any(item => !item.IsDeleted)
+                    && !asset.Demarcations.Any(item => !item.IsDeleted && !item.BoundaryVerified))
+                || ((asset.AssetType == EstateManagedAssetType.Property
+                        || asset.AssetType == EstateManagedAssetType.Facility)
+                    && asset.SourceType == EstateManagedAssetSourceType.ProjectUnit
+                    && asset.IsPublishedFromProject
+                    && asset.Status == EstateManagedAssetStatus.Available)));
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();

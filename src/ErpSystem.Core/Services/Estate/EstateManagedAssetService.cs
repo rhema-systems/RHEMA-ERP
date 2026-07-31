@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -36,7 +37,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 && (!query.AvailableForLease.HasValue || item.IsAvailableForLease == query.AvailableForLease.Value)
                 && (!query.AvailableForSale.HasValue || item.IsAvailableForSale == query.AvailableForSale.Value)
                 && (!query.AvailableForSaleOrLease.HasValue
-                    || (item.IsAvailableForSale || item.IsAvailableForLease) == query.AvailableForSaleOrLease.Value));
+                    || (item.IsAvailableForSale || item.IsAvailableForLease) == query.AvailableForSaleOrLease.Value)
+                && (query.PortalListingCandidates != true
+                    || item.IsPublishedToExternalPortal
+                    || item.ExternalListingType != "None"));
 
         if (normalizedSearch != null)
         {
@@ -50,7 +54,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 || (item.Purpose != null && EF.Functions.Like(item.Purpose, search))
                 || (item.ZoningClassification != null && EF.Functions.Like(item.ZoningClassification, search))
                 || (item.GisLayerReference != null && EF.Functions.Like(item.GisLayerReference, search))
-                || (item.Location != null && EF.Functions.Like(item.Location, search)));
+                || (item.Location != null && EF.Functions.Like(item.Location, search))
+                || (item.LesseeName != null && EF.Functions.Like(item.LesseeName, search))
+                || (item.PropertyFileReference != null && EF.Functions.Like(item.PropertyFileReference, search)));
         }
 
         var assets = await assetsQuery
@@ -737,8 +743,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         var asset = await repository.FirstOrDefaultAsync(item => item.Id == assetId &&
             item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted && item.AssetType == EstateManagedAssetType.Land);
         if (asset == null) throw new InvalidOperationException("Land asset was not found.");
-        if (asset.IsPublishedToExternalPortal)
-            throw new InvalidOperationException("Withdraw the active external land listing before marking it ready for project management.");
+        if (asset.IsPublishedToExternalPortal || asset.ExternalListingType != "None")
+            throw new InvalidOperationException("Remove the land from Portal Listings before marking it ready for project management.");
         if (!asset.BoundaryVerified || string.IsNullOrWhiteSpace(asset.BoundaryCoordinates))
             throw new InvalidOperationException("Verify and record the cadastral boundary before project handoff.");
         var demarcations = await _unitOfWork.Repository<EstateLandDemarcation>()
@@ -779,6 +785,84 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         return MapToDto(asset);
     }
 
+    public Task<EstateManagedAssetDto> UpdateRegisterAsync(
+        Guid assetId,
+        UpdateEstateManagedAssetRegisterDto request)
+        => ExecuteSerializableMutationAsync(
+            () => UpdateRegisterCoreAsync(assetId, request));
+
+    private async Task<EstateManagedAssetDto> UpdateRegisterCoreAsync(
+        Guid assetId,
+        UpdateEstateManagedAssetRegisterDto request)
+    {
+        if (request.LeaseTermYears is <= 0 or > 999)
+        {
+            throw new InvalidOperationException("Lease term must be between 1 and 999 years.");
+        }
+
+        var repository = _unitOfWork.Repository<EstateManagedAsset>();
+        var asset = await repository.FirstOrDefaultAsync(item =>
+            item.Id == assetId
+            && item.TenantId == _currentUserProvider.TenantId
+            && !item.IsDeleted);
+        if (asset == null)
+        {
+            throw new InvalidOperationException("Estate asset was not found.");
+        }
+
+        if (asset.Status != EstateManagedAssetStatus.Available
+            || !asset.IsAvailableForLease)
+        {
+            throw new InvalidOperationException(
+                "Only land, property, or units released as available for lease can be assigned to a customer.");
+        }
+
+        if (asset.CustomerBusinessPartnerId.HasValue
+            && asset.CustomerBusinessPartnerId != request.CustomerBusinessPartnerId)
+        {
+            throw new InvalidOperationException(
+                "This asset already has a customer assignment. Manage changes through its existing lease case.");
+        }
+
+        BusinessPartner? customer = null;
+        if (request.CustomerBusinessPartnerId.HasValue)
+        {
+            customer = await _unitOfWork.Repository<BusinessPartner>()
+                .FirstOrDefaultAsync(item =>
+                    item.Id == request.CustomerBusinessPartnerId.Value
+                    && item.TenantId == _currentUserProvider.TenantId
+                    && !item.IsDeleted);
+            if (customer == null)
+            {
+                throw new InvalidOperationException("The linked customer was not found.");
+            }
+
+            if (!customer.IsActive
+                || !string.Equals(customer.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Select an active customer business partner for this lease.");
+            }
+        }
+
+        asset.DateOfTenancy = request.DateOfTenancy;
+        asset.RightOfEntryDate = request.RightOfEntryDate;
+        asset.LeaseTermYears = request.LeaseTermYears;
+        asset.CustomerBusinessPartnerId = request.CustomerBusinessPartnerId;
+        asset.LesseeName = TrimOrNull(request.LesseeName)
+            ?? TrimOrNull(customer?.PartnerName);
+        asset.LesseeAddress = TrimOrNull(request.LesseeAddress)
+            ?? TrimOrNull(customer?.PhysicalAddress);
+        asset.PropertyFileReference = TrimOrNull(request.PropertyFileReference);
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = _currentUserProvider.Username;
+        asset.LastModifiedById = _currentUserProvider.UserId;
+
+        await repository.UpdateAsync(asset);
+        await _unitOfWork.SaveChangesAsync();
+        return MapToDto(asset);
+    }
+
     public Task<EstateManagedAssetDto> UpdateExternalListingAsync(
         Guid assetId,
         UpdateEstateManagedAssetListingDto request)
@@ -800,15 +884,16 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             throw new InvalidOperationException("Select Sale, Rent, or Sale and Rent before publishing to the external portal.");
         }
 
-        if (request.IsPublishedToExternalPortal && asset.AssetType == EstateManagedAssetType.Land)
+        var isPortalListing = listingType != "None";
+        if (isPortalListing && asset.AssetType == EstateManagedAssetType.Land)
         {
             if (asset.Status != EstateManagedAssetStatus.LandBank || asset.ProjectId.HasValue)
             {
-                throw new InvalidOperationException("Land assigned to a development project cannot be published for sale.");
+                throw new InvalidOperationException("Land assigned to a development project cannot be sent to Portal Listings.");
             }
             if (!asset.BoundaryVerified)
             {
-                throw new InvalidOperationException("Verify the main cadastral boundary before publishing land for sale.");
+                throw new InvalidOperationException("Verify the main cadastral boundary before sending land to Portal Listings.");
             }
 
             var demarcations = (await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
@@ -818,7 +903,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 .ToList();
             if (!demarcations.Any() || demarcations.Any(item => !item.BoundaryVerified))
             {
-                throw new InvalidOperationException("Add and verify every land demarcation before publishing land for sale.");
+                throw new InvalidOperationException("Add and verify every land demarcation before sending land to Portal Listings.");
             }
             var assignedLandReferences = await GetAssignedProjectLandReferencesAsync();
             if (demarcations.Any(item => IsDemarcationAssignedToProject(
@@ -828,18 +913,70 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                     assignedLandReferences)))
             {
                 throw new InvalidOperationException(
-                    "Land with a demarcated portion assigned to a development project cannot be published for sale.");
+                    "Land with a demarcated portion assigned to a development project cannot be sent to Portal Listings.");
             }
 
-            // Sale and project handoff are exclusive choices. Withdrawing the listing allows
-            // Estate to mark the parcel project-ready again after review.
+            // Portal listing and project handoff are exclusive choices. Staging the land in
+            // Portal Listings removes it from the project-ready pool before publication.
             asset.IsReadyForProjectManagement = false;
+        }
+        else if (isPortalListing
+            && (asset.AssetType == EstateManagedAssetType.Property
+                || asset.AssetType == EstateManagedAssetType.Facility))
+        {
+            if (asset.SourceType != EstateManagedAssetSourceType.ProjectUnit
+                || !asset.IsPublishedFromProject)
+            {
+                throw new InvalidOperationException(
+                    "Only property handed off from Project Management can be sent to Portal Listings.");
+            }
+
+            if (asset.Status != EstateManagedAssetStatus.Available)
+            {
+                throw new InvalidOperationException(
+                    "Only an available project-handoff property can be listed on the external portal.");
+            }
+        }
+
+        var includesSale = listingType is "Sale" or "SaleAndRent";
+        var includesRent = listingType is "Rent" or "SaleAndRent";
+        var requestedSalePrice = request.ExternalSalePrice
+            ?? (includesSale ? request.ExternalListingPrice : null);
+        var requestedMonthlyRent = request.ExternalMonthlyRent
+            ?? (includesRent && !includesSale ? request.ExternalListingPrice : null);
+        var salePrice = includesSale && requestedSalePrice > 0
+            ? requestedSalePrice
+            : null;
+        var monthlyRent = includesRent && requestedMonthlyRent > 0
+            ? requestedMonthlyRent
+            : null;
+        var leaseTermMonths = includesRent && request.ExternalLeaseTermMonths > 0
+            ? request.ExternalLeaseTermMonths
+            : null;
+
+        if (request.IsPublishedToExternalPortal && includesRent)
+        {
+            if (!monthlyRent.HasValue)
+            {
+                throw new InvalidOperationException("Enter the monthly rent before publishing a rental listing.");
+            }
+
+            if (!leaseTermMonths.HasValue || leaseTermMonths > 1200)
+            {
+                throw new InvalidOperationException(
+                    "Enter a rental duration between 1 and 1,200 months before publishing.");
+            }
         }
 
         asset.IsPublishedToExternalPortal = request.IsPublishedToExternalPortal;
         asset.ExternalListingType = listingType;
         asset.ExternalListingStatus = request.IsPublishedToExternalPortal ? NormalizeListingStatus(request.ExternalListingStatus) : "Draft";
-        asset.ExternalListingPrice = request.ExternalListingPrice > 0 ? request.ExternalListingPrice : null;
+        asset.ExternalSalePrice = salePrice;
+        asset.ExternalMonthlyRent = monthlyRent;
+        asset.ExternalLeaseTermMonths = leaseTermMonths;
+        // Keep the legacy price populated for older integrations while the portal uses
+        // the explicit sale and monthly-rent values.
+        asset.ExternalListingPrice = includesSale ? salePrice : monthlyRent;
         asset.ExternalListingCurrency = string.IsNullOrWhiteSpace(request.ExternalListingCurrency)
             ? "GHS"
             : request.ExternalListingCurrency.Trim().ToUpperInvariant();
@@ -847,8 +984,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.ExternalPublishedAt = request.IsPublishedToExternalPortal
             ? asset.ExternalPublishedAt ?? DateTime.UtcNow
             : null;
-        asset.IsAvailableForSale = listingType is "Sale" or "SaleAndRent";
-        asset.IsAvailableForLease = listingType is "Rent" or "SaleAndRent";
+        asset.IsAvailableForSale = includesSale;
+        asset.IsAvailableForLease = includesRent;
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = _currentUserProvider.Username;
         asset.LastModifiedById = _currentUserProvider.UserId;
@@ -1440,6 +1577,16 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ProjectTitle = asset.ProjectTitle,
         ProjectUnitCode = asset.ProjectUnitCode,
         UnitType = asset.UnitType,
+        DateOfTenancy = asset.DateOfTenancy,
+        RightOfEntryDate = asset.RightOfEntryDate,
+        LeaseTermYears = asset.LeaseTermYears,
+        GroundRentPayable = asset.GroundRentPayable,
+        GroundRentRatePerAcre = asset.GroundRentRatePerAcre,
+        GroundRentComputed = asset.GroundRentComputed,
+        CustomerBusinessPartnerId = asset.CustomerBusinessPartnerId,
+        LesseeName = asset.LesseeName,
+        LesseeAddress = asset.LesseeAddress,
+        PropertyFileReference = asset.PropertyFileReference,
         AreaSquareMeters = asset.AreaSquareMeters,
         ValuationAmount = asset.ValuationAmount,
         Currency = asset.Currency,
@@ -1451,6 +1598,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ExternalListingType = asset.ExternalListingType,
         ExternalListingStatus = asset.ExternalListingStatus,
         ExternalListingPrice = asset.ExternalListingPrice,
+        ExternalSalePrice = asset.ExternalSalePrice,
+        ExternalMonthlyRent = asset.ExternalMonthlyRent,
+        ExternalLeaseTermMonths = asset.ExternalLeaseTermMonths,
         ExternalListingCurrency = asset.ExternalListingCurrency,
         ExternalListingNotes = asset.ExternalListingNotes,
         ExternalPublishedAt = asset.ExternalPublishedAt,

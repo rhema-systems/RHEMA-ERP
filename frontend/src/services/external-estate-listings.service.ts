@@ -20,6 +20,9 @@ export interface ExternalEstateListing {
   areaUnit?: string | null;
   externalListingType: string;
   externalListingPrice?: number | null;
+  externalSalePrice?: number | null;
+  externalMonthlyRent?: number | null;
+  externalLeaseTermMonths?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;
   externalPublishedAt?: string | null;

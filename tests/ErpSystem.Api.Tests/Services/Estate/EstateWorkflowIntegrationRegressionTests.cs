@@ -128,6 +128,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         publicMethod.Should().Contain("ExecuteSerializableMutationAsync(");
         publicMethod.Should().Contain("MarkReadyForProjectManagementCoreAsync(assetId)");
         coreMethod.Should().Contain("demarcations.Any(item => !item.BoundaryVerified)");
+        coreMethod.Should().Contain("asset.ExternalListingType != \"None\"");
         coreMethod.Should().Contain("asset.IsReadyForProjectManagement = true;");
     }
 
@@ -337,11 +338,12 @@ public sealed class EstateWorkflowIntegrationRegressionTests
 
         listingAction.Should().Contain("<Button");
         listingAction.Should().Contain("disabled");
-        listingAction.Should().Contain("<Button asChild variant=\"outline\">");
+        listingAction.Should().Contain("sendLandToPortalListings(selected.asset)");
         listingAction.IndexOf("disabled", StringComparison.Ordinal)
             .Should().BeLessThan(
-                listingAction.IndexOf("<Link", StringComparison.Ordinal));
-        listingAction.Should().NotContain("asChild\n                    variant=\"outline\"\n                    disabled");
+                listingAction.IndexOf("onClick", StringComparison.Ordinal));
+        listingAction.Should().NotContain("<Link");
+        listingAction.Should().NotContain("asChild");
     }
 
     [Fact]
@@ -630,9 +632,111 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "Discard all unsaved demarcation drafts and close this dialog?");
         dialog.Should().Contain(
             "<Dialog open={open} onOpenChange={handleOpenChange}>");
-        page.Should().Contain("selected.asset.isPublishedToExternalPortal ||");
+        page.Should().Contain("selected.asset.externalListingType !== 'None' ||");
         page.Should().Contain(
-            "Withdraw the active external land listing before marking this land ready for a project.");
+            "Remove the land from Portal Listings before marking it ready for a project.");
+    }
+
+    [Fact]
+    public void PortalListings_StageOnlyEligibleLandAndProjectHandoffProperty()
+    {
+        var managedAssets = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var externalController = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "EstateExternalDocumentsController.cs");
+        var listingsPage = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "property-management",
+            "listings",
+            "page.tsx");
+        var landPage = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "land-management",
+            "page.tsx");
+        var externalPage = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "external-portal",
+            "property-listings",
+            "page.tsx");
+        var propertyRegister = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "property-management",
+            "[entityType]",
+            "PropertyUnitRegister.tsx");
+
+        managedAssets.Should().Contain("query.PortalListingCandidates != true");
+        managedAssets.Should().Contain("item.ExternalListingType != \"None\"");
+        managedAssets.Should().Contain("!asset.IsPublishedFromProject");
+        managedAssets.Should().Contain("asset.IsReadyForProjectManagement = false;");
+        managedAssets.Should().Contain("Enter the monthly rent before publishing a rental listing.");
+        managedAssets.Should().Contain("ExternalLeaseTermMonths");
+
+        externalController.Should().Contain("asset.Demarcations.Any(item => !item.IsDeleted)");
+        externalController.Should().Contain("asset.SourceType == EstateManagedAssetSourceType.ProjectUnit");
+        externalController.Should().Contain("asset.ExternalMonthlyRent > 0");
+        externalController.Should().Contain("asset.ExternalLeaseTermMonths > 0");
+
+        listingsPage.Should().Contain("portalListingCandidates: true");
+        listingsPage.Should().Contain("Rent per month");
+        listingsPage.Should().Contain("Rental duration");
+        listingsPage.Should().Contain("Remove from Portal Listings");
+        landPage.Should().Contain("sendLandToPortalListings");
+        landPage.Should().Contain("Send to Portal Listings");
+        propertyRegister.Should().Contain("sendProjectPropertyToPortalListings");
+        propertyRegister.Should().Contain("asset.isPublishedFromProject");
+        propertyRegister.Should().Contain("'Send to portal'");
+        externalPage.Should().Contain("Rent per month");
+        externalPage.Should().Contain("formatLeaseTerm");
+    }
+
+    [Fact]
+    public void GroundRentAssessment_FollowsEstateSopAndIsInheritedByLeaseManagement()
+    {
+        var procedureService = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "ProcedureCaseService.cs");
+        var leaseSetup = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "property-management",
+            "[entityType]",
+            "LeaseSetupWorkspace.tsx");
+
+        procedureService.Should().Contain("plotSizeAcres * ratePerAcre");
+        procedureService.Should().Contain("asset.GroundRentRatePerAcre = ratePerAcre;");
+        procedureService.Should().Contain("asset.GroundRentComputed = computed;");
+        procedureService.Should().Contain(
+            "asset.GroundRentPayable = decimal.Ceiling(rawGroundRent);");
+
+        leaseSetup.Should().Contain("Approved Ground Rent Assessment");
+        leaseSetup.Should().Contain("selectedAsset.groundRentRatePerAcre");
+        leaseSetup.Should().Contain("/estate/EstateLandsPartiallyServiced");
+        leaseSetup.Should().NotContain("AnnualFlat");
+        leaseSetup.Should().NotContain("PerSquareMeterAnnual");
+        leaseSetup.Should().NotContain("groundRentBillingFrequency");
     }
 
     [Fact]

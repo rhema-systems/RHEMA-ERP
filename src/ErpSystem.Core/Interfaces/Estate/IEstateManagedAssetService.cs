@@ -15,6 +15,7 @@ public interface IEstateManagedAssetService
     Task<EstateLandDemarcationDto> UpdateLandDemarcationAsync(Guid assetId, Guid demarcationId, SaveEstateLandDemarcationDto request);
     Task DeleteLandDemarcationAsync(Guid assetId, Guid demarcationId);
     Task<EstateManagedAssetDto> MarkReadyForProjectManagementAsync(Guid assetId);
+    Task<EstateManagedAssetDto> UpdateRegisterAsync(Guid assetId, UpdateEstateManagedAssetRegisterDto request);
     Task<EstateManagedAssetDto> UpdateExternalListingAsync(Guid assetId, UpdateEstateManagedAssetListingDto request);
     Task<EstateManagedAssetDocumentDto> RegisterDocumentAsync(Guid assetId, RegisterEstateManagedAssetDocumentDto document);
     Task<EstateManagedAssetDocumentDto> SetPrimaryListingImageAsync(Guid assetId, Guid documentId);

@@ -6,7 +6,6 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft,
   ArrowRight,
-  Building2,
   ClipboardList,
   CreditCard,
   ExternalLink,
@@ -32,6 +31,8 @@ import { ProcedureCaseWorkspace } from '@/components/procedures/ProcedureCaseWor
 import { Separator } from '@/components/ui/separator';
 import { estatePropertyManagementService } from '@/services/estate-property-management.service';
 import type { FacilitiesProcedureWorkspace } from '@/services/estate-facilities.service';
+import { LeaseSetupWorkspace } from './LeaseSetupWorkspace';
+import { PropertyUnitRegister } from './PropertyUnitRegister';
 
 type PropertyHandoff = {
   title: string;
@@ -187,30 +188,7 @@ const documentIndexOwnershipRows = [
   },
 ];
 
-const propertyUnitOwnershipRows = [
-  {
-    label: 'Estate owns land bank',
-    detail:
-      'Estate Land Management prepares and marks the land source ready before Project Management pulls it for development.',
-  },
-  {
-    label: 'Project Management creates',
-    detail:
-      'Project Management develops the property structure, units, spaces, common areas, completion status, and readiness package.',
-  },
-  {
-    label: 'Property Management receives',
-    detail:
-      'Property Management validates identifiers, hierarchy, readiness, condition, availability, facilities, billing context, and records links.',
-  },
-  {
-    label: 'Release controls downstream',
-    detail:
-      'Only approved releases move into leasing, occupancy, billing, facilities, maintenance, complaints, reports, and records operations.',
-  },
-];
-
-function getPropertyHandoff(entityType: string): PropertyHandoff {
+function getPropertyHandoff(entityType: string): PropertyHandoff | null {
   if (entityType === 'EstatePropertyManagementDocumentRecordIndex') {
     return {
       title: 'Property Documents / Records Index Handoff',
@@ -492,30 +470,7 @@ function getPropertyHandoff(entityType: string): PropertyHandoff {
     };
   }
 
-  return {
-    title: 'Project Management To Property Management Handoff',
-    description:
-      'Estate land bank records are made ready under Estate, Project Management pulls them for development, then pushes completed properties, sites, units, spaces, common areas, and service areas into Property Management for receiving, readiness, availability, billing, facilities, maintenance, records, and operational release.',
-    sourceLabel:
-      'Source: Estate Land Bank -> Project Management -> Estate / Property Management',
-    icon: Building2,
-    primaryAction: {
-      label: 'Open Project Management',
-      href: '/development/projects',
-    },
-    secondaryActions: [
-      { label: 'Project Operations', href: '/development/project-operations' },
-      { label: 'Land Management', href: '/estate/land-management' },
-      { label: 'Facilities Management', href: '/estate/facilities' },
-    ],
-    checkpoints: [
-      'Use Estate Land Management to mark demarcated land bank records ready for Project Management.',
-      'Create or structurally update property and unit records in Project Management from that land source.',
-      'Push completed property, site, unit, space, common area, service area, readiness, and completion records into Property Management.',
-      'Validate identifiers, hierarchy, readiness, condition, utilities, access, facilities, billing setup, availability, and records links before release.',
-      'Release only clean or approved-exception units as Active for Leasing, Active for Operations, Blocked, Under Maintenance, Not Ready, or Closed.',
-    ],
-  };
+  return null;
 }
 
 export default function PropertyManagementWorkspacePage() {
@@ -601,8 +556,12 @@ export default function PropertyManagementWorkspacePage() {
   }
 
   const { procedure } = workspace;
+  const isPropertyUnitRegister =
+    procedure.entityType === 'EstatePropertyManagementPropertyUnit';
+  const isLeaseManagement =
+    procedure.entityType === 'EstatePropertyManagementLease';
   const handoff = getPropertyHandoff(procedure.entityType);
-  const HandoffIcon = handoff.icon;
+  const HandoffIcon = handoff?.icon;
 
   return (
     <div className="space-y-6">
@@ -628,52 +587,65 @@ export default function PropertyManagementWorkspacePage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{procedure.source}</Badge>
-            <Badge variant="secondary">{workspace.stages.length} stages</Badge>
+            <Badge variant="secondary">
+              {isPropertyUnitRegister
+                ? 'Estate records register'
+                : `${workspace.stages.length} stages`}
+            </Badge>
           </div>
         </div>
       </div>
 
-      <ProcedureCaseWorkspace
-        module="PropertyManagement"
-        entityType={procedure.entityType}
-        defaultTitle={procedure.title}
-      />
+      {isPropertyUnitRegister ? (
+        <PropertyUnitRegister />
+      ) : (
+        <>
+          {isLeaseManagement ? <LeaseSetupWorkspace /> : null}
+          <ProcedureCaseWorkspace
+            module="PropertyManagement"
+            entityType={procedure.entityType}
+            defaultTitle={procedure.title}
+          />
+        </>
+      )}
 
-      <Card className="border-border bg-card text-card-foreground">
-        <CardHeader>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
-                <HandoffIcon className="h-5 w-5 text-primary" />
+      {handoff && HandoffIcon ? (
+        <Card className="border-border bg-card text-card-foreground">
+          <CardHeader>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
+                  <HandoffIcon className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <CardTitle>{handoff.title}</CardTitle>
+                  <Badge variant="outline" className="mt-3 w-fit">
+                    {handoff.sourceLabel}
+                  </Badge>
+                </div>
               </div>
-              <div>
-                <CardTitle>{handoff.title}</CardTitle>
-                <Badge variant="outline" className="mt-3 w-fit">
-                  {handoff.sourceLabel}
-                </Badge>
-              </div>
-            </div>
-            <Button asChild>
-              <Link href={handoff.primaryAction.href}>
-                {handoff.primaryAction.label}
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            {handoff.secondaryActions.map((action) => (
-              <Button key={action.href} asChild variant="outline" size="sm">
-                <Link href={action.href}>
-                  {action.label}
-                  <ExternalLink className="ml-2 h-3.5 w-3.5" />
+              <Button asChild>
+                <Link href={handoff.primaryAction.href}>
+                  {handoff.primaryAction.label}
+                  <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {handoff.secondaryActions.map((action) => (
+                <Button key={action.href} asChild variant="outline" size="sm">
+                  <Link href={action.href}>
+                    {action.label}
+                    <ExternalLink className="ml-2 h-3.5 w-3.5" />
+                  </Link>
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {procedure.entityType ===
       'EstatePropertyManagementBillingServiceCharge' ? (
@@ -794,27 +766,6 @@ export default function PropertyManagementWorkspacePage() {
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {documentIndexOwnershipRows.map((row) => (
-              <div
-                key={row.label}
-                className="rounded-md border bg-background p-4"
-              >
-                <div className="font-medium">{row.label}</div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {procedure.entityType === 'EstatePropertyManagementPropertyUnit' ? (
-        <Card className="border-border bg-card text-card-foreground">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-primary" />
-              <CardTitle>Property And Unit Receiving Controls</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {propertyUnitOwnershipRows.map((row) => (
               <div
                 key={row.label}
                 className="rounded-md border bg-background p-4"

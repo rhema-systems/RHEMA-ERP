@@ -4,6 +4,7 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260731091028_AddEstatePropertyRegisterFields")]
+    partial class AddEstatePropertyRegisterFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -5148,9 +5151,6 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("nvarchar(120)");
 
-                    b.Property<int?>("ExternalLeaseTermMonths")
-                        .HasColumnType("int");
-
                     b.Property<string>("ExternalListingCurrency")
                         .IsRequired()
                         .HasMaxLength(10)
@@ -5161,14 +5161,6 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(2000)");
 
                     b.Property<decimal?>("ExternalListingPrice")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("ExternalMonthlyRent")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("ExternalSalePrice")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
@@ -5219,14 +5211,6 @@ namespace ErpSystem.Data.Migrations
                         .HasDefaultValue("NotLinked");
 
                     b.Property<decimal?>("GroundRentPayable")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("GroundRentComputed")
-                        .HasPrecision(18, 3)
-                        .HasColumnType("decimal(18,3)");
-
-                    b.Property<decimal?>("GroundRentRatePerAcre")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 

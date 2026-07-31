@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using ErpSystem.Api.Services.Notifications;
 using ErpSystem.Core.DTOs.Procedures;
@@ -298,7 +299,24 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             }
         }
 
+        var groundRentAssetCode = await SyncEstateGroundRentAssessmentAsync(
+            procedureCase,
+            request.FieldValues,
+            tenantId,
+            userId,
+            now);
+
         _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, "Updated intake", procedureCase.CurrentStageName, "Intake fields saved."));
+        if (groundRentAssetCode != null)
+        {
+            _db.ProcedureCaseActivities.Add(Activity(
+                tenantId,
+                userId,
+                procedureCase.Id,
+                "Ground rent assessed",
+                procedureCase.CurrentStageName,
+                $"SOP ground-rent assessment synchronized to Estate asset {groundRentAssetCode}."));
+        }
         await _db.SaveChangesAsync();
 
         return ToDetailDto((await LoadCaseAsync(id, asTracking: false))!);
@@ -1393,6 +1411,73 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         string.Equals(entityType, "EstateLandsPartiallyServiced", StringComparison.OrdinalIgnoreCase)
         || string.Equals(entityType, "EstateTraditionalLands", StringComparison.OrdinalIgnoreCase)
         || string.Equals(entityType, "EstateTenancyRegularisation", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<string?> SyncEstateGroundRentAssessmentAsync(
+        ProcedureCase procedureCase,
+        IDictionary<string, string?> requestedValues,
+        Guid tenantId,
+        Guid userId,
+        DateTime now)
+    {
+        if (!string.Equals(procedureCase.Module, "Estate", StringComparison.OrdinalIgnoreCase)
+            || !HasLandFeeDetermination(procedureCase.EntityType))
+        {
+            return null;
+        }
+
+        string? CurrentValue(string key)
+        {
+            if (requestedValues.TryGetValue(key, out var requestedValue))
+            {
+                return requestedValue;
+            }
+
+            return procedureCase.Fields
+                .FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase))
+                ?.Value;
+        }
+
+        var propertyNumber = CurrentValue("propertyNumber")?.Trim();
+        if (string.IsNullOrWhiteSpace(propertyNumber)
+            || !TryParseEstateDecimal(CurrentValue("plotSizeAcres"), out var plotSizeAcres)
+            || !TryParseEstateDecimal(CurrentValue("groundRentRatePerAcre"), out var ratePerAcre)
+            || plotSizeAcres <= 0
+            || ratePerAcre < 0)
+        {
+            return null;
+        }
+
+        var asset = await _db.EstateManagedAssets
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId
+                && item.AssetCode == propertyNumber
+                && !item.IsDeleted);
+        if (asset == null)
+        {
+            return null;
+        }
+
+        var rawGroundRent = plotSizeAcres * ratePerAcre;
+        var computed = decimal.Round(
+            rawGroundRent,
+            3,
+            MidpointRounding.AwayFromZero);
+        asset.GroundRentRatePerAcre = ratePerAcre;
+        asset.GroundRentComputed = computed;
+        asset.GroundRentPayable = decimal.Ceiling(rawGroundRent);
+        asset.UpdatedAt = now;
+        asset.UpdatedBy = _currentUser.UserName;
+        asset.LastModifiedById = userId;
+
+        return asset.AssetCode;
+    }
+
+    private static bool TryParseEstateDecimal(string? value, out decimal result)
+        => decimal.TryParse(
+            value,
+            NumberStyles.Number,
+            CultureInfo.InvariantCulture,
+            out result);
 
     private static IReadOnlyList<string> EstateStageNames(string entityType) =>
         entityType switch

@@ -49,6 +49,28 @@ function formatMoney(value?: number | null, currency = 'GHS') {
   }).format(value);
 }
 
+function formatLeaseTerm(months?: number | null) {
+  if (!months) return 'Duration on request';
+  if (months % 12 === 0) {
+    const years = months / 12;
+    return `${years} year${years === 1 ? '' : 's'}`;
+  }
+  return `${months} month${months === 1 ? '' : 's'}`;
+}
+
+function listingPriceSummary(listing: ExternalEstateListing) {
+  if (listing.externalListingType === 'Rent') {
+    return `${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / month`;
+  }
+  if (listing.externalListingType === 'SaleAndRent') {
+    return `Sale ${formatMoney(listing.externalSalePrice, listing.externalListingCurrency)} · Rent ${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / month`;
+  }
+  return formatMoney(
+    listing.externalSalePrice ?? listing.externalListingPrice,
+    listing.externalListingCurrency
+  );
+}
+
 function listingTypeLabel(value: string) {
   if (value === 'SaleAndRent') return 'Sale and rent';
   if (value === 'Sale') return 'For sale';
@@ -56,7 +78,9 @@ function listingTypeLabel(value: string) {
   return value;
 }
 
-function availableIntents(listing?: ExternalEstateListing | null): ListingIntent[] {
+function availableIntents(
+  listing?: ExternalEstateListing | null
+): ListingIntent[] {
   if (!listing) return [];
   if (listing.externalListingType === 'SaleAndRent') return ['Rent', 'Sale'];
   return listing.externalListingType === 'Sale' ? ['Sale'] : ['Rent'];
@@ -83,7 +107,9 @@ function areaLabel(listing: ExternalEstateListing) {
 function locationLabel(listing: ExternalEstateListing) {
   return (
     listing.location ||
-    [listing.town, listing.district, listing.region].filter(Boolean).join(', ') ||
+    [listing.town, listing.district, listing.region]
+      .filter(Boolean)
+      .join(', ') ||
     'Location not recorded'
   );
 }
@@ -116,7 +142,8 @@ function ListingImage({ listing }: { listing: ExternalEstateListing }) {
 
     const load = async () => {
       try {
-        const blob = await externalEstateListingsService.getListingImage(listing);
+        const blob =
+          await externalEstateListingsService.getListingImage(listing);
         if (!blob || !active) return;
         objectUrl = URL.createObjectURL(blob);
         setImageUrl(objectUrl);
@@ -171,7 +198,9 @@ function ListingStat({
       <Icon className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
       <div className="min-w-0">
         <div className="text-xs text-slate-500">{label}</div>
-        <div className="truncate text-sm font-medium text-slate-900">{value}</div>
+        <div className="truncate text-sm font-medium text-slate-900">
+          {value}
+        </div>
       </div>
     </div>
   );
@@ -183,7 +212,8 @@ export default function ExternalPropertyListingsPage() {
   const [search, setSearch] = React.useState('');
   const [location, setLocation] = React.useState('');
   const [listingType, setListingType] = React.useState('all');
-  const [requestIntent, setRequestIntent] = React.useState<ListingIntent>('Rent');
+  const [requestIntent, setRequestIntent] =
+    React.useState<ListingIntent>('Rent');
   const [applicantName, setApplicantName] = React.useState('');
   const [contact, setContact] = React.useState('');
   const [offerAmount, setOfferAmount] = React.useState('');
@@ -199,7 +229,10 @@ export default function ExternalPropertyListingsPage() {
     [listings, selectedId]
   );
 
-  const requestOptions = React.useMemo(() => availableIntents(selected), [selected]);
+  const requestOptions = React.useMemo(
+    () => availableIntents(selected),
+    [selected]
+  );
 
   const loadListings = React.useCallback(async () => {
     setIsLoading(true);
@@ -215,7 +248,7 @@ export default function ExternalPropertyListingsPage() {
       setSelectedId((current) =>
         current && data.some((listing) => listing.id === current)
           ? current
-          : data[0]?.id ?? null
+          : (data[0]?.id ?? null)
       );
     } catch {
       setError('Could not load property listings.');
@@ -282,7 +315,8 @@ export default function ExternalPropertyListingsPage() {
             Property Listings
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Browse available estate units and submit a purchase bid or rental request.
+            Browse available estate units and submit a purchase bid or rental
+            request.
           </p>
         </div>
         <Badge variant="outline" className="w-fit">
@@ -400,10 +434,7 @@ export default function ExternalPropertyListingsPage() {
                   </div>
                   <div className="flex items-center justify-between gap-3 text-sm">
                     <span className="font-semibold text-slate-900">
-                      {formatMoney(
-                        listing.externalListingPrice,
-                        listing.externalListingCurrency
-                      )}
+                      {listingPriceSummary(listing)}
                     </span>
                     <span className="text-slate-500">{areaLabel(listing)}</span>
                   </div>
@@ -445,24 +476,47 @@ export default function ExternalPropertyListingsPage() {
                       label="Location"
                       value={locationLabel(selected)}
                     />
-                    <ListingStat icon={Ruler} label="Area" value={areaLabel(selected)} />
+                    <ListingStat
+                      icon={Ruler}
+                      label="Area"
+                      value={areaLabel(selected)}
+                    />
                     <ListingStat
                       icon={CalendarDays}
                       label="Published"
                       value={formatPublishedDate(selected.externalPublishedAt)}
                     />
+                    {selected.externalListingType !== 'Sale' ? (
+                      <ListingStat
+                        icon={CalendarDays}
+                        label="Rental duration"
+                        value={formatLeaseTerm(
+                          selected.externalLeaseTermMonths
+                        )}
+                      />
+                    ) : null}
                   </div>
 
                   <div className="rounded-md bg-slate-50 p-4">
-                    <div className="text-xs text-slate-500">Listed price</div>
+                    <div className="text-xs text-slate-500">
+                      {requestIntent === 'Sale'
+                        ? 'Sale price'
+                        : 'Rent per month'}
+                    </div>
                     <div className="mt-1 text-xl font-semibold text-slate-900">
                       {formatMoney(
-                        selected.externalListingPrice,
+                        requestIntent === 'Sale'
+                          ? (selected.externalSalePrice ??
+                              selected.externalListingPrice)
+                          : (selected.externalMonthlyRent ??
+                              selected.externalListingPrice),
                         selected.externalListingCurrency
                       )}
                     </div>
                     <div className="mt-1 text-sm text-slate-500">
-                      {listingTypeLabel(selected.externalListingType)}
+                      {requestIntent === 'Rent'
+                        ? formatLeaseTerm(selected.externalLeaseTermMonths)
+                        : listingTypeLabel(selected.externalListingType)}
                     </div>
                   </div>
 
@@ -478,7 +532,9 @@ export default function ExternalPropertyListingsPage() {
                     <Label>Request type</Label>
                     <Select
                       value={requestIntent}
-                      onValueChange={(value) => setRequestIntent(value as ListingIntent)}
+                      onValueChange={(value) =>
+                        setRequestIntent(value as ListingIntent)
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -500,7 +556,9 @@ export default function ExternalPropertyListingsPage() {
                       <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                       <Input
                         value={applicantName}
-                        onChange={(event) => setApplicantName(event.target.value)}
+                        onChange={(event) =>
+                          setApplicantName(event.target.value)
+                        }
                         className="pl-9"
                         required
                       />
@@ -520,7 +578,9 @@ export default function ExternalPropertyListingsPage() {
                   </div>
                   {requestIntent === 'Sale' ? (
                     <div className="space-y-2">
-                      <Label>Bid amount ({selected.externalListingCurrency || 'GHS'})</Label>
+                      <Label>
+                        Bid amount ({selected.externalListingCurrency || 'GHS'})
+                      </Label>
                       <Input
                         type="number"
                         min="0.01"

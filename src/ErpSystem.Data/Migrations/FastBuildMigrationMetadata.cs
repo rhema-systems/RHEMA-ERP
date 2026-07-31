@@ -123,3 +123,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260728230211_AddEstateLandDemarcations")] partial class AddEstateLandDemarcations { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260729022744_AddSupplierEvidenceDmsLinks")] partial class AddSupplierEvidenceDmsLinks { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260729124416_TDC0402FrameworkCallOffs")] partial class TDC0402FrameworkCallOffs { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260731091028_AddEstatePropertyRegisterFields")] partial class AddEstatePropertyRegisterFields { }

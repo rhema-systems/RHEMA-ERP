@@ -3,6 +3,7 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
   BadgeCheck,
@@ -161,11 +162,10 @@ function DetailRow({
 }
 
 export default function EstateLandManagementPage() {
+  const router = useRouter();
   const { hasAnyRole, hasPermission } = useAuth();
   const canLinkGis = hasAnyRole(GIS_LINK_ROLES);
-  const canMarkProjectReady = hasPermission(
-    'estate.land.project-readiness'
-  );
+  const canMarkProjectReady = hasPermission('estate.land.project-readiness');
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [acquisitions, setAcquisitions] = React.useState<LandAcquisitionItem[]>(
     []
@@ -183,6 +183,9 @@ export default function EstateLandManagementPage() {
   const [gisLinkAsset, setGisLinkAsset] =
     React.useState<EstateManagedAsset | null>(null);
   const [markingReadyKey, setMarkingReadyKey] = React.useState<string | null>(
+    null
+  );
+  const [sendingListingId, setSendingListingId] = React.useState<string | null>(
     null
   );
 
@@ -279,9 +282,7 @@ export default function EstateLandManagementPage() {
         ...acquisitionItems.map((item) => `acquisition:${item.id}`),
       ];
       setSelectedKey((current) =>
-        current && nextKeys.includes(current)
-          ? current
-          : (nextKeys[0] ?? null)
+        current && nextKeys.includes(current) ? current : (nextKeys[0] ?? null)
       );
     } catch (error) {
       console.error('Failed to load land records', error);
@@ -300,11 +301,10 @@ export default function EstateLandManagementPage() {
       record.type === 'acquisition' ||
       record.asset.sourceType === EstateManagedAssetSourceType.LandAcquisition
   ).length;
-  const verifiedCount = records.filter(
-    (record) =>
-      record.type === 'asset'
-        ? record.asset.boundaryVerified
-        : acquisitionBoundaryVerified(record.acquisition)
+  const verifiedCount = records.filter((record) =>
+    record.type === 'asset'
+      ? record.asset.boundaryVerified
+      : acquisitionBoundaryVerified(record.acquisition)
   ).length;
   const selectedAsset = selected?.type === 'asset' ? selected.asset : null;
   const saleListingDisabledReason = !selectedAsset
@@ -322,18 +322,47 @@ export default function EstateLandManagementPage() {
               ? 'Verify every demarcation first.'
               : undefined;
   const saleListingLabel =
-    selectedAsset?.isPublishedToExternalPortal &&
-    (selectedAsset.externalListingType === 'Sale' ||
-      selectedAsset.externalListingType === 'SaleAndRent')
-      ? 'View Sale Listing'
-      : 'List Land for Sale';
+    selectedAsset?.externalListingType !== 'None'
+      ? 'View Portal Listing'
+      : 'Send to Portal Listings';
+
+  const sendLandToPortalListings = async (asset: EstateManagedAsset) => {
+    try {
+      setSendingListingId(asset.id);
+      if (asset.externalListingType === 'None') {
+        await estateLandManagementService.updateExternalListing(asset.id, {
+          isPublishedToExternalPortal: false,
+          externalListingType: 'Sale',
+          externalListingStatus: 'Draft',
+          externalListingPrice: null,
+          externalSalePrice: null,
+          externalMonthlyRent: null,
+          externalLeaseTermMonths: null,
+          externalListingCurrency: asset.currency || 'GHS',
+          externalListingNotes: null,
+        });
+        toast.success(
+          'Land sent to Portal Listings for commercial setup and publication.'
+        );
+      }
+      router.push(
+        `/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}&listingType=Sale`
+      );
+    } catch (error: any) {
+      toast.error(error?.message || 'Unable to send land to Portal Listings.');
+    } finally {
+      setSendingListingId(null);
+    }
+  };
 
   const markAssetProjectReady = async (asset: EstateManagedAsset) => {
     const key = `asset:${asset.id}`;
     try {
       setMarkingReadyKey(key);
       await estateLandManagementService.markReadyForProjectManagement(asset.id);
-      toast.success('Whole land is demarcated and ready for project management.');
+      toast.success(
+        'Whole land is demarcated and ready for project management.'
+      );
       await loadLandRecords(search);
     } catch (error: any) {
       toast.error(error?.message || 'Unable to make land ready.');
@@ -611,7 +640,7 @@ export default function EstateLandManagementPage() {
                     ? `${selected.asset.assetCode} - ${sourceLabel(selected.asset.sourceType)}`
                     : selected?.type === 'acquisition'
                       ? `${selected.acquisition.currentStage} - ${selected.acquisition.status}`
-                    : 'Project management can pull from records shown here.'}
+                      : 'Project management can pull from records shown here.'}
                 </CardDescription>
               </div>
               {selected?.type === 'acquisition' ? (
@@ -630,7 +659,8 @@ export default function EstateLandManagementPage() {
                     variant="outline"
                     disabled={
                       !acquisitionReadyForLandBank(selected.acquisition) ||
-                      markingReadyKey === `acquisition:${selected.acquisition.id}`
+                      markingReadyKey ===
+                        `acquisition:${selected.acquisition.id}`
                     }
                     onClick={() =>
                       void publishAcquisitionToLandBank(selected.acquisition)
@@ -680,13 +710,19 @@ export default function EstateLandManagementPage() {
                       {saleListingLabel}
                     </Button>
                   ) : (
-                    <Button asChild variant="outline">
-                      <Link
-                        href={`/estate/property-management/listings?assetId=${encodeURIComponent(selected.asset.id)}&listingType=Sale`}
-                      >
+                    <Button
+                      variant="outline"
+                      disabled={sendingListingId === selected.asset.id}
+                      onClick={() =>
+                        void sendLandToPortalListings(selected.asset)
+                      }
+                    >
+                      {sendingListingId === selected.asset.id ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
                         <Globe2 className="mr-2 h-4 w-4" />
-                        {saleListingLabel}
-                      </Link>
+                      )}
+                      {saleListingLabel}
                     </Button>
                   )}
                   {selected.asset.isReadyForProjectManagement ? (
@@ -701,7 +737,7 @@ export default function EstateLandManagementPage() {
                       variant="outline"
                       disabled={
                         !canMarkProjectReady ||
-                        selected.asset.isPublishedToExternalPortal ||
+                        selected.asset.externalListingType !== 'None' ||
                         !selected.asset.boundaryVerified ||
                         selected.asset.demarcationCount === 0 ||
                         selected.asset.verifiedDemarcationCount !==
@@ -712,8 +748,8 @@ export default function EstateLandManagementPage() {
                       title={
                         !canMarkProjectReady
                           ? 'Requires the Mark Land Project Ready permission assigned in Administration.'
-                          : selected.asset.isPublishedToExternalPortal
-                            ? 'Withdraw the active external land listing before marking this land ready for a project.'
+                          : selected.asset.externalListingType !== 'None'
+                            ? 'Remove the land from Portal Listings before marking it ready for a project.'
                             : !selected.asset.boundaryVerified
                               ? 'Verify the main cadastral boundary first.'
                               : selected.asset.demarcationCount === 0
@@ -733,9 +769,7 @@ export default function EstateLandManagementPage() {
                     </Button>
                   )}
                 </div>
-              ) : selected ? (
-                null
-              ) : null}
+              ) : selected ? null : null}
             </div>
           </CardHeader>
           <CardContent className="space-y-5">

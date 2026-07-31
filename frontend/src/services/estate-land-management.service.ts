@@ -56,22 +56,42 @@ export interface EstateManagedAsset {
   verifiedDemarcationCount: number;
   ownershipHistory: ExistingLandOwner[];
   isReadyForProjectManagement: boolean;
+  blockName?: string;
+  floorLabel?: string;
   assetType: EstateManagedAssetType;
   status: EstateManagedAssetStatus;
   sourceType: EstateManagedAssetSourceType;
   landAcquisitionId?: string;
+  projectId?: string;
+  projectUnitId?: string;
   projectCode?: string;
   projectTitle?: string;
   projectUnitCode?: string;
+  unitType?: string;
+  dateOfTenancy?: string;
+  rightOfEntryDate?: string;
+  leaseTermYears?: number;
+  groundRentPayable?: number;
+  groundRentRatePerAcre?: number;
+  groundRentComputed?: number;
+  customerBusinessPartnerId?: string;
+  lesseeName?: string;
+  lesseeAddress?: string;
+  propertyFileReference?: string;
   areaSquareMeters?: number;
   valuationAmount?: number;
   currency: string;
   isAvailableForLease: boolean;
   isAvailableForSale: boolean;
+  isPublishedFromProject: boolean;
+  publishedFromProjectAt?: string;
   isPublishedToExternalPortal: boolean;
   externalListingType: string;
   externalListingStatus: string;
   externalListingPrice?: number;
+  externalSalePrice?: number;
+  externalMonthlyRent?: number;
+  externalLeaseTermMonths?: number;
   externalListingCurrency: string;
   externalListingNotes?: string;
   externalPublishedAt?: string;
@@ -208,8 +228,21 @@ export interface UpdateEstateManagedAssetListing {
   externalListingType: string;
   externalListingStatus: string;
   externalListingPrice?: number | null;
+  externalSalePrice?: number | null;
+  externalMonthlyRent?: number | null;
+  externalLeaseTermMonths?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;
+}
+
+export interface UpdateEstateManagedAssetRegister {
+  dateOfTenancy?: string | null;
+  rightOfEntryDate?: string | null;
+  leaseTermYears?: number | null;
+  customerBusinessPartnerId?: string | null;
+  lesseeName?: string | null;
+  lesseeAddress?: string | null;
+  propertyFileReference?: string | null;
 }
 
 export interface EstateManagedAssetQuery {
@@ -218,6 +251,7 @@ export interface EstateManagedAssetQuery {
   search?: string;
   availableForLease?: boolean;
   availableForSale?: boolean;
+  portalListingCandidates?: boolean;
   take?: number;
 }
 
@@ -263,7 +297,9 @@ const enumValue = <T extends number>(
 
 // The API serializes enums as names; normalize them once so every Estate screen
 // can safely use the numeric TypeScript enums for counts, labels, and actions.
-const normalizeManagedAsset = (asset: EstateManagedAsset): EstateManagedAsset => ({
+const normalizeManagedAsset = (
+  asset: EstateManagedAsset
+): EstateManagedAsset => ({
   ...asset,
   assetType: enumValue(
     asset.assetType,
@@ -301,9 +337,11 @@ const buildManagedAssetQueryParams = (query: EstateManagedAssetQuery) => ({
   search: query.search || undefined,
   assetType:
     query.assetType === undefined ? undefined : assetTypeNames[query.assetType],
-  status: query.status === undefined ? undefined : assetStatusNames[query.status],
+  status:
+    query.status === undefined ? undefined : assetStatusNames[query.status],
   availableForLease: query.availableForLease,
   availableForSale: query.availableForSale,
+  portalListingCandidates: query.portalListingCandidates,
   take: query.take || 250,
 });
 
@@ -357,6 +395,21 @@ export class EstateLandManagementService {
     return normalizeManagedAsset(response.data);
   }
 
+  async updateRegister(
+    assetId: string,
+    payload: UpdateEstateManagedAssetRegister
+  ): Promise<EstateManagedAsset> {
+    const response = await apiService.patch<{
+      success?: boolean;
+      data?: EstateManagedAsset;
+      message?: string;
+    }>(`/estate/managed-assets/${assetId}/register`, payload);
+    if (!response.data) {
+      throw new Error(response.message || 'Unable to update register record.');
+    }
+    return normalizeManagedAsset(response.data);
+  }
+
   async createManualLand(
     payload: CreateManualExistingLand
   ): Promise<EstateManagedAsset> {
@@ -387,9 +440,7 @@ export class EstateLandManagementService {
     return normalizeManagedAsset(response.data);
   }
 
-  async getLandDemarcations(
-    assetId: string
-  ): Promise<EstateLandDemarcation[]> {
+  async getLandDemarcations(assetId: string): Promise<EstateLandDemarcation[]> {
     const response = await apiService.get<
       ApiListResponse<EstateLandDemarcation>
     >(`/estate/managed-assets/${assetId}/demarcations`);

@@ -8628,6 +8628,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(item => new { item.TenantId, item.AssetType, item.Status });
             entity.HasIndex(item => new { item.TenantId, item.ProjectUnitId });
             entity.HasIndex(item => new { item.TenantId, item.LandAcquisitionId });
+            entity.HasIndex(item => new { item.TenantId, item.CustomerBusinessPartnerId });
             entity.HasIndex(item => new { item.TenantId, item.IsPublishedToExternalPortal, item.ExternalListingStatus });
             entity.Property(item => item.AssetType).HasConversion<string>().HasMaxLength(40);
             entity.Property(item => item.Status).HasConversion<string>().HasMaxLength(40);
@@ -8636,8 +8637,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.Property(item => item.GisSyncStatus).HasDefaultValue("NotLinked");
             entity.Property(item => item.AreaSquareMeters).HasPrecision(18, 4);
             entity.Property(item => item.AreaValue).HasPrecision(18, 4);
+            entity.Property(item => item.GroundRentPayable).HasColumnType("decimal(18,2)");
+            entity.Property(item => item.GroundRentRatePerAcre).HasColumnType("decimal(18,2)");
+            entity.Property(item => item.GroundRentComputed).HasColumnType("decimal(18,3)");
             entity.Property(item => item.ValuationAmount).HasPrecision(18, 2);
             entity.Property(item => item.ExternalListingPrice).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalSalePrice).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalMonthlyRent).HasPrecision(18, 2);
             entity.HasMany(item => item.Documents)
                 .WithOne(item => item.EstateManagedAsset)
                 .HasForeignKey(item => item.EstateManagedAssetId)

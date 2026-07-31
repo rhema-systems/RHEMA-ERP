@@ -54,8 +54,7 @@ const accentClasses: Record<string, string> = {
 
 export default function EstatePropertyManagementPage() {
   const router = useRouter();
-  const [procedures, setProcedures] =
-    React.useState<FacilitiesProcedure[]>([]);
+  const [procedures, setProcedures] = React.useState<FacilitiesProcedure[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
@@ -67,12 +66,18 @@ export default function EstatePropertyManagementPage() {
         const data = await estatePropertyManagementService.getProcedures();
         if (mounted) {
           setProcedures(data);
-          setLoadError(data.length === 0 ? 'No property management workspaces were returned by the API.' : null);
+          setLoadError(
+            data.length === 0
+              ? 'No property management workspaces were returned by the API.'
+              : null
+          );
         }
       } catch {
         if (mounted) {
           setProcedures([]);
-          setLoadError('Unable to load property management workspaces from the API.');
+          setLoadError(
+            'Unable to load property management workspaces from the API.'
+          );
         }
       } finally {
         if (mounted) {
@@ -155,6 +160,8 @@ export default function EstatePropertyManagementPage() {
             const Icon = procedureIcons[procedure.icon] || Building2;
             const accent =
               accentClasses[procedure.accent] || accentClasses.teal;
+            const isPropertyUnitRegister =
+              procedure.entityType === 'EstatePropertyManagementPropertyUnit';
 
             return (
               <Card
@@ -167,7 +174,9 @@ export default function EstatePropertyManagementPage() {
                       <Icon className={`h-5 w-5 ${accent}`} />
                     </div>
                     <Badge variant="secondary">
-                      {procedure.stageCount} stages
+                      {isPropertyUnitRegister
+                        ? 'Estate records'
+                        : `${procedure.stageCount} stages`}
                     </Badge>
                   </div>
                   <div>
@@ -189,7 +198,9 @@ export default function EstatePropertyManagementPage() {
                     className="w-full justify-between"
                     onClick={() => openWorkspace(procedure.entityType)}
                   >
-                    Open workspace
+                    {isPropertyUnitRegister
+                      ? 'Open register'
+                      : 'Open workspace'}
                     <ArrowRight className="h-4 w-4" />
                   </Button>
                 </CardContent>
