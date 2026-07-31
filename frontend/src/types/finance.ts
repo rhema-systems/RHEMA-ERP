@@ -11,6 +11,7 @@ export type AccountStatus = 'Active' | 'Inactive' | 'Closed';
 export type JournalType = 'General' | 'Adjusting' | 'Reversing' | 'Recurring' | 'Opening Balance' | 'Closing' | 'Revaluation' | 'System Generated';
 export type PostingStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Posted' | 'Rejected' | 'Reversed';
 export type ExchangeRateType = 'Daily' | 'Average' | 'MonthEnd' | 'QuarterEnd' | 'YearEnd' | 'Budget' | 'Fixed' | 'Spot';
+export type ExchangeRateQuoteSide = 'Mid' | 'Buying' | 'Selling';
 export type PeriodStatus = 'Future' | 'Open' | 'Closed' | 'Locked';
 export type RevaluationFrequency = 'None' | 'Monthly' | 'Quarterly' | 'Annually';
 export type SubledgerModule = 'AR' | 'AP';
@@ -53,6 +54,7 @@ export interface ExchangeRate {
     currentExchangeRate?: number;
     effectiveDate: string;
     rateType: ExchangeRateType;
+    quoteSide: ExchangeRateQuoteSide;
     rateSource: string;
     comments?: string;
     isActive: boolean;
@@ -207,7 +209,9 @@ export interface AccountCurrencyLink {
     revaluationRequired: boolean;
     revaluationFrequency: RevaluationFrequency;
     transactionRateType: string;
+    transactionQuoteSide: ExchangeRateQuoteSide;
     revaluationRateType: string;
+    revaluationQuoteSide: ExchangeRateQuoteSide;
     foreignCurrencyBalance: number;
     baseCurrencyBalance: number;
     currentExchangeRate?: number;
@@ -336,6 +340,9 @@ export interface JournalEntry {
     reversalDate?: string;
     reversalReason?: string;
     reversalType?: string;
+    journalBatchId?: string;
+    journalBatchNumber?: string;
+    journalBatchItemId?: string;
     notes?: string;
 }
 
@@ -494,6 +501,23 @@ export interface FinanceSettings {
     discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
     openingBalanceAutoRoutingEnabled?: boolean;
+    bankDepositPolicy?: 'DepositIntact' | 'ControlledNetBanking';
+    requireBankDepositPrimaryEvidence?: boolean;
+    autoPostBankDepositAfterApproval?: boolean;
+    maximumDepositDeductionAmount?: number;
+    maximumDepositDeductionPercentage?: number;
+    bankStatementMatchDateToleranceDays?: number;
+    chequeClearingPeriodDays?: number;
+    returnedChequeBankChargeAccountId?: string;
+    defaultReturnedChequeChargeTreatment?: 'CustomerRecoverable' | 'BankChargeExpense' | 'Split';
+    directionalExchangeRatePolicyEnabled?: boolean;
+    defaultTransactionQuoteSide?: ExchangeRateQuoteSide;
+    arInvoiceQuoteSide?: ExchangeRateQuoteSide;
+    arSettlementQuoteSide?: ExchangeRateQuoteSide;
+    apInvoiceQuoteSide?: ExchangeRateQuoteSide;
+    apSettlementQuoteSide?: ExchangeRateQuoteSide;
+    closingQuoteSide?: ExchangeRateQuoteSide;
+    requireExchangeRateOverrideApproval?: boolean;
     /** True when posted transactions exist — base currency and control accounts become locked */
     transactionsExist?: boolean;
 }
@@ -516,6 +540,23 @@ export interface UpdateFinanceSettingsDto {
     discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
     openingBalanceAutoRoutingEnabled?: boolean;
+    bankDepositPolicy?: 'DepositIntact' | 'ControlledNetBanking';
+    requireBankDepositPrimaryEvidence?: boolean;
+    autoPostBankDepositAfterApproval?: boolean;
+    maximumDepositDeductionAmount?: number;
+    maximumDepositDeductionPercentage?: number;
+    bankStatementMatchDateToleranceDays?: number;
+    chequeClearingPeriodDays?: number;
+    returnedChequeBankChargeAccountId?: string;
+    defaultReturnedChequeChargeTreatment?: 'CustomerRecoverable' | 'BankChargeExpense' | 'Split';
+    directionalExchangeRatePolicyEnabled?: boolean;
+    defaultTransactionQuoteSide?: ExchangeRateQuoteSide;
+    arInvoiceQuoteSide?: ExchangeRateQuoteSide;
+    arSettlementQuoteSide?: ExchangeRateQuoteSide;
+    apInvoiceQuoteSide?: ExchangeRateQuoteSide;
+    apSettlementQuoteSide?: ExchangeRateQuoteSide;
+    closingQuoteSide?: ExchangeRateQuoteSide;
+    requireExchangeRateOverrideApproval?: boolean;
 }
 
 // Currency
@@ -552,6 +593,7 @@ export interface CreateExchangeRateDto {
     effectiveDate: string;
     expiryDate?: string;
     rateType: ExchangeRateType;
+    quoteSide?: ExchangeRateQuoteSide;
     rateSource: string;
     sourceName?: string;
     sourceReference?: string;
@@ -563,6 +605,7 @@ export interface CreateExchangeRateDto {
 export interface ExchangeRateFilters {
     currencyCode?: string;
     rateType?: ExchangeRateType;
+    quoteSide?: ExchangeRateQuoteSide;
     from?: string;
     to?: string;
     isActive?: boolean;
@@ -693,7 +736,9 @@ export interface AddCurrencyLinkDto {
     revaluationRequired: boolean;
     revaluationFrequency: string;
     transactionRateType: string;
+    transactionQuoteSide?: ExchangeRateQuoteSide;
     revaluationRateType: string;
+    revaluationQuoteSide?: ExchangeRateQuoteSide;
     notes?: string;
 }
 
@@ -811,6 +856,16 @@ export interface CreateOpeningBalanceLineDto {
     counterpartyType?: string;
     counterpartyId?: string;
     sourceReference?: string;
+    notes?: string;
+}
+
+export interface UpdateCurrencyLinkRatePolicyDto {
+    revaluationRequired: boolean;
+    revaluationFrequency: string;
+    transactionRateType: string;
+    transactionQuoteSide: ExchangeRateQuoteSide;
+    revaluationRateType: string;
+    revaluationQuoteSide: ExchangeRateQuoteSide;
     notes?: string;
 }
 
@@ -989,6 +1044,8 @@ export interface IncomeStatementRequestDto {
     bookClassification?: string;
     includeAccountDetails?: boolean;
     segmentFilters?: FinanceSegmentFilterDto[];
+    layoutId?: string;
+    useDefaultLayout?: boolean;
 }
 
 export interface BalanceSheetRequestDto {
@@ -996,6 +1053,8 @@ export interface BalanceSheetRequestDto {
     bookClassification?: string;
     includeAccountDetails?: boolean;
     segmentFilters?: FinanceSegmentFilterDto[];
+    layoutId?: string;
+    useDefaultLayout?: boolean;
 }
 
 export interface CashFlowStatementRequestDto {
@@ -1031,6 +1090,8 @@ export interface IncomeStatementReportDto {
     profitBeforeTax: number;
     taxExpense: number;
     netProfit: number;
+    layoutExecution?: FinancialStatementLayoutExecutionDto | null;
+    presentationWarnings: string[];
 }
 
 export interface IncomeStatementSectionDto {
@@ -1057,6 +1118,8 @@ export interface BalanceSheetReportDto {
     totalLiabilities: number;
     totalEquity: number;
     isBalanced: boolean;
+    layoutExecution?: FinancialStatementLayoutExecutionDto | null;
+    presentationWarnings: string[];
 }
 
 export interface BalanceSheetSectionDto {
@@ -1071,6 +1134,261 @@ export interface BalanceSheetCategoryDto {
     categoryOrder: number;
     lineItems: FinancialStatementLineItemDto[];
     categoryTotal: number;
+}
+
+export type FinancialStatementType = 'BalanceSheet' | 'IncomeStatement';
+export type FinancialStatementLayoutVersionStatus = 'Draft' | 'Published' | 'Retired';
+export type FinancialStatementRowType = 'Header' | 'Account' | 'Formula' | 'Total' | 'Spacer';
+export type FinancialStatementRowMappingType = 'Account' | 'AccountRange' | 'AccountHierarchy';
+
+export interface FinancialStatementLayoutSummaryDto {
+    id: string;
+    code: string;
+    name: string;
+    description?: string;
+    statementType: FinancialStatementType;
+    accountingBookId: string;
+    accountingBookCode: string;
+    accountingBookName: string;
+    isDefault: boolean;
+    isActive: boolean;
+    revision: number;
+    latestVersionNumber: number;
+    publishedVersionNumber?: number;
+}
+
+export interface FinancialStatementLayoutDto extends FinancialStatementLayoutSummaryDto {
+    versions: FinancialStatementLayoutVersionDto[];
+}
+
+export interface FinancialStatementLayoutVersionDto {
+    id: string;
+    financialStatementLayoutId: string;
+    versionNumber: number;
+    status: FinancialStatementLayoutVersionStatus;
+    effectiveFrom?: string;
+    effectiveTo?: string;
+    publishedAt?: string;
+    publishedById?: string;
+    publishedByName?: string;
+    notes?: string;
+    revision: number;
+    rows: FinancialStatementRowDto[];
+}
+
+export interface FinancialStatementRowDto {
+    id: string;
+    rowCode: string;
+    parentRowCode?: string;
+    label: string;
+    rowType: FinancialStatementRowType;
+    displayOrder: number;
+    formula?: string;
+    signMultiplier: number;
+    isVisible: boolean;
+    suppressIfZero: boolean;
+    showAccountDetails: boolean;
+    isBold: boolean;
+    isItalic: boolean;
+    isUnderlined: boolean;
+    indentLevel: number;
+    mappings: FinancialStatementRowMappingDto[];
+}
+
+export interface FinancialStatementRowMappingDto {
+    id: string;
+    mappingType: FinancialStatementRowMappingType;
+    accountId?: string;
+    accountNumber?: string;
+    accountName?: string;
+    fromAccountNumber?: string;
+    toAccountNumber?: string;
+}
+
+export interface UpdateFinancialStatementLayoutDto {
+    name: string;
+    description?: string;
+    isDefault: boolean;
+    isActive: boolean;
+    expectedRevision: number;
+}
+
+export interface CreateFinancialStatementLayoutVersionDto {
+    sourceVersionId?: string;
+    effectiveFrom?: string;
+    effectiveTo?: string;
+    notes?: string;
+}
+
+export interface PublishFinancialStatementLayoutVersionDto {
+    expectedVersionRevision: number;
+    effectiveFrom?: string;
+    effectiveTo?: string;
+}
+
+export interface FinancialStatementLayoutValidationResultDto {
+    isValid: boolean;
+    issues: FinancialStatementLayoutValidationIssueDto[];
+}
+
+export interface FinancialStatementRowMappingInputDto {
+    mappingType: FinancialStatementRowMappingType;
+    accountId?: string;
+    fromAccountNumber?: string;
+    toAccountNumber?: string;
+}
+
+export interface FinancialStatementRowInputDto {
+    rowCode: string;
+    parentRowCode?: string;
+    label: string;
+    rowType: FinancialStatementRowType;
+    displayOrder: number;
+    formula?: string;
+    signMultiplier: number;
+    isVisible: boolean;
+    suppressIfZero: boolean;
+    showAccountDetails: boolean;
+    isBold: boolean;
+    isItalic: boolean;
+    isUnderlined: boolean;
+    indentLevel: number;
+    mappings: FinancialStatementRowMappingInputDto[];
+}
+
+export interface FinancialStatementLayoutImportDefinitionDto {
+    templateVersion: string;
+    targetLayoutId?: string;
+    targetVersionId?: string;
+    sourceVersionId?: string;
+    expectedTargetVersionRevision?: number;
+    code: string;
+    name: string;
+    description?: string;
+    statementType: FinancialStatementType;
+    accountingBookId: string;
+    isDefault: boolean;
+    effectiveFrom?: string;
+    effectiveTo?: string;
+    notes?: string;
+    rows: FinancialStatementRowInputDto[];
+}
+
+export interface FinancialStatementLayoutImportPreviewDto {
+    definitionHash: string;
+    willCreateLayout: boolean;
+    targetLayoutId?: string;
+    targetVersionId?: string;
+    rowCount: number;
+    mappingCount: number;
+    definition: FinancialStatementLayoutImportDefinitionDto;
+    validation: FinancialStatementLayoutValidationResultDto;
+}
+
+export interface FinancialStatementLayoutImportResultDto {
+    definitionHash: string;
+    createdLayout: boolean;
+    layoutId: string;
+    draftVersionId: string;
+    draftVersionNumber: number;
+    draftVersionRevision: number;
+    layout: FinancialStatementLayoutDto;
+}
+
+export interface LegacyFinancialStatementLayoutMigrationRequestDto {
+    code: string;
+    name: string;
+    description?: string;
+    statementType: FinancialStatementType;
+    accountingBookId: string;
+    isDefault: boolean;
+    effectiveFrom?: string;
+    effectiveTo?: string;
+    notes?: string;
+}
+
+export interface FinancialStatementLayoutAuditEventDto {
+    id: string;
+    eventType: string;
+    username: string;
+    timestamp: string;
+    detailsJson?: string;
+}
+
+export interface FinancialStatementLayoutExecutionDto {
+    layoutId: string;
+    layoutCode: string;
+    layoutName: string;
+    versionId: string;
+    versionNumber: number;
+    versionStatus: FinancialStatementLayoutVersionStatus;
+    statementType: FinancialStatementType;
+    accountingBookId: string;
+    accountingBookCode: string;
+    accountingBookName: string;
+    companyName: string;
+    currencyCode: string;
+    periodStart?: string;
+    periodEnd: string;
+    generatedAt: string;
+    isPreview: boolean;
+    rows: FinancialStatementLayoutExecutionRowDto[];
+    reconciliation: FinancialStatementLayoutReconciliationDto;
+    warnings: FinancialStatementLayoutValidationIssueDto[];
+}
+
+export interface FinancialStatementLayoutExecutionRowDto {
+    rowId: string;
+    rowCode: string;
+    parentRowCode?: string;
+    label: string;
+    rowType: FinancialStatementRowType;
+    displayOrder: number;
+    sequence: number;
+    formula?: string;
+    amount: number;
+    isDisplayed: boolean;
+    suppressIfZero: boolean;
+    showAccountDetails: boolean;
+    isBold: boolean;
+    isItalic: boolean;
+    isUnderlined: boolean;
+    indentLevel: number;
+    accounts: FinancialStatementLayoutAccountDetailDto[];
+}
+
+export interface FinancialStatementLayoutAccountDetailDto {
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    accountType: AccountType;
+    normalBalance: number;
+    presentedAmount: number;
+}
+
+export interface FinancialStatementLayoutReconciliationDto {
+    eligibleAccountCount: number;
+    mappedAccountCount: number;
+    mappedNonZeroAccountCount: number;
+    unmappedAccountCount: number;
+    unmappedNonZeroAccountCount: number;
+    mappedNormalBalance: number;
+    unmappedNormalBalance: number;
+    accountCoveragePercent: number;
+    unmappedAccounts: Array<{
+        accountId: string;
+        accountNumber: string;
+        accountName: string;
+        accountType: AccountType;
+        normalBalance: number;
+    }>;
+}
+
+export interface FinancialStatementLayoutValidationIssueDto {
+    severity: 'Information' | 'Warning' | 'Error';
+    code: string;
+    message: string;
+    rowCode?: string;
 }
 
 export interface CashFlowStatementReportDto {

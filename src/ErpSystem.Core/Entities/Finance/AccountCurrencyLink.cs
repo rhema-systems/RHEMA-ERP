@@ -80,6 +80,12 @@ namespace ErpSystem.Core.Entities.Finance
         public string TransactionRateType { get; set; } = "Daily";
 
         /// <summary>
+        /// Default provider/bank quote side for ordinary GL transactions.
+        /// Subledger document policies remain authoritative for AR and AP.
+        /// </summary>
+        public ExchangeRateQuoteSide TransactionQuoteSide { get; set; } = ExchangeRateQuoteSide.Mid;
+
+        /// <summary>
         /// Type of exchange rate used for period-end revaluation.
         /// 
         /// Typically "Month-End" or "Year-End" to comply with IAS 21 requirements.
@@ -88,6 +94,11 @@ namespace ErpSystem.Core.Entities.Finance
         [Required]
         [MaxLength(20)]
         public string RevaluationRateType { get; set; } = "Month-End";
+
+        /// <summary>
+        /// Closing/revaluation should normally use the neutral mid quote.
+        /// </summary>
+        public ExchangeRateQuoteSide RevaluationQuoteSide { get; set; } = ExchangeRateQuoteSide.Mid;
 
         #endregion
 

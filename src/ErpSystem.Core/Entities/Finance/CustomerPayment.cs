@@ -56,8 +56,21 @@ public class CustomerPayment : BusinessEntity
     public Guid? BankAccountId { get; set; }
     public virtual BankAccount? BankAccount { get; set; }
 
+    /// <summary>
+    /// Holding/settlement account used for cash, cheque, mobile-money, and card receipts.
+    /// Direct bank transfers use BankAccountId instead.
+    /// </summary>
+    public Guid? LiquidityAccountId { get; set; }
+    public virtual LiquidityAccount? LiquidityAccount { get; set; }
+
+    public Guid? LiquidityAccountEntryId { get; set; }
+    public virtual LiquidityAccountEntry? LiquidityAccountEntry { get; set; }
+
     [MaxLength(100)]
     public string? CheckNumber { get; set; }
+
+    [MaxLength(150)]
+    public string? ChequeDrawerBank { get; set; }
 
     [MaxLength(100)]
     public string? TransactionReference { get; set; }

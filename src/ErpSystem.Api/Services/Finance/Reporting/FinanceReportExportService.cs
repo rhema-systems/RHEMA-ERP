@@ -172,46 +172,89 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             BookClassification = request.BookClassification,
             IncludeAccountDetails = request.IncludeAccountDetails,
             AccountIds = request.AccountIds,
-            SegmentFilters = request.SegmentFilters
+            SegmentFilters = request.SegmentFilters,
+            LayoutId = request.LayoutId,
+            UseDefaultLayout = request.UseDefaultLayout
         });
 
-        var rows = new List<string[]>
+        List<string[]> rows;
+        int rowCount;
+        string sourceOfTruth;
+        var warnings = new List<string>(report.PresentationWarnings);
+        if (report.LayoutExecution != null)
         {
-            new[] { "Section", "Category", "LineItem", "Amount", "AccountNumbers" }
-        };
-        foreach (var section in report.Sections.OrderBy(s => s.SectionOrder))
-        {
-            foreach (var category in section.Categories.OrderBy(c => c.CategoryOrder))
+            var layout = report.LayoutExecution;
+            rows = new List<string[]>
             {
-                foreach (var line in category.LineItems.OrderBy(l => l.LineOrder))
+                new[] { "RowCode", "ParentRowCode", "RowType", "Sequence", "Label", "Amount", "AccountNumbers" }
+            };
+            foreach (var row in layout.Rows.OrderBy(row => row.Sequence))
+            {
+                rows.Add(new[]
                 {
-                    rows.Add(new[]
-                    {
-                        section.SectionName,
-                        category.CategoryName,
-                        line.LineItemName,
-                        Money(line.Amount),
-                        line.AccountNumbers == null ? string.Empty : string.Join(";", line.AccountNumbers)
-                    });
-                }
+                    row.RowCode,
+                    row.ParentRowCode ?? string.Empty,
+                    row.RowType.ToString(),
+                    row.Sequence.ToString(InvariantCulture),
+                    row.Label,
+                    Money(row.Amount),
+                    string.Join(";", row.Accounts.Select(account => account.AccountNumber))
+                });
+            }
+
+            rowCount = layout.Rows.Count;
+            sourceOfTruth =
+                $"Posted GL | Layout {layout.LayoutCode} v{layout.VersionNumber}";
+            warnings.AddRange(layout.Warnings.Select(warning => warning.Message));
+            if (layout.Reconciliation.UnmappedNonZeroAccountCount > 0)
+            {
+                warnings.Add(
+                    $"{layout.Reconciliation.UnmappedNonZeroAccountCount} non-zero eligible GL account(s) are not mapped to this layout.");
             }
         }
-        rows.Add(new[] { "TOTAL", "Assets", string.Empty, Money(report.TotalAssets), string.Empty });
-        rows.Add(new[] { "TOTAL", "Liabilities", string.Empty, Money(report.TotalLiabilities), string.Empty });
-        rows.Add(new[] { "TOTAL", "Equity", string.Empty, Money(report.TotalEquity), string.Empty });
+        else
+        {
+            rows = new List<string[]>
+            {
+                new[] { "Section", "Category", "LineItem", "Amount", "AccountNumbers" }
+            };
+            foreach (var section in report.Sections.OrderBy(s => s.SectionOrder))
+            {
+                foreach (var category in section.Categories.OrderBy(c => c.CategoryOrder))
+                {
+                    foreach (var line in category.LineItems.OrderBy(l => l.LineOrder))
+                    {
+                        rows.Add(new[]
+                        {
+                            section.SectionName,
+                            category.CategoryName,
+                            line.LineItemName,
+                            Money(line.Amount),
+                            line.AccountNumbers == null ? string.Empty : string.Join(";", line.AccountNumbers)
+                        });
+                    }
+                }
+            }
+            rows.Add(new[] { "TOTAL", "Assets", string.Empty, Money(report.TotalAssets), string.Empty });
+            rows.Add(new[] { "TOTAL", "Liabilities", string.Empty, Money(report.TotalLiabilities), string.Empty });
+            rows.Add(new[] { "TOTAL", "Equity", string.Empty, Money(report.TotalEquity), string.Empty });
+            rowCount = rows.Count - 4;
+            sourceOfTruth = "Posted GL | Legacy account classification";
+        }
 
         return BuildCsvResult(
             FinanceReportExportTypes.BalanceSheet,
-            "Posted GL",
+            sourceOfTruth,
             rows,
-            rows.Count - 4,
+            rowCount,
             new Dictionary<string, decimal>
             {
                 ["TotalAssets"] = report.TotalAssets,
                 ["TotalLiabilities"] = report.TotalLiabilities,
                 ["TotalEquity"] = report.TotalEquity,
                 ["BalanceCheckDifference"] = report.TotalAssets - (report.TotalLiabilities + report.TotalEquity)
-            });
+            },
+            warnings);
     }
 
     private async Task<FinanceReportExportResultDto> BuildIncomeStatementExportAsync(
@@ -226,36 +269,79 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             BookClassification = request.BookClassification,
             IncludeAccountDetails = request.IncludeAccountDetails,
             AccountIds = request.AccountIds,
-            SegmentFilters = request.SegmentFilters
+            SegmentFilters = request.SegmentFilters,
+            LayoutId = request.LayoutId,
+            UseDefaultLayout = request.UseDefaultLayout
         });
 
-        var rows = new List<string[]>
+        List<string[]> rows;
+        int rowCount;
+        string sourceOfTruth;
+        var warnings = new List<string>(report.PresentationWarnings);
+        if (report.LayoutExecution != null)
         {
-            new[] { "Section", "LineItem", "Amount", "AccountNumbers" }
-        };
-        foreach (var section in report.Sections.OrderBy(s => s.SectionOrder))
-        {
-            foreach (var line in section.LineItems.OrderBy(l => l.LineOrder))
+            var layout = report.LayoutExecution;
+            rows = new List<string[]>
+            {
+                new[] { "RowCode", "ParentRowCode", "RowType", "Sequence", "Label", "Amount", "AccountNumbers" }
+            };
+            foreach (var row in layout.Rows.OrderBy(row => row.Sequence))
             {
                 rows.Add(new[]
                 {
-                    section.SectionName,
-                    line.LineItemName,
-                    Money(line.Amount),
-                    line.AccountNumbers == null ? string.Empty : string.Join(";", line.AccountNumbers)
+                    row.RowCode,
+                    row.ParentRowCode ?? string.Empty,
+                    row.RowType.ToString(),
+                    row.Sequence.ToString(InvariantCulture),
+                    row.Label,
+                    Money(row.Amount),
+                    string.Join(";", row.Accounts.Select(account => account.AccountNumber))
                 });
             }
+
+            rowCount = layout.Rows.Count;
+            sourceOfTruth =
+                $"Posted GL | Layout {layout.LayoutCode} v{layout.VersionNumber}";
+            warnings.AddRange(layout.Warnings.Select(warning => warning.Message));
+            if (layout.Reconciliation.UnmappedNonZeroAccountCount > 0)
+            {
+                warnings.Add(
+                    $"{layout.Reconciliation.UnmappedNonZeroAccountCount} non-zero eligible GL account(s) are not mapped to this layout.");
+            }
         }
-        rows.Add(new[] { "TOTAL", "GrossProfit", Money(report.GrossProfit), string.Empty });
-        rows.Add(new[] { "TOTAL", "OperatingProfit", Money(report.OperatingProfit), string.Empty });
-        rows.Add(new[] { "TOTAL", "ProfitBeforeTax", Money(report.ProfitBeforeTax), string.Empty });
-        rows.Add(new[] { "TOTAL", "NetProfit", Money(report.NetProfit), string.Empty });
+        else
+        {
+            rows = new List<string[]>
+            {
+                new[] { "Section", "LineItem", "Amount", "AccountNumbers" }
+            };
+            foreach (var section in report.Sections.OrderBy(s => s.SectionOrder))
+            {
+                foreach (var line in section.LineItems.OrderBy(l => l.LineOrder))
+                {
+                    rows.Add(new[]
+                    {
+                        section.SectionName,
+                        line.LineItemName,
+                        Money(line.Amount),
+                        line.AccountNumbers == null ? string.Empty : string.Join(";", line.AccountNumbers)
+                    });
+                }
+            }
+            rows.Add(new[] { "TOTAL", "GrossProfit", Money(report.GrossProfit), string.Empty });
+            rows.Add(new[] { "TOTAL", "OperatingProfit", Money(report.OperatingProfit), string.Empty });
+            rows.Add(new[] { "TOTAL", "ProfitBeforeTax", Money(report.ProfitBeforeTax), string.Empty });
+            rows.Add(new[] { "TOTAL", "NetProfit", Money(report.NetProfit), string.Empty });
+            rowCount = report.Sections.Sum(section => section.LineItems.Count);
+            sourceOfTruth =
+                "Posted GL with non-operating disposal gain presentation mapping | Legacy account classification";
+        }
 
         return BuildCsvResult(
             FinanceReportExportTypes.IncomeStatement,
-            "Posted GL with non-operating disposal gain presentation mapping",
+            sourceOfTruth,
             rows,
-            report.Sections.Sum(section => section.LineItems.Count),
+            rowCount,
             new Dictionary<string, decimal>
             {
                 ["TotalRevenue"] = report.TotalRevenue,
@@ -264,7 +350,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
                 ["TotalOtherExpenses"] = report.TotalOtherExpenses,
                 ["NetProfit"] = report.NetProfit
             },
-            report.PresentationWarnings);
+            warnings);
     }
 
     private async Task<FinanceReportExportResultDto> BuildDetailedLedgerExportAsync(

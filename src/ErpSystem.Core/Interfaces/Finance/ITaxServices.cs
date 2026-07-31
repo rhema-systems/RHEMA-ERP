@@ -62,6 +62,7 @@ namespace ErpSystem.Core.Interfaces.Finance
         Task<TaxDto> CreateTaxAsync(CreateTaxDto dto, CancellationToken cancellationToken = default);
         Task<TaxDto> UpdateTaxAsync(Guid id, UpdateTaxDto dto, CancellationToken cancellationToken = default);
         Task DeleteTaxAsync(Guid id, CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<TaxConfigurationVersionDto>> GetTaxConfigurationVersionsAsync(Guid taxId, CancellationToken cancellationToken = default);
 
         #endregion
 

@@ -1,8 +1,8 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
-using ErpSystem.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Finance;
 
@@ -37,12 +37,10 @@ namespace ErpSystem.Api.Controllers.Finance;
 public class BudgetController : ControllerBase
 {
     private readonly IBudgetService _budgetService;
-    private readonly ICurrentUserService _currentUserService;
 
-    public BudgetController(IBudgetService budgetService, ICurrentUserService currentUserService)
+    public BudgetController(IBudgetService budgetService)
     {
         _budgetService = budgetService;
-        _currentUserService = currentUserService;
     }
 
     // ========================================================================
@@ -113,6 +111,10 @@ public class BudgetController : ControllerBase
         catch (KeyNotFoundException)
         {
             return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
         }
     }
 
@@ -191,6 +193,10 @@ public class BudgetController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This budget scenario changed after you opened it. Refresh and try again.");
+        }
     }
 
     /// <summary>
@@ -260,20 +266,114 @@ public class BudgetController : ControllerBase
     /// <response code="401">Not authenticated.</response>
     /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Scenario with the specified ID was not found.</response>
-    [HttpPost("scenarios/{id}/lock")]
-    public async Task<ActionResult<BudgetScenarioDto>> LockScenario(Guid id)
+    [HttpPost("scenarios/{id}/open")]
+    public async Task<ActionResult<BudgetScenarioDto>> OpenScenario(Guid id, BudgetScenarioCommandDto dto)
     {
         try
         {
-            // Validate user permissions (e.g., only Finance Admin)
-            // if (!_currentUserService.HasPermission("Budget.Lock")) return Forbid();
-
-            var result = await _budgetService.LockScenarioAsync(id);
+            var result = await _budgetService.OpenScenarioAsync(id, dto.RowVersion);
             return Ok(result);
         }
         catch (KeyNotFoundException)
         {
             return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This budget scenario changed after you opened it. Refresh and try again.");
+        }
+    }
+
+    [HttpPost("scenarios/{id}/submit")]
+    public async Task<ActionResult<BudgetScenarioDto>> SubmitScenario(Guid id, BudgetScenarioCommandDto dto)
+    {
+        try
+        {
+            return Ok(await _budgetService.SubmitScenarioAsync(id, dto.RowVersion));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This budget scenario changed after you opened it. Refresh and try again.");
+        }
+    }
+
+    [HttpPost("scenarios/{id}/archive")]
+    public async Task<ActionResult<BudgetScenarioDto>> ArchiveScenario(Guid id, BudgetScenarioCommandDto dto)
+    {
+        try
+        {
+            return Ok(await _budgetService.ArchiveScenarioAsync(id, dto.RowVersion));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This budget scenario changed after you opened it. Refresh and try again.");
+        }
+    }
+
+    /// <summary>
+    /// Explicitly adopts an approved scenario as the single official reporting baseline.
+    /// Any existing official scenario for the fiscal year is marked Superseded.
+    /// </summary>
+    [HttpPost("scenarios/{id}/adopt")]
+    public async Task<ActionResult<BudgetScenarioDto>> AdoptScenario(
+        Guid id,
+        AdoptBudgetScenarioDto dto)
+    {
+        try
+        {
+            return Ok(await _budgetService.AdoptScenarioAsync(id, dto));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This budget scenario changed after you opened it. Refresh and try again.");
+        }
+        catch (DbUpdateException)
+        {
+            return Conflict("Another official budget adoption completed at the same time. Refresh and try again.");
         }
     }
 
@@ -312,6 +412,16 @@ public class BudgetController : ControllerBase
     }
 
     /// <summary>
+    /// Retrieves budget returns assigned to the authenticated user.
+    /// </summary>
+    [HttpGet("returns/my-returns")]
+    public async Task<ActionResult<IEnumerable<BudgetReturnDto>>> GetMyReturns()
+    {
+        var result = await _budgetService.GetMyReturnsAsync();
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Retrieves a single budget return by its unique identifier.
     /// </summary>
     /// <remarks>
@@ -344,6 +454,10 @@ public class BudgetController : ControllerBase
         catch (KeyNotFoundException)
         {
             return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
         }
     }
 
@@ -383,6 +497,10 @@ public class BudgetController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
     }
 
     /// <summary>
@@ -410,6 +528,14 @@ public class BudgetController : ControllerBase
         catch (KeyNotFoundException)
         {
             return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This budget return changed after you opened it. Refresh and try again.");
         }
     }
 
@@ -441,11 +567,11 @@ public class BudgetController : ControllerBase
     /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Budget return with the specified ID was not found.</response>
     [HttpPost("returns/{id}/submit")]
-    public async Task<ActionResult<BudgetReturnDto>> SubmitReturn(Guid id)
+    public async Task<ActionResult<BudgetReturnDto>> SubmitReturn(Guid id, BudgetReturnCommandDto dto)
     {
         try
         {
-            var result = await _budgetService.SubmitReturnAsync(id);
+            var result = await _budgetService.SubmitReturnAsync(id, dto.RowVersion);
             return Ok(result);
         }
         catch (InvalidOperationException ex)
@@ -455,6 +581,14 @@ public class BudgetController : ControllerBase
         catch (KeyNotFoundException)
         {
             return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This budget return changed after you opened it. Refresh and try again.");
         }
     }
 
@@ -485,25 +619,6 @@ public class BudgetController : ControllerBase
     /// <response code="401">Not authenticated.</response>
     /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Budget return with the specified ID was not found.</response>
-    [HttpPost("returns/{id}/approve")]
-    public async Task<ActionResult<BudgetReturnDto>> ApproveReturn(Guid id)
-    {
-        try
-        {
-            var userId = Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : Guid.Empty;
-            var result = await _budgetService.ApproveReturnAsync(id, userId);
-            return Ok(result);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (KeyNotFoundException)
-        {
-            return NotFound();
-        }
-    }
-
     /// <summary>
     /// Rejects a submitted budget return, transitioning it back so corrections can be made.
     /// </summary>
@@ -526,20 +641,19 @@ public class BudgetController : ControllerBase
     /// **Authorization:** Requires the mapped finance budgeting permission.
     /// </remarks>
     /// <param name="id">The unique identifier of the budget return to reject.</param>
-    /// <param name="reason">A free-text explanation of why the return is being rejected.</param>
+    /// <param name="dto">The rejection reason.</param>
     /// <returns>The updated <see cref="BudgetReturnDto"/> reflecting the Rejected status.</returns>
     /// <response code="200">Budget return rejected successfully.</response>
     /// <response code="400">Return is not in a rejectable state or reason is missing.</response>
     /// <response code="401">Not authenticated.</response>
     /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">Budget return with the specified ID was not found.</response>
-    [HttpPost("returns/{id}/reject")]
-    public async Task<ActionResult<BudgetReturnDto>> RejectReturn(Guid id, [FromBody] string reason)
+    [HttpPost("returns/{id}/recall")]
+    public async Task<ActionResult<BudgetReturnDto>> RecallReturn(Guid id, BudgetReturnCommandDto dto)
     {
         try
         {
-            var userId = Guid.TryParse(_currentUserService.UserId, out var uid) ? uid : Guid.Empty;
-            var result = await _budgetService.RejectReturnAsync(id, reason, userId);
+            var result = await _budgetService.RecallReturnAsync(id, dto.RowVersion, dto.Reason);
             return Ok(result);
         }
         catch (InvalidOperationException ex)
@@ -549,6 +663,14 @@ public class BudgetController : ControllerBase
         catch (KeyNotFoundException)
         {
             return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This budget return changed after you opened it. Refresh and try again.");
         }
     }
 
@@ -583,8 +705,19 @@ public class BudgetController : ControllerBase
     [HttpGet("returns/{returnId}/entries")]
     public async Task<ActionResult<IEnumerable<BudgetEntryDto>>> GetEntries(Guid returnId)
     {
-        var result = await _budgetService.GetEntriesAsync(returnId);
-        return Ok(result);
+        try
+        {
+            var result = await _budgetService.GetEntriesAsync(returnId);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
     }
 
     /// <summary>
@@ -616,16 +749,49 @@ public class BudgetController : ControllerBase
     /// <response code="403">User lacks the required finance budgeting permission.</response>
     /// <response code="404">The parent budget return was not found.</response>
     [HttpPost("entries/bulk-save")]
-    public async Task<ActionResult> BulkSaveEntries(BulkSaveBudgetEntriesDto dto)
+    public async Task<ActionResult<BudgetReturnDto>> BulkSaveEntries(BulkSaveBudgetEntriesDto dto)
     {
         try
         {
-            await _budgetService.BulkSaveEntriesAsync(dto);
-            return NoContent();
+            return Ok(await _budgetService.BulkSaveEntriesAsync(dto));
         }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This worksheet was changed by another session. Refresh before saving again.");
+        }
+    }
+
+    [HttpGet("scenarios/{id}/audit-history")]
+    public async Task<ActionResult<IReadOnlyList<BudgetAuditEventDto>>> GetScenarioAuditHistory(Guid id)
+    {
+        try
+        {
+            return Ok(await _budgetService.GetAuditHistoryAsync("BudgetScenario", id));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    [HttpGet("returns/{id}/audit-history")]
+    public async Task<ActionResult<IReadOnlyList<BudgetAuditEventDto>>> GetReturnAuditHistory(Guid id)
+    {
+        try
+        {
+            return Ok(await _budgetService.GetAuditHistoryAsync("BudgetReturn", id));
         }
         catch (KeyNotFoundException)
         {
@@ -653,6 +819,63 @@ public class BudgetController : ControllerBase
         catch (KeyNotFoundException)
         {
             return NotFound();
+        }
+    }
+
+    /// <summary>
+    /// Returns the compiled account/period budget, contributing returns, validation findings,
+    /// and posted-GL actuals for a scenario.
+    /// </summary>
+    [HttpGet("scenarios/{scenarioId}/consolidated")]
+    public async Task<ActionResult<ConsolidatedBudgetViewDto>> GetConsolidatedView(
+        Guid scenarioId,
+        [FromQuery] bool approvedOnly = true)
+    {
+        try
+        {
+            return Ok(await _budgetService.GetConsolidatedViewAsync(scenarioId, approvedOnly));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    /// <summary>
+    /// Resolves the adopted official budget for a fiscal year and compares it with posted IFRS GL actuals.
+    /// </summary>
+    [HttpGet("analytics/budget-vs-actual/fiscal-year/{fiscalYearId}")]
+    public async Task<ActionResult<ConsolidatedBudgetViewDto>> GetActiveBudgetVsActual(Guid fiscalYearId)
+    {
+        try
+        {
+            return Ok(await _budgetService.GetActiveBudgetVsActualAsync(fiscalYearId));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    /// <summary>
+    /// Compares two approved or superseded scenarios from the same fiscal year.
+    /// </summary>
+    [HttpGet("scenarios/{baseScenarioId}/compare/{comparisonScenarioId}")]
+    public async Task<ActionResult<BudgetScenarioComparisonDto>> CompareScenarios(
+        Guid baseScenarioId,
+        Guid comparisonScenarioId)
+    {
+        try
+        {
+            return Ok(await _budgetService.CompareScenariosAsync(baseScenarioId, comparisonScenarioId));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
     }
 }

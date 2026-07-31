@@ -156,6 +156,12 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             if (tax == null)
                 throw new InvalidOperationException("Tax not found.");
 
+            if (!tax.IsActive)
+            {
+                throw new InvalidOperationException(
+                    "Inactive tax configurations are locked and cannot be edited. Create a new tax configuration for any future effective change.");
+            }
+
             var beforeValues = new
             {
                 tax.Code,
@@ -181,6 +187,21 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             Guid? newReceivableAccountId = dto.ClearTaxReceivableAccount
                 ? null
                 : dto.TaxReceivableAccountId ?? tax.TaxReceivableAccountId;
+            var hasConfigurationChange =
+                (dto.Name != null && dto.Name != tax.Name)
+                || (dto.Description != null && dto.Description != tax.Description)
+                || newRate != tax.Rate
+                || newEffectiveFrom != tax.EffectiveFrom.Date
+                || (dto.Applicability.HasValue && dto.Applicability.Value != tax.Applicability)
+                || (dto.Category.HasValue && dto.Category.Value != tax.Category)
+                || newIsActive != tax.IsActive
+                || (dto.IsInputTaxDeductible.HasValue && dto.IsInputTaxDeductible.Value != tax.IsInputTaxDeductible)
+                || (dto.ThresholdAmount.HasValue && dto.ThresholdAmount.Value != tax.ThresholdAmount)
+                || newPayableAccountId != tax.TaxPayableAccountId
+                || newReceivableAccountId != tax.TaxReceivableAccountId;
+
+            if (!hasConfigurationChange)
+                return MapToTaxDto(tax);
 
             await ValidateTaxConfigurationAsync(
                 tax.Code,
@@ -192,14 +213,18 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 newReceivableAccountId,
                 cancellationToken);
 
+            if (dto.Rate.HasValue
+                && dto.Rate.Value != tax.Rate
+                && newEffectiveFrom <= tax.EffectiveFrom.Date)
+            {
+                throw new InvalidOperationException("New tax rate effective date must be after the current effective date. Use a new effective-dated version instead of overwriting historical rates.");
+            }
+
+            await ArchiveTaxConfigurationAsync(tax, dto.ChangeReason, cancellationToken);
+
             // Track rate changes for history
             if (dto.Rate.HasValue && dto.Rate.Value != tax.Rate)
             {
-                if (newEffectiveFrom <= tax.EffectiveFrom.Date)
-                {
-                    throw new InvalidOperationException("New tax rate effective date must be after the current effective date. Use a new effective-dated version instead of overwriting historical rates.");
-                }
-
                 await AddRateHistoryAsync(tax, newEffectiveFrom, cancellationToken);
                 tax.Rate = dto.Rate.Value;
                 tax.EffectiveFrom = newEffectiveFrom;
@@ -275,14 +300,10 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             if (tax == null)
                 throw new InvalidOperationException("Tax not found.");
 
-            // Check for usage in groups
-            var usedInGroups = await _context.Set<TaxGroupComponent>()
-                .AnyAsync(c => c.TaxId == id && c.TenantId == TenantId && !c.IsDeleted, cancellationToken);
+            if (!tax.IsActive)
+                throw new InvalidOperationException("Inactive tax configurations are locked and retained for audit. They cannot be deleted.");
 
-            if (usedInGroups)
-                throw new InvalidOperationException("Cannot delete tax used in tax groups. Deactivate instead.");
-
-            tax.IsDeleted = true;
+            await ArchiveTaxConfigurationAsync(tax, "Tax configuration retired", cancellationToken);
             tax.IsActive = false;
             tax.UpdatedAt = DateTime.UtcNow;
             tax.UpdatedBy = UserName;
@@ -290,12 +311,12 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             _context.Set<Tax>().Update(tax);
             await _context.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Deleted tax: {Code}", tax.Code);
+            _logger.LogInformation("Retired tax: {Code}", tax.Code);
             await RecordTaxAuditAsync(
                 FinanceAuditEvents.TaxRuleDeactivated,
                 tax,
-                beforeValues: new { tax.Code, wasDeleted = false, wasActive = true },
-                afterValues: new { tax.Code, tax.IsDeleted, tax.IsActive },
+                beforeValues: new { tax.Code, wasActive = true },
+                afterValues: new { tax.Code, tax.IsActive },
                 cancellationToken: cancellationToken);
         }
 
@@ -315,6 +336,45 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             };
 
             await _context.Set<TaxRateHistory>().AddAsync(history, cancellationToken);
+        }
+
+        private async Task ArchiveTaxConfigurationAsync(
+            Tax tax,
+            string? changeReason,
+            CancellationToken cancellationToken)
+        {
+            var now = DateTime.UtcNow;
+            var latestVersion = await _context.Set<TaxConfigurationVersion>()
+                .Where(v => v.TenantId == TenantId && v.TaxId == tax.Id && !v.IsDeleted)
+                .OrderByDescending(v => v.VersionNumber)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var snapshot = new TaxConfigurationVersion
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                TaxId = tax.Id,
+                VersionNumber = (latestVersion?.VersionNumber ?? 0) + 1,
+                Code = tax.Code,
+                Name = tax.Name,
+                Description = tax.Description,
+                Rate = tax.Rate,
+                EffectiveFrom = tax.EffectiveFrom,
+                Applicability = tax.Applicability,
+                Category = tax.Category,
+                IsActive = tax.IsActive,
+                IsInputTaxDeductible = tax.IsInputTaxDeductible,
+                ThresholdAmount = tax.ThresholdAmount,
+                TaxPayableAccountId = tax.TaxPayableAccountId,
+                TaxReceivableAccountId = tax.TaxReceivableAccountId,
+                ValidFrom = latestVersion?.ValidTo ?? tax.CreatedAt,
+                ValidTo = now,
+                ChangeReason = string.IsNullOrWhiteSpace(changeReason) ? null : changeReason.Trim(),
+                CreatedAt = now,
+                CreatedBy = UserName
+            };
+
+            await _context.Set<TaxConfigurationVersion>().AddAsync(snapshot, cancellationToken);
         }
 
         #endregion
@@ -339,6 +399,76 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 CreatedBy = h.CreatedBy,
                 CreatedAt = h.CreatedAt
             }).ToList();
+        }
+
+        public async Task<IReadOnlyList<TaxConfigurationVersionDto>> GetTaxConfigurationVersionsAsync(
+            Guid taxId,
+            CancellationToken cancellationToken = default)
+        {
+            var tax = await _context.Set<Tax>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    t => t.Id == taxId && t.TenantId == TenantId && !t.IsDeleted,
+                    cancellationToken);
+
+            if (tax == null)
+                throw new InvalidOperationException("Tax not found.");
+
+            var versions = await _context.Set<TaxConfigurationVersion>()
+                .AsNoTracking()
+                .Where(v => v.TaxId == taxId && v.TenantId == TenantId && !v.IsDeleted)
+                .OrderBy(v => v.VersionNumber)
+                .ToListAsync(cancellationToken);
+
+            var result = versions.Select(v => new TaxConfigurationVersionDto
+            {
+                Id = v.Id,
+                TaxId = v.TaxId,
+                VersionNumber = v.VersionNumber,
+                Code = v.Code,
+                Name = v.Name,
+                Description = v.Description,
+                Rate = v.Rate,
+                EffectiveFrom = v.EffectiveFrom,
+                Applicability = v.Applicability,
+                Category = v.Category,
+                IsActive = v.IsActive,
+                IsInputTaxDeductible = v.IsInputTaxDeductible,
+                ThresholdAmount = v.ThresholdAmount,
+                TaxPayableAccountId = v.TaxPayableAccountId,
+                TaxReceivableAccountId = v.TaxReceivableAccountId,
+                ValidFrom = v.ValidFrom,
+                ValidTo = v.ValidTo,
+                ChangeReason = v.ChangeReason,
+                ChangedBy = v.CreatedBy,
+                IsCurrent = false
+            }).ToList();
+
+            var currentVersionNumber = (versions.LastOrDefault()?.VersionNumber ?? 0) + 1;
+            result.Add(new TaxConfigurationVersionDto
+            {
+                Id = tax.Id,
+                TaxId = tax.Id,
+                VersionNumber = currentVersionNumber,
+                Code = tax.Code,
+                Name = tax.Name,
+                Description = tax.Description,
+                Rate = tax.Rate,
+                EffectiveFrom = tax.EffectiveFrom,
+                Applicability = tax.Applicability,
+                Category = tax.Category,
+                IsActive = tax.IsActive,
+                IsInputTaxDeductible = tax.IsInputTaxDeductible,
+                ThresholdAmount = tax.ThresholdAmount,
+                TaxPayableAccountId = tax.TaxPayableAccountId,
+                TaxReceivableAccountId = tax.TaxReceivableAccountId,
+                ValidFrom = versions.LastOrDefault()?.ValidTo ?? tax.CreatedAt,
+                ValidTo = null,
+                ChangedBy = tax.UpdatedBy ?? tax.CreatedBy,
+                IsCurrent = true
+            });
+
+            return result.OrderByDescending(v => v.VersionNumber).ToList();
         }
 
         #endregion

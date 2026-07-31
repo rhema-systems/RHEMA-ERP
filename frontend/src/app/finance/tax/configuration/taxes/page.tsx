@@ -8,9 +8,10 @@ import { taxDataService } from '@/services/finance/tax-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { Tax } from '@/types/tax';
 import type { Account } from '@/types/finance';
-import { Plus, Edit, Trash2, CheckCircle, XCircle } from 'lucide-react';
+import { Plus, Edit, CheckCircle, Eye, LockKeyhole } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { TaxFormDialog } from '@/components/finance/tax/TaxFormDialog';
+import Link from 'next/link';
 
 export default function TaxesPage() {
     const [taxes, setTaxes] = useState<Tax[]>([]);
@@ -65,13 +66,13 @@ export default function TaxesPage() {
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Are you sure you want to delete this tax?')) return;
+        if (!confirm('Retire this tax configuration? It will remain visible and become permanently locked.')) return;
 
         try {
             await taxDataService.deleteTax(id);
             toast({
                 title: 'Success',
-                description: 'Tax deleted successfully',
+                description: 'Tax retired and locked successfully',
             });
             loadTaxes();
         } catch (error) {
@@ -130,8 +131,8 @@ export default function TaxesPage() {
                                                 </Badge>
                                             ) : (
                                                 <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">
-                                                    <XCircle className="mr-1 h-3 w-3" />
-                                                    Inactive
+                                                    <LockKeyhole className="mr-1 h-3 w-3" />
+                                                    Inactive · Locked
                                                 </Badge>
                                             )}
                                         </div>
@@ -155,20 +156,30 @@ export default function TaxesPage() {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleOpenDialog(tax)}
-                                        >
-                                            <Edit className="h-4 w-4" />
+                                        <Button variant="ghost" size="sm" asChild>
+                                            <Link href={`/finance/tax/configuration/taxes/${tax.id}`} aria-label={`View ${tax.name}`}>
+                                                <Eye className="h-4 w-4" />
+                                            </Link>
                                         </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleDelete(tax.id)}
-                                        >
-                                            <Trash2 className="h-4 w-4 text-destructive" />
-                                        </Button>
+                                        {tax.isActive && (
+                                            <>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => handleOpenDialog(tax)}
+                                                >
+                                                    <Edit className="h-4 w-4" />
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => handleDelete(tax.id)}
+                                                    aria-label={`Retire and lock ${tax.name}`}
+                                                >
+                                                    <LockKeyhole className="h-4 w-4 text-destructive" />
+                                                </Button>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             ))}

@@ -137,6 +137,12 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 if (parent == null)
                     throw new ArgumentException($"Parent unit account with ID '{dto.ParentAccountId}' not found.");
 
+                if (parent.UnitTypeId != dto.UnitTypeId)
+                    throw new InvalidOperationException("Child unit accounts must use the same unit type as their parent.");
+
+                if (parent.IsPostingAccount)
+                    throw new InvalidOperationException("A posting unit account cannot be used as a parent account.");
+
                 accountLevel = parent.AccountLevel + 1;
             }
 
@@ -183,7 +189,18 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (!string.IsNullOrEmpty(dto.Description))
                 account.Description = dto.Description;
             if (dto.IsPostingAccount.HasValue)
+            {
+                if (dto.IsPostingAccount.Value)
+                {
+                    var hasChildren = await _unitOfWork.Repository<UnitAccount>()
+                        .GetQueryable(ua => ua.TenantId == TenantId && ua.ParentAccountId == id && !ua.IsDeleted)
+                        .AnyAsync(cancellationToken);
+                    if (hasChildren)
+                        throw new InvalidOperationException("Summary unit accounts with child accounts cannot be changed to posting accounts.");
+                }
+
                 account.IsPostingAccount = dto.IsPostingAccount.Value;
+            }
 
             account.UpdatedAt = DateTime.UtcNow;
             account.UpdatedBy = UserName;
@@ -221,6 +238,9 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
             if (account == null)
                 throw new ArgumentException($"Unit account with ID '{id}' not found.");
+
+            if (account.CurrentBalance != 0m)
+                throw new InvalidOperationException($"Cannot deactivate unit account '{account.AccountNumber}' because it has a non-zero balance.");
 
             account.IsActive = false;
             account.UpdatedAt = DateTime.UtcNow;
@@ -278,7 +298,9 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             // Sum all posted journal entry lines for this account
             var totalBalance = await _unitOfWork.Repository<UnitJournalEntryLine>()
                 .GetQueryable(l => l.UnitAccountId == id && !l.IsDeleted)
-                .Where(l => l.UnitJournalEntry!.Status == UnitJournalEntryStatus.Posted)
+                .Where(l => l.UnitJournalEntry!.TenantId == TenantId
+                    && (l.UnitJournalEntry.Status == UnitJournalEntryStatus.Posted
+                        || l.UnitJournalEntry.Status == UnitJournalEntryStatus.Reversed))
                 .SumAsync(l => l.Quantity, cancellationToken);
 
             account.CurrentBalance = totalBalance;

@@ -62,6 +62,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.Invoice)
                 .Include(p => p.ConfiguredPaymentMethod)
+                .Include(p => p.BankAccount)
+                .Include(p => p.LiquidityAccount)
                 .FirstOrDefaultAsync(cancellationToken);
 
             var customer = payment == null
@@ -140,6 +142,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .Skip((query.PageNumber - 1) * query.PageSize)
                 .Take(query.PageSize)
                 .Include(p => p.ConfiguredPaymentMethod)
+                .Include(p => p.BankAccount)
+                .Include(p => p.LiquidityAccount)
                 .ToListAsync(cancellationToken);
             var customerIds = payments.Select(p => p.CustomerId).Distinct().ToList();
             var customerMap = customerIds.Count == 0
@@ -195,6 +199,15 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var paymentMethod = configuredPaymentMethod == null
                     ? dto.PaymentMethod
                     : MapConfiguredPaymentMethodToCustomerPaymentMethod(configuredPaymentMethod.Type);
+                var receiptDestination = dto.IsCreditNote
+                    ? new ReceiptDestination(null, null)
+                    : await ResolveReceiptDestinationAsync(
+                        configuredPaymentMethod?.Type,
+                        paymentMethod,
+                        dto.BankAccountId,
+                        dto.LiquidityAccountId,
+                        paymentCurrencyCode,
+                        cancellationToken);
 
                 var now = DateTime.UtcNow;
                 payment = new CustomerPayment
@@ -210,8 +223,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                     PaymentMethodId = configuredPaymentMethod?.Id,
                     CurrencyCode = paymentCurrencyCode,
                     ExchangeRate = dto.ExchangeRate,
-                    BankAccountId = dto.BankAccountId,
+                    BankAccountId = receiptDestination.BankAccountId,
+                    LiquidityAccountId = receiptDestination.LiquidityAccountId,
                     CheckNumber = dto.CheckNumber,
+                    ChequeDrawerBank = dto.ChequeDrawerBank,
                     TransactionReference = dto.TransactionReference,
                     WithholdingTaxId = dto.WithholdingTaxId,
                     WithholdingTaxAccountId = dto.WithholdingTaxAccountId,
@@ -313,14 +328,23 @@ namespace ErpSystem.Api.Services.Finance.AR
             var paymentMethod = configuredPaymentMethod == null
                 ? dto.PaymentMethod
                 : MapConfiguredPaymentMethodToCustomerPaymentMethod(configuredPaymentMethod.Type);
+            var receiptDestination = await ResolveReceiptDestinationAsync(
+                configuredPaymentMethod?.Type,
+                paymentMethod,
+                dto.BankAccountId,
+                dto.LiquidityAccountId,
+                payment.CurrencyCode,
+                cancellationToken);
 
             var now = DateTime.UtcNow;
             payment.PaymentDate = dto.PaymentDate;
             payment.TotalAmount = dto.TotalAmount;
             payment.PaymentMethod = paymentMethod;
             payment.PaymentMethodId = configuredPaymentMethod?.Id;
-            payment.BankAccountId = dto.BankAccountId;
+            payment.BankAccountId = receiptDestination.BankAccountId;
+            payment.LiquidityAccountId = receiptDestination.LiquidityAccountId;
             payment.CheckNumber = dto.CheckNumber;
+            payment.ChequeDrawerBank = dto.ChequeDrawerBank;
             payment.TransactionReference = dto.TransactionReference;
             payment.WithholdingTaxId = dto.WithholdingTaxId;
             payment.WithholdingTaxAccountId = dto.WithholdingTaxAccountId;
@@ -468,6 +492,17 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Realized FX is part of settlement accounting, so it participates in the same
             // transaction as the receipt and allocation instead of becoming a later partial commit.
             await PostRealizedFxIfRequiredAsync(payment, cancellationToken);
+
+            var customer = await GetCustomerPartnerAsync(payment.CustomerId, cancellationToken)
+                ?? throw new InvalidOperationException("Customer was not found while finalizing the AR receipt.");
+            if (payment.LiquidityAccountId.HasValue)
+            {
+                await CreateLiquidityEntryForReceiptAsync(payment, customer, cancellationToken);
+            }
+            else
+            {
+                await CreateCashTransactionForReceiptAsync(payment, customer, cancellationToken);
+            }
 
             _logger.LogInformation(
                 "Posted AR receipt {PaymentNumber} through finance posting engine with journal {JournalEntryId}. Duplicate={WasDuplicate}",
@@ -1281,6 +1316,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             var payment = await _unitOfWork.Repository<CustomerPayment>()
                 .GetQueryable(p => p.TenantId == TenantId && p.Id == id && !p.IsDeleted)
                 .Include(p => p.BankAccount)
+                .Include(p => p.LiquidityAccount)
+                .Include(p => p.ConfiguredPaymentMethod)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.Invoice)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -1432,23 +1469,55 @@ namespace ErpSystem.Api.Services.Finance.AR
                     throw new InvalidOperationException("Customer advance account must be a liability account.");
             }
 
-            var bankAccountId = payment.BankAccountId
-                ?? settings.DefaultBankAccountId
-                ?? throw new InvalidOperationException("Bank account is not configured for AR receipt posting.");
-            var bankAccount = await _unitOfWork.Repository<BankAccount>()
-                .GetQueryable(a => a.TenantId == tenantId && a.Id == bankAccountId && !a.IsDeleted)
-                .FirstOrDefaultAsync(cancellationToken);
+            Guid receiptDebitAccountId;
+            string receiptDebitTag;
+            if (payment.LiquidityAccountId.HasValue)
+            {
+                var liquidityAccount = await _unitOfWork.Repository<LiquidityAccount>()
+                    .GetQueryable(a =>
+                        a.TenantId == tenantId &&
+                        a.Id == payment.LiquidityAccountId.Value &&
+                        a.IsActive &&
+                        !a.IsDeleted)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException("The selected receipt holding account was not found or is inactive.");
+                if (!liquidityAccount.Currency.Equals(paymentCurrency, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Receipt and holding-account currencies must match.");
+                receiptDebitAccountId = liquidityAccount.GLAccountId;
+                receiptDebitTag = "AR-Liquidity";
+                payment.BankAccountId = null;
+            }
+            else
+            {
+                var bankAccountId = payment.BankAccountId
+                    ?? settings.DefaultBankAccountId
+                    ?? throw new InvalidOperationException("A bank account is required for a direct-bank AR receipt.");
+                var bankAccount = await _unitOfWork.Repository<BankAccount>()
+                    .GetQueryable(a => a.TenantId == tenantId && a.Id == bankAccountId && !a.IsDeleted)
+                    .FirstOrDefaultAsync(cancellationToken);
 
-            if (bankAccount == null)
-                throw new InvalidOperationException("AR receipt bank account was not found for this tenant.");
+                if (bankAccount == null)
+                    throw new InvalidOperationException("AR receipt bank account was not found for this tenant.");
+                if (!bankAccount.IsActive)
+                    throw new InvalidOperationException($"AR receipt bank account '{bankAccount.AccountName}' is inactive.");
+                if (!bankAccount.GLAccountId.HasValue)
+                    throw new InvalidOperationException($"AR receipt bank account '{bankAccount.AccountName}' is not linked to a GL account.");
+                if (!bankAccount.Currency.Equals(paymentCurrency, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Receipt and bank-account currencies must match.");
 
-            if (!bankAccount.IsActive)
-                throw new InvalidOperationException($"AR receipt bank account '{bankAccount.AccountName}' is inactive.");
+                receiptDebitAccountId = bankAccount.GLAccountId.Value;
+                receiptDebitTag = "AR-Bank";
+                payment.BankAccountId = bankAccount.Id;
+                payment.LiquidityAccountId = null;
+            }
 
-            if (!bankAccount.GLAccountId.HasValue)
-                throw new InvalidOperationException($"AR receipt bank account '{bankAccount.AccountName}' is not linked to a GL account.");
-
-            await ResolveReceiptPostingAccountAsync(bankAccount.GLAccountId.Value, "bank/cash account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+            await ResolveReceiptPostingAccountAsync(
+                receiptDebitAccountId,
+                payment.LiquidityAccountId.HasValue ? "liquidity control account" : "bank account",
+                accountCache,
+                allowControlAccount: true,
+                requireDirectPosting: false,
+                cancellationToken);
 
             var discountAllowed = RoundMoney(activeAllocations.Sum(a => a.DiscountAmount));
             var withholdingTaxAmount = RoundMoney(payment.WithholdingTaxAmount);
@@ -1466,7 +1535,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var lineNumber = 1;
 
             postingLines.Add(BuildPostingLine(
-                bankAccount.GLAccountId.Value,
+                receiptDebitAccountId,
                 $"AR receipt {payment.PaymentNumber}",
                 debitTransactionAmount: payment.TotalAmount,
                 creditTransactionAmount: 0m,
@@ -1476,7 +1545,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 payment.PaymentDate,
                 payment.PaymentNumber,
                 lineNumber++,
-                    "AR-Bank"));
+                    receiptDebitTag));
 
             if (withholdingTaxAmount > 0m)
             {
@@ -1558,7 +1627,6 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (RoundMoney(postingLines.Sum(l => l.DebitAmount)) != RoundMoney(postingLines.Sum(l => l.CreditAmount)))
                 throw new InvalidOperationException("AR receipt posting is not balanced.");
 
-            payment.BankAccountId ??= bankAccount.Id;
             payment.IsCustomerAdvance = isCustomerAdvance;
 
             return new FinancePostingRequestDto
@@ -1985,6 +2053,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             await cashTransactionRepository.AddAsync(new CashTransaction
             {
                 Id = Guid.NewGuid(),
+                TenantId = TenantId,
                 TransactionNumber = transactionNumber,
                 TransactionDate = payment.PaymentDate,
                 TransactionType = CashTransactionType.Receipt,
@@ -2000,6 +2069,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 GLAccountId = arAccountId,
                 IsReconciled = false,
                 IsPosted = true,
+                ApprovalStatus = CashTransactionApprovalStatus.Posted,
+                JournalEntryId = payment.JournalEntryId,
                 PostedDate = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = UserName
@@ -2011,6 +2082,79 @@ namespace ErpSystem.Api.Services.Finance.AR
             bankAccount.UpdatedAt = DateTime.UtcNow;
             bankAccount.UpdatedBy = UserName;
             await bankAccountRepository.UpdateAsync(bankAccount);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        private async Task CreateLiquidityEntryForReceiptAsync(
+            CustomerPayment payment,
+            BusinessPartner customer,
+            CancellationToken cancellationToken)
+        {
+            if (payment.IsCreditNote || !payment.LiquidityAccountId.HasValue)
+            {
+                return;
+            }
+
+            var repository = _unitOfWork.Repository<LiquidityAccountEntry>();
+            var existing = await repository
+                .GetQueryable(entry =>
+                    entry.TenantId == TenantId &&
+                    entry.SourceDocumentType == nameof(CustomerPayment) &&
+                    entry.SourceDocumentId == payment.Id &&
+                    !entry.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (existing != null)
+            {
+                payment.LiquidityAccountEntryId ??= existing.Id;
+                return;
+            }
+
+            var liquidityAccount = await _unitOfWork.Repository<LiquidityAccount>()
+                .GetQueryable(account =>
+                    account.TenantId == TenantId &&
+                    account.Id == payment.LiquidityAccountId.Value &&
+                    account.IsActive &&
+                    !account.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("Receipt holding account was not found.");
+            var currency = NormalizeCurrency(payment.CurrencyCode, await _tenantSettingsService.GetBaseCurrencyAsync());
+            if (!liquidityAccount.Currency.Equals(currency, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Receipt and holding-account currencies must match.");
+            }
+
+            var entryNumber = await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.LiquidityEntry,
+                TenantId,
+                payment.PaymentDate,
+                nameof(LiquidityAccountEntry),
+                cancellationToken: cancellationToken);
+            var entry = new LiquidityAccountEntry
+            {
+                TenantId = TenantId,
+                LiquidityAccountId = liquidityAccount.Id,
+                EntryNumber = entryNumber,
+                EntryDate = payment.PaymentDate,
+                EntryType = LiquidityEntryType.CustomerReceipt,
+                Direction = LiquidityEntryDirection.Increase,
+                Amount = payment.TotalAmount,
+                AllocatedAmount = 0m,
+                Currency = currency,
+                SourceDocumentType = nameof(CustomerPayment),
+                SourceDocumentId = payment.Id,
+                ReferenceNumber = payment.CheckNumber ?? payment.TransactionReference ?? payment.PaymentNumber,
+                CounterpartyName = customer.PartnerName,
+                Description = $"{payment.PaymentMethod} receipt {payment.PaymentNumber}",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = UserName
+            };
+            await repository.AddAsync(entry);
+            payment.LiquidityAccountEntryId = entry.Id;
+            payment.BankAccountId = null;
+            payment.UpdatedAt = DateTime.UtcNow;
+            payment.UpdatedBy = UserName;
+            await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
@@ -2041,17 +2185,103 @@ namespace ErpSystem.Api.Services.Finance.AR
                 throw new InvalidOperationException($"The selected {label} payment method is inactive.");
             }
 
-            if (method.RequiresBankAccount && !bankAccountId.HasValue)
-            {
-                throw new InvalidOperationException($"The selected {label} payment method requires a bank account.");
-            }
-
             if (enforceReference && method.RequiresReference && string.IsNullOrWhiteSpace(referenceNumber))
             {
                 throw new InvalidOperationException($"The selected {label} payment method requires a reference number.");
             }
 
             return method;
+        }
+
+        private async Task<ReceiptDestination> ResolveReceiptDestinationAsync(
+            PaymentMethodType? configuredType,
+            string? paymentMethod,
+            Guid? bankAccountId,
+            Guid? liquidityAccountId,
+            string currency,
+            CancellationToken cancellationToken)
+        {
+            var normalizedCurrency = NormalizeCurrency(currency, await _tenantSettingsService.GetBaseCurrencyAsync());
+            var isDirectBank = configuredType is PaymentMethodType.EFT
+                or PaymentMethodType.DirectDebit
+                or PaymentMethodType.StandingOrder
+                or PaymentMethodType.BankTransfer;
+            if (!configuredType.HasValue)
+            {
+                var normalizedMethod = (paymentMethod ?? string.Empty)
+                    .Replace(" ", string.Empty, StringComparison.Ordinal)
+                    .Replace("-", string.Empty, StringComparison.Ordinal)
+                    .ToUpperInvariant();
+                isDirectBank = normalizedMethod is "BANKTRANSFER" or "EFT" or "DIRECTDEBIT" or "STANDINGORDER";
+            }
+
+            if (isDirectBank)
+            {
+                var settings = await GetFinanceSettingsAsync(cancellationToken);
+                var resolvedBankId = bankAccountId ?? settings.DefaultBankAccountId
+                    ?? throw new InvalidOperationException("Select a bank account for a direct bank receipt.");
+                var bank = await _unitOfWork.Repository<BankAccount>()
+                    .GetQueryable(item =>
+                        item.TenantId == TenantId &&
+                        item.Id == resolvedBankId &&
+                        item.IsActive &&
+                        !item.IsDeleted)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException("The selected bank account was not found or is inactive.");
+                if (!bank.Currency.Equals(normalizedCurrency, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("Receipt and bank-account currencies must match.");
+                }
+                return new ReceiptDestination(bank.Id, null);
+            }
+
+            var targetType = configuredType switch
+            {
+                PaymentMethodType.Cheque => LiquidityAccountType.ChequesAwaitingDeposit,
+                PaymentMethodType.Card => LiquidityAccountType.CardSettlementClearing,
+                PaymentMethodType.MobileMoney => LiquidityAccountType.MobileMoneyClearing,
+                PaymentMethodType.Cash => LiquidityAccountType.UndepositedCash,
+                _ => InferLiquidityType(paymentMethod)
+            };
+            var liquidityQuery = _unitOfWork.Repository<LiquidityAccount>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.Currency == normalizedCurrency &&
+                    item.IsActive &&
+                    !item.IsDeleted);
+            var account = liquidityAccountId.HasValue
+                ? await liquidityQuery.FirstOrDefaultAsync(item => item.Id == liquidityAccountId.Value, cancellationToken)
+                : await liquidityQuery
+                    .OrderByDescending(item => item.AccountType == targetType)
+                    .ThenBy(item => item.Code)
+                    .FirstOrDefaultAsync(item => item.AccountType == targetType, cancellationToken);
+            if (account == null)
+            {
+                throw new InvalidOperationException(
+                    $"No active {targetType} holding account exists for {normalizedCurrency}. Complete Banking & Settlement setup first.");
+            }
+            if (account.AccountType != targetType &&
+                account.AccountType != LiquidityAccountType.OtherSettlementClearing)
+            {
+                throw new InvalidOperationException(
+                    $"The selected holding account is not suitable for {paymentMethod ?? configuredType?.ToString() ?? "this payment method"}.");
+            }
+            return new ReceiptDestination(null, account.Id);
+        }
+
+        private static LiquidityAccountType InferLiquidityType(string? paymentMethod)
+        {
+            var value = (paymentMethod ?? string.Empty)
+                .Replace(" ", string.Empty, StringComparison.Ordinal)
+                .Replace("-", string.Empty, StringComparison.Ordinal)
+                .ToUpperInvariant();
+            if (value.Contains("CHEQUE", StringComparison.Ordinal) || value.Contains("CHECK", StringComparison.Ordinal))
+                return LiquidityAccountType.ChequesAwaitingDeposit;
+            if (value.Contains("MOBILE", StringComparison.Ordinal) || value.Contains("MOMO", StringComparison.Ordinal))
+                return LiquidityAccountType.MobileMoneyClearing;
+            if (value.Contains("CARD", StringComparison.Ordinal))
+                return LiquidityAccountType.CardSettlementClearing;
+            return LiquidityAccountType.UndepositedCash;
         }
 
         private static string MapConfiguredPaymentMethodToCustomerPaymentMethod(PaymentMethodType type)
@@ -2075,6 +2305,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             FinancePostingResultDto PostingResult,
             bool WasAlreadyLinked);
 
+        private sealed record ReceiptDestination(Guid? BankAccountId, Guid? LiquidityAccountId);
+
         private CustomerPaymentDto MapToDto(CustomerPayment payment, BusinessPartner? customer = null)
         {
             return new CustomerPaymentDto
@@ -2093,7 +2325,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                 CurrencyCode = payment.CurrencyCode,
                 ExchangeRate = payment.ExchangeRate,
                 BankAccountId = payment.BankAccountId,
+                BankAccountName = payment.BankAccount?.AccountName,
+                LiquidityAccountId = payment.LiquidityAccountId,
+                LiquidityAccountName = payment.LiquidityAccount?.Name,
+                LiquidityAccountEntryId = payment.LiquidityAccountEntryId,
                 CheckNumber = payment.CheckNumber,
+                ChequeDrawerBank = payment.ChequeDrawerBank,
                 TransactionReference = payment.TransactionReference,
                 WithholdingTaxId = payment.WithholdingTaxId,
                 WithholdingTaxAccountId = payment.WithholdingTaxAccountId,

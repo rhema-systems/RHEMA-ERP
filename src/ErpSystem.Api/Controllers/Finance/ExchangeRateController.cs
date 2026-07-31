@@ -53,13 +53,14 @@ namespace ErpSystem.Api.Controllers.Finance
             [FromQuery] string? fromCurrency = null,
             [FromQuery] string? toCurrency = null,
             [FromQuery] string? rateType = null,
+            [FromQuery] string? quoteSide = null,
             [FromQuery] DateTime? startDate = null,
             [FromQuery] DateTime? endDate = null)
         {
             try
             {
                 var rates = await _exchangeRateService.GetExchangeRatesAsync(
-                    fromCurrency, toCurrency, startDate, rateType);
+                    fromCurrency, toCurrency, startDate, rateType, quoteSide);
                 return Ok(rates);
             }
             catch (Exception ex)
@@ -197,11 +198,21 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No current rate found for this currency</response>
         /// <response code="500">Internal server error</response>
         [HttpGet("current/{currencyCode}")]
-        public async Task<ActionResult<ExchangeRateDto>> GetCurrentRate(string currencyCode)
+        public async Task<ActionResult<ExchangeRateDto>> GetCurrentRate(
+            string currencyCode,
+            [FromQuery] string? baseCurrencyCode = null,
+            [FromQuery] DateTime? effectiveDate = null,
+            [FromQuery] string? rateType = null,
+            [FromQuery] string? quoteSide = null)
         {
             try
             {
-                var rate = await _exchangeRateService.GetCurrentRateAsync(currencyCode);
+                var rate = await _exchangeRateService.GetCurrentRateAsync(
+                    currencyCode,
+                    baseCurrencyCode,
+                    effectiveDate,
+                    rateType,
+                    quoteSide);
                 if (rate == null)
                     return NotFound($"No current exchange rate found for {currencyCode}");
 

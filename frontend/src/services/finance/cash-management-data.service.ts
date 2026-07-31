@@ -24,6 +24,16 @@ import type {
     ReconciliationSummary,
     CashPositionSummary,
     CashFlowSummary,
+    LiquidityAccount,
+    LiquidityAccountEntry,
+    BankDeposit,
+    BankDepositStatus,
+    BankingSetupStatus,
+    DepositPolicy,
+    LiquidityAccountType,
+    ReturnedChequeCase,
+    ReturnedChequeCaseStatus,
+    PostedLiquidityPaymentCandidate,
 } from '@/types/cash-management';
 import { apiService } from '@/services/api.service';
 
@@ -32,6 +42,180 @@ import { apiService } from '@/services/api.service';
 // =============================================================================
 
 class CashManagementDataService {
+    // ===== BANKING & SETTLEMENT =====
+
+    async getBankingSetup(): Promise<BankingSetupStatus> {
+        return apiService.get<BankingSetupStatus>('/finance/banking/setup');
+    }
+
+    async completeBankingSetup(dto: {
+        depositPolicy: DepositPolicy;
+        requirePrimaryEvidence: boolean;
+        accounts: Array<{
+            accountType: LiquidityAccountType;
+            code: string;
+            name: string;
+            currency: string;
+            glAccountId: string;
+        }>;
+    }): Promise<BankingSetupStatus> {
+        return apiService.post<BankingSetupStatus>('/finance/banking/setup', dto);
+    }
+
+    async getLiquidityAccounts(activeOnly = false): Promise<LiquidityAccount[]> {
+        return apiService.get<LiquidityAccount[]>(
+            `/finance/banking/liquidity-accounts?activeOnly=${activeOnly}`,
+        );
+    }
+
+    async createLiquidityAccount(dto: {
+        code: string;
+        name: string;
+        accountType: LiquidityAccountType;
+        currency: string;
+        glAccountId: string;
+        bankAccountId?: string;
+        providerName?: string;
+        providerAccountReference?: string;
+        allowsNegativeBalance: boolean;
+        allowsManualAllocations: boolean;
+        notes?: string;
+    }): Promise<LiquidityAccount> {
+        return apiService.post<LiquidityAccount>('/finance/banking/liquidity-accounts', dto);
+    }
+
+    async getEligibleLiquidityEntries(currency?: string): Promise<LiquidityAccountEntry[]> {
+        const query = currency ? `?currency=${encodeURIComponent(currency)}` : '';
+        return apiService.get<LiquidityAccountEntry[]>(`/finance/banking/eligible-entries${query}`);
+    }
+
+    async getPostedPaymentCandidates(): Promise<PostedLiquidityPaymentCandidate[]> {
+        return apiService.get<PostedLiquidityPaymentCandidate[]>('/finance/banking/posted-payment-candidates');
+    }
+
+    async registerPostedPayment(
+        accountTransactionId: string,
+        entryType: 'CashExpense' | 'PettyCashReplenishment' | 'CustomerRefund' | 'OtherPayment',
+    ): Promise<LiquidityAccountEntry> {
+        return apiService.post<LiquidityAccountEntry>('/finance/banking/posted-payment-entries', {
+            accountTransactionId,
+            entryType,
+        });
+    }
+
+    async getBankDeposits(status?: BankDepositStatus): Promise<BankDeposit[]> {
+        const query = status ? `?status=${encodeURIComponent(status)}` : '';
+        return apiService.get<BankDeposit[]>(`/finance/banking/deposits${query}`);
+    }
+
+    async getBankDeposit(id: string): Promise<BankDeposit> {
+        return apiService.get<BankDeposit>(`/finance/banking/deposits/${id}`);
+    }
+
+    async createBankDeposit(dto: {
+        bankAccountId: string;
+        depositDate: string;
+        depositReference: string;
+        notes?: string;
+        allocations: Array<{
+            liquidityAccountEntryId: string;
+            allocationType: 'Receipt' | 'Deduction';
+            amount: number;
+            notes?: string;
+        }>;
+    }): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>('/finance/banking/deposits', dto);
+    }
+
+    async submitBankDeposit(id: string): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/submit`, {});
+    }
+
+    async approveBankDeposit(id: string, comments?: string): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/approve`, { comments });
+    }
+
+    async rejectBankDeposit(id: string, reason: string): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/reject`, { reason });
+    }
+
+    async returnBankDeposit(id: string, comments: string): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/return`, { comments });
+    }
+
+    async postBankDeposit(id: string): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/post`, {});
+    }
+
+    async uploadBankingEvidence(file: File): Promise<string> {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('category', 'finance-banking-evidence');
+        const response = await apiService.post<Record<string, string>>('/fileupload/single', formData);
+        const fileId = response.fileId || response.id || response.fileUploadRecordId;
+        if (!fileId) throw new Error('Upload succeeded but the server did not return a file ID.');
+        return fileId;
+    }
+
+    async linkBankDepositAttachment(
+        depositId: string,
+        fileUploadRecordId: string,
+        documentType = 'DepositSlip',
+        isPrimaryEvidence = true,
+    ): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${depositId}/attachments`, {
+            fileUploadRecordId,
+            documentType,
+            isPrimaryEvidence,
+        });
+    }
+
+    async getReturnedCheques(status?: ReturnedChequeCaseStatus): Promise<ReturnedChequeCase[]> {
+        const query = status ? `?status=${encodeURIComponent(status)}` : '';
+        return apiService.get<ReturnedChequeCase[]>(`/finance/banking/returned-cheques${query}`);
+    }
+
+    async createReturnedCheque(dto: {
+        customerPaymentId: string;
+        bankDepositBatchId?: string;
+        bankAccountId: string;
+        returnDate: string;
+        bankReference: string;
+        returnReason: string;
+        bankChargeAmount: number;
+        chargeTreatment: 'CustomerRecoverable' | 'BankChargeExpense' | 'Split';
+        customerRecoverableChargeAmount?: number;
+        expenseChargeAmount?: number;
+        drawerBank?: string;
+        notes?: string;
+    }): Promise<ReturnedChequeCase> {
+        return apiService.post<ReturnedChequeCase>('/finance/banking/returned-cheques', dto);
+    }
+
+    async submitReturnedCheque(id: string): Promise<ReturnedChequeCase> {
+        return apiService.post<ReturnedChequeCase>(`/finance/banking/returned-cheques/${id}/submit`, {});
+    }
+
+    async approveReturnedCheque(id: string, comments?: string): Promise<ReturnedChequeCase> {
+        return apiService.post<ReturnedChequeCase>(
+            `/finance/banking/returned-cheques/${id}/approve`,
+            { comments },
+        );
+    }
+
+    async linkReturnedChequeAttachment(
+        id: string,
+        fileUploadRecordId: string,
+        documentType = 'BankReturnAdvice',
+        isPrimaryEvidence = true,
+    ): Promise<ReturnedChequeCase> {
+        return apiService.post<ReturnedChequeCase>(`/finance/banking/returned-cheques/${id}/attachments`, {
+            fileUploadRecordId,
+            documentType,
+            isPrimaryEvidence,
+        });
+    }
+
     // ===== BANK ACCOUNTS =====
 
     async getBankAccounts(): Promise<BankAccount[]> {

@@ -383,6 +383,102 @@ public sealed class FxFunctionalCurrencyGovernanceTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXFoundation")]
     [Trait("Category", "FX")]
+    public async Task DirectionalPolicy_ShouldUseBuyingForArSettlementAndSellingForApSettlement()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        var settings = SeedFinanceSettings(db, tenantId, "GHS");
+        settings.DirectionalExchangeRatePolicyEnabled = true;
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1010", AccountType.Asset, isMultiCurrency: true);
+        var credit = SeedAccount(db, tenantId, "2010", AccountType.Liability, isMultiCurrency: true);
+        SeedExchangeRate(db, tenantId, "GHS", "USD", 15m, new DateTime(2026, 7, 1), quoteSide: ExchangeRateQuoteSide.Mid);
+        var buying = SeedExchangeRate(db, tenantId, "GHS", "USD", 14.8m, new DateTime(2026, 7, 1), quoteSide: ExchangeRateQuoteSide.Buying);
+        var selling = SeedExchangeRate(db, tenantId, "GHS", "USD", 15.2m, new DateTime(2026, 7, 1), quoteSide: ExchangeRateQuoteSide.Selling);
+        await db.SaveChangesAsync();
+
+        var arRequest = CreateForeignPostingRequest(tenantId, debit.Id, credit.Id, 10m, buying.Rate);
+        arRequest.SourceModule = "AR";
+        arRequest.SourceDocumentType = "CustomerPayment";
+        var arResult = await CreatePostingEngine(db, tenantId).PostAsync(arRequest);
+
+        var apRequest = CreateForeignPostingRequest(tenantId, debit.Id, credit.Id, 10m, selling.Rate);
+        apRequest.SourceModule = "AP";
+        apRequest.SourceDocumentType = "VendorPayment";
+        var apResult = await CreatePostingEngine(db, tenantId).PostAsync(apRequest);
+
+        (await db.AccountTransactions
+                .Where(t => t.JournalEntryId == arResult.JournalEntryId)
+                .Select(t => t.ExchangeRateId)
+                .Distinct()
+                .SingleAsync())
+            .Should()
+            .Be(buying.Id);
+        (await db.AccountTransactions
+                .Where(t => t.JournalEntryId == apResult.JournalEntryId)
+                .Select(t => t.ExchangeRateId)
+                .Distinct()
+                .SingleAsync())
+            .Should()
+            .Be(selling.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public async Task DirectionalRateOverride_ShouldRequireReasonApprovalAndEmitAudit()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        var settings = SeedFinanceSettings(db, tenantId, "GHS");
+        settings.DirectionalExchangeRatePolicyEnabled = true;
+        settings.RequireExchangeRateOverrideApproval = true;
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1020", AccountType.Asset, isMultiCurrency: true);
+        var credit = SeedAccount(db, tenantId, "2020", AccountType.Liability, isMultiCurrency: true);
+        var mid = SeedExchangeRate(db, tenantId, "GHS", "USD", 15m, new DateTime(2026, 7, 1), quoteSide: ExchangeRateQuoteSide.Mid);
+        SeedExchangeRate(db, tenantId, "GHS", "USD", 14.8m, new DateTime(2026, 7, 1), quoteSide: ExchangeRateQuoteSide.Buying);
+        await db.SaveChangesAsync();
+
+        var request = CreateForeignPostingRequest(tenantId, debit.Id, credit.Id, 10m, mid.Rate);
+        request.SourceModule = "AR";
+        request.SourceDocumentType = "CustomerPayment";
+        foreach (var line in request.Lines)
+        {
+            line.ExchangeRateId = mid.Id;
+        }
+
+        var audit = new CapturingFinanceAuditService();
+        var service = CreatePostingEngine(db, tenantId, audit);
+
+        await service.Invoking(s => s.PostAsync(request))
+            .Should()
+            .ThrowAsync<InvalidOperationException>()
+            .WithMessage("*requires a reason*");
+
+        request.ExchangeRateOverrideReason = "Actual bank settlement rate";
+        request.ExchangeRateOverrideApprovedByUserId = Guid.NewGuid();
+        request.ExchangeRateOverrideApprovedAt = DateTime.UtcNow;
+
+        var result = await service.PostAsync(request);
+
+        (await db.AccountTransactions
+                .Where(t => t.JournalEntryId == result.JournalEntryId)
+                .Select(t => t.ExchangeRateId)
+                .Distinct()
+                .SingleAsync())
+            .Should()
+            .Be(mid.Id);
+        audit.Events.Should().Contain(e =>
+            e.EventType == FinanceAuditEvents.ExchangeRatePolicyOverrideUsed
+            && e.SourceDocumentId == request.SourceDocumentId);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
     public async Task ClosedPeriodForeignCurrencyPostingIsRejectedThroughPostingEngine()
     {
         var tenantId = Guid.NewGuid();
@@ -586,7 +682,8 @@ public sealed class FxFunctionalCurrencyGovernanceTests
         string targetCurrency,
         decimal rate,
         DateTime effectiveDate,
-        DateTime? endDate = null)
+        DateTime? endDate = null,
+        ExchangeRateQuoteSide quoteSide = ExchangeRateQuoteSide.Mid)
     {
         var exchangeRate = new ExchangeRate
         {
@@ -599,6 +696,7 @@ public sealed class FxFunctionalCurrencyGovernanceTests
             EffectiveDate = effectiveDate.Date,
             EndDate = endDate?.Date,
             RateType = ExchangeRateType.Daily,
+            QuoteSide = quoteSide,
             RateSource = "Bank of Ghana",
             ApprovalStatus = RateApprovalStatus.Approved,
             IsActive = true,

@@ -40,6 +40,18 @@ public static class FinancePermissions
     public const string PostJournalEntries = "Finance.JournalEntries.Post";
     public const string ReverseJournalEntries = "Finance.JournalEntries.Reverse";
 
+    public const string ViewJournalBatches = "Finance.JournalBatches.View";
+    public const string CreateJournalBatches = "Finance.JournalBatches.Create";
+    public const string EditJournalBatches = "Finance.JournalBatches.Edit";
+    public const string DeleteJournalBatches = "Finance.JournalBatches.Delete";
+    public const string SubmitJournalBatches = "Finance.JournalBatches.SubmitForApproval";
+    public const string ApproveJournalBatches = "Finance.JournalBatches.Approve";
+    public const string PostJournalBatches = "Finance.JournalBatches.Post";
+    public const string ReverseJournalBatches = "Finance.JournalBatches.Reverse";
+    public const string ImportJournalBatches = "Finance.JournalBatches.Import";
+    public const string ExportJournalBatches = "Finance.JournalBatches.Export";
+    public const string CopyJournalBatches = "Finance.JournalBatches.Copy";
+
     public const string ManageApInvoices = "Finance.AP.Invoices.Manage";
     public const string CreateApInvoices = "Finance.AP.Invoices.Create";
     public const string EditApInvoices = "Finance.AP.Invoices.Edit";
@@ -66,6 +78,12 @@ public static class FinancePermissions
     public const string RecordCashBankTransactions = "Finance.CashBank.Transactions.Record";
     public const string PerformBankReconciliation = "Finance.BankReconciliation.Perform";
     public const string ApproveBankReconciliation = "Finance.BankReconciliation.Approve";
+    public const string ManageLiquidityAccounts = "Finance.Banking.LiquidityAccounts.Manage";
+    public const string CreateBankDeposits = "Finance.Banking.Deposits.Create";
+    public const string SubmitBankDeposits = "Finance.Banking.Deposits.Submit";
+    public const string ApproveBankDeposits = "Finance.Banking.Deposits.Approve";
+    public const string ManageBankingSettings = "Finance.Banking.Settings.Manage";
+    public const string ManageReturnedCheques = "Finance.Banking.ReturnedCheques.Manage";
 
     public const string ManageTaxConfiguration = "Finance.Tax.Configuration.Manage";
 
@@ -78,6 +96,8 @@ public static class FinancePermissions
 
     public const string RunFinanceReports = "Finance.Reports.Run";
     public const string ExportFinanceReports = "Finance.Reports.Export";
+    public const string ManageFinancialStatementLayouts = "Finance.Reports.Layouts.Manage";
+    public const string PublishFinancialStatementLayouts = "Finance.Reports.Layouts.Publish";
 
     public const string CloseAccountingPeriods = "Finance.PeriodClose";
     public const string ReopenAccountingPeriods = "Finance.PeriodReopen";
@@ -96,6 +116,7 @@ public static class FinancePermissions
     public const string ViewBudgets = "Finance.Budgeting.Read";
     public const string MaintainBudgets = "Finance.Budgeting.Write";
     public const string AssignBudgetReturns = "Finance.BudgetReturns.Assign";
+    public const string EditBudgetReturns = "Finance.BudgetReturns.Edit";
     public const string SubmitBudgetReturns = "Finance.BudgetReturns.Submit";
     public const string ApproveBudgetReturns = "Finance.BudgetReturns.Approve";
     public const string LockBudgets = "Finance.Budgeting.Lock";
@@ -115,6 +136,17 @@ public static class FinancePermissions
         new(ApproveJournalEntries, "Approve Journal Entries", "Approve or reject submitted journal entries.", CategoryGeneralLedger),
         new(PostJournalEntries, "Post Journal Entries", "Post approved journal entries to the ledger.", CategoryGeneralLedger),
         new(ReverseJournalEntries, "Reverse Journal Entries", "Reverse posted journal entries using controlled reversal actions.", CategoryGeneralLedger),
+        new(ViewJournalBatches, "View Journal Batches", "View controlled journal batches, entries, review outcomes, and posting runs.", CategoryGeneralLedger),
+        new(CreateJournalBatches, "Create Journal Batches", "Create journal-batch control headers and member journals.", CategoryGeneralLedger),
+        new(EditJournalBatches, "Edit Journal Batches", "Edit Draft journal batches and their member journals.", CategoryGeneralLedger),
+        new(DeleteJournalBatches, "Delete Journal Batches", "Delete empty Draft journal batches.", CategoryGeneralLedger),
+        new(SubmitJournalBatches, "Submit Journal Batches", "Validate and submit journal batches for approval.", CategoryGeneralLedger),
+        new(ApproveJournalBatches, "Approve Journal Batches", "Record per-entry review decisions on assigned journal batches.", CategoryGeneralLedger),
+        new(PostJournalBatches, "Post Journal Batches", "Post selected approved journal entries through atomic posting runs.", CategoryGeneralLedger),
+        new(ReverseJournalBatches, "Reverse Journal Batches", "Create and process full linked journal-batch reversals.", CategoryGeneralLedger),
+        new(ImportJournalBatches, "Import Journal Batches", "Preview and commit versioned journal-batch spreadsheets.", CategoryGeneralLedger),
+        new(ExportJournalBatches, "Export Journal Batches", "Export journal-batch templates, details, and error workbooks.", CategoryGeneralLedger),
+        new(CopyJournalBatches, "Copy Journal Batches", "Copy entire journal batches or rejected entries into new Draft batches.", CategoryGeneralLedger),
 
         new(ManageApInvoices, "Manage AP Invoices", "Manage supplier invoice lifecycle and matching.", CategoryAccountsPayable),
         new(CreateApInvoices, "Create AP Invoices", "Capture supplier invoices.", CategoryAccountsPayable),
@@ -142,6 +174,12 @@ public static class FinancePermissions
         new(RecordCashBankTransactions, "Record Cash/Bank Transactions", "Record cash receipts, payments, transfers, and reversals.", CategoryCashBank),
         new(PerformBankReconciliation, "Perform Bank Reconciliation", "Start, match, adjust, and maintain bank reconciliations.", CategoryCashBank),
         new(ApproveBankReconciliation, "Approve Bank Reconciliation", "Approve completed bank reconciliations.", CategoryCashBank),
+        new(ManageLiquidityAccounts, "Manage Liquidity Accounts", "Create and maintain bank, till, and settlement holding-account mappings.", CategoryCashBank),
+        new(CreateBankDeposits, "Create Bank Deposits", "Create and edit bank deposit batches from eligible receipts and payments.", CategoryCashBank),
+        new(SubmitBankDeposits, "Submit Bank Deposits", "Submit or cancel bank deposit batches through workflow.", CategoryCashBank),
+        new(ApproveBankDeposits, "Approve Bank Deposits", "Approve, reject, or return bank deposit batches.", CategoryCashBank),
+        new(ManageBankingSettings, "Manage Banking Settings", "Configure tenant deposit policy and settlement-account provisioning.", CategoryCashBank),
+        new(ManageReturnedCheques, "Manage Returned Cheques", "Capture, submit, and approve returned customer cheque cases.", CategoryCashBank),
 
         new(ManageTaxConfiguration, "Manage Tax Configuration", "Maintain effective-dated tenant tax configuration and statutory tax setup.", CategoryTax),
 
@@ -154,6 +192,8 @@ public static class FinancePermissions
 
         new(RunFinanceReports, "Run Finance Reports", "Run finance statements, aging, cash, bank, tax, FX, and fixed asset reports.", CategoryReporting),
         new(ExportFinanceReports, "Export/Print Finance Reports", "Export or print finance reports and finance-controlled documents.", CategoryReporting),
+        new(ManageFinancialStatementLayouts, "Manage Financial Statement Layouts", "Create and maintain draft financial statement layouts and mappings.", CategoryReporting),
+        new(PublishFinancialStatementLayouts, "Publish Financial Statement Layouts", "Validate and publish versioned financial statement layouts for production reporting.", CategoryReporting),
 
         new(CloseAccountingPeriods, "Close Accounting Periods", "Close fiscal periods after month-end checks.", CategoryPeriodClose),
         new(ReopenAccountingPeriods, "Reopen Accounting Periods", "Reopen previously closed fiscal periods.", CategoryPeriodClose),
@@ -172,6 +212,7 @@ public static class FinancePermissions
         new(ViewBudgets, "View Budgets", "View budget scenarios, returns, and worksheets.", CategoryBudgeting),
         new(MaintainBudgets, "Maintain Budgets", "Create budget scenarios, returns, and entries.", CategoryBudgeting),
         new(AssignBudgetReturns, "Assign Budget Returns", "Assign budget worksheets to preparers.", CategoryBudgeting),
+        new(EditBudgetReturns, "Edit Assigned Budget Returns", "Edit assigned budget worksheets before submission.", CategoryBudgeting),
         new(SubmitBudgetReturns, "Submit Budget Returns", "Submit assigned budget worksheets.", CategoryBudgeting),
         new(ApproveBudgetReturns, "Approve Budget Returns", "Approve or reject submitted budget worksheets.", CategoryBudgeting),
         new(LockBudgets, "Lock Budgets", "Lock approved budget scenarios.", CategoryBudgeting)

@@ -36,6 +36,23 @@ public static class FinanceAuditEvents
     public const string FinanceWorkflowCrossTenantApprovalRejected = "Finance.Workflow.CrossTenantApprovalRejected";
     public const string FinanceWorkflowApproverPermissionRejected = "Finance.Workflow.ApproverPermissionRejected";
 
+    public const string BudgetScenarioCreated = "Finance.BudgetScenario.Created";
+    public const string BudgetScenarioUpdated = "Finance.BudgetScenario.Updated";
+    public const string BudgetScenarioOpened = "Finance.BudgetScenario.OpenedForCollection";
+    public const string BudgetScenarioSubmitted = "Finance.BudgetScenario.SubmittedForApproval";
+    public const string BudgetScenarioApproved = "Finance.BudgetScenario.Approved";
+    public const string BudgetScenarioRejected = "Finance.BudgetScenario.Rejected";
+    public const string BudgetScenarioAdopted = "Finance.BudgetScenario.AdoptedAsOfficial";
+    public const string BudgetScenarioSuperseded = "Finance.BudgetScenario.Superseded";
+    public const string BudgetScenarioArchived = "Finance.BudgetScenario.Archived";
+    public const string BudgetReturnCreated = "Finance.BudgetReturn.Created";
+    public const string BudgetReturnUpdated = "Finance.BudgetReturn.Updated";
+    public const string BudgetReturnSubmitted = "Finance.BudgetReturn.SubmittedForApproval";
+    public const string BudgetReturnRecalled = "Finance.BudgetReturn.Recalled";
+    public const string BudgetReturnApproved = "Finance.BudgetReturn.Approved";
+    public const string BudgetReturnRejected = "Finance.BudgetReturn.Rejected";
+    public const string BudgetWorksheetSaved = "Finance.BudgetWorksheet.Saved";
+
     public const string SourceDocumentApproved = "Finance.SourceDocument.Approved";
     public const string SourceDocumentPosted = "Finance.SourceDocument.Posted";
     public const string SourceDocumentReversed = "Finance.SourceDocument.Reversed";
@@ -132,6 +149,13 @@ public static class FinanceAuditEvents
     public const string ArControlReconciliationExported = "Finance.Report.ARControlReconciliationExported";
     public const string FixedAssetReportExported = "Finance.Report.FixedAssetReportExported";
     public const string FixedAssetGlReconciliationExported = "Finance.Report.FixedAssetGLReconciliationExported";
+    public const string FinancialStatementLayoutCreated = "Finance.Reporting.LayoutCreated";
+    public const string FinancialStatementLayoutUpdated = "Finance.Reporting.LayoutUpdated";
+    public const string FinancialStatementLayoutVersionCreated = "Finance.Reporting.LayoutVersionCreated";
+    public const string FinancialStatementLayoutRowsReplaced = "Finance.Reporting.LayoutRowsReplaced";
+    public const string FinancialStatementLayoutVersionPublished = "Finance.Reporting.LayoutVersionPublished";
+    public const string FinancialStatementLayoutImported = "Finance.Reporting.LayoutImported";
+    public const string FinancialStatementLegacyLayoutMigrated = "Finance.Reporting.LegacyLayoutMigrated";
 
     public const string TaxRuleCreated = "Finance.Tax.RuleCreated";
     public const string TaxRuleUpdated = "Finance.Tax.RuleUpdated";
@@ -169,6 +193,8 @@ public static class FinanceAuditEvents
     public const string ExchangeRateDeactivated = "Finance.FX.ExchangeRateDeactivated";
     public const string ExchangeRateUsedInPosting = "Finance.FX.ExchangeRateUsedInPosting";
     public const string ExchangeRateEditRejectedAfterUse = "Finance.FX.ExchangeRateEditRejectedAfterUse";
+    public const string ExchangeRatePolicyChanged = "Finance.FX.RatePolicyChanged";
+    public const string ExchangeRatePolicyOverrideUsed = "Finance.FX.RatePolicyOverrideUsed";
     public const string ForeignCurrencyPostingBlockedInvalidRate = "Finance.FX.ForeignCurrencyPostingBlockedInvalidRate";
     public const string CurrencySnapshotCapturedInPosting = "Finance.FX.CurrencySnapshotCapturedInPosting";
     public const string FxAccountMappingChanged = "Finance.FX.AccountMappingChanged";

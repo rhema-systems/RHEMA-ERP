@@ -64,6 +64,7 @@ import {
   Swords,
   BookTemplate,
   Repeat2,
+  Layers3,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -107,6 +108,7 @@ const navigationItems: NavItem[] = [
         children: [
           { title: 'Chart of Accounts', href: '/finance/accounts', icon: CreditCard },
           { title: 'Journal Entries', href: '/finance/journal-entries', icon: FileText },
+          { title: 'Journal Batches', href: '/finance/journal-batches', icon: Layers3 },
           { title: 'Recurring Journals', href: '/finance/recurring-journals', icon: Repeat2 },
           { title: 'Opening Balances', href: '/finance/opening-balances', icon: Database },
           {
@@ -222,6 +224,9 @@ const navigationItems: NavItem[] = [
         icon: CreditCard,
         children: [
           { title: 'Bank Accounts', href: '/finance/cash/accounts', icon: Building },
+          { title: 'Liquidity Accounts', href: '/finance/cash/liquidity-accounts', icon: Banknote },
+          { title: 'Banking Deposits', href: '/finance/cash/deposits', icon: FileCheck },
+          { title: 'Returned Cheques', href: '/finance/cash/returned-cheques', icon: RotateCcw },
           { title: 'Cash Transactions', href: '/finance/cash/transactions', icon: Activity },
           { title: 'Bank Reconciliation', href: '/finance/cash/reconciliation', icon: ClipboardCheck },
           {
@@ -296,6 +301,13 @@ const navigationItems: NavItem[] = [
           { title: 'Trial Balance', href: '/finance/reports/trial-balance', icon: FileText },
           { title: 'Income Statement', href: '/finance/reports/income-statement', icon: TrendingUp },
           { title: 'Balance Sheet', href: '/finance/reports/balance-sheet', icon: Scale },
+          {
+            title: 'Statement Layouts',
+            href: '/finance/reports/layouts',
+            icon: BookTemplate,
+            permissions: ['Finance.Reports.Layouts.Manage', 'Finance.Reports.Layouts.Publish'],
+            accessMode: 'any',
+          },
           { title: 'Cash Flow Statement', href: '/finance/reports/cash-flow', icon: Banknote },
           { title: 'Multi-Currency Detail', href: '/finance/reports/multi-currency', icon: Globe },
           { title: 'Detailed Ledger', href: '/finance/reports/detailed-ledger', icon: ListTree },
@@ -1287,6 +1299,8 @@ export function Sidebar({ className }: SidebarProps) {
             size="sm"
             onClick={() => setCollapsed(!collapsed)}
             className="h-8 w-8 p-0"
+            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
           >
             {collapsed ? <Menu className="h-4 w-4" /> : <X className="h-4 w-4" />}
           </Button>

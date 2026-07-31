@@ -1,4 +1,5 @@
 using System;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Finance
 {
@@ -47,6 +48,24 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool TransactionsExist { get; set; }
         public Guid? MigrationClearingAccountId { get; set; }
         public bool OpeningBalanceAutoRoutingEnabled { get; set; } = true;
+        public DepositPolicy BankDepositPolicy { get; set; } = DepositPolicy.DepositIntact;
+        public bool RequireBankDepositPrimaryEvidence { get; set; } = true;
+        public bool AutoPostBankDepositAfterApproval { get; set; } = true;
+        public decimal? MaximumDepositDeductionAmount { get; set; }
+        public decimal? MaximumDepositDeductionPercentage { get; set; }
+        public int BankStatementMatchDateToleranceDays { get; set; } = 3;
+        public int ChequeClearingPeriodDays { get; set; } = 3;
+        public Guid? ReturnedChequeBankChargeAccountId { get; set; }
+        public ReturnedChequeChargeTreatment DefaultReturnedChequeChargeTreatment { get; set; } =
+            ReturnedChequeChargeTreatment.CustomerRecoverable;
+        public bool DirectionalExchangeRatePolicyEnabled { get; set; }
+        public string DefaultTransactionQuoteSide { get; set; } = "Mid";
+        public string ArInvoiceQuoteSide { get; set; } = "Mid";
+        public string ArSettlementQuoteSide { get; set; } = "Buying";
+        public string ApInvoiceQuoteSide { get; set; } = "Mid";
+        public string ApSettlementQuoteSide { get; set; } = "Selling";
+        public string ClosingQuoteSide { get; set; } = "Mid";
+        public bool RequireExchangeRateOverrideApproval { get; set; } = true;
     }
 
     public class UpdateFinanceSettingsDto
@@ -79,5 +98,22 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? WriteOffExpenseAccountId { get; set; }
         public Guid? WriteOffRecoveryAccountId { get; set; }
         public bool? RequireSubledgerJournalApproval { get; set; }
+        public DepositPolicy? BankDepositPolicy { get; set; }
+        public bool? RequireBankDepositPrimaryEvidence { get; set; }
+        public bool? AutoPostBankDepositAfterApproval { get; set; }
+        public decimal? MaximumDepositDeductionAmount { get; set; }
+        public decimal? MaximumDepositDeductionPercentage { get; set; }
+        public int? BankStatementMatchDateToleranceDays { get; set; }
+        public int? ChequeClearingPeriodDays { get; set; }
+        public Guid? ReturnedChequeBankChargeAccountId { get; set; }
+        public ReturnedChequeChargeTreatment? DefaultReturnedChequeChargeTreatment { get; set; }
+        public bool? DirectionalExchangeRatePolicyEnabled { get; set; }
+        public string? DefaultTransactionQuoteSide { get; set; }
+        public string? ArInvoiceQuoteSide { get; set; }
+        public string? ArSettlementQuoteSide { get; set; }
+        public string? ApInvoiceQuoteSide { get; set; }
+        public string? ApSettlementQuoteSide { get; set; }
+        public string? ClosingQuoteSide { get; set; }
+        public bool? RequireExchangeRateOverrideApproval { get; set; }
     }
 }

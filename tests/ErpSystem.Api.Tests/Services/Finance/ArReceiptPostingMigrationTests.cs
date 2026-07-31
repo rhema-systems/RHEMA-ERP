@@ -1,7 +1,9 @@
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AR;
+using ErpSystem.Api.Services.Finance.Cash;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
@@ -448,6 +450,90 @@ public sealed class ArReceiptPostingMigrationTests
             .WithMessage("Posted customer payments cannot be bounced by mutation until AR receipt reversal posting is implemented.");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank")]
+    public async Task PostedCashReceipt_ShouldEnterHoldingAccountAndSupportPartialDeposit()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        var holdingGl = SeedAccount(db, tenantId, "1110", AccountType.Asset);
+        var holding = new LiquidityAccount
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "UNDEPOSITED-CASH",
+            Name = "Undeposited Cash",
+            AccountType = LiquidityAccountType.UndepositedCash,
+            Currency = "GHS",
+            GLAccountId = holdingGl.Id,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.LiquidityAccounts.Add(holding);
+        fixture.Payment.PaymentMethod = "Cash";
+        fixture.Payment.BankAccountId = null;
+        fixture.Payment.LiquidityAccountId = holding.Id;
+        await db.SaveChangesAsync();
+        var (receiptService, _) = CreateService(db, tenantId);
+
+        await receiptService.PostAsync(fixture.Payment.Id);
+
+        var holdingEntry = await db.LiquidityAccountEntries.SingleAsync(entry =>
+            entry.TenantId == tenantId &&
+            entry.SourceDocumentType == nameof(CustomerPayment) &&
+            entry.SourceDocumentId == fixture.Payment.Id);
+        holdingEntry.Direction.Should().Be(LiquidityEntryDirection.Increase);
+        holdingEntry.EntryType.Should().Be(LiquidityEntryType.CustomerReceipt);
+        holdingEntry.Amount.Should().Be(100m);
+        var receiptJournal = await db.JournalEntries
+            .Include(entry => entry.Transactions)
+            .SingleAsync(entry => entry.Id == fixture.Payment.JournalEntryId);
+        receiptJournal.Transactions.Single(line => line.AccountId == holdingGl.Id).DebitAmount.Should().Be(100m);
+
+        var currentUser = CreateCurrentUser(tenantId);
+        var numbering = new Mock<IDocumentNumberingService>();
+        numbering.Setup(service => service.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                It.IsAny<string>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync("BD-2026-0001");
+        var bankingService = new BankingSettlementService(
+            db,
+            currentUser.Object,
+            numbering.Object,
+            Mock.Of<IWorkflowIntegrationService>(),
+            Mock.Of<IFinancePostingEngine>());
+
+        var deposit = await bankingService.CreateDepositAsync(new CreateBankDepositDto
+        {
+            BankAccountId = fixture.BankAccount.Id,
+            DepositDate = new DateTime(2026, 7, 6),
+            DepositReference = "SLIP-PARTIAL-001",
+            Allocations =
+            {
+                new BankDepositAllocationRequestDto
+                {
+                    LiquidityAccountEntryId = holdingEntry.Id,
+                    AllocationType = BankDepositAllocationType.Receipt,
+                    Amount = 40m
+                }
+            }
+        });
+
+        deposit.TotalReceipts.Should().Be(40m);
+        deposit.NetAmount.Should().Be(40m);
+        deposit.Allocations.Should().ContainSingle();
+        (await db.LiquidityAccountEntries.SingleAsync(entry => entry.Id == holdingEntry.Id))
+            .AllocatedAmount.Should().Be(40m);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -478,13 +564,24 @@ public sealed class ArReceiptPostingMigrationTests
         var subledgerPostingMock = new Mock<ISubledgerPostingService>();
         var tenantSettings = new Mock<ITenantSettingsService>();
         tenantSettings.Setup(x => x.GetBaseCurrencyAsync()).ReturnsAsync("GHS");
+        var documentNumbering = new Mock<IDocumentNumberingService>();
+        documentNumbering
+            .Setup(x => x.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                It.IsAny<string>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => $"LQE-{Guid.NewGuid():N}"[..24]);
 
         var service = new PaymentService(
             new UnitOfWork(db),
             currentUser.Object,
             tenantSettings.Object,
             Mock.Of<ILogger<PaymentService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            documentNumbering.Object,
             postingEngine,
             auditService);
 

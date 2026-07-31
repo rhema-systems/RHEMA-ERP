@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { settingsService } from '../services/settings';
+import { settingsService, type SessionRuntimeSettings } from '../services/settings';
 import { tokenRefreshService } from '../services/token-refresh.service';
 import { authService } from '../services/auth';
 
@@ -31,7 +31,7 @@ export function useSessionTimeout() {
   const activityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch session timeout settings from security settings - only if authenticated
-  const { data: sessionRuntimeSettings, isLoading: isLoadingSettings } = useQuery({
+  const { data: sessionRuntimeSettings, isLoading: isLoadingSettings } = useQuery<SessionRuntimeSettings>({
     queryKey: ['sessionRuntimeSettings'],
     queryFn: () => settingsService.getSessionSettings(),
     staleTime: 30 * 60 * 1000,
@@ -52,7 +52,7 @@ export function useSessionTimeout() {
 
   // Use the actual session timeout from settings, or default if still loading
   const sessionTimeoutMinutes = sessionRuntimeSettings?.sessionTimeoutMinutes || DEFAULT_SESSION_TIMEOUT;
-  const shouldInitializeTimers = !isLoadingSettings || sessionRuntimeSettings?.sessionTimeoutMinutes;
+  const shouldInitializeTimers = !isLoadingSettings || sessionRuntimeSettings !== undefined;
   const sessionTimeoutMs = sessionTimeoutMinutes * 60 * 1000;
   const warningTimeMs = WARNING_TIME * 1000;
 

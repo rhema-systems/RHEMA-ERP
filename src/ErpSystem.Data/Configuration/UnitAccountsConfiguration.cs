@@ -363,3 +363,122 @@ public class AllocationTargetConfiguration : IEntityTypeConfiguration<Allocation
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+/// <summary>
+/// Entity Framework configuration for AllocationRunBatch entity.
+/// </summary>
+public class AllocationRunBatchConfiguration : IEntityTypeConfiguration<AllocationRunBatch>
+{
+    public void Configure(EntityTypeBuilder<AllocationRunBatch> builder)
+    {
+        builder.ToTable("AllocationRunBatches");
+
+        builder.HasIndex(b => new { b.TenantId, b.BatchNumber }).IsUnique();
+        builder.HasIndex(b => new { b.TenantId, b.AllocationRuleId, b.FiscalPeriodId, b.Status });
+        builder.HasIndex(b => b.WorkflowInstanceId);
+        builder.HasIndex(b => b.JournalEntryId);
+        builder.HasIndex(b => b.IdempotencyKey).IsUnique().HasFilter("[IdempotencyKey] IS NOT NULL");
+
+        builder.Property(b => b.BatchNumber)
+            .IsRequired()
+            .HasMaxLength(50);
+
+        builder.Property(b => b.Description)
+            .HasMaxLength(500);
+
+        builder.Property(b => b.Status)
+            .HasConversion<int>();
+
+        builder.Property(b => b.AllocationType)
+            .IsRequired()
+            .HasMaxLength(30);
+
+        builder.Property(b => b.BookClassification)
+            .IsRequired()
+            .HasMaxLength(20);
+
+        builder.Property(b => b.FunctionalCurrencyCode)
+            .IsRequired()
+            .HasMaxLength(10);
+
+        builder.Property(b => b.SourcePeriodBalance)
+            .HasColumnType("decimal(18,2)");
+
+        builder.Property(b => b.TotalAllocated)
+            .HasColumnType("decimal(18,2)");
+
+        builder.Property(b => b.JournalEntryNumber)
+            .HasMaxLength(50);
+
+        builder.Property(b => b.SubmittedByName)
+            .HasMaxLength(100);
+
+        builder.Property(b => b.ApprovedByName)
+            .HasMaxLength(100);
+
+        builder.Property(b => b.PostedByName)
+            .HasMaxLength(100);
+
+        builder.Property(b => b.RejectionReason)
+            .HasMaxLength(500);
+
+        builder.Property(b => b.IdempotencyKey)
+            .HasMaxLength(200);
+
+        builder.HasOne(b => b.AllocationRule)
+            .WithMany()
+            .HasForeignKey(b => b.AllocationRuleId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(b => b.FiscalPeriod)
+            .WithMany()
+            .HasForeignKey(b => b.FiscalPeriodId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(b => b.SourceAccount)
+            .WithMany()
+            .HasForeignKey(b => b.SourceAccountId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasMany(b => b.Lines)
+            .WithOne(l => l.AllocationRunBatch)
+            .HasForeignKey(l => l.AllocationRunBatchId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+/// <summary>
+/// Entity Framework configuration for AllocationRunBatchLine entity.
+/// </summary>
+public class AllocationRunBatchLineConfiguration : IEntityTypeConfiguration<AllocationRunBatchLine>
+{
+    public void Configure(EntityTypeBuilder<AllocationRunBatchLine> builder)
+    {
+        builder.ToTable("AllocationRunBatchLines");
+
+        builder.HasIndex(l => l.AllocationRunBatchId);
+        builder.HasIndex(l => l.TargetAccountId);
+
+        builder.Property(l => l.AllocationBasis)
+            .HasColumnType("decimal(18,6)");
+
+        builder.Property(l => l.AllocationPercent)
+            .HasColumnType("decimal(9,4)");
+
+        builder.Property(l => l.AllocatedAmount)
+            .HasColumnType("decimal(18,2)");
+
+        builder.Property(l => l.CostCenterCode)
+            .HasMaxLength(50);
+
+        builder.HasOne(l => l.TargetAccount)
+            .WithMany()
+            .HasForeignKey(l => l.TargetAccountId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(l => l.TargetDriverUnitAccount)
+            .WithMany()
+            .HasForeignKey(l => l.TargetDriverUnitAccountId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}

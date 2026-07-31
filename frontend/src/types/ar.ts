@@ -129,7 +129,13 @@ export interface CustomerPayment {
     paymentMethod: string;
     paymentMethodId?: string;
     paymentMethodName?: string;
+    bankAccountId?: string;
+    bankAccountName?: string;
+    liquidityAccountId?: string;
+    liquidityAccountName?: string;
     referenceNumber?: string;
+    checkNumber?: string;
+    chequeDrawerBank?: string;
     paymentReference: string;
     amount: number;
     status: 'Draft' | 'Posted' | 'Void' | 'Bounced';
@@ -152,7 +158,9 @@ export interface PaymentCreateRequest {
     paymentMethodId?: string;
     referenceNumber?: string;
     bankAccountId?: string;
+    liquidityAccountId?: string;
     checkNumber?: string;
+    chequeDrawerBank?: string;
     transactionReference?: string;
     currencyCode: string;
     exchangeRate?: number;

@@ -1,5 +1,7 @@
 using System.Data;
 using System.Text.Json;
+using System.Globalization;
+using ClosedXML.Excel;
 using ErpSystem.Core.DTOs.Reports;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
@@ -12,7 +14,6 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using OfficeOpenXml;
 
 namespace ErpSystem.Data.Services;
 
@@ -818,18 +819,16 @@ public class DatabaseReportsService : IReportsService
 
     private static byte[] GenerateExcelContent(ReportResultDto reportResult)
     {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-
-        using var package = new ExcelPackage();
-        var worksheet = package.Workbook.Worksheets.Add("Report Data");
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add("Report Data");
 
         var visibleColumns = reportResult.Columns.Where(c => c.IsVisible).OrderBy(c => c.Order).ToList();
 
         // Add headers
         for (int i = 0; i < visibleColumns.Count; i++)
         {
-            worksheet.Cells[1, i + 1].Value = visibleColumns[i].DisplayName ?? visibleColumns[i].Name;
-            worksheet.Cells[1, i + 1].Style.Font.Bold = true;
+            worksheet.Cell(1, i + 1).Value = visibleColumns[i].DisplayName ?? visibleColumns[i].Name;
+            worksheet.Cell(1, i + 1).Style.Font.Bold = true;
         }
 
         // Add data rows
@@ -840,14 +839,41 @@ public class DatabaseReportsService : IReportsService
             {
                 var column = visibleColumns[col];
                 var value = dataRow.TryGetValue(column.Name, out var tempValue) ? tempValue : null;
-                worksheet.Cells[row + 2, col + 1].Value = value;
+                SetExcelCellValue(worksheet.Cell(row + 2, col + 1), value);
             }
         }
 
-        // Auto-fit columns
-        worksheet.Cells.AutoFitColumns();
+        worksheet.ColumnsUsed().AdjustToContents();
 
-        return package.GetAsByteArray();
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
+    }
+
+    private static void SetExcelCellValue(IXLCell cell, object? value)
+    {
+        if (value == null)
+        {
+            cell.Clear(XLClearOptions.Contents);
+            return;
+        }
+
+        cell.Value = value switch
+        {
+            DateTime dateTime => dateTime,
+            DateTimeOffset dateTimeOffset => dateTimeOffset.DateTime,
+            bool boolean => boolean,
+            byte number => number,
+            short number => number,
+            int number => number,
+            long number => number,
+            float number => number,
+            double number => number,
+            decimal number => number,
+            Guid guid => guid.ToString(),
+            string text => text,
+            _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
+        };
     }
 
     private static byte[] GenerateJsonContent(ReportResultDto reportResult)

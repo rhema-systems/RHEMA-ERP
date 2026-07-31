@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
@@ -390,18 +392,19 @@ export default function JournalEntryDetailPage() {
         );
     }
 
-    const canEdit = hasAnyPermission(['Finance.JournalEntries.Edit', 'Finance.JournalEntries.Write']);
-    const canDelete = hasAnyPermission(['Finance.JournalEntries.Delete', 'Finance.JournalEntries.Write']);
-    const canPost = hasPermission('Finance.JournalEntries.Post');
-    const canReverse = hasPermission('Finance.JournalEntries.Reverse');
-    const canSubmitForApproval = hasAnyPermission(['Finance.JournalEntries.SubmitForApproval', 'Finance.JournalEntries.Approve']);
-    const canApprovePermission = hasPermission('Finance.JournalEntries.Approve');
+    const isBatchOwned = !!entry.journalBatchId;
+    const canEdit = !isBatchOwned && hasAnyPermission(['Finance.JournalEntries.Edit', 'Finance.JournalEntries.Write']);
+    const canDelete = !isBatchOwned && hasAnyPermission(['Finance.JournalEntries.Delete', 'Finance.JournalEntries.Write']);
+    const canPost = !isBatchOwned && hasPermission('Finance.JournalEntries.Post');
+    const canReverse = !isBatchOwned && hasPermission('Finance.JournalEntries.Reverse');
+    const canSubmitForApproval = !isBatchOwned && hasAnyPermission(['Finance.JournalEntries.SubmitForApproval', 'Finance.JournalEntries.Approve']);
+    const canApprovePermission = !isBatchOwned && hasPermission('Finance.JournalEntries.Approve');
     const canAttach = canEdit;
     const isCreator = !!entry.createdById && !!user?.id && entry.createdById === user.id;
     const hasActiveWorkflowAssignment = workflowSummary?.hasActiveInstance === true;
     const canApproveWorkflow = !hasActiveWorkflowAssignment || workflowSummary?.canCurrentUserApprove === true;
     const canApproveNow = canApprovePermission && !isCreator && canApproveWorkflow;
-    const canWithdrawApproval = entry.postingStatus === 'Pending Approval' && (isCreator || canSubmitForApproval || canEdit || canDelete);
+    const canWithdrawApproval = !isBatchOwned && entry.postingStatus === 'Pending Approval' && (isCreator || canSubmitForApproval || canEdit || canDelete);
     const requiresApprovalBeforePost = entry.requiresApproval || entry.postingStatus === 'Pending Approval';
     const pendingApproverText = workflowSummary ? formatPendingApprovers(workflowSummary.pendingApprovers || []) : '';
     const isAllActiveBooks = isAllActiveBooksCode(entry.bookClassification);
@@ -465,6 +468,19 @@ export default function JournalEntryDetailPage() {
                     </BreadcrumbItem>
                 </BreadcrumbList>
             </Breadcrumb>
+
+            {isBatchOwned && (
+                <Alert>
+                    <FileText className="h-4 w-4" />
+                    <AlertTitle>Controlled by journal batch {entry.journalBatchNumber}</AlertTitle>
+                    <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+                        Approval, posting, editing, attachments, and reversal are managed from the batch to preserve its control totals and audit trail.
+                        <Button size="sm" variant="outline" asChild>
+                            <Link href={`/finance/journal-batches/${entry.journalBatchId}`}>Open batch</Link>
+                        </Button>
+                    </AlertDescription>
+                </Alert>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Main Content - Lines */}

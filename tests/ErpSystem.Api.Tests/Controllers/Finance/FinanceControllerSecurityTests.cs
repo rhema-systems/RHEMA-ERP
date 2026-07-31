@@ -128,6 +128,12 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(JournalEntryController), "PostJournalEntry", FinancePermissions.PostJournalEntries)]
     [InlineData(typeof(JournalEntryController), "ReverseJournalEntry", FinancePermissions.ReverseJournalEntries)]
     [InlineData(typeof(JournalEntryController), "ApproveJournalEntry", FinancePermissions.ApproveJournalEntries)]
+    [InlineData(typeof(JournalBatchController), "CreateBatch", FinancePermissions.CreateJournalBatches)]
+    [InlineData(typeof(JournalBatchController), "ReviewStage", FinancePermissions.ApproveJournalBatches)]
+    [InlineData(typeof(JournalBatchController), "CreatePostingRun", FinancePermissions.PostJournalBatches)]
+    [InlineData(typeof(JournalBatchController), "CreateReversalBatch", FinancePermissions.ReverseJournalBatches)]
+    [InlineData(typeof(JournalBatchController), "PreviewImport", FinancePermissions.ImportJournalBatches)]
+    [InlineData(typeof(JournalBatchController), "ExportBatch", FinancePermissions.ExportJournalBatches)]
     [InlineData(typeof(VendorInvoiceController), "Post", FinancePermissions.PostApInvoices)]
     [InlineData(typeof(InvoiceController), "Send", FinancePermissions.SendArInvoices)]
     [InlineData(typeof(InvoiceController), "Post", FinancePermissions.ApprovePostArInvoices)]
@@ -143,6 +149,15 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(CashTransactionController), "Post", FinancePermissions.WorkflowPostAfterApproval)]
     [InlineData(typeof(FinanceApprovalsController), "Approve", FinancePermissions.WorkflowApprove)]
     [InlineData(typeof(FinanceApprovalsController), "Reject", FinancePermissions.WorkflowReject)]
+    [InlineData(typeof(BudgetController), "GetReturns", FinancePermissions.AssignBudgetReturns)]
+    [InlineData(typeof(BudgetController), "UpdateReturn", FinancePermissions.AssignBudgetReturns)]
+    [InlineData(typeof(BudgetController), "BulkSaveEntries", FinancePermissions.EditBudgetReturns)]
+    [InlineData(typeof(BudgetController), "SubmitReturn", FinancePermissions.SubmitBudgetReturns)]
+    [InlineData(typeof(BudgetController), "OpenScenario", FinancePermissions.MaintainBudgets)]
+    [InlineData(typeof(BudgetController), "SubmitScenario", FinancePermissions.LockBudgets)]
+    [InlineData(typeof(BudgetController), "AdoptScenario", FinancePermissions.LockBudgets)]
+    [InlineData(typeof(BudgetController), "ArchiveScenario", FinancePermissions.LockBudgets)]
+    [InlineData(typeof(BudgetController), "RecallReturn", FinancePermissions.SubmitBudgetReturns)]
     [InlineData(typeof(OpeningBalancesController), "Create", FinancePermissions.PrepareOpeningBalances)]
     [InlineData(typeof(OpeningBalancesController), "List", FinancePermissions.ViewFinance)]
     [InlineData(typeof(OpeningBalancesController), "Update", FinancePermissions.PrepareOpeningBalances)]
@@ -203,7 +218,11 @@ public sealed class FinanceControllerSecurityTests
             typeof(BankStatement),
             typeof(BankStatementLine),
             typeof(BankReconciliation),
-            typeof(ReconciliationMatch)
+            typeof(ReconciliationMatch),
+            typeof(JournalBatch),
+            typeof(JournalBatchItem),
+            typeof(JournalBatchPostingRun),
+            typeof(JournalBatchImportSession)
         };
 
         foreach (var entityType in entityTypes)

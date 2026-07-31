@@ -10,14 +10,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ChevronRight, FileText, Clock, CheckCircle, XCircle } from 'lucide-react'; // Import icons
 import { useToast } from '@/components/ui/use-toast';
 import { budgetDataService } from '@/services/finance/budget-data.service'; // Import budget service
-import type { BudgetReturn, BudgetScenario } from '@/types/budget';
+import type { BudgetReturn } from '@/types/budget';
 
 export default function MyBudgetReturnsPage() {
     const { toast } = useToast();
     const [returns, setReturns] = useState<BudgetReturn[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-
-    const [scenarios, setScenarios] = useState<BudgetScenario[]>([]); // Add scenarios state
 
     useEffect(() => {
         loadData();
@@ -26,29 +24,18 @@ export default function MyBudgetReturnsPage() {
     const loadData = async () => {
         try {
             setIsLoading(true);
-            // Fetch both returns and scenarios to map names
-            const [returnsData, scenariosData] = await Promise.all([
-                budgetDataService.getMyReturns(),
-                budgetDataService.getScenarios()
-            ]);
+            const returnsData = await budgetDataService.getMyReturns();
             setReturns(returnsData);
-            setScenarios(scenariosData);
         } catch (error) {
             console.error('Failed to load my returns:', error);
-            if ((error as any)?.response?.status !== 404) {
-                toast({
-                    title: 'Error',
-                    description: 'Failed to load your budget returns.',
-                    variant: 'destructive',
-                });
-            }
+            toast({
+                title: 'Error',
+                description: 'Failed to load your budget returns.',
+                variant: 'destructive',
+            });
         } finally {
             setIsLoading(false);
         }
-    };
-
-    const getScenarioName = (id: string) => {
-        return scenarios.find(s => s.id === id)?.name || id;
     };
 
     const getStatusBadge = (status: string) => {
@@ -134,7 +121,7 @@ export default function MyBudgetReturnsPage() {
                                             {ret.segmentValueName || 'Unknown Segment'}
                                         </TableCell>
                                         <TableCell>
-                                            {getScenarioName(ret.budgetScenarioId)}
+                                            {ret.budgetScenarioName || ret.budgetScenarioId}
                                         </TableCell>
                                         <TableCell>{getStatusBadge(ret.status)}</TableCell>
                                         <TableCell className="text-right">

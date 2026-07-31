@@ -82,6 +82,7 @@ export function ThemeToggle({
         size={size}
         className="px-2"
         disabled={true}
+        aria-label="Theme control loading"
       >
         <SunIcon className="h-4 w-4" />
       </Button>
@@ -91,6 +92,7 @@ export function ThemeToggle({
           size={size}
           onClick={toggleTheme}
           className="px-2"
+          aria-label={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
           title={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
         >
           {getCurrentIcon()}
@@ -109,6 +111,7 @@ export function ThemeToggle({
         size="sm"
         className="h-8 w-8 p-0"
         disabled={true}
+        aria-label="Theme control loading"
       >
           <SunIcon className="h-4 w-4" />
         </Button>
@@ -118,6 +121,7 @@ export function ThemeToggle({
           size="sm"
           onClick={toggleTheme}
           className="h-8 w-8 p-0"
+          aria-label={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
           title={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
         >
           {getCurrentIcon()}
@@ -134,6 +138,7 @@ export function ThemeToggle({
         size={size}
         className="px-2"
         disabled={true}
+        aria-label="Theme control loading"
       >
         <SunIcon className="h-4 w-4" />
       </Button>
@@ -144,6 +149,7 @@ export function ThemeToggle({
             variant="ghost"
             size={size}
             className="px-2"
+            aria-label="Change theme"
             title="Change theme"
           >
             {getCurrentIcon()}
@@ -212,6 +218,7 @@ export function AnimatedThemeToggle({
         size={size}
         className="px-2 relative overflow-hidden"
         disabled={true}
+        aria-label="Theme control loading"
       >
         <div className="relative">
           <SunIcon className="h-4 w-4" />
@@ -223,6 +230,7 @@ export function AnimatedThemeToggle({
         size={size}
         onClick={toggleTheme}
         className="px-2 relative overflow-hidden"
+        aria-label={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
         title={`Switch to ${actualTheme === 'dark' ? 'light' : 'dark'} mode`}
       >
         <div className="relative">

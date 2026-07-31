@@ -117,6 +117,7 @@ public static class FinancePermissionPolicyMap
             "ArReports" => ReportPolicy(action),
             "BankAccount" => ReadOrManage(action, methods, FinancePermissions.ManageBankAccounts),
             "BankReconciliation" => BankReconciliationPolicy(action),
+            "BankingSettlement" => BankingSettlementPolicy(action),
             "Budget" => BudgetPolicy(action),
             "CapitalProjects" => CapitalProjectsPolicy(action),
             "CashReports" => One(FinancePermissions.RunFinanceReports),
@@ -127,6 +128,7 @@ public static class FinancePermissionPolicyMap
             "FinanceApprovals" => FinanceApprovalPolicy(action),
             "Finance" => FinanceControllerPolicy(action),
             "FinanceReportExports" => One(FinancePermissions.ExportFinanceReports),
+            "FinancialStatementLayouts" => FinancialStatementLayoutPolicy(action),
             "FinancePurchaseOrder" => FinancePurchaseOrderPolicy(action),
             "FinancePurchaseOrderReceipt" => FinancePurchaseOrderReceiptPolicy(action),
             "FinanceSettings" => FinanceSettingsPolicy(action, methods),
@@ -134,6 +136,7 @@ public static class FinancePermissionPolicyMap
             "FixedAssetCategories" => ReadOrManage(action, methods, FinancePermissions.ManageFixedAssets),
             "FixedAssets" => FixedAssetsPolicy(action, templates),
             "GLIntegrationTest" => One(FinancePermissions.AdministerFinance),
+            "JournalBatch" => JournalBatchPolicy(action),
             "JournalEntry" => JournalEntryPolicy(action),
             "LeaseAccounting" => LeaseAccountingPolicy(action, methods),
             "MigrationSignOff" => MigrationSignOffPolicy(action),
@@ -239,10 +242,11 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> BudgetPolicy(string action)
         => action switch
         {
-            "CreateScenario" or "UpdateScenario" or "DeleteScenario" or "CreateReturn" or "BulkSaveEntries" => One(FinancePermissions.MaintainBudgets),
-            "SubmitReturn" => One(FinancePermissions.SubmitBudgetReturns),
-            "ApproveReturn" or "RejectReturn" => One(FinancePermissions.ApproveBudgetReturns),
-            "LockScenario" => One(FinancePermissions.LockBudgets),
+            "CreateScenario" or "UpdateScenario" or "DeleteScenario" or "CreateReturn" or "OpenScenario" => One(FinancePermissions.MaintainBudgets),
+            "GetReturns" or "UpdateReturn" => One(FinancePermissions.AssignBudgetReturns),
+            "BulkSaveEntries" => One(FinancePermissions.EditBudgetReturns),
+            "SubmitReturn" or "RecallReturn" => One(FinancePermissions.SubmitBudgetReturns),
+            "SubmitScenario" or "AdoptScenario" or "ArchiveScenario" => One(FinancePermissions.LockBudgets),
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewBudgets) : One(FinancePermissions.MaintainBudgets)
         };
 
@@ -402,6 +406,43 @@ public static class FinancePermissionPolicyMap
             _ => One(FinancePermissions.RunMigrationAdjustments)
         };
 
+    private static IReadOnlyList<string> BankingSettlementPolicy(string action)
+        => action switch
+        {
+            "CompleteSetup" => One(FinancePermissions.ManageBankingSettings),
+            "CreateLiquidityAccount" or "UpdateLiquidityAccount" => One(FinancePermissions.ManageLiquidityAccounts),
+            "CreateDeposit" or "UpdateDeposit" or "LinkDepositAttachment" or "UnlinkDepositAttachment" or "RegisterPostedPayment" =>
+                One(FinancePermissions.CreateBankDeposits),
+            "SubmitDeposit" or "CancelDeposit" => One(FinancePermissions.SubmitBankDeposits),
+            "ApproveDeposit" or "RejectDeposit" or "ReturnDeposit" => One(FinancePermissions.ApproveBankDeposits),
+            "PostDeposit" => One(FinancePermissions.WorkflowPostAfterApproval),
+            "CreateReturnedCheque" or "LinkReturnedChequeAttachment" or "SubmitReturnedCheque" =>
+                One(FinancePermissions.ManageReturnedCheques),
+            "ApproveReturnedCheque" or "RejectReturnedCheque" => One(FinancePermissions.ApproveBankDeposits),
+            _ => One(FinancePermissions.ViewFinance)
+        };
+
+    private static IReadOnlyList<string> JournalBatchPolicy(string action)
+        => action switch
+        {
+            "CreateBatch" or "CreateJournal" or "AddExistingJournal" or "LinkAttachment"
+                => One(FinancePermissions.CreateJournalBatches),
+            "UpdateBatch" or "UpdateJournal" or "RemoveJournal" or "UnlinkAttachment"
+                => One(FinancePermissions.EditJournalBatches),
+            "DeleteBatch" => One(FinancePermissions.DeleteJournalBatches),
+            "Submit" or "Withdraw" => One(FinancePermissions.SubmitJournalBatches),
+            "ReviewStage" => One(FinancePermissions.ApproveJournalBatches),
+            "CreatePostingRun" => One(FinancePermissions.PostJournalBatches),
+            "CreateReversalBatch" => One(FinancePermissions.ReverseJournalBatches),
+            "PreviewImport" or "CommitImport" or "DownloadImportTemplate" or "DownloadImportErrors"
+                => One(FinancePermissions.ImportJournalBatches),
+            "ExportBatch" => One(FinancePermissions.ExportJournalBatches),
+            "CopyBatch" or "CopyRejected" => One(FinancePermissions.CopyJournalBatches),
+            "ValidateBatch" or "GetBatches" or "GetBatch"
+                => One(FinancePermissions.ViewJournalBatches),
+            _ => One(FinancePermissions.ViewJournalBatches)
+        };
+
     private static IReadOnlyList<string> RatioDefinitionPolicy(string action, IReadOnlyCollection<string> methods)
         => IsRead(action, methods) || action.Contains("Calculate", StringComparison.OrdinalIgnoreCase)
             ? One(FinancePermissions.RunFinanceReports)
@@ -480,6 +521,21 @@ public static class FinancePermissionPolicyMap
         => ExportActions.Contains(action)
             ? One(FinancePermissions.ExportFinanceReports)
             : One(FinancePermissions.RunFinanceReports);
+
+    private static IReadOnlyList<string> FinancialStatementLayoutPolicy(string action)
+        => action switch
+        {
+            "PublishVersion" => One(FinancePermissions.PublishFinancialStatementLayouts),
+            "CreateLayout" or "UpdateLayout" or "CreateDraftVersion" or "ReplaceDraftRows"
+                or "PreviewVersion" or "DownloadImportTemplate"
+                or "PreviewJsonImport" or "CommitJsonImport"
+                or "PreviewWorkbookImport" or "CommitWorkbookImport"
+                or "PreviewLegacyMigration" or "CommitLegacyMigration" =>
+                One(FinancePermissions.ManageFinancialStatementLayouts),
+            "ValidateVersion" => One(FinancePermissions.ManageFinancialStatementLayouts),
+            "ExecutePublished" => One(FinancePermissions.RunFinanceReports),
+            _ => One(FinancePermissions.ViewFinance)
+        };
 
     private static IReadOnlyList<string> FallbackPolicy(string action, IReadOnlyCollection<string> methods)
     {

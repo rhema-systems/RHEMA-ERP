@@ -8,7 +8,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
-using OfficeOpenXml;
+using ClosedXML.Excel;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
@@ -279,12 +279,11 @@ public sealed class FixedAssetServiceImportTests : IDisposable
 
     private static MemoryStream CreateWorkbook(params (string AssetCode, string Name, string Location, string CategoryCode)[] rows)
     {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
         var stream = new MemoryStream();
 
-        using (var package = new ExcelPackage(stream))
+        using (var package = new XLWorkbook())
         {
-            var worksheet = package.Workbook.Worksheets.Add("Assets");
+            var worksheet = package.Worksheets.Add("Assets");
             var headers = new[]
             {
                 "Asset Code*", "Name*", "Location", "Category Code*", "Purchase Date*",
@@ -294,28 +293,28 @@ public sealed class FixedAssetServiceImportTests : IDisposable
 
             for (var column = 0; column < headers.Length; column++)
             {
-                worksheet.Cells[1, column + 1].Value = headers[column];
+                worksheet.Cell(1, column + 1).Value = headers[column];
             }
 
             for (var index = 0; index < rows.Length; index++)
             {
                 var row = rows[index];
                 var rowNumber = index + 2;
-                worksheet.Cells[rowNumber, 1].Value = row.AssetCode;
-                worksheet.Cells[rowNumber, 2].Value = row.Name;
-                worksheet.Cells[rowNumber, 3].Value = row.Location;
-                worksheet.Cells[rowNumber, 4].Value = row.CategoryCode;
-                worksheet.Cells[rowNumber, 5].Value = new DateTime(2024, 1, 15);
-                worksheet.Cells[rowNumber, 6].Value = 1500m;
-                worksheet.Cells[rowNumber, 7].Value = 50m;
-                worksheet.Cells[rowNumber, 8].Value = 195m;
-                worksheet.Cells[rowNumber, 9].Value = 36;
-                worksheet.Cells[rowNumber, 10].Value = 100m;
-                worksheet.Cells[rowNumber, 11].Value = $"SN-{row.AssetCode}";
-                worksheet.Cells[rowNumber, 12].Value = "Active";
+                worksheet.Cell(rowNumber, 1).Value = row.AssetCode;
+                worksheet.Cell(rowNumber, 2).Value = row.Name;
+                worksheet.Cell(rowNumber, 3).Value = row.Location;
+                worksheet.Cell(rowNumber, 4).Value = row.CategoryCode;
+                worksheet.Cell(rowNumber, 5).Value = new DateTime(2024, 1, 15);
+                worksheet.Cell(rowNumber, 6).Value = 1500m;
+                worksheet.Cell(rowNumber, 7).Value = 50m;
+                worksheet.Cell(rowNumber, 8).Value = 195m;
+                worksheet.Cell(rowNumber, 9).Value = 36;
+                worksheet.Cell(rowNumber, 10).Value = 100m;
+                worksheet.Cell(rowNumber, 11).Value = $"SN-{row.AssetCode}";
+                worksheet.Cell(rowNumber, 12).Value = "Active";
             }
 
-            package.Save();
+            package.SaveAs(stream);
         }
 
         stream.Position = 0;
@@ -324,12 +323,11 @@ public sealed class FixedAssetServiceImportTests : IDisposable
 
     private static MemoryStream CreateOpeningWorkbook(params OpeningAssetRow[] rows)
     {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
         var stream = new MemoryStream();
 
-        using (var package = new ExcelPackage(stream))
+        using (var package = new XLWorkbook())
         {
-            var worksheet = package.Workbook.Worksheets.Add("Assets");
+            var worksheet = package.Worksheets.Add("Assets");
             var headers = new[]
             {
                 "Asset Code*", "Name*", "Location", "Category Code*", "Purchase Date*",
@@ -341,39 +339,63 @@ public sealed class FixedAssetServiceImportTests : IDisposable
 
             for (var column = 0; column < headers.Length; column++)
             {
-                worksheet.Cells[1, column + 1].Value = headers[column];
+                worksheet.Cell(1, column + 1).Value = headers[column];
             }
 
             for (var index = 0; index < rows.Length; index++)
             {
                 var row = rows[index];
                 var rowNumber = index + 2;
-                worksheet.Cells[rowNumber, 1].Value = row.AssetCode;
-                worksheet.Cells[rowNumber, 2].Value = row.Name;
-                worksheet.Cells[rowNumber, 3].Value = row.Location;
-                worksheet.Cells[rowNumber, 4].Value = row.CategoryCode;
-                worksheet.Cells[rowNumber, 5].Value = row.PurchaseDate;
-                worksheet.Cells[rowNumber, 6].Value = row.PlacedInServiceDate;
-                worksheet.Cells[rowNumber, 7].Value = row.BookCode;
-                worksheet.Cells[rowNumber, 8].Value = row.PurchasePrice;
-                worksheet.Cells[rowNumber, 9].Value = row.InstallationCost;
-                worksheet.Cells[rowNumber, 10].Value = row.TaxAmount;
-                worksheet.Cells[rowNumber, 11].Value = row.AccumulatedDepreciation;
-                worksheet.Cells[rowNumber, 12].Value = row.NetBookValue;
-                worksheet.Cells[rowNumber, 13].Value = row.OpeningAsOfDate;
-                worksheet.Cells[rowNumber, 14].Value = row.OpeningYtdDepreciation;
-                worksheet.Cells[rowNumber, 15].Value = row.RemainingUsefulLifeMonths;
-                worksheet.Cells[rowNumber, 16].Value = row.UsefulLifeMonths;
-                worksheet.Cells[rowNumber, 17].Value = row.ResidualValue;
-                worksheet.Cells[rowNumber, 18].Value = row.SerialNumber ?? $"SN-{row.AssetCode}";
-                worksheet.Cells[rowNumber, 19].Value = row.Status;
+                worksheet.Cell(rowNumber, 1).Value = row.AssetCode;
+                worksheet.Cell(rowNumber, 2).Value = row.Name;
+                worksheet.Cell(rowNumber, 3).Value = row.Location;
+                worksheet.Cell(rowNumber, 4).Value = row.CategoryCode;
+                worksheet.Cell(rowNumber, 5).Value = row.PurchaseDate;
+                worksheet.Cell(rowNumber, 6).Value = row.PlacedInServiceDate;
+                SetCellValue(worksheet.Cell(rowNumber, 7), row.BookCode);
+                worksheet.Cell(rowNumber, 8).Value = row.PurchasePrice;
+                worksheet.Cell(rowNumber, 9).Value = row.InstallationCost;
+                worksheet.Cell(rowNumber, 10).Value = row.TaxAmount;
+                SetCellValue(worksheet.Cell(rowNumber, 11), row.AccumulatedDepreciation);
+                SetCellValue(worksheet.Cell(rowNumber, 12), row.NetBookValue);
+                SetCellValue(worksheet.Cell(rowNumber, 13), row.OpeningAsOfDate);
+                SetCellValue(worksheet.Cell(rowNumber, 14), row.OpeningYtdDepreciation);
+                SetCellValue(worksheet.Cell(rowNumber, 15), row.RemainingUsefulLifeMonths);
+                worksheet.Cell(rowNumber, 16).Value = row.UsefulLifeMonths;
+                worksheet.Cell(rowNumber, 17).Value = row.ResidualValue;
+                worksheet.Cell(rowNumber, 18).Value = row.SerialNumber ?? $"SN-{row.AssetCode}";
+                worksheet.Cell(rowNumber, 19).Value = row.Status;
             }
 
-            package.Save();
+            package.SaveAs(stream);
         }
 
         stream.Position = 0;
         return stream;
+    }
+
+    private static void SetCellValue(IXLCell cell, object? value)
+    {
+        switch (value)
+        {
+            case null:
+                return;
+            case string text:
+                cell.Value = text;
+                return;
+            case DateTime date:
+                cell.Value = date;
+                return;
+            case decimal number:
+                cell.Value = number;
+                return;
+            case int number:
+                cell.Value = number;
+                return;
+            default:
+                cell.Value = value.ToString() ?? string.Empty;
+                return;
+        }
     }
 
     private sealed class OpeningAssetRow

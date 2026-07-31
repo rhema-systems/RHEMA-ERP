@@ -44,6 +44,7 @@ export interface TaxType {
     compoundOrder?: number | null;
     isSystemDefined?: boolean;
     isActive: boolean;
+    isLocked?: boolean;
     effectiveFrom?: string; // ISO Date
     taxPayableAccountId?: string | null;
     taxReceivableAccountId?: string | null;
@@ -53,6 +54,30 @@ export interface TaxType {
 
 // Alias for backward compatibility if needed, though TaxType is preferred
 export type Tax = TaxType;
+
+export interface TaxConfigurationVersion {
+    id: string;
+    taxId: string;
+    versionNumber: number;
+    code: string;
+    name: string;
+    description?: string | null;
+    rate: number;
+    effectiveFrom: string;
+    applicability: TaxApplicability;
+    category: TaxCategory;
+    isActive: boolean;
+    isInputTaxDeductible: boolean;
+    thresholdAmount?: number | null;
+    taxPayableAccountId?: string | null;
+    taxReceivableAccountId?: string | null;
+    validFrom: string;
+    validTo?: string | null;
+    changeReason?: string | null;
+    changedBy?: string | null;
+    isCurrent: boolean;
+    isLocked: boolean;
+}
 
 export interface TaxGroupComponent {
     id: string;
@@ -254,6 +279,8 @@ export interface UpdateTaxTypeDto {
     thresholdAmount?: number | null;
     compoundOrder?: number;
     isActive?: boolean;
+    effectiveFrom?: string;
+    changeReason?: string;
     taxPayableAccountId?: string | null;
     taxReceivableAccountId?: string | null;
     clearTaxPayableAccount?: boolean;

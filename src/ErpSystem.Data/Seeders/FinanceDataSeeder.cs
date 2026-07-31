@@ -91,6 +91,11 @@ public class FinanceDataSeeder
             await SeedFinanceSettingsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
+            // 9.5 Seed operational liquidity masters only for this known standard/demo COA.
+            // Custom tenant COAs are deliberately handled by the Banking setup wizard.
+            await SeedBankingSettlementDefaultsAsync(tenantId, baseDate);
+            await _context.SaveChangesAsync();
+
             // 10. Seed Module Definitions
             await SeedModuleDefinitionsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
@@ -1421,6 +1426,90 @@ public class FinanceDataSeeder
             },
             new Account
             {
+                Id = Guid.Parse("00000005-1020-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1020",
+                AccountNumber = "1020",
+                AccountName = "Undeposited Cash",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Cash and Cash Equivalents",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-1021-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1021",
+                AccountNumber = "1021",
+                AccountName = "Cheques Awaiting Deposit",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Cash and Cash Equivalents",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-1022-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1022",
+                AccountNumber = "1022",
+                AccountName = "Mobile Money Clearing",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Cash and Cash Equivalents",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-1023-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1023",
+                AccountNumber = "1023",
+                AccountName = "Card Settlement Clearing",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Cash and Cash Equivalents",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
                 Id = Guid.Parse("00000005-9999-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "9999",
@@ -1979,6 +2068,28 @@ public class FinanceDataSeeder
                 Balance = 32000m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-6600-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "6600",
+                AccountNumber = "6600",
+                AccountName = "Bank Charges",
+                AccountType = AccountType.Expense,
+                AccountCategory = "Finance Costs",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = true,
+                Status = AccountStatus.Active,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
             }
         };
     }
@@ -2188,6 +2299,134 @@ public class FinanceDataSeeder
         {
             await _context.FixedAssets.AddRangeAsync(assets);
             _logger.LogInformation($"Seeded {assets.Count} fixed assets");
+        }
+    }
+
+    #endregion
+
+    #region Banking Settlement Seeding
+
+    private async Task SeedBankingSettlementDefaultsAsync(Guid tenantId, DateTime baseDate)
+    {
+        var definitions = new[]
+        {
+            new
+            {
+                Id = Guid.Parse("00000007-1020-0000-0000-000000000001"),
+                Code = "UNDEP-CASH-GHS",
+                Name = "Undeposited Cash (GHS)",
+                Type = LiquidityAccountType.UndepositedCash,
+                GLAccountId = Guid.Parse("00000005-1020-0000-0000-000000000001")
+            },
+            new
+            {
+                Id = Guid.Parse("00000007-1021-0000-0000-000000000001"),
+                Code = "CHQ-CLEAR-GHS",
+                Name = "Cheques Awaiting Deposit (GHS)",
+                Type = LiquidityAccountType.ChequesAwaitingDeposit,
+                GLAccountId = Guid.Parse("00000005-1021-0000-0000-000000000001")
+            },
+            new
+            {
+                Id = Guid.Parse("00000007-1022-0000-0000-000000000001"),
+                Code = "MOMO-CLEAR-GHS",
+                Name = "Mobile Money Clearing (GHS)",
+                Type = LiquidityAccountType.MobileMoneyClearing,
+                GLAccountId = Guid.Parse("00000005-1022-0000-0000-000000000001")
+            },
+            new
+            {
+                Id = Guid.Parse("00000007-1023-0000-0000-000000000001"),
+                Code = "CARD-CLEAR-GHS",
+                Name = "Card Settlement Clearing (GHS)",
+                Type = LiquidityAccountType.CardSettlementClearing,
+                GLAccountId = Guid.Parse("00000005-1023-0000-0000-000000000001")
+            }
+        };
+
+        var validAccountIds = await _context.Accounts
+            .Where(account =>
+                account.TenantId == tenantId &&
+                definitions.Select(definition => definition.GLAccountId).Contains(account.Id))
+            .Select(account => account.Id)
+            .ToListAsync();
+        foreach (var definition in definitions.Where(definition => validAccountIds.Contains(definition.GLAccountId)))
+        {
+            var existing = await _context.LiquidityAccounts.FirstOrDefaultAsync(
+                account => account.TenantId == tenantId && account.Code == definition.Code);
+            if (existing != null)
+            {
+                existing.Name = definition.Name;
+                existing.AccountType = definition.Type;
+                existing.Currency = "GHS";
+                existing.GLAccountId = definition.GLAccountId;
+                existing.IsActive = true;
+                existing.IsSystemAccount = true;
+                existing.AllowsManualAllocations = true;
+                continue;
+            }
+
+            _context.LiquidityAccounts.Add(new LiquidityAccount
+            {
+                Id = definition.Id,
+                TenantId = tenantId,
+                Code = definition.Code,
+                Name = definition.Name,
+                AccountType = definition.Type,
+                Currency = "GHS",
+                GLAccountId = definition.GLAccountId,
+                IsActive = true,
+                IsSystemAccount = true,
+                AllowsManualAllocations = true,
+                CreatedAt = baseDate,
+                CreatedBy = "System",
+                Notes = "Standard Banking & Settlement control account."
+            });
+        }
+
+        var mappedBankIds = await _context.LiquidityAccounts
+            .Where(account => account.TenantId == tenantId && account.BankAccountId.HasValue)
+            .Select(account => account.BankAccountId!.Value)
+            .ToListAsync();
+        var banks = await _context.BankAccounts
+            .Where(bank =>
+                bank.TenantId == tenantId &&
+                bank.IsActive &&
+                bank.GLAccountId.HasValue &&
+                !mappedBankIds.Contains(bank.Id))
+            .ToListAsync();
+        foreach (var bank in banks)
+        {
+            _context.LiquidityAccounts.Add(new LiquidityAccount
+            {
+                TenantId = tenantId,
+                Code = $"BANK-{bank.Id.ToString("N")[..8]}".ToUpperInvariant(),
+                Name = bank.AccountName,
+                AccountType = LiquidityAccountType.Bank,
+                Currency = bank.Currency,
+                GLAccountId = bank.GLAccountId!.Value,
+                BankAccountId = bank.Id,
+                IsActive = true,
+                IsSystemAccount = true,
+                AllowsManualAllocations = false,
+                CreatedAt = baseDate,
+                CreatedBy = "System",
+                Notes = "Bank subtype created from the existing bank account master."
+            });
+        }
+
+        var returnedChequeBankChargeAccountId =
+            Guid.Parse("00000005-6600-0000-0000-000000000001");
+        var hasReturnedChequeBankChargeAccount = await _context.Accounts.AnyAsync(account =>
+            account.TenantId == tenantId &&
+            account.Id == returnedChequeBankChargeAccountId &&
+            !account.IsDeleted);
+        var settings = await _context.FinanceSettings.FirstOrDefaultAsync(item => item.TenantId == tenantId);
+        if (settings != null &&
+            !settings.ReturnedChequeBankChargeAccountId.HasValue &&
+            hasReturnedChequeBankChargeAccount)
+        {
+            settings.ReturnedChequeBankChargeAccountId = returnedChequeBankChargeAccountId;
         }
     }
 

@@ -7,9 +7,8 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
+using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
-using OfficeOpenXml;
-using OfficeOpenXml.Style;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -41,7 +40,6 @@ public class FixedAssetReportsService : IFixedAssetReportsService
         _financeAuditService = financeAuditService;
 
         QuestPDF.Settings.License = LicenseType.Community;
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -691,45 +689,45 @@ public class FixedAssetReportsService : IFixedAssetReportsService
 
     public async Task<byte[]> ExportToExcelAsync(string reportType, FixedAssetReportQueryDto query)
     {
-        using var package = new ExcelPackage();
-        var worksheet = package.Workbook.Worksheets.Add(reportType);
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add(reportType);
 
         if (string.Equals(reportType, "AssetRegister", StringComparison.OrdinalIgnoreCase))
         {
             var data = await GetAssetRegisterAsync(query);
-            worksheet.Cells[1, 1].Value = "Asset Code";
-            worksheet.Cells[1, 2].Value = "Name";
-            worksheet.Cells[1, 3].Value = "Category";
-            worksheet.Cells[1, 4].Value = "Location";
-            worksheet.Cells[1, 5].Value = "Acquisition Date";
-            worksheet.Cells[1, 6].Value = "Cost";
-            worksheet.Cells[1, 7].Value = "Acc. Depreciation";
-            worksheet.Cells[1, 8].Value = "NBV";
-            worksheet.Cells[1, 9].Value = "Status";
+            worksheet.Cell(1, 1).Value = "Asset Code";
+            worksheet.Cell(1, 2).Value = "Name";
+            worksheet.Cell(1, 3).Value = "Category";
+            worksheet.Cell(1, 4).Value = "Location";
+            worksheet.Cell(1, 5).Value = "Acquisition Date";
+            worksheet.Cell(1, 6).Value = "Cost";
+            worksheet.Cell(1, 7).Value = "Acc. Depreciation";
+            worksheet.Cell(1, 8).Value = "NBV";
+            worksheet.Cell(1, 9).Value = "Status";
 
-            using (var range = worksheet.Cells[1, 1, 1, 9])
-            {
-                range.Style.Font.Bold = true;
-                range.Style.Fill.PatternType = ExcelFillStyle.Solid;
-                range.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightGray);
-            }
+            var range = worksheet.Range(1, 1, 1, 9);
+            range.Style.Font.Bold = true;
+            range.Style.Fill.BackgroundColor = XLColor.LightGray;
 
             for (var i = 0; i < data.Items.Count; i++)
             {
                 var item = data.Items[i];
-                worksheet.Cells[i + 2, 1].Value = item.AssetCode;
-                worksheet.Cells[i + 2, 2].Value = item.Name;
-                worksheet.Cells[i + 2, 3].Value = item.CategoryName;
-                worksheet.Cells[i + 2, 4].Value = item.Location;
-                worksheet.Cells[i + 2, 5].Value = item.AcquisitionDate.ToString("yyyy-MM-dd");
-                worksheet.Cells[i + 2, 6].Value = item.Cost;
-                worksheet.Cells[i + 2, 7].Value = item.AccumulatedDepreciation;
-                worksheet.Cells[i + 2, 8].Value = item.NetBookValue;
-                worksheet.Cells[i + 2, 9].Value = item.Status.ToString();
+                worksheet.Cell(i + 2, 1).Value = item.AssetCode;
+                worksheet.Cell(i + 2, 2).Value = item.Name;
+                worksheet.Cell(i + 2, 3).Value = item.CategoryName;
+                worksheet.Cell(i + 2, 4).Value = item.Location;
+                worksheet.Cell(i + 2, 5).Value = item.AcquisitionDate;
+                worksheet.Cell(i + 2, 5).Style.DateFormat.Format = "yyyy-mm-dd";
+                worksheet.Cell(i + 2, 6).Value = item.Cost;
+                worksheet.Cell(i + 2, 7).Value = item.AccumulatedDepreciation;
+                worksheet.Cell(i + 2, 8).Value = item.NetBookValue;
+                worksheet.Cell(i + 2, 9).Value = item.Status.ToString();
             }
 
-            worksheet.Cells.AutoFitColumns();
-            return await package.GetAsByteArrayAsync();
+            worksheet.ColumnsUsed().AdjustToContents();
+            using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            return stream.ToArray();
         }
 
         throw new NotSupportedException($"Fixed asset Excel export type '{reportType}' is not supported by this legacy endpoint. Use the central finance report export service for fixed asset roll-forward and GL reconciliation exports.");

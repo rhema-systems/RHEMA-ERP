@@ -134,6 +134,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
         await _context.SaveChangesAsync(cancellationToken);
         await RecordPostingEventCreatedAuditAsync(tenantId, validation, postingEvent, journalEntry.Id, cancellationToken);
         await RecordCurrencySnapshotAuditAsync(tenantId, validation, postingEvent, journalEntry.Id, cancellationToken);
+        await RecordExchangeRatePolicyOverrideAuditAsync(tenantId, validation, postingEvent, journalEntry.Id, cancellationToken);
 
         _logger.LogInformation(
             "Finance posting completed for tenant {TenantId}, source {SourceModule}/{SourceDocumentType}/{SourceDocumentId}, action {PostingAction}, journal {JournalEntryId}.",
@@ -912,6 +913,11 @@ WHERE [Id] = {delta.AccountId}
 
         var lineNumber = 1;
         var normalizedLines = new List<ValidatedPostingLine>();
+        var ratePolicySettings = await _context.FinanceSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, cancellationToken);
+        var selectedPolicies = new Dictionary<string, ExchangeRatePolicy>(StringComparer.OrdinalIgnoreCase);
+        var exchangeRatePolicyOverrideUsed = false;
         foreach (var line in requestedLines)
         {
             if (line.AccountId == Guid.Empty)
@@ -957,6 +963,27 @@ WHERE [Id] = {delta.AccountId}
                     throw new InvalidOperationException("Foreign-currency posting lines require the original foreign amount.");
                 }
 
+                var ratePolicy = await ResolveExchangeRatePolicyAsync(
+                    tenantId,
+                    line.AccountId,
+                    lineCurrency,
+                    sourceModule,
+                    sourceDocumentType,
+                    postingDate,
+                    ratePolicySettings,
+                    request,
+                    cancellationToken);
+
+                if (selectedPolicies.TryGetValue(lineCurrency, out var selectedPolicy)
+                    && (selectedPolicy.RateType != ratePolicy.RateType || selectedPolicy.QuoteSide != ratePolicy.QuoteSide))
+                {
+                    throw new InvalidOperationException(
+                        $"Foreign-currency lines for {lineCurrency} have conflicting account rate policies. Use one approved document-level rate override so the posting remains balanced.");
+                }
+
+                selectedPolicies[lineCurrency] = ratePolicy;
+                exchangeRatePolicyOverrideUsed |= ratePolicy.IsOverride;
+
                 var rateSnapshot = await ResolveExchangeRateSnapshotAsync(
                     tenantId,
                     functionalCurrency,
@@ -964,9 +991,12 @@ WHERE [Id] = {delta.AccountId}
                     postingDate,
                     line.ExchangeRateId,
                     line.ExchangeRate,
+                    ratePolicy,
+                    ratePolicySettings?.RequireExchangeRateOverrideApproval ?? true,
                     request,
                     cancellationToken);
 
+                exchangeRatePolicyOverrideUsed |= rateSnapshot.PolicyOverrideUsed;
                 exchangeRateId = rateSnapshot.ExchangeRateId;
                 exchangeRate = rateSnapshot.Rate;
                 exchangeRateSource = rateSnapshot.RateSource;
@@ -1127,7 +1157,11 @@ WHERE [Id] = {delta.AccountId}
             primaryCurrency,
             primaryExchangeRateLine?.ExchangeRateId,
             primaryExchangeRateLine?.ExchangeRate,
-            primaryExchangeRateLine?.ExchangeRateDate);
+            primaryExchangeRateLine?.ExchangeRateDate,
+            exchangeRatePolicyOverrideUsed,
+            NormalizeOptional(request.ExchangeRateOverrideReason, 500, "Exchange-rate override reason"),
+            request.ExchangeRateOverrideApprovedByUserId,
+            request.ExchangeRateOverrideApprovedAt);
     }
 
     private async Task<FiscalPeriod> ResolveFiscalPeriodAsync(
@@ -1257,6 +1291,88 @@ WHERE [Id] = {delta.AccountId}
         return new FunctionalCurrencyConfig(NormalizeCurrency(tenantCurrency, "Tenant functional currency"), false);
     }
 
+    private async Task<ExchangeRatePolicy> ResolveExchangeRatePolicyAsync(
+        Guid tenantId,
+        Guid accountId,
+        string transactionCurrency,
+        string sourceModule,
+        string sourceDocumentType,
+        DateTime postingDate,
+        FinanceSettings? settings,
+        FinancePostingRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var isRevaluation = sourceDocumentType.Contains("Revaluation", StringComparison.OrdinalIgnoreCase);
+        var isSettlement = sourceDocumentType.Contains("Payment", StringComparison.OrdinalIgnoreCase)
+            || sourceDocumentType.Contains("Receipt", StringComparison.OrdinalIgnoreCase)
+            || sourceDocumentType.Contains("Settlement", StringComparison.OrdinalIgnoreCase)
+            || sourceDocumentType.Contains("Application", StringComparison.OrdinalIgnoreCase);
+        var directionalPolicyEnabled = settings?.DirectionalExchangeRatePolicyEnabled == true;
+
+        var rateType = isRevaluation ? ExchangeRateType.MonthEnd : ExchangeRateType.Daily;
+        var quoteSide = ExchangeRateQuoteSide.Mid;
+
+        if (string.Equals(sourceModule, "AR", StringComparison.OrdinalIgnoreCase))
+        {
+            quoteSide = directionalPolicyEnabled
+                ? (isSettlement
+                    ? settings?.ArSettlementQuoteSide ?? ExchangeRateQuoteSide.Buying
+                    : settings?.ArInvoiceQuoteSide ?? ExchangeRateQuoteSide.Mid)
+                : ExchangeRateQuoteSide.Mid;
+        }
+        else if (string.Equals(sourceModule, "AP", StringComparison.OrdinalIgnoreCase))
+        {
+            quoteSide = directionalPolicyEnabled
+                ? (isSettlement
+                    ? settings?.ApSettlementQuoteSide ?? ExchangeRateQuoteSide.Selling
+                    : settings?.ApInvoiceQuoteSide ?? ExchangeRateQuoteSide.Mid)
+                : ExchangeRateQuoteSide.Mid;
+        }
+        else
+        {
+            var link = await _context.AccountCurrencyLinks
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    l => l.TenantId == tenantId
+                        && l.AccountId == accountId
+                        && l.LinkedCurrencyCode == transactionCurrency
+                        && !l.IsDeleted
+                        && l.IsActive
+                        && l.EffectiveDate.Date <= postingDate.Date
+                        && (!l.EffectiveEndDate.HasValue || l.EffectiveEndDate.Value.Date >= postingDate.Date),
+                    cancellationToken);
+
+            if (link != null && directionalPolicyEnabled)
+            {
+                rateType = ParseExchangeRateType(
+                    isRevaluation ? link.RevaluationRateType : link.TransactionRateType,
+                    isRevaluation ? ExchangeRateType.MonthEnd : ExchangeRateType.Daily);
+                quoteSide = isRevaluation ? link.RevaluationQuoteSide : link.TransactionQuoteSide;
+            }
+            else
+            {
+                quoteSide = directionalPolicyEnabled
+                    ? (isRevaluation
+                        ? settings?.ClosingQuoteSide ?? ExchangeRateQuoteSide.Mid
+                        : settings?.DefaultTransactionQuoteSide ?? ExchangeRateQuoteSide.Mid)
+                    : ExchangeRateQuoteSide.Mid;
+            }
+        }
+
+        var selectedRateType = string.IsNullOrWhiteSpace(request.ExchangeRateTypeOverride)
+            ? rateType
+            : ParseExchangeRateType(request.ExchangeRateTypeOverride, rateType);
+        var selectedQuoteSide = string.IsNullOrWhiteSpace(request.ExchangeRateQuoteSideOverride)
+            ? quoteSide
+            : ParseExchangeRateQuoteSide(request.ExchangeRateQuoteSideOverride);
+        var isOverride = selectedRateType != rateType || selectedQuoteSide != quoteSide;
+
+        if (isOverride)
+            EnsureExchangeRateOverrideApproval(request, settings?.RequireExchangeRateOverrideApproval ?? true);
+
+        return new ExchangeRatePolicy(selectedRateType, selectedQuoteSide, isOverride);
+    }
+
     private async Task<ExchangeRateSnapshot> ResolveExchangeRateSnapshotAsync(
         Guid tenantId,
         string functionalCurrency,
@@ -1264,10 +1380,13 @@ WHERE [Id] = {delta.AccountId}
         DateTime postingDate,
         Guid? exchangeRateId,
         decimal? suppliedRate,
+        ExchangeRatePolicy policy,
+        bool requireOverrideApproval,
         FinancePostingRequestDto request,
         CancellationToken cancellationToken)
     {
         ExchangeRate? rate;
+        var policyOverrideUsed = policy.IsOverride;
         if (exchangeRateId.HasValue)
         {
             rate = await _context.ExchangeRates
@@ -1280,7 +1399,8 @@ WHERE [Id] = {delta.AccountId}
                     && !r.IsDeleted
                     && r.BaseCurrencyCode == functionalCurrency
                     && r.TargetCurrencyCode == transactionCurrency
-                    && r.RateType == ExchangeRateType.Daily
+                    && r.RateType == policy.RateType
+                    && r.QuoteSide == policy.QuoteSide
                     && r.IsActive
                     && r.Rate > 0
                     && (r.ApprovalStatus == RateApprovalStatus.Approved || r.ApprovalStatus == RateApprovalStatus.AutoApproved)
@@ -1348,6 +1468,17 @@ WHERE [Id] = {delta.AccountId}
             throw new InvalidOperationException("Exchange rate must be active and approved before posting.");
         }
 
+        if (rate.RateType != policy.RateType || rate.QuoteSide != policy.QuoteSide)
+        {
+            // A reversal must reproduce the original immutable rate snapshot even
+            // when the tenant's current policy has since changed.
+            if (!request.ReversalOfJournalEntryId.HasValue)
+            {
+                EnsureExchangeRateOverrideApproval(request, requireOverrideApproval);
+                policyOverrideUsed = true;
+            }
+        }
+
         if (suppliedRate.HasValue && RoundRate(suppliedRate.Value) != RoundRate(rate.Rate))
         {
             await RecordForeignCurrencyPostingBlockedAuditAsync(
@@ -1359,7 +1490,51 @@ WHERE [Id] = {delta.AccountId}
             throw new InvalidOperationException("Supplied exchange-rate snapshot does not match the tenant exchange-rate record.");
         }
 
-        return new ExchangeRateSnapshot(rate.Id, rate.Rate, rate.RateSource, rate.EffectiveDate.Date);
+        return new ExchangeRateSnapshot(rate.Id, rate.Rate, rate.RateSource, rate.EffectiveDate.Date, policyOverrideUsed);
+    }
+
+    private static ExchangeRateType ParseExchangeRateType(string? value, ExchangeRateType fallback)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return fallback;
+
+        var normalized = value.Trim().Replace("-", string.Empty).Replace("_", string.Empty).Replace(" ", string.Empty);
+        return Enum.TryParse<ExchangeRateType>(normalized, ignoreCase: true, out var rateType)
+            ? rateType
+            : throw new InvalidOperationException("Exchange-rate type override is invalid.");
+    }
+
+    private static ExchangeRateQuoteSide ParseExchangeRateQuoteSide(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)
+            || !Enum.TryParse<ExchangeRateQuoteSide>(value.Trim(), ignoreCase: true, out var quoteSide))
+        {
+            throw new InvalidOperationException("Exchange-rate quote-side override must be Mid, Buying, or Selling.");
+        }
+
+        return quoteSide;
+    }
+
+    private static void EnsureExchangeRateOverrideApproval(
+        FinancePostingRequestDto request,
+        bool requireApproval)
+    {
+        var reason = request.ExchangeRateOverrideReason?.Trim();
+        if (string.IsNullOrWhiteSpace(reason) || reason.Length < 10)
+            throw new InvalidOperationException("An exchange-rate policy override requires a reason of at least 10 characters.");
+
+        if (!requireApproval)
+            return;
+
+        if (!request.ExchangeRateOverrideApprovedByUserId.HasValue
+            || request.ExchangeRateOverrideApprovedByUserId.Value == Guid.Empty
+            || !request.ExchangeRateOverrideApprovedAt.HasValue)
+        {
+            throw new InvalidOperationException("An exchange-rate policy override requires recorded approval by an authorised user.");
+        }
+
+        if (request.ExchangeRateOverrideApprovedAt.Value > DateTime.UtcNow.AddMinutes(5))
+            throw new InvalidOperationException("Exchange-rate override approval time cannot be in the future.");
     }
 
     private async Task MarkExchangeRatesUsedAsync(
@@ -1727,6 +1902,41 @@ WHERE [Id] = {delta.AccountId}
         }
     }
 
+    private async Task RecordExchangeRatePolicyOverrideAuditAsync(
+        Guid tenantId,
+        ValidatedPosting validation,
+        FinancePostingEvent postingEvent,
+        Guid journalEntryId,
+        CancellationToken cancellationToken)
+    {
+        if (_financeAuditService == null || !validation.ExchangeRatePolicyOverrideUsed)
+            return;
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.ExchangeRatePolicyOverrideUsed,
+            TenantId = tenantId,
+            SourceModule = validation.SourceModule,
+            SourceDocumentType = validation.SourceDocumentType,
+            SourceDocumentId = validation.SourceDocumentId,
+            JournalEntryId = journalEntryId,
+            PostingEventId = postingEvent.Id,
+            Reason = validation.ExchangeRateOverrideReason,
+            AfterValues = new
+            {
+                validation.ExchangeRateOverrideApprovedByUserId,
+                validation.ExchangeRateOverrideApprovedAt,
+                ExchangeRateIds = validation.Lines
+                    .Where(l => l.ExchangeRateId.HasValue)
+                    .Select(l => l.ExchangeRateId!.Value)
+                    .Distinct()
+                    .ToArray()
+            },
+            Resource = "Finance.PostingEvent",
+            ResourceId = postingEvent.Id.ToString()
+        }, cancellationToken);
+    }
+
     private static string GeneratePostingJournalNumber(string sourceModule, DateTime now)
     {
         var prefix = new string(sourceModule
@@ -1838,7 +2048,11 @@ WHERE [Id] = {delta.AccountId}
         string? PrimaryCurrency,
         Guid? PrimaryExchangeRateId,
         decimal? PrimaryExchangeRate,
-        DateTime? PrimaryExchangeRateDate);
+        DateTime? PrimaryExchangeRateDate,
+        bool ExchangeRatePolicyOverrideUsed,
+        string? ExchangeRateOverrideReason,
+        Guid? ExchangeRateOverrideApprovedByUserId,
+        DateTime? ExchangeRateOverrideApprovedAt);
 
     private sealed record ValidatedPostingLine(
         Guid AccountId,
@@ -1865,5 +2079,11 @@ WHERE [Id] = {delta.AccountId}
         Guid ExchangeRateId,
         decimal Rate,
         string RateSource,
-        DateTime RateDate);
+        DateTime RateDate,
+        bool PolicyOverrideUsed);
+
+    private sealed record ExchangeRatePolicy(
+        ExchangeRateType RateType,
+        ExchangeRateQuoteSide QuoteSide,
+        bool IsOverride);
 }

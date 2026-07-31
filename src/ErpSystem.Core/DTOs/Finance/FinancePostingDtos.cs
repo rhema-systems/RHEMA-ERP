@@ -27,6 +27,16 @@ public sealed class FinancePostingRequestDto
     public bool ReturnExistingOnDuplicate { get; set; } = true;
 
     /// <summary>
+    /// Optional document-level deviation from the configured rate-selection policy.
+    /// Any override is applied consistently to every foreign-currency line.
+    /// </summary>
+    public string? ExchangeRateTypeOverride { get; set; }
+    public string? ExchangeRateQuoteSideOverride { get; set; }
+    public string? ExchangeRateOverrideReason { get; set; }
+    public Guid? ExchangeRateOverrideApprovedByUserId { get; set; }
+    public DateTime? ExchangeRateOverrideApprovedAt { get; set; }
+
+    /// <summary>
     /// Year-end closing entries must post into the year's final period after every period is
     /// closed, so the engine's open-period gate cannot apply. Honored only for the GL
     /// year-end close/reversal source document types; all other requests are still rejected.

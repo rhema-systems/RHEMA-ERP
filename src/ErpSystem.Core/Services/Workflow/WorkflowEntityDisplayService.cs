@@ -296,6 +296,16 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("JournalBatch"))
+            {
+                var batch = await _unitOfWork.Repository<JournalBatch>().FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "JournalBatch";
+                info.EntityNumber = batch?.BatchNumber;
+                info.EntityName = batch?.Description;
+                info.ActionUrl = $"/finance/journal-batches/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("Quote"))
             {
                 var quote = await _unitOfWork.Repository<Quote>().FirstOrDefaultAsync(x => x.Id == entityId);
@@ -445,6 +455,32 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 info.EntityNumber = reconciliation == null ? null : $"REC-{reconciliation.ReconciliationDate:yyyyMMdd}";
                 info.EntityName = reconciliation?.BankAccount?.AccountName;
                 info.ActionUrl = $"/finance/cash/reconciliation";
+                return info;
+            }
+
+            if (key == Normalize("BankDepositBatch") || key == Normalize("Bank Deposit"))
+            {
+                var deposit = await _unitOfWork.Repository<BankDepositBatch>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.BankAccount);
+                info.EntityType = "BankDepositBatch";
+                info.EntityNumber = deposit?.DepositNumber;
+                info.EntityName = deposit == null
+                    ? null
+                    : $"{deposit.BankAccount?.AccountName} / {deposit.Currency} {deposit.NetAmount:N2}";
+                info.ActionUrl = $"/finance/cash/deposits/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("ReturnedChequeCase") || key == Normalize("Returned Cheque"))
+            {
+                var returnedCheque = await _unitOfWork.Repository<ReturnedChequeCase>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.BankAccount);
+                info.EntityType = "ReturnedChequeCase";
+                info.EntityNumber = returnedCheque?.CaseNumber;
+                info.EntityName = returnedCheque == null
+                    ? null
+                    : $"Cheque {returnedCheque.ChequeNumber} / {returnedCheque.BankAccount?.AccountName}";
+                info.ActionUrl = $"/finance/cash/returned-cheques?caseId={entityId}";
                 return info;
             }
 

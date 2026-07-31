@@ -46,18 +46,42 @@ import { format } from 'date-fns';
 
 const paymentSchema = z.object({
     customerId: z.string().min(1, 'Customer is required'),
-    bankAccountId: z.string().min(1, 'Bank account is required'),
+    bankAccountId: z.string().optional(),
+    liquidityAccountId: z.string().optional(),
     paymentDate: z.date(),
     totalAmount: z.coerce.number().min(0.01, 'Amount must be positive'),
     paymentMethod: z.string().min(1, 'Payment method is required'),
     paymentMethodId: z.string().optional(),
     referenceNumber: z.string().optional(),
+    checkNumber: z.string().optional(),
+    chequeDrawerBank: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001, 'Exchange rate must be greater than 0').default(1),
     notes: z.string().optional(),
 });
 
 type PaymentFormValues = z.infer<typeof paymentSchema>;
+
+const directBankMethodTypes = new Set<PaymentMethodType>([
+    PaymentMethodType.BankTransfer,
+    PaymentMethodType.EFT,
+    PaymentMethodType.DirectDebit,
+    PaymentMethodType.StandingOrder,
+]);
+
+const liquidityTypeForPaymentMethod = (type?: PaymentMethodType) => {
+    switch (type) {
+        case PaymentMethodType.Cheque:
+            return 'ChequesAwaitingDeposit';
+        case PaymentMethodType.Card:
+            return 'CardSettlementClearing';
+        case PaymentMethodType.MobileMoney:
+            return 'MobileMoneyClearing';
+        case PaymentMethodType.Cash:
+        default:
+            return 'UndepositedCash';
+    }
+};
 
 const toCustomerPaymentMethod = (type?: PaymentMethodType): string => {
     switch (type) {
@@ -120,11 +144,17 @@ export default function NewReceiptPage() {
         queryFn: () => cashManagementDataService.getActivePaymentMethods(),
     });
 
+    const { data: liquidityAccounts } = useQuery({
+        queryKey: ['liquidity-accounts', 'active'],
+        queryFn: () => cashManagementDataService.getLiquidityAccounts(true),
+    });
+
     const form = useForm<PaymentFormValues>({
         resolver: zodResolver(paymentSchema) as any,
         defaultValues: {
             customerId: preselectedCustomerId || '',
             bankAccountId: preselectedBankAccountId,
+            liquidityAccountId: undefined,
             paymentDate: preselectedPaymentDate,
             totalAmount: preselectedAmount,
             paymentMethod: 'Bank Transfer',
@@ -138,7 +168,16 @@ export default function NewReceiptPage() {
 
     const selectedCustomerId = form.watch('customerId');
     const selectedBankAccountId = form.watch('bankAccountId');
+    const selectedLiquidityAccountId = form.watch('liquidityAccountId');
     const selectedPaymentMethodId = form.watch('paymentMethodId');
+    const selectedPaymentMethod = paymentMethods?.find((method) => method.id === selectedPaymentMethodId);
+    const isDirectBankReceipt = selectedPaymentMethod
+        ? directBankMethodTypes.has(selectedPaymentMethod.type)
+        : true;
+    const expectedLiquidityType = liquidityTypeForPaymentMethod(selectedPaymentMethod?.type);
+    const eligibleLiquidityAccounts = liquidityAccounts?.filter(account =>
+        account.accountType === expectedLiquidityType && account.isActive,
+    ) ?? [];
 
     useEffect(() => {
         if (!paymentMethods?.length) return;
@@ -161,7 +200,7 @@ export default function NewReceiptPage() {
     }, [paymentMethods, selectedPaymentMethodId, form]);
 
     useEffect(() => {
-        if (!selectedBankAccountId || !bankAccounts) return;
+        if (!isDirectBankReceipt || !selectedBankAccountId || !bankAccounts) return;
 
         const account = bankAccounts.find((item) => item.id === selectedBankAccountId);
         if (!account) return;
@@ -175,7 +214,31 @@ export default function NewReceiptPage() {
         void financeService.getCurrentExchangeRate(account.currency)
             .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
             .catch(() => form.setValue('exchangeRate', 1));
-    }, [selectedBankAccountId, bankAccounts, form]);
+    }, [selectedBankAccountId, bankAccounts, form, isDirectBankReceipt]);
+
+    useEffect(() => {
+        if (isDirectBankReceipt || !selectedLiquidityAccountId || !liquidityAccounts) return;
+
+        const account = liquidityAccounts.find((item) => item.id === selectedLiquidityAccountId);
+        if (!account) return;
+
+        form.setValue('currencyCode', account.currency);
+        if (account.currency === 'GHS') {
+            form.setValue('exchangeRate', 1);
+            return;
+        }
+
+        void financeService.getCurrentExchangeRate(account.currency)
+            .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
+            .catch(() => form.setValue('exchangeRate', 1));
+    }, [selectedLiquidityAccountId, liquidityAccounts, form, isDirectBankReceipt]);
+
+    useEffect(() => {
+        if (isDirectBankReceipt) return;
+        const selectionIsEligible = eligibleLiquidityAccounts.some(account => account.id === selectedLiquidityAccountId);
+        if (selectionIsEligible) return;
+        form.setValue('liquidityAccountId', eligibleLiquidityAccounts[0]?.id);
+    }, [eligibleLiquidityAccounts, form, isDirectBankReceipt, selectedLiquidityAccountId]);
 
     // Fetch outstanding invoices for selected customer
     const { data: outstandingInvoices, isLoading: isLoadingInvoices } = useQuery({
@@ -201,19 +264,30 @@ export default function NewReceiptPage() {
     const onSubmit = async (data: PaymentFormValues) => {
         setIsSubmitting(true);
         try {
-            const selectedPaymentMethod = paymentMethods?.find((method) => method.id === data.paymentMethodId);
-            if (data.paymentMethodId && !selectedPaymentMethod) {
+            const method = paymentMethods?.find((item) => item.id === data.paymentMethodId);
+            if (data.paymentMethodId && !method) {
                 form.setError('paymentMethodId', { type: 'manual', message: 'Selected payment method is not available' });
                 return;
             }
 
-            if (selectedPaymentMethod?.requiresBankAccount && !data.bankAccountId) {
-                form.setError('bankAccountId', { type: 'manual', message: `${selectedPaymentMethod.name} requires a bank account` });
+            const directBankReceipt = method ? directBankMethodTypes.has(method.type) : true;
+            if (directBankReceipt && !data.bankAccountId) {
+                form.setError('bankAccountId', { type: 'manual', message: `${method?.name ?? 'This method'} requires a bank account` });
                 return;
             }
 
-            if (selectedPaymentMethod?.requiresReference && !data.referenceNumber?.trim()) {
-                form.setError('referenceNumber', { type: 'manual', message: `${selectedPaymentMethod.name} requires a reference number` });
+            if (!directBankReceipt && !data.liquidityAccountId) {
+                form.setError('liquidityAccountId', { type: 'manual', message: `Select the ${expectedLiquidityType} holding account` });
+                return;
+            }
+
+            if (method?.requiresReference && !data.referenceNumber?.trim()) {
+                form.setError('referenceNumber', { type: 'manual', message: `${method.name} requires a reference number` });
+                return;
+            }
+
+            if (method?.type === PaymentMethodType.Cheque && !data.checkNumber?.trim()) {
+                form.setError('checkNumber', { type: 'manual', message: 'Cheque number is required' });
                 return;
             }
 
@@ -335,28 +409,55 @@ export default function NewReceiptPage() {
                                 )}
                             </div>
 
-                            <div className="space-y-2">
-                                <Label htmlFor="bankAccount">Deposit To Bank Account</Label>
-                                <Select
-                                    onValueChange={(val) => form.setValue('bankAccountId', val)}
-                                    value={form.watch('bankAccountId') || undefined}
-                                    disabled={isSubmitting}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select bank account..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {bankAccounts?.map((account) => (
-                                            <SelectItem key={account.id} value={account.id}>
-                                                {account.accountName} ({account.currency}) - {account.bankName}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                {form.formState.errors.bankAccountId && (
-                                    <p className="text-sm text-red-500">{form.formState.errors.bankAccountId.message}</p>
-                                )}
-                            </div>
+                            {isDirectBankReceipt ? (
+                                <div className="space-y-2">
+                                    <Label htmlFor="bankAccount">Deposit To Bank Account</Label>
+                                    <Select
+                                        onValueChange={(val) => form.setValue('bankAccountId', val)}
+                                        value={form.watch('bankAccountId') || undefined}
+                                        disabled={isSubmitting}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select bank account..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {bankAccounts?.map((account) => (
+                                                <SelectItem key={account.id} value={account.id}>
+                                                    {account.accountName} ({account.currency}) - {account.bankName}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    {form.formState.errors.bankAccountId && (
+                                        <p className="text-sm text-red-500">{form.formState.errors.bankAccountId.message}</p>
+                                    )}
+                                    <p className="text-xs text-muted-foreground">Direct bank methods bypass the banking queue.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <Label htmlFor="liquidityAccount">Receive Into Holding Account</Label>
+                                    <Select
+                                        onValueChange={(val) => form.setValue('liquidityAccountId', val)}
+                                        value={form.watch('liquidityAccountId') || undefined}
+                                        disabled={isSubmitting}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder={`Select ${expectedLiquidityType} account...`} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {eligibleLiquidityAccounts.map((account) => (
+                                                <SelectItem key={account.id} value={account.id}>
+                                                    {account.name} ({account.currency}) - {account.glAccountNumber}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    {form.formState.errors.liquidityAccountId && (
+                                        <p className="text-sm text-red-500">{form.formState.errors.liquidityAccountId.message}</p>
+                                    )}
+                                    <p className="text-xs text-muted-foreground">This receipt will enter the banking queue after posting.</p>
+                                </div>
+                            )}
 
                             <div className="space-y-2">
                                 <Label>Payment Date</Label>
@@ -460,6 +561,22 @@ export default function NewReceiptPage() {
                                     <p className="text-sm text-red-500">{form.formState.errors.referenceNumber.message}</p>
                                 )}
                             </div>
+
+                            {selectedPaymentMethod?.type === PaymentMethodType.Cheque && (
+                                <>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="checkNumber">Cheque Number</Label>
+                                        <Input id="checkNumber" {...form.register('checkNumber')} disabled={isSubmitting} />
+                                        {form.formState.errors.checkNumber && (
+                                            <p className="text-sm text-red-500">{form.formState.errors.checkNumber.message}</p>
+                                        )}
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="chequeDrawerBank">Drawer Bank</Label>
+                                        <Input id="chequeDrawerBank" {...form.register('chequeDrawerBank')} disabled={isSubmitting} />
+                                    </div>
+                                </>
+                            )}
 
                             <div className="space-y-2">
                                 <Label htmlFor="notes">Notes</Label>
