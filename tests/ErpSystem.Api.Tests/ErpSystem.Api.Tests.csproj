@@ -127,6 +127,7 @@
     <Compile Include="Services\Finance\GhanaTaxReportingExportFoundationTests.cs" />
     <Compile Include="Services\Finance\LegacyPostingPathLockdownTests.cs" />
     <Compile Include="Services\Finance\FinanceConcurrencyHardeningTests.cs" />
+    <Compile Include="Services\Finance\FinanceSettingsMigrationGapTests.cs" />
     <Compile Include="Services\Finance\FiscalYearCloseTests.cs" />
     <Compile Include="Services\Finance\FiscalYearDeletionGuardTests.cs" />
     <Compile Include="Services\Finance\FiscalPeriodModuleLockTests.cs" />
