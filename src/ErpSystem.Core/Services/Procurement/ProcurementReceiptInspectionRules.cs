@@ -35,6 +35,24 @@ public static class ProcurementReceiptInspectionRules
 
     public static bool RequiresResolution(decimal rejected) => rejected > 0;
 
+    public static decimal CalculateWeightedAverageCost(
+        decimal existingQuantity,
+        decimal existingAverageCost,
+        decimal receivedQuantity,
+        decimal receivedUnitCost)
+    {
+        if (existingQuantity < 0 || existingAverageCost < 0 ||
+            receivedQuantity < 0 || receivedUnitCost < 0)
+            throw new ArgumentOutOfRangeException(nameof(existingQuantity),
+                "Inventory quantities and costs cannot be negative.");
+
+        var totalQuantity = existingQuantity + receivedQuantity;
+        return totalQuantity == 0
+            ? 0
+            : ((existingQuantity * existingAverageCost) +
+               (receivedQuantity * receivedUnitCost)) / totalQuantity;
+    }
+
     public static bool CanResolve(ProcurementReceiptInspectionStatus status) =>
         status is ProcurementReceiptInspectionStatus.QualityHold
             or ProcurementReceiptInspectionStatus.ReturnPending

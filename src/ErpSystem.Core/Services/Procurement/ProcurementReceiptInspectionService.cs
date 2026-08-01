@@ -44,6 +44,7 @@ public sealed class ProcurementReceiptInspectionService :
     private readonly IProcurementReceiptSourceControlService _sourceControl;
     private readonly IProcurementReceiptInspectionStore _store;
     private readonly IInventoryValuationService _valuation;
+    private readonly IProcurementBudgetService _budgetService;
     private readonly ILogger<ProcurementReceiptInspectionService> _logger;
 
     public ProcurementReceiptInspectionService(
@@ -60,6 +61,7 @@ public sealed class ProcurementReceiptInspectionService :
         IProcurementReceiptSourceControlService sourceControl,
         IProcurementReceiptInspectionStore store,
         IInventoryValuationService valuation,
+        IProcurementBudgetService budgetService,
         ILogger<ProcurementReceiptInspectionService> logger)
     {
         _unitOfWork = unitOfWork;
@@ -75,6 +77,7 @@ public sealed class ProcurementReceiptInspectionService :
         _sourceControl = sourceControl;
         _store = store;
         _valuation = valuation;
+        _budgetService = budgetService;
         _logger = logger;
     }
 
@@ -402,32 +405,43 @@ public sealed class ProcurementReceiptInspectionService :
 
         var evidence = await ValidateEvidenceAsync(caseId, request.Evidence, cancellationToken);
         var before = Snapshot(inspection);
-        foreach (var item in evidence)
+        await ExecuteAsync(async () =>
         {
-            item.InspectionCaseId = inspection.Id;
-            await Evidence.AddAsync(item);
-            inspection.Evidence.Add(item);
-        }
-        inspection.Status = ProcurementReceiptInspectionStatus.PendingApproval;
-        inspection.SubmittedByUserId = _currentUser.UserId;
-        inspection.SubmittedAtUtc = DateTime.UtcNow;
-        inspection.DecisionComment = request.Comment.Trim();
-        inspection.CorrelationId = correlation;
-        inspection.IntegrityHash = CaseHash(inspection);
-        await Cases.UpdateAsync(inspection);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        var workflow = await _workflow.SubmitAsync(
-            WorkflowEntityType, inspection.Id, inspection.WorkflowDefinitionId);
-        if (!workflow.ExecutionResult.Success)
-            throw Conflict("RCV_INSPECTION_WORKFLOW_START_FAILED",
-                workflow.ExecutionResult.Message ?? "The configured receipt-inspection workflow could not be started.");
-        inspection.WorkflowInstanceId = workflow.ExecutionResult.WorkflowInstanceId;
-        await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Submitted,
-            request.Comment, "Submitted for independent approval", correlation,
-            $"submit:{inspection.Id:N}:{inspection.Sequence}", null, cancellationToken);
-        inspection.IntegrityHash = CaseHash(inspection);
-        await Cases.UpdateAsync(inspection);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            inspection = await LoadCaseAsync(caseId, cancellationToken);
+            EnsureRowVersion(inspection.RowVersion, request.RowVersion);
+            if (!ProcurementReceiptInspectionRules.CanSubmit(inspection.Status))
+                throw Conflict("RCV_INSPECTION_NOT_SUBMITTABLE",
+                    "The inspection changed before workflow startup. Reload and retry.");
+
+            foreach (var item in evidence)
+            {
+                item.InspectionCaseId = inspection.Id;
+                await Evidence.AddAsync(item);
+                inspection.Evidence.Add(item);
+            }
+            inspection.Status = ProcurementReceiptInspectionStatus.PendingApproval;
+            inspection.SubmittedByUserId = _currentUser.UserId;
+            inspection.SubmittedAtUtc = DateTime.UtcNow;
+            inspection.DecisionComment = request.Comment.Trim();
+            inspection.CorrelationId = correlation;
+            inspection.IntegrityHash = CaseHash(inspection);
+            await Cases.UpdateAsync(inspection);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            var workflow = await _workflow.SubmitAsync(
+                WorkflowEntityType, inspection.Id, inspection.WorkflowDefinitionId);
+            if (!workflow.ExecutionResult.Success)
+                throw Conflict("RCV_INSPECTION_WORKFLOW_START_FAILED",
+                    workflow.ExecutionResult.Message ?? "The configured receipt-inspection workflow could not be started.");
+
+            inspection.WorkflowInstanceId = workflow.ExecutionResult.WorkflowInstanceId;
+            await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Submitted,
+                request.Comment, "Submitted for independent approval", correlation,
+                $"submit:{inspection.Id:N}:{inspection.Sequence}", null, cancellationToken);
+            inspection.IntegrityHash = CaseHash(inspection);
+            await Cases.UpdateAsync(inspection);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }, cancellationToken);
         await RecordEventAsync(inspection, "Submitted", ProcurementControlEventResult.ReviewRequired,
             before, Snapshot(inspection), request.Comment, correlation, cancellationToken);
         await PublishAsync("procurement.receipt-inspection.submitted", inspection, cancellationToken);
@@ -931,10 +945,29 @@ public sealed class ProcurementReceiptInspectionService :
         var baseQuantity = quantity * conversion;
         var purchaseCost = poLine.LandedUnitCost > 0 ? poLine.LandedUnitCost : poLine.UnitPrice;
         var baseCost = purchaseCost / conversion;
+        var inventoryItem = await _unitOfWork.Repository<InventoryItem>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                                  item.Id == poLine.InventoryItemId.Value && !item.IsDeleted)
+            .SingleAsync(cancellationToken);
         await _valuation.ProcessReceiptAsync(poLine.InventoryItemId.Value,
             location.InventoryWarehouseId, receiptLine.LocationId, baseQuantity, baseCost,
             ReferenceType.PO, receipt.ReceiptNumber, receipt.Id,
             receiptLine.LotNumber, receiptLine.SerialNumber, receiptLine.ExpirationDate);
+
+        var valuationBalance = await _unitOfWork.Repository<InventoryBalance>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                                  item.InventoryItemId == poLine.InventoryItemId.Value &&
+                                  item.WarehouseId == location.InventoryWarehouseId &&
+                                  item.LocationId == receiptLine.LocationId.Value &&
+                                  !item.IsDeleted)
+            .SingleOrDefaultAsync(cancellationToken);
+        var postedAverageCost = valuationBalance?.AverageUnitCost ??
+                                (inventoryItem.ValuationMethod == ValuationMethod.StandardCost
+                                    ? inventoryItem.StandardCost
+                                    : baseCost);
+        var receiptValuationCost = inventoryItem.ValuationMethod == ValuationMethod.StandardCost
+            ? inventoryItem.StandardCost
+            : baseCost;
 
         var inventoryLocation = await _unitOfWork.Repository<InventoryLocation>()
             .FirstOrDefaultAsync(item => item.TenantId == _currentUser.TenantId &&
@@ -949,7 +982,7 @@ public sealed class ProcurementReceiptInspectionService :
                 LocationId = receiptLine.LocationId.Value,
                 Quantity = baseQuantity,
                 AvailableQuantity = baseQuantity,
-                AverageCost = baseCost,
+                AverageCost = postedAverageCost,
                 LastMovementDate = DateTime.UtcNow,
                 CreatedById = _currentUser.UserId
             };
@@ -959,7 +992,7 @@ public sealed class ProcurementReceiptInspectionService :
         {
             inventoryLocation.Quantity += baseQuantity;
             inventoryLocation.AvailableQuantity += baseQuantity;
-            inventoryLocation.AverageCost = baseCost;
+            inventoryLocation.AverageCost = postedAverageCost;
             inventoryLocation.LastMovementDate = DateTime.UtcNow;
             await _unitOfWork.Repository<InventoryLocation>().UpdateAsync(inventoryLocation);
         }
@@ -976,7 +1009,7 @@ public sealed class ProcurementReceiptInspectionService :
                 WarehouseId = location.InventoryWarehouseId,
                 CurrentStock = baseQuantity,
                 AvailableStock = baseQuantity,
-                AverageCost = baseCost,
+                AverageCost = postedAverageCost,
                 LastMovementDate = DateTime.UtcNow,
                 CreatedById = _currentUser.UserId
             };
@@ -984,9 +1017,15 @@ public sealed class ProcurementReceiptInspectionService :
         }
         else
         {
+            var priorWarehouseStock = warehouseQuantity.CurrentStock;
+            warehouseQuantity.AverageCost =
+                ProcurementReceiptInspectionRules.CalculateWeightedAverageCost(
+                    priorWarehouseStock,
+                    warehouseQuantity.AverageCost,
+                    baseQuantity,
+                    receiptValuationCost);
             warehouseQuantity.CurrentStock += baseQuantity;
             warehouseQuantity.AvailableStock += baseQuantity;
-            warehouseQuantity.AverageCost = baseCost;
             warehouseQuantity.LastMovementDate = DateTime.UtcNow;
             await _unitOfWork.Repository<WarehouseQuantity>().UpdateAsync(warehouseQuantity);
         }
@@ -996,10 +1035,6 @@ public sealed class ProcurementReceiptInspectionService :
             .AsNoTracking().SingleAsync(cancellationToken);
         if (!warehouse.IsConsignmentWarehouse)
         {
-            var inventoryItem = await _unitOfWork.Repository<InventoryItem>()
-                .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
-                                      item.Id == poLine.InventoryItemId.Value && !item.IsDeleted)
-                .SingleAsync(cancellationToken);
             inventoryItem.CurrentStock += baseQuantity;
             inventoryItem.AvailableStock += baseQuantity;
             inventoryItem.LastPurchaseCost = baseCost;
@@ -1012,6 +1047,10 @@ public sealed class ProcurementReceiptInspectionService :
         PurchaseOrder purchaseOrder,
         CancellationToken cancellationToken)
     {
+        var wasFullyReceived = string.Equals(
+            purchaseOrder.Status,
+            "Received",
+            StringComparison.OrdinalIgnoreCase);
         var lines = await _unitOfWork.Repository<PurchaseOrderItem>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                                   item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted)
@@ -1022,6 +1061,12 @@ public sealed class ProcurementReceiptInspectionService :
         purchaseOrder.ReceivedDate = fullyAccepted ? DateTime.UtcNow : purchaseOrder.ReceivedDate;
         purchaseOrder.UpdatedAt = DateTime.UtcNow;
         await _unitOfWork.Repository<PurchaseOrder>().UpdateAsync(purchaseOrder);
+        if (fullyAccepted && !wasFullyReceived)
+        {
+            await _budgetService.UtilizePurchaseOrderCommittedBudgetAsync(
+                purchaseOrder.Id,
+                purchaseOrder.TotalAmount);
+        }
     }
 
     private async Task ValidateReplacementReceiptAsync(

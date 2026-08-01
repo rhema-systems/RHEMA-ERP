@@ -42,8 +42,6 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IInventoryItemRepository _inventoryItemRepository;
     private readonly IWarehouseRepository _warehouseRepository;
     private readonly IProcurementBudgetService _budgetService;
-    private readonly IProcurementBudgetRepository _budgetRepository;
-    private readonly IProcurementPlanItemRepository _planItemRepository;
     private readonly IInventoryValuationService _inventoryValuationService;
     private readonly IProjectService _projectService;
     private readonly IUnitOfWork _unitOfWork;
@@ -75,8 +73,6 @@ public class PurchaseOrdersController : ControllerBase
         IInventoryItemRepository inventoryItemRepository,
         IWarehouseRepository warehouseRepository,
         IProcurementBudgetService budgetService,
-        IProcurementBudgetRepository budgetRepository,
-        IProcurementPlanItemRepository planItemRepository,
         IInventoryValuationService inventoryValuationService,
         IProjectService projectService,
         IUnitOfWork unitOfWork,
@@ -101,8 +97,6 @@ public class PurchaseOrdersController : ControllerBase
         _inventoryItemRepository = inventoryItemRepository;
         _warehouseRepository = warehouseRepository;
         _budgetService = budgetService;
-        _budgetRepository = budgetRepository;
-        _planItemRepository = planItemRepository;
         _inventoryValuationService = inventoryValuationService;
         _projectService = projectService;
         _unitOfWork = unitOfWork;
@@ -2897,30 +2891,9 @@ public class PurchaseOrdersController : ControllerBase
     {
         try
         {
-            // Find the plan item linked to this PO to get category and plan info
-            var planItems = await _planItemRepository.GetAllAsync();
-            var planItem = planItems.FirstOrDefault(pi => pi.PurchaseOrderId == purchaseOrder.Id);
-
-            if (planItem == null)
-            {
-                _logger.LogWarning("No plan item found for PO {PONumber}, skipping budget utilization", purchaseOrder.OrderNumber);
-                return;
-            }
-
-            // Find budget linked to the plan
-            var budgets = await _budgetRepository.GetByPlanIdAsync(planItem.ProcurementPlanId);
-            var budget = budgets.FirstOrDefault(b => b.Status == "Active" || b.Status == "Approved");
-
-            if (budget == null)
-            {
-                _logger.LogWarning("No budget found for plan {PlanId}, skipping budget utilization", planItem.ProcurementPlanId);
-                return;
-            }
-
-            // Move from committed to utilized
-            await _budgetService.UtilizeCommittedBudgetAsync(budget.Id, purchaseOrder.TotalAmount, planItem.ItemCategory);
-            _logger.LogInformation("Utilized {Amount} from budget {BudgetCode} for PO {PONumber}, category: {Category}",
-                purchaseOrder.TotalAmount, budget.BudgetCode, purchaseOrder.OrderNumber, planItem.ItemCategory ?? "N/A");
+            await _budgetService.UtilizePurchaseOrderCommittedBudgetAsync(
+                purchaseOrder.Id,
+                purchaseOrder.TotalAmount);
         }
         catch (Exception ex)
         {

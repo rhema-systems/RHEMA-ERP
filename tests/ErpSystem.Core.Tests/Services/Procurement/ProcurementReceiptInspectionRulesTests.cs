@@ -55,6 +55,25 @@ public sealed class ProcurementReceiptInspectionRulesTests
     }
 
     [Theory]
+    [InlineData(10, 5, 10, 15, 10)]
+    [InlineData(4, 12.5, 6, 7.5, 9.5)]
+    [InlineData(0, 0, 8, 3.25, 3.25)]
+    public void WarehouseAverageCostUsesExistingAndReceivedValue(
+        decimal existingQuantity,
+        decimal existingAverageCost,
+        decimal receivedQuantity,
+        decimal receivedUnitCost,
+        decimal expected)
+    {
+        ProcurementReceiptInspectionRules.CalculateWeightedAverageCost(
+                existingQuantity,
+                existingAverageCost,
+                receivedQuantity,
+                receivedUnitCost)
+            .Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData(ProcurementReceiptInspectionStatus.QualityHold, 0, 4, true)]
     [InlineData(ProcurementReceiptInspectionStatus.ReturnPending, 0, 4, true)]
     [InlineData(ProcurementReceiptInspectionStatus.Closed, 0, 4, true)]
