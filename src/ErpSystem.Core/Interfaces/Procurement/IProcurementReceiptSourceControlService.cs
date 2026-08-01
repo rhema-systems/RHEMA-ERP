@@ -39,6 +39,8 @@ public interface IProcurementReceiptSourceControlService
         string correlationId,
         CancellationToken cancellationToken = default);
 
+    void ResetInventoryPostingAttempt();
+
     Task RecordDeniedAsync(
         Guid? purchaseOrderId,
         string sourceReference,

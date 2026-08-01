@@ -417,6 +417,9 @@ public sealed class ProcurementReceiptSourceControlService :
             pending + quantity;
     }
 
+    public void ResetInventoryPostingAttempt() =>
+        _pendingInventoryPostingQuantities.Clear();
+
     public async Task RecordDeniedAsync(
         Guid? purchaseOrderId,
         string sourceReference,

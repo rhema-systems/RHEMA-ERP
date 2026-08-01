@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
@@ -407,17 +408,39 @@ namespace ErpSystem.Api.Services.Finance.AP
                     !item.IsDeleted &&
                     sourceRequisitionIds.Contains(item.PurchaseRequisitionId))
                 .ToListAsync(cancellationToken);
+            var cutoffExclusive = date.AddDays(1);
             var allInvoices = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(item =>
                     item.TenantId == tenantId &&
                     !item.IsDeleted &&
                     item.PurchaseOrderId.HasValue &&
                     selectedPoIds.Contains(item.PurchaseOrderId.Value) &&
-                    item.InvoiceDate.Date <= date &&
-                    item.Status != VendorInvoiceStatus.Draft &&
-                    item.Status != VendorInvoiceStatus.Rejected)
+                    item.InvoiceDate < cutoffExclusive &&
+                    item.SubmittedDate.HasValue &&
+                    item.SubmittedDate.Value < cutoffExclusive &&
+                    item.ApprovedDate.HasValue &&
+                    item.ApprovedDate.Value < cutoffExclusive)
                 .ToListAsync(cancellationToken);
             var invoiceIds = allInvoices.Select(item => item.Id).ToList();
+            var invoiceResourceIds = invoiceIds.Select(item => item.ToString()).ToList();
+            var invoiceTerminationsAsOf = invoiceResourceIds.Count == 0
+                ? new HashSet<Guid>()
+                : (await _unitOfWork.Repository<AuditLog>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted &&
+                        item.Resource == "Finance.APInvoice" &&
+                        item.ResourceId != null &&
+                        invoiceResourceIds.Contains(item.ResourceId) &&
+                        item.Timestamp < cutoffExclusive &&
+                        (item.Action == FinanceAuditEvents.ApInvoiceVoided ||
+                         item.Action == FinanceAuditEvents.ApInvoiceReversed))
+                    .AsNoTracking()
+                    .Select(item => item.ResourceId!)
+                    .ToListAsync(cancellationToken))
+                    .Select(value => Guid.TryParse(value, out var id) ? id : Guid.Empty)
+                    .Where(id => id != Guid.Empty)
+                    .ToHashSet();
             var allocations = await _unitOfWork.Repository<VendorPaymentAllocation>()
                 .GetQueryable(item =>
                     item.TenantId == tenantId &&
@@ -456,7 +479,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     item.TenantId == tenantId &&
                     !item.IsDeleted &&
                     item.PostingStatus == "Posted" &&
-                    item.PostingDate.Date <= date &&
+                    item.PostingDate < cutoffExclusive &&
                     ((item.SourceDocumentType == "VendorInvoice" && invoiceIds.Contains(item.SourceDocumentId)) ||
                      (item.SourceDocumentType == "VendorPayment" && paymentIds.Contains(item.SourceDocumentId)) ||
                      (item.SourceDocumentType == "VendorPaymentAdvanceApplication" && allocationIds.Contains(item.SourceDocumentId)) ||
@@ -472,9 +495,6 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var poInvoices = allInvoices
                     .Where(item => item.PurchaseOrderId == purchaseOrder.Id)
                     .ToList();
-                var activeInvoices = poInvoices
-                    .Where(item => item.Status != VendorInvoiceStatus.Voided)
-                    .ToList();
                 var poInvoiceIds = poInvoices.Select(item => item.Id).ToHashSet();
                 var poAllocations = allocations
                     .Where(item => poInvoiceIds.Contains(item.VendorInvoiceId))
@@ -489,6 +509,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                           item.SourceDocumentType == "VendorPaymentAllocation") &&
                          poAllocationIds.Contains(item.SourceDocumentId)))
                     .ToList();
+                var reversedInvoiceIdsAsOf = poPostings
+                    .Where(item => item.SourceDocumentType == "VendorInvoice" &&
+                                   item.PostingAction != "Post")
+                    .Select(item => item.SourceDocumentId)
+                    .ToHashSet();
+                var activeInvoices = poInvoices
+                    .Where(item => !invoiceTerminationsAsOf.Contains(item.Id) &&
+                                   !reversedInvoiceIdsAsOf.Contains(item.Id))
+                    .ToList();
+                var activeInvoiceIds = activeInvoices.Select(item => item.Id).ToHashSet();
 
                 var commitmentGroupOrders = purchaseOrder.SourceRequisitionId.HasValue
                     ? purchaseOrders.Where(item =>
@@ -550,7 +580,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .Where(item =>
                         item.SourceDocumentType == "VendorInvoice" &&
                         item.PostingAction == "Post" &&
-                        item.JournalEntry is { IsReversed: false })
+                        activeInvoiceIds.Contains(item.SourceDocumentId) &&
+                        !reversedInvoiceIdsAsOf.Contains(item.SourceDocumentId))
                     .Sum(item => GetTransactionDebit(item, currency)));
                 var activePoAllocations = poAllocations
                     .Where(item =>
@@ -619,7 +650,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         .Where(IsInvoicedMilestone).Sum(item => item.PaymentAmount)),
                     PaidMilestoneAmount = RoundMoney(contractMilestones
                         .Where(IsPaidMilestone).Sum(item => item.PaymentAmount)),
-                    InvoiceCount = poInvoices.Count,
+                    InvoiceCount = activeInvoices.Count,
                     PaymentCount = poPaymentIds.Count,
                     PostingCount = poPostings.Count,
                     ControlledReversalCount = poPostings.Count(item => item.PostingAction != "Post")
@@ -632,7 +663,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     row,
                     activeCommitments,
                     contracts.FirstOrDefault(item => item.Id == purchaseOrder.ContractId),
-                    poInvoices,
+                    activeInvoices,
                     poAllocations,
                     poPostings);
                 row.Issues = issues;

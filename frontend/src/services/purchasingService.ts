@@ -1052,6 +1052,7 @@ export interface ProcurementReceiptDocumentDto {
   pdfUrl?: string;
   sourceIntegrityHash: string;
   requiredSignatures: string[];
+  allowedSignatureRoles: string[];
   signatures: ProcurementReceiptDocumentSignatureDto[];
   actions: ProcurementReceiptDocumentActionDto[];
   allowedActions: string[];
@@ -1074,6 +1075,7 @@ export interface ProcurementReceiptDocumentOverviewDto {
   availableEvidence: string[];
   checks: Array<{ code: string; label: string; passed: boolean; message: string }>;
   documents: ProcurementReceiptDocumentDto[];
+  allowedActions: string[];
   isReconciled: boolean;
 }
 

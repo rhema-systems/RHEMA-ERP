@@ -20,6 +20,7 @@ public sealed class ProcurementReceiptDocumentOverviewDto
     public IReadOnlyList<string> AvailableEvidence { get; init; } = Array.Empty<string>();
     public IReadOnlyList<ProcurementReceiptDocumentCheckDto> Checks { get; init; } = Array.Empty<ProcurementReceiptDocumentCheckDto>();
     public IReadOnlyList<ProcurementReceiptDocumentDto> Documents { get; init; } = Array.Empty<ProcurementReceiptDocumentDto>();
+    public IReadOnlyList<string> AllowedActions { get; init; } = Array.Empty<string>();
     public bool IsReconciled => Checks.All(item => item.Passed) && Documents.All(item =>
         item.ReconciliationStatus is ProcurementReceiptDocumentReconciliationStatus.Reconciled or
             ProcurementReceiptDocumentReconciliationStatus.Cancelled);
@@ -47,6 +48,7 @@ public sealed class ProcurementReceiptDocumentDto
     public string? PdfUrl { get; init; }
     public string SourceIntegrityHash { get; init; } = string.Empty;
     public IReadOnlyList<string> RequiredSignatures { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> AllowedSignatureRoles { get; init; } = Array.Empty<string>();
     public IReadOnlyList<ProcurementReceiptDocumentSignatureDto> Signatures { get; init; } = Array.Empty<ProcurementReceiptDocumentSignatureDto>();
     public IReadOnlyList<ProcurementReceiptDocumentActionDto> Actions { get; init; } = Array.Empty<ProcurementReceiptDocumentActionDto>();
     public IReadOnlyList<string> AllowedActions { get; init; } = Array.Empty<string>();

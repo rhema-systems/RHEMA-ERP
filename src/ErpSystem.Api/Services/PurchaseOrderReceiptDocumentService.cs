@@ -250,7 +250,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         await RecordEventAsync(document.PurchaseOrderReceipt, "Signed", ProcurementControlEventResult.Succeeded,
             $"{role} signature recorded for {document.DocumentNumber}.", correlation,
             new { document.Id, document.DocumentNumber, role }, cancellationToken);
-        return Map(document, config);
+        return await MapForCurrentActorAsync(document, config, cancellationToken);
     }
 
     public async Task<ProcurementReceiptDocumentDto> IssueAsync(
@@ -262,7 +262,9 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         var correlation = Correlation(correlationId);
         var document = await LoadDocumentAsync(documentId, cancellationToken);
         await EnsureCapabilityAsync(IssuePermission, document.PurchaseOrderReceipt, correlation, cancellationToken);
-        if (document.Status == ProcurementReceiptDocumentStatus.Issued) return Map(document, DeserializeDecision(document.DecisionSnapshotJson));
+        if (document.Status == ProcurementReceiptDocumentStatus.Issued)
+            return await MapForCurrentActorAsync(
+                document, DeserializeDecision(document.DecisionSnapshotJson), cancellationToken);
         EnsureRowVersion(document.RowVersion, request.RowVersion);
         if (document.Status == ProcurementReceiptDocumentStatus.Cancelled)
             throw Conflict("RCV_DOCUMENT_CANCELLED", "A cancelled receipt document cannot be issued.");
@@ -409,7 +411,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             $"{KindLabel(document.DocumentKind)} {document.DocumentNumber} issued to the central DMS.", correlation,
             new { document.Id, document.CentralDocumentRecordId, document.CentralDocumentVersionId }, cancellationToken);
         await PublishAsync(document, cancellationToken);
-        return Map(document, config);
+        return await MapForCurrentActorAsync(document, config, cancellationToken);
     }
 
     public async Task<ProcurementReceiptDocumentDto> CancelAsync(
@@ -421,7 +423,9 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         var correlation = Correlation(correlationId);
         var document = await LoadDocumentAsync(documentId, cancellationToken);
         await EnsureCapabilityAsync(IssuePermission, document.PurchaseOrderReceipt, correlation, cancellationToken);
-        if (document.Status == ProcurementReceiptDocumentStatus.Cancelled) return Map(document, DeserializeDecision(document.DecisionSnapshotJson));
+        if (document.Status == ProcurementReceiptDocumentStatus.Cancelled)
+            return await MapForCurrentActorAsync(
+                document, DeserializeDecision(document.DecisionSnapshotJson), cancellationToken);
         EnsureRowVersion(document.RowVersion, request.RowVersion);
         var now = DateTime.UtcNow;
         var before = document.Status.ToString();
@@ -455,7 +459,8 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         await _db.SaveChangesAsync(cancellationToken);
         await RecordEventAsync(document.PurchaseOrderReceipt, "Cancelled", ProcurementControlEventResult.Succeeded,
             request.Reason.Trim(), correlation, new { document.Id, document.DocumentNumber }, cancellationToken);
-        return Map(document, DeserializeDecision(document.DecisionSnapshotJson));
+        return await MapForCurrentActorAsync(
+            document, DeserializeDecision(document.DecisionSnapshotJson), cancellationToken);
     }
 
     public async Task<ProcurementReceiptDocumentOverviewDto> ReconcileAsync(
@@ -576,6 +581,11 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             ? Array.Empty<string>()
             : await EvidenceKeysAsync(inspection.Id, cancellationToken);
         var missingEvidence = ProcurementReceiptDocumentRules.MissingRequirements(config.EvidenceRequirements, evidence);
+        var warehouseId = await ResolveWarehouseIdAsync(receipt, cancellationToken);
+        var manageAllowed = IsAdministrator() || await CanUseCapabilityAsync(
+            ManagePermission, receipt, warehouseId, cancellationToken);
+        var issueAllowed = IsAdministrator() || await CanUseCapabilityAsync(
+            IssuePermission, receipt, warehouseId, cancellationToken);
         var checks = new List<ProcurementReceiptDocumentCheckDto>
         {
             Check("SOURCE_PO", "Source purchase order", receipt.PurchaseOrderId != Guid.Empty && !string.IsNullOrWhiteSpace(receipt.PurchaseOrder.OrderNumber), "A tenant-valid purchase order is linked."),
@@ -601,55 +611,115 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             RequiredEvidence = config.EvidenceRequirements.Select(value => value.Trim()).Where(value => value.Length > 0).ToList(),
             AvailableEvidence = evidence,
             Checks = checks,
-            Documents = documents.OrderBy(item => item.DocumentKind).Select(item => Map(item, config)).ToList()
+            Documents = documents.OrderBy(item => item.DocumentKind)
+                .Select(item => Map(item, config, manageAllowed, issueAllowed)).ToList(),
+            AllowedActions = manageAllowed ? ["ensure", "reconcile"] : Array.Empty<string>()
         };
     }
 
-    private ProcurementReceiptDocumentDto Map(ProcurementReceiptDocument item, ProcurementReceiptDocumentDecisionValueDto config) => new()
+    private ProcurementReceiptDocumentDto Map(
+        ProcurementReceiptDocument item,
+        ProcurementReceiptDocumentDecisionValueDto config,
+        bool manageAllowed,
+        bool issueAllowed)
     {
-        Id = item.Id,
-        DocumentKind = item.DocumentKind,
-        DocumentNumber = item.DocumentNumber,
-        TemplateCode = item.TemplateCode,
-        Status = item.Status,
-        ReconciliationStatus = item.ReconciliationStatus,
-        ReconciliationMessage = item.ReconciliationMessage,
-        ReconciledAtUtc = item.ReconciledAtUtc,
-        PreparedByName = item.PreparedByName,
-        PreparedAtUtc = item.PreparedAtUtc,
-        IssuedByName = item.IssuedByName,
-        IssuedAtUtc = item.IssuedAtUtc,
-        CancelledByName = item.CancelledByName,
-        CancelledAtUtc = item.CancelledAtUtc,
-        CancellationReason = item.CancellationReason,
-        CentralDocumentRecordId = item.CentralDocumentRecordId,
-        CentralDocumentVersionId = item.CentralDocumentVersionId,
-        PdfUrl = item.Status == ProcurementReceiptDocumentStatus.Issued ? $"/api/ProcurementReceiptDocuments/{item.Id}/download" : null,
-        SourceIntegrityHash = item.SourceIntegrityHash,
-        RequiredSignatures = config.SignatureRequirements.Select(value => value.Trim()).Where(value => value.Length > 0).ToList(),
-        Signatures = item.Signatures.OrderBy(value => value.SignedAtUtc).Select(value => new ProcurementReceiptDocumentSignatureDto
+        var requiredSignatures = config.SignatureRequirements.Select(value => value.Trim())
+            .Where(value => value.Length > 0).ToList();
+        var missingSignatures = requiredSignatures.Where(role => !item.Signatures.Any(signature =>
+            string.Equals(signature.RequiredRole, role, StringComparison.OrdinalIgnoreCase))).ToList();
+        var allowedSignatureRoles = manageAllowed
+            ? missingSignatures.Where(role => IsAdministrator() || _currentUser.Roles.Any(actorRole =>
+                string.Equals(actorRole, role, StringComparison.OrdinalIgnoreCase))).ToList()
+            : [];
+        return new ProcurementReceiptDocumentDto
         {
-            Id = value.Id, RequiredRole = value.RequiredRole, SignedByUserId = value.SignedByUserId,
-            SignedByName = value.SignedByName, SignedAtUtc = value.SignedAtUtc, Comment = value.Comment,
-            IntegrityHash = value.IntegrityHash
-        }).ToList(),
-        Actions = item.Actions.OrderByDescending(value => value.OccurredAtUtc).Select(value => new ProcurementReceiptDocumentActionDto
-        {
-            Id = value.Id, Action = value.Action, FromStatus = value.FromStatus, ToStatus = value.ToStatus,
-            ActorName = value.ActorName, OccurredAtUtc = value.OccurredAtUtc, Reason = value.Reason,
-            IntegrityHash = value.IntegrityHash
-        }).ToList(),
-        AllowedActions = AllowedActions(item, config),
-        RowVersion = Convert.ToBase64String(item.RowVersion)
-    };
+            Id = item.Id,
+            DocumentKind = item.DocumentKind,
+            DocumentNumber = item.DocumentNumber,
+            TemplateCode = item.TemplateCode,
+            Status = item.Status,
+            ReconciliationStatus = item.ReconciliationStatus,
+            ReconciliationMessage = item.ReconciliationMessage,
+            ReconciledAtUtc = item.ReconciledAtUtc,
+            PreparedByName = item.PreparedByName,
+            PreparedAtUtc = item.PreparedAtUtc,
+            IssuedByName = item.IssuedByName,
+            IssuedAtUtc = item.IssuedAtUtc,
+            CancelledByName = item.CancelledByName,
+            CancelledAtUtc = item.CancelledAtUtc,
+            CancellationReason = item.CancellationReason,
+            CentralDocumentRecordId = item.CentralDocumentRecordId,
+            CentralDocumentVersionId = item.CentralDocumentVersionId,
+            PdfUrl = item.Status == ProcurementReceiptDocumentStatus.Issued
+                ? $"/api/ProcurementReceiptDocuments/{item.Id}/download"
+                : null,
+            SourceIntegrityHash = item.SourceIntegrityHash,
+            RequiredSignatures = requiredSignatures,
+            AllowedSignatureRoles = allowedSignatureRoles,
+            Signatures = item.Signatures.OrderBy(value => value.SignedAtUtc).Select(value =>
+                new ProcurementReceiptDocumentSignatureDto
+                {
+                    Id = value.Id,
+                    RequiredRole = value.RequiredRole,
+                    SignedByUserId = value.SignedByUserId,
+                    SignedByName = value.SignedByName,
+                    SignedAtUtc = value.SignedAtUtc,
+                    Comment = value.Comment,
+                    IntegrityHash = value.IntegrityHash
+                }).ToList(),
+            Actions = item.Actions.OrderByDescending(value => value.OccurredAtUtc).Select(value =>
+                new ProcurementReceiptDocumentActionDto
+                {
+                    Id = value.Id,
+                    Action = value.Action,
+                    FromStatus = value.FromStatus,
+                    ToStatus = value.ToStatus,
+                    ActorName = value.ActorName,
+                    OccurredAtUtc = value.OccurredAtUtc,
+                    Reason = value.Reason,
+                    IntegrityHash = value.IntegrityHash
+                }).ToList(),
+            AllowedActions = AllowedActions(item, manageAllowed, issueAllowed,
+                allowedSignatureRoles.Count > 0),
+            RowVersion = Convert.ToBase64String(item.RowVersion)
+        };
+    }
 
-    private static IReadOnlyList<string> AllowedActions(ProcurementReceiptDocument document, ProcurementReceiptDocumentDecisionValueDto config)
+    private async Task<ProcurementReceiptDocumentDto> MapForCurrentActorAsync(
+        ProcurementReceiptDocument document,
+        ProcurementReceiptDocumentDecisionValueDto config,
+        CancellationToken cancellationToken)
+    {
+        var warehouseId = await ResolveWarehouseIdAsync(
+            document.PurchaseOrderReceipt, cancellationToken);
+        var manageAllowed = IsAdministrator() || await CanUseCapabilityAsync(
+            ManagePermission, document.PurchaseOrderReceipt, warehouseId, cancellationToken);
+        var issueAllowed = IsAdministrator() || await CanUseCapabilityAsync(
+            IssuePermission, document.PurchaseOrderReceipt, warehouseId, cancellationToken);
+        return Map(document, config, manageAllowed, issueAllowed);
+    }
+
+    private static IReadOnlyList<string> AllowedActions(
+        ProcurementReceiptDocument document,
+        bool manageAllowed,
+        bool issueAllowed,
+        bool canSign)
     {
         if (document.Status == ProcurementReceiptDocumentStatus.Cancelled) return Array.Empty<string>();
-        if (document.Status == ProcurementReceiptDocumentStatus.Issued) return ["download", "cancel", "reconcile"];
-        var result = new List<string> { "reconcile", "cancel" };
-        if (config.SignatureRequirements.Any(role => !document.Signatures.Any(signature => string.Equals(signature.RequiredRole, role, StringComparison.OrdinalIgnoreCase)))) result.Add("sign");
-        result.Add("issue");
+        var result = new List<string>();
+        if (manageAllowed) result.Add("reconcile");
+        if (document.Status == ProcurementReceiptDocumentStatus.Issued)
+        {
+            result.Add("download");
+            if (issueAllowed) result.Add("cancel");
+            return result;
+        }
+        if (issueAllowed)
+        {
+            result.Add("issue");
+            result.Add("cancel");
+        }
+        if (canSign) result.Add("sign");
         return result;
     }
 
@@ -795,6 +865,23 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             WarehouseId = warehouseId
         }, correlation, cancellationToken);
         if (!decision.Allowed) throw new ProcurementReceiptDocumentAuthorizationException(decision.Message);
+    }
+
+    private async Task<bool> CanUseCapabilityAsync(
+        string permission,
+        PurchaseOrderReceipt receipt,
+        Guid? warehouseId,
+        CancellationToken cancellationToken)
+    {
+        if (_currentUser.IsExternalUser) return false;
+        var decision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = permission,
+            SourceType = EventType,
+            SourceReference = receipt.ReceiptNumber,
+            WarehouseId = warehouseId
+        }, Correlation(null), cancellationToken);
+        return decision.Allowed;
     }
 
     private async Task<Guid?> ResolveWarehouseIdAsync(

@@ -444,7 +444,7 @@ public sealed class ProcurementReceiptInspectionService :
             throw Validation("RCV_REJECTION_CONTROL_INCOMPLETE",
                 "Every rejected line requires a reason and quarantine location.");
 
-        var evidence = await ValidateEvidenceAsync(caseId, request.Evidence, cancellationToken);
+        var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
         var before = Snapshot(inspection);
         await ExecuteAsync(async () =>
         {
@@ -582,6 +582,7 @@ public sealed class ProcurementReceiptInspectionService :
             await _sourceControl.RevalidatePurchaseOrderReceiptAsync(
                 inspection.PurchaseOrderReceiptId, "ApproveReceiptInspection", correlation,
                 cancellationToken);
+            await RevalidateEvidenceAsync(inspection, cancellationToken);
             await _store.SetMutationContextAsync(inspection.Id, cancellationToken);
             try
             {
@@ -668,7 +669,7 @@ public sealed class ProcurementReceiptInspectionService :
             ProcurementReceiptSupplierAcknowledgementStatus.Pending)
             throw Conflict("RCV_SUPPLIER_ACK_NOT_AVAILABLE",
                 "Supplier acknowledgement is available only for an active rejected-quantity quality hold.");
-        var evidence = await ValidateEvidenceAsync(caseId, request.Evidence, cancellationToken);
+        var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
         if (request.Acknowledged && evidence.Count == 0)
             throw Validation("RCV_SUPPLIER_ACK_EVIDENCE_REQUIRED",
                 "Acknowledgement requires controlled supplier evidence.");
@@ -732,7 +733,7 @@ public sealed class ProcurementReceiptInspectionService :
                 correlation,
                 cancellationToken);
         }
-        var evidence = await ValidateEvidenceAsync(caseId, request.Evidence, cancellationToken);
+        var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
         if (evidence.Count == 0)
             throw Validation("RCV_RESOLUTION_EVIDENCE_REQUIRED",
                 "Every return/replacement progression requires controlled evidence.");
@@ -814,7 +815,7 @@ public sealed class ProcurementReceiptInspectionService :
             inspection.CreatedByUserId == _currentUser.UserId)
             throw new ProcurementReceiptInspectionAuthorizationException(
                 "Quality-hold closure requires an actor independent from inspection creation and approval.");
-        var evidence = await ValidateEvidenceAsync(caseId, request.Evidence, cancellationToken);
+        var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
         if (evidence.Count == 0)
             throw Validation("RCV_CLOSURE_EVIDENCE_REQUIRED", "Closure evidence is required.");
         foreach (var item in evidence)
@@ -1175,7 +1176,7 @@ public sealed class ProcurementReceiptInspectionService :
     }
 
     private async Task<List<ProcurementReceiptInspectionEvidence>> ValidateEvidenceAsync(
-        Guid caseId,
+        ProcurementReceiptInspectionCase inspection,
         IEnumerable<ProcurementReceiptInspectionEvidenceRequest> requests,
         CancellationToken cancellationToken)
     {
@@ -1198,11 +1199,24 @@ public sealed class ProcurementReceiptInspectionService :
                 if (!request.WorkflowEvidenceDocumentId.HasValue || request.FileUploadRecordId.HasValue)
                     throw Validation("RCV_WORKFLOW_EVIDENCE_INVALID",
                         "Workflow evidence requires exactly one workflow evidence document ID.");
-                var evidence = await _unitOfWork.Repository<WorkflowEvidenceDocument>()
-                    .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
-                                          item.Id == request.WorkflowEvidenceDocumentId.Value && !item.IsDeleted)
+                var evidence = await (
+                    from document in _unitOfWork.Repository<WorkflowEvidenceDocument>()
+                        .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                                              item.Id == request.WorkflowEvidenceDocumentId.Value &&
+                                              !item.IsDeleted)
+                    join step in _unitOfWork.Repository<WorkflowStepInstance>()
+                        .GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+                        on document.StepInstanceId equals step.Id
+                    join workflow in _unitOfWork.Repository<WorkflowInstance>()
+                        .GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+                        on step.WorkflowInstanceId equals workflow.Id
+                    where workflow.EntityId == inspection.Id ||
+                          workflow.EntityId == inspection.PurchaseOrderReceiptId ||
+                          workflow.EntityId == inspection.PurchaseOrderReceipt.PurchaseOrderId
+                    select document)
                     .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
-                    ?? throw NotFound("RCV_EVIDENCE_NOT_FOUND", "Workflow evidence was not found in the current tenant.");
+                    ?? throw NotFound("RCV_EVIDENCE_NOT_FOUND",
+                        "Workflow evidence must belong to this inspection, receipt, or purchase order.");
                 if (!evidence.IsCurrent ||
                     evidence.VerificationStatus != WorkflowEvidenceVerificationStatus.Verified ||
                     evidence.MalwareScanStatus != WorkflowMalwareScanStatus.Clean)
@@ -1218,16 +1232,24 @@ public sealed class ProcurementReceiptInspectionService :
                         "Central-DMS evidence requires exactly one controlled upload ID.");
                 var version = await _unitOfWork.Repository<CentralDocumentVersion>()
                     .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
-                                          item.FileUploadRecordId == request.FileUploadRecordId && !item.IsDeleted)
+                                          item.FileUploadRecordId == request.FileUploadRecordId &&
+                                          !item.IsDeleted &&
+                                          !item.DocumentRecord.IsDeleted &&
+                                          (item.DocumentRecord.SourceRecordId == inspection.Id ||
+                                           item.DocumentRecord.SourceRecordId == inspection.PurchaseOrderReceiptId ||
+                                           item.DocumentRecord.SourceRecordId ==
+                                               inspection.PurchaseOrderReceipt.PurchaseOrderId))
                     .Include(item => item.DocumentRecord)
                     .AsNoTracking().OrderByDescending(item => item.CreatedAt)
                     .FirstOrDefaultAsync(cancellationToken)
                     ?? throw NotFound("RCV_DMS_EVIDENCE_NOT_FOUND",
-                        "The upload is not retained by the central document repository.");
+                        "Central-DMS evidence must belong to this inspection, receipt, or purchase order.");
                 var upload = await _unitOfWork.Repository<FileUploadRecord>()
                     .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                                           item.Id == request.FileUploadRecordId && !item.IsDeleted)
-                    .AsNoTracking().SingleAsync(cancellationToken);
+                    .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+                    ?? throw NotFound("RCV_DMS_UPLOAD_NOT_FOUND",
+                        "The controlled upload was not found in the current tenant.");
                 if (upload.VirusScanStatus != FileVirusScanStatus.Clean)
                     throw Conflict("RCV_DMS_EVIDENCE_UNSAFE",
                         "Central-DMS evidence must have a completed Clean malware scan.");
@@ -1246,7 +1268,7 @@ public sealed class ProcurementReceiptInspectionService :
             {
                 Id = Guid.NewGuid(),
                 TenantId = _currentUser.TenantId,
-                InspectionCaseId = caseId,
+                InspectionCaseId = inspection.Id,
                 ActionKey = request.ActionKey.Trim(),
                 RequirementKey = request.RequirementKey.Trim(),
                 ReferenceKind = request.ReferenceKind,
@@ -1260,6 +1282,89 @@ public sealed class ProcurementReceiptInspectionService :
             });
         }
         return result;
+    }
+
+    private async Task RevalidateEvidenceAsync(
+        ProcurementReceiptInspectionCase inspection,
+        CancellationToken cancellationToken)
+    {
+        foreach (var row in inspection.Evidence.Where(item => !item.IsDeleted))
+        {
+            if (row.ReferenceKind ==
+                ProcurementReceiptInspectionEvidenceKind.WorkflowEvidenceDocument)
+            {
+                var current = await (
+                    from document in _unitOfWork.Repository<WorkflowEvidenceDocument>()
+                        .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                                              item.Id == row.WorkflowEvidenceDocumentId &&
+                                              !item.IsDeleted)
+                    join step in _unitOfWork.Repository<WorkflowStepInstance>()
+                        .GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+                        on document.StepInstanceId equals step.Id
+                    join workflow in _unitOfWork.Repository<WorkflowInstance>()
+                        .GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+                        on step.WorkflowInstanceId equals workflow.Id
+                    where workflow.EntityId == inspection.Id ||
+                          workflow.EntityId == inspection.PurchaseOrderReceiptId ||
+                          workflow.EntityId == inspection.PurchaseOrderReceipt.PurchaseOrderId
+                    select document)
+                    .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+                if (current is null || !current.IsCurrent ||
+                    current.VerificationStatus != WorkflowEvidenceVerificationStatus.Verified ||
+                    current.MalwareScanStatus != WorkflowMalwareScanStatus.Clean ||
+                    !string.Equals(current.Sha256, row.EvidenceHash,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw Conflict("RCV_EVIDENCE_STALE",
+                        "Linked workflow evidence is missing, unrelated, stale, unsafe, or changed.");
+                }
+
+                continue;
+            }
+
+            var dms = await (
+                from version in _unitOfWork.Repository<CentralDocumentVersion>()
+                    .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                                          item.FileUploadRecordId == row.FileUploadRecordId &&
+                                          !item.IsDeleted && !item.DocumentRecord.IsDeleted &&
+                                          (item.DocumentRecord.SourceRecordId == inspection.Id ||
+                                           item.DocumentRecord.SourceRecordId ==
+                                               inspection.PurchaseOrderReceiptId ||
+                                           item.DocumentRecord.SourceRecordId ==
+                                               inspection.PurchaseOrderReceipt.PurchaseOrderId))
+                join upload in _unitOfWork.Repository<FileUploadRecord>()
+                    .GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+                    on version.FileUploadRecordId equals upload.Id
+                orderby version.CreatedAt descending
+                select new
+                {
+                    version.Id,
+                    version.DocumentRecordId,
+                    version.VersionNumber,
+                    UploadId = upload.Id,
+                    upload.FilePath,
+                    upload.FileSize,
+                    upload.VirusScanStatus
+                }).AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+            var currentHash = dms is null
+                ? null
+                : Hash(Serialize(new
+                {
+                    dms.Id,
+                    dms.DocumentRecordId,
+                    dms.VersionNumber,
+                    dms.UploadId,
+                    dms.FilePath,
+                    dms.FileSize
+                }));
+            if (dms is null || dms.VirusScanStatus != FileVirusScanStatus.Clean ||
+                !string.Equals(currentHash, row.EvidenceHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw Conflict("RCV_EVIDENCE_STALE",
+                    "Linked central-DMS evidence is missing, unrelated, unsafe, relinked, or changed.");
+            }
+        }
     }
 
     private async Task<Governance> ResolveGovernanceAsync(
@@ -1577,11 +1682,15 @@ public sealed class ProcurementReceiptInspectionService :
     {
         if (_unitOfWork.HasActiveTransaction)
         {
+            _sourceControl.ResetInventoryPostingAttempt();
             await action();
             return;
         }
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
+            // The execution strategy can invoke this delegate more than once. Quantities
+            // accumulated by a rolled-back attempt must never leak into its retry.
+            _sourceControl.ResetInventoryPostingAttempt();
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             try
             {
