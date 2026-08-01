@@ -108,6 +108,63 @@ public sealed class ProcurementFinanceReconciliationTests
         });
     }
 
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldNotCountAcceptancePostedAfterCutoff()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        var receipt = fixture.PurchaseOrder.Receipts.Single();
+        var receiptLine = receipt.Items.Single();
+        var inspection = new ProcurementReceiptInspectionCase
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            PurchaseOrderReceiptId = receipt.Id,
+            Sequence = 1,
+            Status = ProcurementReceiptInspectionStatus.Closed,
+            ReceivedQuantity = 10m,
+            AcceptedQuantity = 10m,
+            PendingQuantity = 0m,
+            StockEligibleQuantity = 10m,
+            StockPostedQuantity = 10m,
+            StockPostedAtUtc = new DateTime(2026, 8, 2),
+            ApEligibleQuantity = 10m,
+            ConfigurationProfileId = Guid.NewGuid(),
+            PolicySetId = Guid.NewGuid(),
+            AuthorityRuleId = Guid.NewGuid(),
+            AuthorityName = "Receipt approval",
+            WorkflowDefinitionId = Guid.NewGuid(),
+            CreatedByUserId = Guid.NewGuid(),
+            CreatedByName = "Inspector",
+            IdempotencyKey = "inspection-after-cutoff",
+            CorrelationId = "inspection-after-cutoff",
+            SourceSnapshotHash = new string('a', 64),
+            IntegrityHash = new string('b', 64)
+        };
+        inspection.Lines.Add(new ProcurementReceiptInspectionLine
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            InspectionCaseId = inspection.Id,
+            PurchaseOrderReceiptItemId = receiptLine.Id,
+            ReceivedQuantity = 10m,
+            AcceptedQuantity = 10m,
+            PendingQuantity = 0m,
+            Disposition = ProcurementReceiptDisposition.Accepted,
+            IntegrityHash = new string('c', 64)
+        });
+        db.ProcurementReceiptInspectionCases.Add(inspection);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 7, 31), fixture.PurchaseOrder.Id);
+
+        report.Rows.Single().AcceptedReceiptAmount.Should().Be(0m);
+    }
+
     private static ApReportsService CreateService(ApplicationDbContext db, Guid tenantId)
     {
         var currentUser = new Mock<ICurrentUserService>();
@@ -196,6 +253,7 @@ public sealed class ProcurementFinanceReconciliationTests
             PurchaseOrderId = po.Id,
             ReceiptNumber = "GR-0508-001",
             ReceiptDate = new DateTime(2026, 7, 2),
+            InspectionDate = new DateTime(2026, 7, 2),
             Status = "Accepted"
         };
         receipt.Items.Add(new PurchaseOrderReceiptItem

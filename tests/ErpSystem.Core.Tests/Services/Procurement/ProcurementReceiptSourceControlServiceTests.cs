@@ -99,6 +99,37 @@ public sealed class ProcurementReceiptSourceControlServiceTests
     }
 
     [Fact]
+    public async Task DuplicatePurchaseOrderLineFailsWithControlledValidation()
+    {
+        await using var fixture = new Fixture();
+        var duplicateLineId = fixture.PurchaseOrderItem.Id;
+
+        var action = () => fixture.Service.EnforceCreateAsync(
+            fixture.PurchaseOrder,
+            [
+                new ProcurementReceiptSourceLineRequest
+                {
+                    PurchaseOrderItemId = duplicateLineId,
+                    ReceivedQuantity = 2m
+                },
+                new ProcurementReceiptSourceLineRequest
+                {
+                    PurchaseOrderItemId = duplicateLineId,
+                    ReceivedQuantity = 3m
+                }
+            ],
+            "PurchaseOrderReceipt",
+            Guid.NewGuid(),
+            "tdc0501-duplicate-line");
+
+        var exception = await action.Should()
+            .ThrowAsync<ProcurementReceiptSourceValidationException>();
+        exception.Which.Code.Should().Be("RCV_DUPLICATE_LINE");
+        fixture.ControlEvents.Should().BeEmpty();
+        fixture.Notifications.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ForeignTenantPurchaseOrderIsRejectedBeforeCapabilityCheck()
     {
         await using var fixture = new Fixture();

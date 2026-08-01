@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.Services.Finance;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -357,6 +358,38 @@ namespace ErpSystem.Api.Services.Finance.AP
                     $"Purchase order with Id '{purchaseOrderId.Value}' was not found for this tenant.");
 
             var selectedPoIds = selectedPurchaseOrders.Select(item => item.Id).ToList();
+            var selectedReceipts = selectedPurchaseOrders
+                .SelectMany(item => item.Receipts)
+                .ToList();
+            var selectedReceiptIds = selectedReceipts.Select(item => item.Id).ToList();
+            var receiptItemsById = selectedReceipts
+                .SelectMany(item => item.Items)
+                .ToDictionary(item => item.Id);
+            var receiptInspectionCases = selectedReceiptIds.Count == 0
+                ? new List<ProcurementReceiptInspectionCase>()
+                : await _unitOfWork.Repository<ProcurementReceiptInspectionCase>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        selectedReceiptIds.Contains(item.PurchaseOrderReceiptId) &&
+                        !item.IsDeleted)
+                    .Include(item => item.Lines.Where(line => !line.IsDeleted))
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken);
+            var governedReceiptIds = receiptInspectionCases
+                .Select(item => item.PurchaseOrderReceiptId)
+                .ToHashSet();
+            var acceptedInspectionByReceiptAsOf = receiptInspectionCases
+                .Where(item =>
+                    item.StockPostedAtUtc.HasValue &&
+                    item.StockPostedAtUtc.Value.Date <= date &&
+                    ProcurementReceiptInspectionRules.IsApEligible(
+                        item.Status,
+                        item.PendingQuantity,
+                        item.ApEligibleQuantity))
+                .GroupBy(item => item.PurchaseOrderReceiptId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderByDescending(item => item.Sequence).First());
             var sourceRequisitionIds = purchaseOrders
                 .Where(item => item.SourceRequisitionId.HasValue)
                 .Select(item => item.SourceRequisitionId!.Value)
@@ -477,12 +510,34 @@ namespace ErpSystem.Api.Services.Finance.AP
                     : new List<ProjectPaymentCertificate>();
 
                 var itemPrices = purchaseOrder.Items.ToDictionary(item => item.Id, item => item.UnitPrice);
-                var acceptedReceiptAmount = RoundMoney(purchaseOrder.Receipts
-                    .Where(receipt => receipt.Status != "Rejected" && receipt.Status != "Cancelled")
-                    .SelectMany(receipt => receipt.Items)
-                    .Sum(item => itemPrices.TryGetValue(item.PurchaseOrderItemId, out var unitPrice)
-                        ? item.AcceptedQuantity * unitPrice
-                        : 0m));
+                var acceptedReceiptValue = 0m;
+                foreach (var receipt in purchaseOrder.Receipts.Where(receipt =>
+                             receipt.Status != "Rejected" && receipt.Status != "Cancelled"))
+                {
+                    if (acceptedInspectionByReceiptAsOf.TryGetValue(receipt.Id, out var inspection))
+                    {
+                        acceptedReceiptValue += inspection.Lines.Sum(line =>
+                            receiptItemsById.TryGetValue(line.PurchaseOrderReceiptItemId, out var receiptItem) &&
+                            itemPrices.TryGetValue(receiptItem.PurchaseOrderItemId, out var unitPrice)
+                                ? line.AcceptedQuantity * unitPrice
+                                : 0m);
+                        continue;
+                    }
+
+                    // Legacy receipts without a governed inspection case retain their
+                    // explicit inspection timestamp. Never fall back to their current
+                    // accepted quantity when a governed decision exists after the cutoff.
+                    if (!governedReceiptIds.Contains(receipt.Id) &&
+                        receipt.InspectionDate.HasValue &&
+                        receipt.InspectionDate.Value.Date <= date)
+                    {
+                        acceptedReceiptValue += receipt.Items.Sum(item =>
+                            itemPrices.TryGetValue(item.PurchaseOrderItemId, out var unitPrice)
+                                ? item.AcceptedQuantity * unitPrice
+                                : 0m);
+                    }
+                }
+                var acceptedReceiptAmount = RoundMoney(acceptedReceiptValue);
                 var settledAmount = RoundMoney(poAllocations
                     .Where(item =>
                         !item.IsReversal &&

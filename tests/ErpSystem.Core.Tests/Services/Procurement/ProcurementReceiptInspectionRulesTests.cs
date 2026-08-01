@@ -92,6 +92,22 @@ public sealed class ProcurementReceiptInspectionRulesTests
     }
 
     [Theory]
+    [InlineData(ProcurementReceiptInspectionStatus.Closed, 0, 0, true)]
+    [InlineData(ProcurementReceiptInspectionStatus.Closed, 0, 4, true)]
+    [InlineData(ProcurementReceiptInspectionStatus.QualityHold, 0, 0, false)]
+    [InlineData(ProcurementReceiptInspectionStatus.Rejected, 0, 0, false)]
+    [InlineData(ProcurementReceiptInspectionStatus.Closed, 1, 0, false)]
+    public void ApMatchingTreatsOnlyClosedZeroEligibleRejectionsAsResolved(
+        ProcurementReceiptInspectionStatus status,
+        decimal pending,
+        decimal eligible,
+        bool expected)
+    {
+        ProcurementReceiptInspectionRules.IsApMatchingResolved(status, pending, eligible)
+            .Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData(ProcurementReceiptSupplierAcknowledgementStatus.Acknowledged, ProcurementReceiptResolutionStatus.Dispatched, true)]
     [InlineData(ProcurementReceiptSupplierAcknowledgementStatus.Acknowledged, ProcurementReceiptResolutionStatus.ReplacementReceived, true)]
     [InlineData(ProcurementReceiptSupplierAcknowledgementStatus.Pending, ProcurementReceiptResolutionStatus.Dispatched, false)]

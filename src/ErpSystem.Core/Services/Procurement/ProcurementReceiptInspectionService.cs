@@ -483,31 +483,40 @@ public sealed class ProcurementReceiptInspectionService :
                 inspection.PurchaseOrderReceipt.ReceivedById ?? Guid.Empty
             }.Where(item => item != Guid.Empty).Distinct().ToList()
         }, correlation, cancellationToken);
-        if (!await _workflow.CanUserApproveAsync(
-                WorkflowEntityType, inspection.Id, _currentUser.UserId))
-            throw new ProcurementReceiptInspectionAuthorizationException(
-                "The current actor is not eligible for the active shared-workflow step.");
-
-        var workflow = await _workflow.ProcessApprovalAsync(
-            WorkflowEntityType, inspection.Id, _currentUser.UserId,
-            request.Approved ? "Approve" : "Reject", request.Comment);
-        if (!workflow.ExecutionResult.Success)
-            throw Conflict("RCV_INSPECTION_WORKFLOW_DECISION_FAILED",
-                workflow.ExecutionResult.Message ?? "The shared workflow decision failed.");
-        if (request.Approved && workflow.Outcome == WorkflowOutcome.Rejected)
-            throw Conflict("RCV_INSPECTION_WORKFLOW_REJECTED", "The shared workflow rejected the inspection.");
-        if (!request.Approved && workflow.Outcome == WorkflowOutcome.Approved)
-            throw Conflict("RCV_INSPECTION_WORKFLOW_ALREADY_APPROVED",
-                "An approved shared workflow cannot be recorded as rejected.");
-        if (workflow.Outcome == WorkflowOutcome.Pending)
-            return Map(await LoadCaseAsync(caseId, cancellationToken));
-
         ProcurementReceiptInspectionDto? result = null;
+        string? publishTopic = null;
         await ExecuteAsync(async () =>
         {
             inspection = await LoadCaseAsync(caseId, cancellationToken);
+            EnsureRowVersion(inspection.RowVersion, request.RowVersion);
             if (!ProcurementReceiptInspectionRules.CanDecide(inspection.Status))
                 throw Conflict("RCV_INSPECTION_NOT_DECIDABLE", "The inspection decision changed. Reload and retry.");
+            if (!await _workflow.CanUserApproveAsync(
+                    WorkflowEntityType, inspection.Id, _currentUser.UserId))
+                throw new ProcurementReceiptInspectionAuthorizationException(
+                    "The current actor is not eligible for the active shared-workflow step.");
+
+            // Workflow repositories and the inspection/stock repositories share this
+            // scoped unit of work. Consume the approval and apply its final business
+            // outcome inside the same serializable transaction so either both commit
+            // or the workflow remains pending and retryable.
+            var workflow = await _workflow.ProcessApprovalAsync(
+                WorkflowEntityType, inspection.Id, _currentUser.UserId,
+                request.Approved ? "Approve" : "Reject", request.Comment);
+            if (!workflow.ExecutionResult.Success)
+                throw Conflict("RCV_INSPECTION_WORKFLOW_DECISION_FAILED",
+                    workflow.ExecutionResult.Message ?? "The shared workflow decision failed.");
+            if (request.Approved && workflow.Outcome == WorkflowOutcome.Rejected)
+                throw Conflict("RCV_INSPECTION_WORKFLOW_REJECTED", "The shared workflow rejected the inspection.");
+            if (!request.Approved && workflow.Outcome == WorkflowOutcome.Approved)
+                throw Conflict("RCV_INSPECTION_WORKFLOW_ALREADY_APPROVED",
+                    "An approved shared workflow cannot be recorded as rejected.");
+            if (workflow.Outcome == WorkflowOutcome.Pending)
+            {
+                result = Map(inspection);
+                return;
+            }
+
             var before = Snapshot(inspection);
             inspection.DecidedByUserId = _currentUser.UserId;
             inspection.DecidedAtUtc = DateTime.UtcNow;
@@ -525,6 +534,7 @@ public sealed class ProcurementReceiptInspectionService :
                 await RecordEventAsync(inspection, "Rejected", ProcurementControlEventResult.Rejected,
                     before, Snapshot(inspection), request.Comment, correlation, cancellationToken);
                 result = Map(inspection);
+                publishTopic = "procurement.receipt-inspection.rejected";
                 return;
             }
 
@@ -592,11 +602,12 @@ public sealed class ProcurementReceiptInspectionService :
             await RecordEventAsync(inspection, "Approved", ProcurementControlEventResult.Allowed,
                 before, Snapshot(inspection), request.Comment, correlation, cancellationToken);
             result = Map(inspection);
-        }, cancellationToken);
-        await PublishAsync(inspection.QualityHold
+            publishTopic = inspection.QualityHold
                 ? "procurement.receipt-inspection.quality-hold"
-                : "procurement.receipt-inspection.accepted",
-            inspection, cancellationToken);
+                : "procurement.receipt-inspection.accepted";
+        }, cancellationToken);
+        if (publishTopic != null)
+            await PublishAsync(publishTopic, inspection, cancellationToken);
         return result!;
     }
 
@@ -807,10 +818,10 @@ public sealed class ProcurementReceiptInspectionService :
             .Select(group => group.OrderByDescending(item => item.Sequence).First())
             .ToListAsync(cancellationToken);
         if (latest.Count != receipts.Count || latest.Any(item =>
-                !ProcurementReceiptInspectionRules.IsApEligible(
+                !ProcurementReceiptInspectionRules.IsApMatchingResolved(
                     item.Status, item.PendingQuantity, item.ApEligibleQuantity)))
             throw Conflict("RCV_AP_INSPECTION_NOT_ELIGIBLE",
-                "AP matching is blocked until a governed inspection approves accepted quantities.");
+                "AP matching is blocked until each governed inspection either approves accepted quantities or closes a zero-eligible rejected receipt.");
     }
 
     private async Task ApplyAcceptedQuantitiesAndStockAsync(

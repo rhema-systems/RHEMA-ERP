@@ -1427,14 +1427,18 @@ namespace ErpSystem.Api.Services.Finance.AP
             var eligibleInspections = latestInspections.Where(item =>
                 ProcurementReceiptInspectionRules.IsApEligible(
                     item.Status, item.PendingQuantity, item.ApEligibleQuantity)).ToList();
+            var resolvedInspections = latestInspections.Where(item =>
+                ProcurementReceiptInspectionRules.IsApMatchingResolved(
+                    item.Status, item.PendingQuantity, item.ApEligibleQuantity)).ToList();
 
             if (receipts.Count == 0)
                 AddHardStop("AP_MATCH_RECEIPT_MISSING", "Accepted receipt", "No governed purchase-order receipt exists for this invoice.");
-            else if (latestInspections.Count != receipts.Count || eligibleInspections.Count != receipts.Count)
-                AddHardStop("AP_MATCH_INSPECTION_BLOCKED", "Accepted receipt", "Every linked receipt must have a latest independently approved AP-eligible inspection.");
+            else if (latestInspections.Count != receipts.Count || resolvedInspections.Count != receipts.Count)
+                AddHardStop("AP_MATCH_INSPECTION_BLOCKED", "Accepted receipt", "Every linked receipt must have a latest independently approved accepted quantity or a terminal zero-eligible rejection outcome.");
             else
                 result.Checks.Add(Check("AP-MATCH-INSPECTION", "Accepted receipt", true, false,
-                    $"{eligibleInspections.Count} receipt inspection outcome(s) are AP eligible."));
+                    $"{eligibleInspections.Count} receipt inspection outcome(s) are AP eligible; " +
+                    $"{resolvedInspections.Count - eligibleInspections.Count} terminal zero-eligible outcome(s) contribute no invoiceable quantity."));
 
             var acceptedByPoLine = eligibleInspections
                 .SelectMany(item => item.Lines)

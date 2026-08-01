@@ -76,4 +76,12 @@ public static class ProcurementReceiptInspectionRules
             or ProcurementReceiptInspectionStatus.ReplacementPending
             or ProcurementReceiptInspectionStatus.ClosureReady
             or ProcurementReceiptInspectionStatus.Closed;
+
+    public static bool IsApMatchingResolved(
+        ProcurementReceiptInspectionStatus status,
+        decimal pendingQuantity,
+        decimal apEligibleQuantity) =>
+        IsApEligible(status, pendingQuantity, apEligibleQuantity) ||
+        (status == ProcurementReceiptInspectionStatus.Closed &&
+         pendingQuantity == 0 && apEligibleQuantity == 0);
 }

@@ -84,6 +84,42 @@ public sealed class ProcurementReviewRegressionTests
         source.Should().Contain("PO_SOURCE_FORBIDDEN");
     }
 
+    [Fact]
+    public void Final_receipt_inspection_workflow_decision_is_inside_atomic_outcome_scope()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementReceiptInspectionService.cs");
+        var decideStart = source.IndexOf(
+            "public async Task<ProcurementReceiptInspectionDto> DecideAsync",
+            StringComparison.Ordinal);
+        var executeStart = source.IndexOf(
+            "await ExecuteAsync(async () =>",
+            decideStart,
+            StringComparison.Ordinal);
+        var workflowDecision = source.IndexOf(
+            "_workflow.ProcessApprovalAsync",
+            decideStart,
+            StringComparison.Ordinal);
+        var outcomeApplication = source.IndexOf(
+            "ApplyAcceptedQuantitiesAndStockAsync",
+            decideStart,
+            StringComparison.Ordinal);
+        var decideEnd = source.IndexOf(
+            "public async Task<ProcurementReceiptInspectionDto> AcknowledgeAsync",
+            decideStart,
+            StringComparison.Ordinal);
+
+        decideStart.Should().BeGreaterThanOrEqualTo(0);
+        executeStart.Should().BeGreaterThan(decideStart);
+        workflowDecision.Should().BeGreaterThan(executeStart,
+            "the shared-workflow decision must be consumed inside the serializable transaction");
+        outcomeApplication.Should().BeGreaterThan(workflowDecision,
+            "stock and inspection outcome application must follow workflow processing in the same transaction");
+        outcomeApplication.Should().BeLessThan(decideEnd);
+        source[decideStart..executeStart].Should().NotContain("_workflow.ProcessApprovalAsync");
+    }
+
     private static Warehouse NewWarehouse(Guid tenantId, Guid id) => new()
     {
         Id = id,

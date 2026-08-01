@@ -70,6 +70,27 @@ public sealed class ProcurementPaymentReadinessMigrationTests
         Enumerable.Range(1, 14).Should().OnlyContain(number => sql.Contains($"'DEC-{number:000}'"));
     }
 
+    [Fact]
+    public void TerminalZeroEligibleReceiptPatchUpdatesBothDatabaseReadinessGuards()
+    {
+        var migration = new TDC0505TerminalReceiptEligibility();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType()
+            .GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+        var sql = string.Join(
+            Environment.NewLine,
+            builder.Operations.OfType<SqlOperation>().Select(item => item.Sql));
+
+        sql.Should().Contain("TR_VendorPaymentAllocation_TDC0505PaymentReadiness");
+        sql.Should().Contain("TR_PaymentBatchInvoice_TDC0505PaymentReadiness");
+        sql.Should().Contain("latestInspection.Status = 8");
+        sql.Should().Contain("latestInspection.ApEligibleQuantity = 0");
+        sql.Should().Contain("@alterKeywordIndex - @createKeywordIndex");
+        sql.Should().Contain("LEN(N'CREATE')");
+        sql.Should().Contain("THROW 51625");
+    }
+
     private static IReadOnlyList<MigrationOperation> Operations()
     {
         var migration = new TDC0505PaymentReadiness();
