@@ -638,6 +638,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Inventory services
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryManagementService, ErpSystem.Core.Services.Inventory.InventoryManagementService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryItemIdentifierService, ErpSystem.Core.Services.Inventory.InventoryItemIdentifierService>();
 
             // Enhanced Inventory services
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IGoodsReceiptNoteService, ErpSystem.Core.Services.Inventory.GoodsReceiptNoteService>();

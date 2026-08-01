@@ -89,6 +89,7 @@ public static class ProcurementMasterDataResourceRegistry
             "Controlled item identity, classification, valuation configuration, replenishment, physical, tracking, and quality attributes; quantities and transaction-derived costs are excluded.",
             One(ProcurementMasterDataTargetKind.InventoryItem, Fields(
                 "ItemCode", "Name", "Description", "CategoryId", "Brand", "Manufacturer", "Model", "UnitOfMeasure", "UnitOfMeasureScheduleId",
+                "Barcode", "AlternateBarcode", "QRCode",
                 "ValuationMethod", "IsValuationLocked", "DailyRentalRate", "StandardCost", "SalePrice", "MinimumLevel", "MaximumLevel", "ReorderLevel",
                 "ReorderQuantity", "SafetyStock", "LeadTimeDays", "SafetyLeadTimeDays", "ItemType", "ABCClass", "Status", "DefaultTaxGroupId",
                 "ShippingWeight", "Weight", "Length", "Width", "Height", "Volume", "IsSerialTracked", "IsLotTracked", "IsExpirationTracked",

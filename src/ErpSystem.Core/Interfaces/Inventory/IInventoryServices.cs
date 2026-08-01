@@ -23,6 +23,42 @@ public interface IInventoryManagementService
 }
 
 /// <summary>
+/// The authoritative tenant-scoped resolver and uniqueness guard for primary,
+/// alternate, QR, and item-unit identifiers.
+/// </summary>
+public interface IInventoryItemIdentifierService
+{
+    string? Normalize(string? identifier);
+    Task ValidateItemIdentifiersAsync(
+        Guid tenantId,
+        Guid? inventoryItemId,
+        string? barcode,
+        string? alternateBarcode,
+        string? qrCode,
+        CancellationToken cancellationToken = default);
+    Task ValidateUnitIdentifierAsync(
+        Guid tenantId,
+        Guid inventoryItemId,
+        Guid? itemUnitOfMeasureId,
+        string? barcode,
+        CancellationToken cancellationToken = default);
+    Task<InventoryIdentifierMatchDto?> ResolveAsync(
+        Guid tenantId,
+        string identifier,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class InventoryIdentifierConflictException : InvalidOperationException
+{
+    public InventoryIdentifierConflictException(string identifier, string message) : base(message)
+    {
+        Identifier = identifier;
+    }
+
+    public string Identifier { get; }
+}
+
+/// <summary>
 /// Warehouse management service interface
 /// </summary>
 public interface IWarehouseManagementService

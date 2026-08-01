@@ -1,12 +1,15 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 using AutoMapper;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +21,7 @@ namespace ErpSystem.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class InventoryItemsController : ControllerBase
 {
     private static readonly Guid DefaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
@@ -38,6 +41,9 @@ public class InventoryItemsController : ControllerBase
     private readonly IMapper _mapper;
     private readonly ILogger<InventoryItemsController> _logger;
     private readonly IProcurementMasterDataChangeService? _masterDataChanges;
+    private readonly IInventoryItemIdentifierService? _identifierService;
+    private readonly IAuditLogService? _auditLog;
+    private readonly IUnitOfWork? _unitOfWork;
 
     public InventoryItemsController(
         ICurrentUserProvider currentUserProvider,
@@ -54,7 +60,10 @@ public class InventoryItemsController : ControllerBase
         IUnitOfMeasureScheduleRepository uomScheduleRepository,
         IMapper mapper,
         ILogger<InventoryItemsController> logger,
-        IProcurementMasterDataChangeService? masterDataChanges = null)
+        IProcurementMasterDataChangeService? masterDataChanges = null,
+        IInventoryItemIdentifierService? identifierService = null,
+        IAuditLogService? auditLog = null,
+        IUnitOfWork? unitOfWork = null)
     {
         _currentUserProvider = currentUserProvider;
         _inventoryItemRepository = inventoryItemRepository;
@@ -71,6 +80,9 @@ public class InventoryItemsController : ControllerBase
         _mapper = mapper;
         _logger = logger;
         _masterDataChanges = masterDataChanges;
+        _identifierService = identifierService;
+        _auditLog = auditLog;
+        _unitOfWork = unitOfWork;
     }
 
     /// <summary>
@@ -301,13 +313,34 @@ public class InventoryItemsController : ControllerBase
             }
 
             var inventoryItem = _mapper.Map<InventoryItem>(createDto);
-            inventoryItem.TenantId = GetTenantId(); // Assuming you have a method to get tenant ID
+            inventoryItem.TenantId = GetTenantId();
+            NormalizeIdentifiers(inventoryItem);
+            if (_identifierService is not null)
+            {
+                await _identifierService.ValidateItemIdentifiersAsync(
+                    inventoryItem.TenantId,
+                    null,
+                    inventoryItem.Barcode,
+                    inventoryItem.AlternateBarcode,
+                    inventoryItem.QRCode,
+                    HttpContext.RequestAborted);
+            }
 
             var createdItem = await _inventoryItemRepository.AddAsync(inventoryItem);
+            var auditQueued = await QueueAuditAsync("InventoryItemIdentifiers.Created", createdItem, null);
             await _inventoryItemRepository.SaveChangesAsync();
+            if (!auditQueued) await AuditFallbackAsync("InventoryItemIdentifiers.Created", createdItem, null);
 
             var itemDto = _mapper.Map<InventoryItemDto>(createdItem);
             return CreatedAtAction(nameof(GetInventoryItem), new { id = createdItem.Id }, itemDto);
+        }
+        catch (InventoryIdentifierConflictException ex)
+        {
+            return Conflict(new ProblemDetails { Status = 409, Title = "Duplicate inventory identifier", Detail = ex.Message, Extensions = { ["code"] = "INVENTORY_IDENTIFIER_DUPLICATE", ["identifier"] = ex.Identifier } });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
         }
         catch (Exception ex)
         {
@@ -347,16 +380,38 @@ public class InventoryItemsController : ControllerBase
                 }
             }
 
+            var previousIdentifiers = new { existingItem.Barcode, existingItem.AlternateBarcode, existingItem.QRCode };
             _mapper.Map(updateDto, existingItem);
+            NormalizeIdentifiers(existingItem);
+            if (_identifierService is not null)
+            {
+                await _identifierService.ValidateItemIdentifiersAsync(
+                    GetTenantId(),
+                    existingItem.Id,
+                    existingItem.Barcode,
+                    existingItem.AlternateBarcode,
+                    existingItem.QRCode,
+                    HttpContext.RequestAborted);
+            }
 
             // Handle IsActive -> Status conversion
             existingItem.Status = updateDto.IsActive ? ItemStatus.Active : ItemStatus.Inactive;
 
             await _inventoryItemRepository.UpdateAsync(existingItem);
+            var auditQueued = await QueueAuditAsync("InventoryItemIdentifiers.Updated", existingItem, previousIdentifiers);
             await _inventoryItemRepository.SaveChangesAsync();
+            if (!auditQueued) await AuditFallbackAsync("InventoryItemIdentifiers.Updated", existingItem, previousIdentifiers);
 
             var itemDto = _mapper.Map<InventoryItemDto>(existingItem);
             return Ok(itemDto);
+        }
+        catch (InventoryIdentifierConflictException ex)
+        {
+            return Conflict(new ProblemDetails { Status = 409, Title = "Duplicate inventory identifier", Detail = ex.Message, Extensions = { ["code"] = "INVENTORY_IDENTIFIER_DUPLICATE", ["identifier"] = ex.Identifier } });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
         }
         catch (Exception ex)
         {
@@ -1038,9 +1093,7 @@ public class InventoryItemsController : ControllerBase
     }
 
     /// <summary>
-    /// Helper method to get tenant ID from the current user context.
-    /// Falls back to the seeded default tenant for authenticated requests that
-    /// do not carry a tenant claim.
+    /// Helper method to get the explicit tenant ID from the authenticated token.
     /// </summary>
     private async Task<ObjectResult?> GuardDirectMutationAsync(Guid? id, string action)
     {
@@ -1060,17 +1113,58 @@ public class InventoryItemsController : ControllerBase
 
     private Guid GetTenantId()
     {
-        var tenantId = _currentUserProvider.TenantId;
-        if (tenantId == Guid.Empty)
+        var tenantClaim = User.FindFirst("tenant_id")?.Value;
+        if (!Guid.TryParse(tenantClaim, out var tenantId) || tenantId == Guid.Empty)
         {
-            _logger.LogWarning(
-                "TenantId was empty while processing inventory item request. Falling back to default tenant {DefaultTenantId}",
-                DefaultTenantId);
-            tenantId = DefaultTenantId;
+            throw new UnauthorizedAccessException("A tenant-scoped token is required for inventory item access.");
         }
 
         return tenantId;
     }
+
+    private void NormalizeIdentifiers(InventoryItem item)
+    {
+        item.Barcode = _identifierService?.Normalize(item.Barcode) ?? NormalizeIdentifier(item.Barcode);
+        item.AlternateBarcode = _identifierService?.Normalize(item.AlternateBarcode) ?? NormalizeIdentifier(item.AlternateBarcode);
+        item.QRCode = _identifierService?.Normalize(item.QRCode) ?? NormalizeIdentifier(item.QRCode);
+    }
+
+    private static string? NormalizeIdentifier(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized.ToUpperInvariant();
+    }
+
+    private async Task<bool> QueueAuditAsync(string action, InventoryItem item, object? previous)
+    {
+        if (_unitOfWork is null) return false;
+        await _unitOfWork.Repository<AuditLog>().AddAsync(new AuditLog
+        {
+            TenantId = item.TenantId,
+            UserId = _currentUserProvider.UserId,
+            Username = string.IsNullOrWhiteSpace(_currentUserProvider.Username) ? "Unknown" : _currentUserProvider.Username,
+            Action = action,
+            Resource = "InventoryItemIdentifier",
+            ResourceId = item.Id.ToString(),
+            OldValues = previous is null ? null : JsonSerializer.Serialize(previous),
+            NewValues = JsonSerializer.Serialize(new { item.Barcode, item.AlternateBarcode, item.QRCode }),
+            IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+            UserAgent = Request.Headers.UserAgent.ToString(),
+            Timestamp = DateTime.UtcNow
+        });
+        return true;
+    }
+
+    private Task AuditFallbackAsync(string action, InventoryItem item, object? previous) =>
+        _auditLog?.LogUserActionAsync(
+            _currentUserProvider.UserId,
+            _currentUserProvider.Username,
+            action,
+            "InventoryItem",
+            item.Id.ToString(),
+            previous,
+            new { item.Barcode, item.AlternateBarcode, item.QRCode })
+        ?? Task.CompletedTask;
 }
 
 /// <summary>

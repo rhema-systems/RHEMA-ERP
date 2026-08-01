@@ -37,6 +37,25 @@ public class InventoryItem : TenantEntity
     [MaxLength(100)]
     public string? Model { get; set; }
 
+    /// <summary>
+    /// Tenant-unique primary machine-readable item identifier.
+    /// Values are normalized by the shared inventory identifier service before persistence.
+    /// </summary>
+    [MaxLength(100)]
+    public string? Barcode { get; set; }
+
+    /// <summary>
+    /// Optional tenant-unique secondary barcode for the same stocking item.
+    /// </summary>
+    [MaxLength(100)]
+    public string? AlternateBarcode { get; set; }
+
+    /// <summary>
+    /// Optional tenant-unique QR payload used to resolve the item.
+    /// </summary>
+    [MaxLength(100)]
+    public string? QRCode { get; set; }
+
     [MaxLength(20)]
     public string UnitOfMeasure { get; set; } = "EA"; // Each, KG, LB, FT, M, L, GAL, etc.
 
@@ -132,6 +151,7 @@ public class InventoryItem : TenantEntity
     public virtual ICollection<InventoryLocation> InventoryLocations { get; set; } = new List<InventoryLocation>();
     public virtual ICollection<InventoryAllocation> Allocations { get; set; } = new List<InventoryAllocation>();
     public virtual ICollection<StockAdjustment> StockAdjustments { get; set; } = new List<StockAdjustment>();
+    public virtual ICollection<ItemUnitOfMeasure> ItemUnitsOfMeasure { get; set; } = new List<ItemUnitOfMeasure>();
     public virtual TaxGroup? DefaultTaxGroup { get; set; }
 }
 

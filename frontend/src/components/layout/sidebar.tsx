@@ -71,6 +71,7 @@ import {
   Repeat2,
   KeyRound,
   PackageCheck,
+  ScanLine,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -527,6 +528,7 @@ const navigationItems: NavItem[] = [
         icon: Package,
         children: [
           { title: 'Inventory Items', href: '/inventory/items', icon: Package },
+          { title: 'Item Identifiers', href: '/inventory/item-identifiers', icon: ScanLine },
           { title: 'Warehouse Items', href: '/inventory/warehouse-items', icon: Building2 },
           { title: 'Item Suppliers', href: '/inventory/item-suppliers', icon: Users },
           { title: 'Price Lists', href: '/inventory/price-lists', icon: DollarSign },
