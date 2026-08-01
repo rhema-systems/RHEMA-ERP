@@ -472,8 +472,14 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <summary>Lists outstanding (unpaid) invoices for a supplier, for allocation selection.</summary>
         [HttpGet("supplier/{supplierId}/outstanding-invoices")]
         [Authorize(Policy = FinancePermissions.ViewFinance)]
-        public async Task<ActionResult<List<OutstandingVendorInvoiceDto>>> GetOutstandingInvoices(Guid supplierId)
-            => Ok(await _paymentService.GetOutstandingInvoicesAsync(supplierId));
+        public async Task<ActionResult<List<OutstandingVendorInvoiceDto>>> GetOutstandingInvoices(
+            Guid supplierId,
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 50)
+            => Ok(await _paymentService.GetOutstandingInvoicesAsync(
+                supplierId,
+                pageNumber,
+                pageSize));
 
         /// <summary>Returns the current read-only AP-003 payment-readiness decision for one invoice.</summary>
         [HttpGet("invoices/{invoiceId}/readiness")]

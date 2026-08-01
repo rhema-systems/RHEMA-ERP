@@ -145,10 +145,12 @@ public sealed class VendorPaymentBatchCreationTests
             .ReturnsAsync(new WorkflowExecutionResult { Success = true });
 
         var invoiceService = new Mock<IVendorInvoiceService>();
-        invoiceService.Setup(item => item.GetThreeWayMatchReadinessAsync(invoice.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new InvoiceMatchingResultDto
+        invoiceService.Setup(item => item.GetThreeWayMatchReadinessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid invoiceId, CancellationToken _) => new InvoiceMatchingResultDto
             {
-                VendorInvoiceId = invoice.Id,
+                VendorInvoiceId = invoiceId,
                 IsRequired = false,
                 IsMatched = true,
                 ApprovalReady = true,
@@ -228,7 +230,60 @@ public sealed class VendorPaymentBatchCreationTests
         var exception = await allocate.Should().ThrowAsync<VendorPaymentControlException>();
         exception.Which.Code.Should().Be("AP_PAYMENT_BALANCE_RESERVED");
         (await db.Set<VendorPaymentAllocation>().CountAsync()).Should().Be(0);
+
+        var mixedCurrencyInvoices = new[]
+        {
+            NewOpeningBalanceInvoice(
+                tenantId, supplier, userId, "TDC0505-MIX-GHS", "GHS", 60m),
+            NewOpeningBalanceInvoice(
+                tenantId, supplier, userId, "TDC0505-MIX-EUR", "EUR", 40m)
+        };
+        db.VendorInvoices.AddRange(mixedCurrencyInvoices);
+        await db.SaveChangesAsync();
+
+        var createMixedCurrencyBatch = () => service.CreatePaymentBatchAsync(
+            new PaymentBatchCreateDto
+            {
+                Description = "Mixed-currency batch must be rejected",
+                BatchDate = DateTime.UtcNow.Date,
+                InvoiceIds = mixedCurrencyInvoices.Select(item => item.Id).ToList()
+            });
+        var mixedCurrencyException = await createMixedCurrencyBatch
+            .Should().ThrowAsync<VendorPaymentControlException>();
+        mixedCurrencyException.Which.Code.Should().Be(
+            "AP_PAYMENT_BATCH_CURRENCY_MISMATCH");
     }
+
+    private static VendorInvoice NewOpeningBalanceInvoice(
+        Guid tenantId,
+        Supplier supplier,
+        Guid userId,
+        string invoiceNumber,
+        string currencyCode,
+        decimal amount) => new()
+    {
+        Id = Guid.NewGuid(),
+        TenantId = tenantId,
+        InvoiceNumber = invoiceNumber,
+        SupplierInvoiceNumber = $"EXT-{invoiceNumber}",
+        SupplierId = supplier.Id,
+        SupplierName = supplier.Name,
+        InvoiceDate = DateTime.UtcNow.Date,
+        DueDate = DateTime.UtcNow.Date.AddDays(30),
+        SubTotal = amount,
+        TotalAmount = amount,
+        PaidAmount = 0m,
+        CurrencyCode = currencyCode,
+        ExchangeRate = 1m,
+        BaseCurrencyAmount = amount,
+        Status = VendorInvoiceStatus.Approved,
+        ApprovalStatus = "Approved",
+        IsOpeningBalance = true,
+        SubmittedById = userId,
+        SubmittedDate = DateTime.UtcNow,
+        CreatedAt = DateTime.UtcNow,
+        CreatedBy = "Tests"
+    };
 
     private static ApplicationDbContext CreateContext()
     {

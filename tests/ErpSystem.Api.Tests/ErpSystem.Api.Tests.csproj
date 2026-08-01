@@ -81,6 +81,7 @@
     <Compile Include="Controllers\Procurement\ProcurementContractOperationsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PurchaseOrdersSodControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementReceiptDocumentsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\PurchaseOrderReceiptIdempotencyTests.cs" />
     <Compile Include="Controllers\Inventory\GoodsReceiptNotesSodControllerTests.cs" />
     <Compile Include="Controllers\Procurement\SupplierValidationControllerTests.cs" />
     <Compile Include="Controllers\Procurement\SupplierApplicantAccessSecurityTests.cs" />

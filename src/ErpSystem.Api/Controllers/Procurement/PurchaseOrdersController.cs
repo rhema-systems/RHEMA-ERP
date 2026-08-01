@@ -1540,10 +1540,22 @@ public class PurchaseOrdersController : ControllerBase
                     item.PurchaseOrderId == purchaseOrder.Id &&
                     item.IdempotencyKey == idempotencyKey &&
                     !item.IsDeleted)
+                .Include(item => item.Items)
                 .AsNoTracking()
                 .SingleOrDefaultAsync(HttpContext.RequestAborted);
             if (existingReceipt != null)
             {
+                if (!ReceiptReplayMatches(existingReceipt, receiveDto))
+                {
+                    return Conflict(new
+                    {
+                        code = "RCV_IDEMPOTENCY_PAYLOAD_MISMATCH",
+                        message =
+                            "This receipt idempotency key was already used with a different receipt payload.",
+                        correlationId
+                    });
+                }
+
                 return Ok(new PurchaseOrderReceiptDto
                 {
                     Id = existingReceipt.Id,
@@ -2898,6 +2910,65 @@ public class PurchaseOrdersController : ControllerBase
             await _unitOfWork.Repository<InventoryLocation>().UpdateAsync(invLoc);
         }
     }
+
+    private static bool ReceiptReplayMatches(
+        PurchaseOrderReceipt receipt,
+        ReceivePurchaseOrderDto request)
+    {
+        if (!SameReceiptText(receipt.DeliveryNote, request.DeliveryNote) ||
+            !SameReceiptText(receipt.CarrierName, request.CarrierName) ||
+            !SameReceiptText(receipt.TrackingNumber, request.TrackingNumber) ||
+            !SameReceiptText(receipt.Notes, request.Notes) ||
+            receipt.InspectedById != request.InspectedById)
+        {
+            return false;
+        }
+
+        // Only positive lines are effective receipt operations; creation
+        // deliberately ignores non-positive lines after source validation.
+        var requestedLines = request.Items
+            .Where(item => item.ReceivedQuantity > 0m)
+            .ToList();
+        var storedLines = receipt.Items
+            .Where(item => !item.IsDeleted)
+            .ToList();
+        if (requestedLines.Count != storedLines.Count ||
+            requestedLines.GroupBy(item => item.PurchaseOrderItemId)
+                .Any(group => group.Count() != 1))
+        {
+            return false;
+        }
+
+        var storedByPurchaseOrderItem = storedLines
+            .GroupBy(item => item.PurchaseOrderItemId)
+            .ToDictionary(group => group.Key, group => group.ToList());
+        foreach (var requested in requestedLines)
+        {
+            if (!storedByPurchaseOrderItem.TryGetValue(
+                    requested.PurchaseOrderItemId,
+                    out var candidates) ||
+                candidates.Count != 1)
+            {
+                return false;
+            }
+
+            var stored = candidates[0];
+            if (stored.ReceivedQuantity != requested.ReceivedQuantity ||
+                stored.LocationId != requested.LocationId ||
+                stored.ExpirationDate != requested.ExpirationDate ||
+                !SameReceiptText(stored.SerialNumber, requested.SerialNumber) ||
+                !SameReceiptText(stored.LotNumber, requested.LotNumber) ||
+                !SameReceiptText(stored.Notes, requested.Notes))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool SameReceiptText(string? stored, string? requested) =>
+        string.Equals(stored, requested, StringComparison.Ordinal);
 
     /// <summary>
     /// Moves committed budget to utilized when PO is fully received

@@ -71,7 +71,11 @@ public interface IVendorPaymentService
     /// Gets outstanding (not fully paid) invoices for a specific supplier.
     /// Used when creating payments or allocating funds.
     /// </summary>
-    Task<List<OutstandingVendorInvoiceDto>> GetOutstandingInvoicesAsync(Guid supplierId, CancellationToken cancellationToken = default);
+    Task<List<OutstandingVendorInvoiceDto>> GetOutstandingInvoicesAsync(
+        Guid supplierId,
+        int pageNumber = 1,
+        int pageSize = 50,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Returns the current tenant-scoped AP-003 payment readiness without

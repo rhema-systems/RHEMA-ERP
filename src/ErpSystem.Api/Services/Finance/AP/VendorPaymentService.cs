@@ -29,6 +29,9 @@ namespace ErpSystem.Api.Services.Finance.AP
     /// </summary>
     public class VendorPaymentService : IVendorPaymentService
     {
+        private const int DefaultOutstandingInvoicePageSize = 50;
+        private const int MaximumOutstandingInvoicePageSize = 100;
+
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ITenantSettingsService _tenantSettingsService;
@@ -1027,6 +1030,87 @@ namespace ErpSystem.Api.Services.Finance.AP
                 0m));
         }
 
+        private async Task<IReadOnlyDictionary<Guid, decimal>>
+            GetInvoiceUnreservedBalancesAsync(
+                IReadOnlyCollection<VendorInvoice> invoices,
+                Guid? currentPaymentId,
+                CancellationToken cancellationToken)
+        {
+            if (invoices.Count == 0)
+                return new Dictionary<Guid, decimal>();
+
+            var invoiceIds = invoices.Select(item => item.Id).ToArray();
+            var liveAllocationReservations = await _unitOfWork
+                .Repository<VendorPaymentAllocation>()
+                .GetQueryable(allocation =>
+                    allocation.TenantId == TenantId &&
+                    invoiceIds.Contains(allocation.VendorInvoiceId) &&
+                    !allocation.IsDeleted &&
+                    !allocation.VendorPayment.IsDeleted &&
+                    !allocation.VendorPayment.JournalEntryId.HasValue &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Failed)
+                .GroupBy(allocation => allocation.VendorInvoiceId)
+                .Select(group => new
+                {
+                    InvoiceId = group.Key,
+                    Amount = group.Sum(allocation =>
+                        allocation.AllocatedAmount +
+                        allocation.DiscountAmount +
+                        allocation.WithholdingTaxAmount)
+                })
+                .ToDictionaryAsync(
+                    item => item.InvoiceId,
+                    item => item.Amount,
+                    cancellationToken);
+
+            var reservingBatchStatuses = new[]
+            {
+                PaymentBatchStatus.Draft,
+                PaymentBatchStatus.PendingApproval,
+                PaymentBatchStatus.Approved,
+                PaymentBatchStatus.Processing
+            };
+            var batchSelectionReservations = await _unitOfWork
+                .Repository<PaymentBatchInvoice>()
+                .GetQueryable(selection =>
+                    selection.TenantId == TenantId &&
+                    invoiceIds.Contains(selection.VendorInvoiceId) &&
+                    !selection.IsDeleted &&
+                    (!currentPaymentId.HasValue ||
+                     selection.VendorPaymentId != currentPaymentId.Value) &&
+                    !selection.PaymentBatch.IsDeleted &&
+                    reservingBatchStatuses.Contains(selection.PaymentBatch.Status) &&
+                    !selection.VendorPayment.IsDeleted &&
+                    !selection.VendorPayment.JournalEntryId.HasValue &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Failed &&
+                    !selection.VendorPayment.Allocations.Any(allocation =>
+                        allocation.TenantId == TenantId &&
+                        allocation.VendorInvoiceId == selection.VendorInvoiceId &&
+                        !allocation.IsDeleted &&
+                        !allocation.IsReversal))
+                .GroupBy(selection => selection.VendorInvoiceId)
+                .Select(group => new
+                {
+                    InvoiceId = group.Key,
+                    Amount = group.Sum(selection => selection.Amount)
+                })
+                .ToDictionaryAsync(
+                    item => item.InvoiceId,
+                    item => item.Amount,
+                    cancellationToken);
+
+            return invoices.ToDictionary(
+                invoice => invoice.Id,
+                invoice => RoundMoney(Math.Max(
+                    invoice.TotalAmount -
+                    invoice.PaidAmount -
+                    liveAllocationReservations.GetValueOrDefault(invoice.Id) -
+                    batchSelectionReservations.GetValueOrDefault(invoice.Id),
+                    0m)));
+        }
+
         public async Task ReverseAllocationAsync(Guid allocationId, string reason, CancellationToken cancellationToken = default)
         {
             var allocation = await _unitOfWork.Repository<VendorPaymentAllocation>()
@@ -1105,7 +1189,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             }).ToList();
         }
 
-        public async Task<List<OutstandingVendorInvoiceDto>> GetOutstandingInvoicesAsync(Guid supplierId, CancellationToken cancellationToken = default)
+        public async Task<List<OutstandingVendorInvoiceDto>> GetOutstandingInvoicesAsync(
+            Guid supplierId,
+            int pageNumber = 1,
+            int pageSize = DefaultOutstandingInvoicePageSize,
+            CancellationToken cancellationToken = default)
         {
             var now = DateTime.UtcNow;
             var resolvedSupplierId = await ResolveSupplierIdForQueryAsync(supplierId, cancellationToken);
@@ -1114,6 +1202,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 return new List<OutstandingVendorInvoiceDto>();
             }
 
+            var boundedPageNumber = Math.Max(pageNumber, 1);
+            var boundedPageSize = Math.Clamp(
+                pageSize,
+                1,
+                MaximumOutstandingInvoicePageSize);
+            var skip = (int)Math.Min(
+                (long)(boundedPageNumber - 1) * boundedPageSize,
+                int.MaxValue);
             var invoices = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
@@ -1123,15 +1219,20 @@ namespace ErpSystem.Api.Services.Finance.AP
                      i.Status == VendorInvoiceStatus.Overdue) &&
                     (i.TotalAmount - i.PaidAmount) > 0)
                 .OrderBy(i => i.DueDate)
+                .ThenBy(i => i.Id)
+                .Skip(skip)
+                .Take(boundedPageSize)
+                .AsNoTracking()
                 .ToListAsync(cancellationToken);
+            var unreservedBalances = await GetInvoiceUnreservedBalancesAsync(
+                invoices,
+                currentPaymentId: null,
+                cancellationToken);
 
             var result = new List<OutstandingVendorInvoiceDto>();
             foreach (var i in invoices)
             {
-                var unreservedBalance = await GetInvoiceUnreservedBalanceAsync(
-                    i,
-                    currentPaymentId: null,
-                    cancellationToken);
+                var unreservedBalance = unreservedBalances.GetValueOrDefault(i.Id);
                 if (unreservedBalance <= 0m)
                     continue;
 
@@ -1159,7 +1260,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                         ? RoundMoney(unreservedBalance *
                                      i.EarlyPaymentDiscountPercentage / 100m)
                         : 0m,
-                    PaymentReadiness = await EvaluateInvoicePaymentReadinessAsync(i.Id, cancellationToken)
+                    PaymentReadiness = await EvaluateInvoicePaymentReadinessAsync(
+                        i.Id,
+                        cancellationToken,
+                        preloadedInvoice: i)
                 });
             }
 
@@ -1616,13 +1720,35 @@ namespace ErpSystem.Api.Services.Finance.AP
                 CreatedBy = UserName
             };
 
-            // Group invoices by supplier and create one payment per supplier
-            var bySupplier = invoices.GroupBy(i => i.SupplierId);
+            var baseCurrencyCode = NormalizeCurrency(
+                await _tenantSettingsService.GetBaseCurrencyAsync(),
+                "GHS");
+            var selectedCurrencies = invoices
+                .Select(invoice => NormalizeCurrency(
+                    invoice.CurrencyCode,
+                    baseCurrencyCode))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (selectedCurrencies.Count != 1)
+            {
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_BATCH_CURRENCY_MISMATCH",
+                    "A payment batch must contain invoices in exactly one currency. Create a separate batch for each currency.");
+            }
+            // A payment is denominated in exactly one currency. Splitting on
+            // both dimensions prevents unconverted mixed-currency totals and
+            // guarantees that every later allocation matches its payment.
+            var bySupplierAndCurrency = invoices.GroupBy(invoice => new
+            {
+                invoice.SupplierId,
+                CurrencyCode = NormalizeCurrency(
+                    invoice.CurrencyCode,
+                    baseCurrencyCode)
+            });
             decimal totalAmount = 0;
             int paymentCount = 0;
-            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
-            foreach (var group in bySupplier)
+            foreach (var group in bySupplierAndCurrency)
             {
                 var supplier = group.First().Supplier;
                 var supplierTotal = group.Sum(i => availableBalanceByInvoice[i.Id]);
@@ -1633,17 +1759,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                     Id = Guid.NewGuid(),
                     TenantId = TenantId,
                     PaymentNumber = paymentNumber,
-                    SupplierId = group.Key,
+                    SupplierId = group.Key.SupplierId,
                     PaymentDate = dto.BatchDate,
                     TotalAmount = supplierTotal,
                     AllocatedAmount = 0,
                     PaymentMethod = paymentMethod,
                     PaymentMethodId = configuredPaymentMethod?.Id,
-                    CurrencyCode = group
-                        .Select(i => i.CurrencyCode)
-                        .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code))?
-                        .Trim()
-                        .ToUpperInvariant() ?? baseCurrencyCode,
+                    CurrencyCode = group.Key.CurrencyCode,
                     ExchangeRate = 1.0m,
                     BankAccountId = dto.BankAccountId,
                     PaymentBatchId = batch.Id,
@@ -2149,13 +2271,26 @@ namespace ErpSystem.Api.Services.Finance.AP
         private async Task<VendorPaymentInvoiceReadinessDto> EvaluateInvoicePaymentReadinessAsync(
             Guid invoiceId,
             CancellationToken cancellationToken,
-            bool allowSettledInvoice = false)
+            bool allowSettledInvoice = false,
+            VendorInvoice? preloadedInvoice = null)
         {
-            var invoice = await _unitOfWork.Repository<VendorInvoice>()
-                .GetQueryable(item => item.TenantId == TenantId && item.Id == invoiceId && !item.IsDeleted)
-                .AsNoTracking()
-                .SingleOrDefaultAsync(cancellationToken)
-                ?? throw new KeyNotFoundException($"Vendor invoice with Id '{invoiceId}' not found.");
+            var invoice = preloadedInvoice;
+            if (invoice is null)
+            {
+                invoice = await _unitOfWork.Repository<VendorInvoice>()
+                    .GetQueryable(item =>
+                        item.TenantId == TenantId &&
+                        item.Id == invoiceId &&
+                        !item.IsDeleted)
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(cancellationToken);
+            }
+            if (invoice is null || invoice.TenantId != TenantId ||
+                invoice.Id != invoiceId || invoice.IsDeleted)
+            {
+                throw new KeyNotFoundException(
+                    $"Vendor invoice with Id '{invoiceId}' not found.");
+            }
 
             var evaluatedAtUtc = DateTime.UtcNow;
             var stateReady = ProcurementPaymentReadinessRules.IsInvoiceStatePaymentEligible(invoice.Status) ||

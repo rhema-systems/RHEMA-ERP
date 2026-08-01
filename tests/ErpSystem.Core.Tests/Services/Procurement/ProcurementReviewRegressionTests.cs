@@ -565,6 +565,52 @@ public sealed class ProcurementReviewRegressionTests
     }
 
     [Fact]
+    public void Rejected_only_receipts_do_not_claim_stock_was_updated()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementReceiptInspectionService.cs");
+
+        source.Should().Contain(
+            "var stockWasAccepted = grn.TotalQuantityAccepted > 0m;");
+        source.Should().Contain("? GRNStatus.StockUpdated");
+        source.Should().Contain(": GRNStatus.Rejected;");
+        source.Should().Contain("grn.StockUpdated = stockWasAccepted;");
+        source.Should().Contain(
+            "grn.StockUpdatedAt = stockWasAccepted ? DateTime.UtcNow : null;");
+    }
+
+    [Fact]
+    public void Receipt_idempotency_replay_is_bound_to_the_effective_payload()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Controllers", "Procurement",
+            "PurchaseOrdersController.cs");
+
+        source.Should().Contain(".Include(item => item.Items)");
+        source.Should().Contain("ReceiptReplayMatches(existingReceipt, receiveDto)");
+        source.Should().Contain("RCV_IDEMPOTENCY_PAYLOAD_MISMATCH");
+        source.Should().Contain("stored.ReceivedQuantity != requested.ReceivedQuantity");
+        source.Should().Contain("stored.LocationId != requested.LocationId");
+    }
+
+    [Fact]
+    public void Payment_batch_currency_and_invoice_picker_queries_are_bounded()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorPaymentService.cs");
+
+        source.Should().Contain("AP_PAYMENT_BATCH_CURRENCY_MISMATCH");
+        source.Should().Contain("var bySupplierAndCurrency = invoices.GroupBy");
+        source.Should().Contain("MaximumOutstandingInvoicePageSize");
+        source.Should().Contain(".Take(boundedPageSize)");
+        source.Should().Contain("GetInvoiceUnreservedBalancesAsync");
+        source.Should().Contain(".GroupBy(allocation => allocation.VendorInvoiceId)");
+        source.Should().Contain("preloadedInvoice: i");
+    }
+
+    [Fact]
     public void Payment_certificate_history_is_persisted_for_cutoff_reconciliation()
     {
         var projectService = ReadRepositoryFile(

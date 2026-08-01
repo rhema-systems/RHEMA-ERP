@@ -1028,11 +1028,14 @@ public sealed class ProcurementReceiptInspectionService :
             : grn.TotalQuantityAccepted == 0
                 ? InspectionResult.Failed
                 : InspectionResult.ConditionalPass;
-        grn.Status = GRNStatus.StockUpdated;
+        var stockWasAccepted = grn.TotalQuantityAccepted > 0m;
+        grn.Status = stockWasAccepted
+            ? GRNStatus.StockUpdated
+            : GRNStatus.Rejected;
         grn.InspectionDate = DateTime.UtcNow;
         grn.InspectedById = _currentUser.UserId;
-        grn.StockUpdated = true;
-        grn.StockUpdatedAt = DateTime.UtcNow;
+        grn.StockUpdated = stockWasAccepted;
+        grn.StockUpdatedAt = stockWasAccepted ? DateTime.UtcNow : null;
         grn.UpdatedAt = DateTime.UtcNow;
         grn.UpdatedBy = ActorName;
         grn.LastModifiedById = _currentUser.UserId;
