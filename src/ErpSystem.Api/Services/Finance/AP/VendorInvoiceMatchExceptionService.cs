@@ -11,6 +11,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.DocumentManagement;
 using ErpSystem.Core.Services.Finance;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
@@ -598,9 +599,9 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
                         "Central-DMS evidence requires exactly one controlled upload ID.");
                 var version = await _db.CentralDocumentVersions
                     .Include(item => item.DocumentRecord)
+                    .Where(CentralDocumentEvidenceRules.CurrentPublished())
                     .AsNoTracking().SingleOrDefaultAsync(item =>
                         item.TenantId == TenantId && item.FileUploadRecordId == request.FileUploadRecordId &&
-                        !item.IsDeleted && !item.DocumentRecord.IsDeleted &&
                         (item.DocumentRecord.SourceRecordId == invoice.Id ||
                          item.DocumentRecord.SourceRecordId == invoice.PurchaseOrderId), cancellationToken)
                     ?? throw NotFound("AP_MATCH_EXCEPTION_DMS_DOCUMENT_NOT_FOUND",

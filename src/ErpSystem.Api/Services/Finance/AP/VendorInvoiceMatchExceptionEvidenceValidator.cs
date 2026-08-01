@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Services.DocumentManagement;
 using ErpSystem.Core.Services.Finance;
 using Microsoft.EntityFrameworkCore;
 
@@ -61,9 +62,9 @@ internal static class VendorInvoiceMatchExceptionEvidenceValidator
 
             var dms = await (
                 from version in unitOfWork.Repository<CentralDocumentVersion>()
-                    .GetQueryable(item => item.TenantId == tenantId && !item.IsDeleted &&
-                                          item.DocumentRecord.TenantId == tenantId &&
-                                          !item.DocumentRecord.IsDeleted)
+                    .GetQueryable(item => item.TenantId == tenantId &&
+                                          item.DocumentRecord.TenantId == tenantId)
+                    .Where(CentralDocumentEvidenceRules.CurrentPublished())
                     .AsNoTracking()
                 join upload in unitOfWork.Repository<FileUploadRecord>()
                     .GetQueryable(item => item.TenantId == tenantId && !item.IsDeleted)

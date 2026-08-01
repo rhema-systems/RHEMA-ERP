@@ -663,6 +663,9 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             ManagePermission, receipt, warehouseId, cancellationToken);
         var issueAllowed = IsAdministrator() || await CanUseCapabilityAsync(
             IssuePermission, receipt, warehouseId, cancellationToken);
+        var grnIssued = documents.Any(item =>
+            item.DocumentKind == ProcurementReceiptDocumentKind.Grn &&
+            item.Status == ProcurementReceiptDocumentStatus.Issued);
         var checks = new List<ProcurementReceiptDocumentCheckDto>
         {
             Check("SOURCE_PO", "Source purchase order", receipt.PurchaseOrderId != Guid.Empty && !string.IsNullOrWhiteSpace(receipt.PurchaseOrder.OrderNumber), "A tenant-valid purchase order is linked."),
@@ -689,7 +692,9 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             AvailableEvidence = evidence,
             Checks = checks,
             Documents = documents.OrderBy(item => item.DocumentKind)
-                .Select(item => Map(item, config, manageAllowed, issueAllowed)).ToList(),
+                .Select(item => Map(item, config, manageAllowed, issueAllowed,
+                    !ProcurementReceiptDocumentRules.RequiresPriorGrnIssue(
+                        item.DocumentKind, config.CoexistenceRule) || grnIssued)).ToList(),
             AllowedActions = manageAllowed ? ["ensure", "reconcile"] : Array.Empty<string>()
         };
     }
@@ -698,7 +703,8 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         ProcurementReceiptDocument item,
         ProcurementReceiptDocumentDecisionValueDto config,
         bool manageAllowed,
-        bool issueAllowed)
+        bool issueAllowed,
+        bool issueSequenceSatisfied)
     {
         var requiredSignatures = config.SignatureRequirements.Select(value => value.Trim())
             .Where(value => value.Length > 0).ToList();
@@ -757,7 +763,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
                     IntegrityHash = value.IntegrityHash
                 }).ToList(),
             AllowedActions = AllowedActions(item, manageAllowed, issueAllowed,
-                allowedSignatureRoles.Count > 0),
+                allowedSignatureRoles.Count > 0, issueSequenceSatisfied),
             RowVersion = Convert.ToBase64String(item.RowVersion)
         };
     }
@@ -773,14 +779,24 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             ManagePermission, document.PurchaseOrderReceipt, warehouseId, cancellationToken);
         var issueAllowed = IsAdministrator() || await CanUseCapabilityAsync(
             IssuePermission, document.PurchaseOrderReceipt, warehouseId, cancellationToken);
-        return Map(document, config, manageAllowed, issueAllowed);
+        var issueSequenceSatisfied =
+            !ProcurementReceiptDocumentRules.RequiresPriorGrnIssue(
+                document.DocumentKind, config.CoexistenceRule) ||
+            await _db.ProcurementReceiptDocuments.AsNoTracking().AnyAsync(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseOrderReceiptId == document.PurchaseOrderReceiptId &&
+                item.DocumentKind == ProcurementReceiptDocumentKind.Grn &&
+                item.Status == ProcurementReceiptDocumentStatus.Issued &&
+                !item.IsDeleted, cancellationToken);
+        return Map(document, config, manageAllowed, issueAllowed, issueSequenceSatisfied);
     }
 
     private static IReadOnlyList<string> AllowedActions(
         ProcurementReceiptDocument document,
         bool manageAllowed,
         bool issueAllowed,
-        bool canSign)
+        bool canSign,
+        bool issueSequenceSatisfied)
     {
         if (document.Status == ProcurementReceiptDocumentStatus.Cancelled) return Array.Empty<string>();
         var result = new List<string>();
@@ -791,7 +807,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             if (issueAllowed) result.Add("cancel");
             return result;
         }
-        if (issueAllowed)
+        if (issueAllowed && issueSequenceSatisfied)
         {
             result.Add("issue");
         }

@@ -13,6 +13,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.DocumentManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -331,9 +332,9 @@ public sealed class ProcurementReceiptInspectionService :
             receipt.UpdatedAt = now;
             await _unitOfWork.Repository<PurchaseOrderReceipt>().UpdateAsync(receipt);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await RecordEventAsync(created, "Created", ProcurementControlEventResult.ReviewRequired,
+                null, Snapshot(created), "Receipt inspection initialized", correlation, cancellationToken);
         }, cancellationToken);
-        await RecordEventAsync(created!, "Created", ProcurementControlEventResult.ReviewRequired,
-            null, Snapshot(created!), "Receipt inspection initialized", correlation, cancellationToken);
         return Map(created!);
     }
 
@@ -351,73 +352,81 @@ public sealed class ProcurementReceiptInspectionService :
             ProcurementPurchaseOrderSodRules.SaveReceiptInspection,
             correlation,
             cancellationToken);
-        var inspection = await CaseQuery(true).FirstOrDefaultAsync(item =>
+        var inspectionExists = await CaseQuery(false).AnyAsync(item =>
             item.PurchaseOrderReceiptId == receiptId &&
             item.Status != ProcurementReceiptInspectionStatus.Cancelled &&
             item.Status != ProcurementReceiptInspectionStatus.Rejected, cancellationToken);
-        if (inspection is null)
-        {
+        if (!inspectionExists)
             await InitializeAsync(receiptId, correlation, cancellationToken);
-            inspection = await CaseQuery(true).FirstAsync(item =>
-                item.PurchaseOrderReceiptId == receiptId &&
-                item.Status == ProcurementReceiptInspectionStatus.Draft, cancellationToken);
-        }
-        if (!ProcurementReceiptInspectionRules.CanEdit(inspection.Status))
-            throw Conflict("RCV_INSPECTION_NOT_EDITABLE", "Only a Draft inspection can be edited.");
-        if (!string.IsNullOrWhiteSpace(request.RowVersion))
-            EnsureRowVersion(inspection.RowVersion, request.RowVersion);
-        if (request.Lines.Count != inspection.Lines.Count ||
-            request.Lines.Select(item => item.PurchaseOrderReceiptItemId).Distinct().Count() != request.Lines.Count)
-            throw Validation("RCV_INSPECTION_LINES_INCOMPLETE",
-                "Every governed receipt line must occur exactly once in the inspection decision.");
 
-        var before = Snapshot(inspection);
-        foreach (var line in inspection.Lines)
+        ProcurementReceiptInspectionCase? saved = null;
+        await ExecuteAsync(async () =>
         {
-            var candidate = request.Lines.SingleOrDefault(item =>
-                item.PurchaseOrderReceiptItemId == line.PurchaseOrderReceiptItemId)
-                ?? throw Validation("RCV_INSPECTION_LINE_MISSING",
-                    "Every governed receipt line requires a disposition.");
-            var result = ProcurementReceiptInspectionRules.Evaluate(
-                line.ReceivedQuantity, candidate.AcceptedQuantity, candidate.RejectedQuantity);
-            if (result.Rejected > 0 && string.IsNullOrWhiteSpace(candidate.RejectionReason))
-                throw Validation("RCV_REJECTION_REASON_REQUIRED",
-                    "A documented rejection reason is required for every rejected quantity.");
-            if (result.Rejected > 0 && (!candidate.QuarantineLocationId.HasValue ||
-                                        candidate.QuarantineLocationId == Guid.Empty))
-                throw Validation("RCV_QUARANTINE_LOCATION_REQUIRED",
-                    "Rejected quantities require a controlled quarantine location.");
-            if (candidate.QuarantineLocationId.HasValue)
-                await EnsureQuarantineLocationAsync(candidate.QuarantineLocationId.Value,
-                    receipt, cancellationToken);
-            line.AcceptedQuantity = result.Accepted;
-            line.RejectedQuantity = result.Rejected;
-            line.PendingQuantity = result.Pending;
-            line.Disposition = result.Disposition;
-            line.RejectionReason = Trim(candidate.RejectionReason, 1000);
-            line.InspectionNotes = Trim(candidate.InspectionNotes, 1000);
-            line.QuarantineLocationId = candidate.QuarantineLocationId;
-            line.UpdatedAt = DateTime.UtcNow;
-            line.UpdatedBy = ActorName;
-            line.LastModifiedById = _currentUser.UserId;
-            line.IntegrityHash = LineHash(line);
-            await Lines.UpdateAsync(line);
-        }
-        Recalculate(inspection);
-        inspection.DecisionComment = request.Comment.Trim();
-        inspection.CorrelationId = correlation;
-        inspection.UpdatedAt = DateTime.UtcNow;
-        inspection.UpdatedBy = ActorName;
-        inspection.LastModifiedById = _currentUser.UserId;
-        inspection.IntegrityHash = CaseHash(inspection);
-        await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Saved,
-            request.Comment, "Inspection quantities saved", correlation,
-            request.IdempotencyKey.Trim(), null, cancellationToken);
-        await Cases.UpdateAsync(inspection);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        await RecordEventAsync(inspection, "Saved", ProcurementControlEventResult.ReviewRequired,
-            before, Snapshot(inspection), request.Comment, correlation, cancellationToken);
-        return Map(inspection);
+            var currentReceipt = await LoadReceiptAsync(receiptId, true, cancellationToken);
+            var inspection = await CaseQuery(true).FirstOrDefaultAsync(item =>
+                item.PurchaseOrderReceiptId == receiptId &&
+                item.Status != ProcurementReceiptInspectionStatus.Cancelled &&
+                item.Status != ProcurementReceiptInspectionStatus.Rejected, cancellationToken)
+                ?? throw Conflict("RCV_INSPECTION_NOT_FOUND",
+                    "The governed receipt inspection could not be loaded for editing.");
+            if (!ProcurementReceiptInspectionRules.CanEdit(inspection.Status))
+                throw Conflict("RCV_INSPECTION_NOT_EDITABLE", "Only a Draft inspection can be edited.");
+            if (!string.IsNullOrWhiteSpace(request.RowVersion))
+                EnsureRowVersion(inspection.RowVersion, request.RowVersion);
+            if (request.Lines.Count != inspection.Lines.Count ||
+                request.Lines.Select(item => item.PurchaseOrderReceiptItemId).Distinct().Count() != request.Lines.Count)
+                throw Validation("RCV_INSPECTION_LINES_INCOMPLETE",
+                    "Every governed receipt line must occur exactly once in the inspection decision.");
+
+            var before = Snapshot(inspection);
+            foreach (var line in inspection.Lines)
+            {
+                var candidate = request.Lines.SingleOrDefault(item =>
+                    item.PurchaseOrderReceiptItemId == line.PurchaseOrderReceiptItemId)
+                    ?? throw Validation("RCV_INSPECTION_LINE_MISSING",
+                        "Every governed receipt line requires a disposition.");
+                var result = ProcurementReceiptInspectionRules.Evaluate(
+                    line.ReceivedQuantity, candidate.AcceptedQuantity, candidate.RejectedQuantity);
+                if (result.Rejected > 0 && string.IsNullOrWhiteSpace(candidate.RejectionReason))
+                    throw Validation("RCV_REJECTION_REASON_REQUIRED",
+                        "A documented rejection reason is required for every rejected quantity.");
+                if (result.Rejected > 0 && (!candidate.QuarantineLocationId.HasValue ||
+                                            candidate.QuarantineLocationId == Guid.Empty))
+                    throw Validation("RCV_QUARANTINE_LOCATION_REQUIRED",
+                        "Rejected quantities require a controlled quarantine location.");
+                if (candidate.QuarantineLocationId.HasValue)
+                    await EnsureQuarantineLocationAsync(candidate.QuarantineLocationId.Value,
+                        currentReceipt, cancellationToken);
+                line.AcceptedQuantity = result.Accepted;
+                line.RejectedQuantity = result.Rejected;
+                line.PendingQuantity = result.Pending;
+                line.Disposition = result.Disposition;
+                line.RejectionReason = Trim(candidate.RejectionReason, 1000);
+                line.InspectionNotes = Trim(candidate.InspectionNotes, 1000);
+                line.QuarantineLocationId = candidate.QuarantineLocationId;
+                line.UpdatedAt = DateTime.UtcNow;
+                line.UpdatedBy = ActorName;
+                line.LastModifiedById = _currentUser.UserId;
+                line.IntegrityHash = LineHash(line);
+                await Lines.UpdateAsync(line);
+            }
+            Recalculate(inspection);
+            inspection.DecisionComment = request.Comment.Trim();
+            inspection.CorrelationId = correlation;
+            inspection.UpdatedAt = DateTime.UtcNow;
+            inspection.UpdatedBy = ActorName;
+            inspection.LastModifiedById = _currentUser.UserId;
+            inspection.IntegrityHash = CaseHash(inspection);
+            await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Saved,
+                request.Comment, "Inspection quantities saved", correlation,
+                request.IdempotencyKey.Trim(), null, cancellationToken);
+            await Cases.UpdateAsync(inspection);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await RecordEventAsync(inspection, "Saved", ProcurementControlEventResult.ReviewRequired,
+                before, Snapshot(inspection), request.Comment, correlation, cancellationToken);
+            saved = inspection;
+        }, cancellationToken);
+        return Map(saved!);
     }
 
     public async Task<ProcurementReceiptInspectionDto> SubmitAsync(
@@ -435,20 +444,6 @@ public sealed class ProcurementReceiptInspectionService :
             ProcurementPurchaseOrderSodRules.SubmitReceiptInspection,
             correlation,
             cancellationToken);
-        EnsureRowVersion(inspection.RowVersion, request.RowVersion);
-        if (!ProcurementReceiptInspectionRules.CanSubmit(inspection.Status))
-            throw Conflict("RCV_INSPECTION_NOT_SUBMITTABLE", "Only a Draft inspection can be submitted.");
-        if (inspection.PendingQuantity != 0)
-            throw Validation("RCV_INSPECTION_PENDING_QUANTITY",
-                "Every received quantity must be accepted or rejected before submission.");
-        if (inspection.RejectedQuantity > 0 && inspection.Lines.Any(item =>
-                item.RejectedQuantity > 0 && (string.IsNullOrWhiteSpace(item.RejectionReason) ||
-                                               !item.QuarantineLocationId.HasValue)))
-            throw Validation("RCV_REJECTION_CONTROL_INCOMPLETE",
-                "Every rejected line requires a reason and quarantine location.");
-
-        var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
-        var before = Snapshot(inspection);
         await ExecuteAsync(async () =>
         {
             inspection = await LoadCaseAsync(caseId, cancellationToken);
@@ -456,7 +451,17 @@ public sealed class ProcurementReceiptInspectionService :
             if (!ProcurementReceiptInspectionRules.CanSubmit(inspection.Status))
                 throw Conflict("RCV_INSPECTION_NOT_SUBMITTABLE",
                     "The inspection changed before workflow startup. Reload and retry.");
+            if (inspection.PendingQuantity != 0)
+                throw Validation("RCV_INSPECTION_PENDING_QUANTITY",
+                    "Every received quantity must be accepted or rejected before submission.");
+            if (inspection.RejectedQuantity > 0 && inspection.Lines.Any(item =>
+                    item.RejectedQuantity > 0 && (string.IsNullOrWhiteSpace(item.RejectionReason) ||
+                                                   !item.QuarantineLocationId.HasValue)))
+                throw Validation("RCV_REJECTION_CONTROL_INCOMPLETE",
+                    "Every rejected line requires a reason and quarantine location.");
 
+            var before = Snapshot(inspection);
+            var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
             foreach (var item in evidence)
             {
                 item.InspectionCaseId = inspection.Id;
@@ -485,9 +490,9 @@ public sealed class ProcurementReceiptInspectionService :
             inspection.IntegrityHash = CaseHash(inspection);
             await Cases.UpdateAsync(inspection);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await RecordEventAsync(inspection, "Submitted", ProcurementControlEventResult.ReviewRequired,
+                before, Snapshot(inspection), request.Comment, correlation, cancellationToken);
         }, cancellationToken);
-        await RecordEventAsync(inspection, "Submitted", ProcurementControlEventResult.ReviewRequired,
-            before, Snapshot(inspection), request.Comment, correlation, cancellationToken);
         await PublishAsync("procurement.receipt-inspection.submitted", inspection, cancellationToken);
         return Map(inspection);
     }
@@ -920,6 +925,8 @@ public sealed class ProcurementReceiptInspectionService :
         ProcurementReceiptInspectionCase inspection,
         CancellationToken cancellationToken)
     {
+        var stockPostings = new List<(PurchaseOrderReceiptItem ReceiptLine,
+            PurchaseOrderItem PurchaseOrderLine, decimal Quantity)>();
         foreach (var line in inspection.Lines)
         {
             var receiptLine = line.PurchaseOrderReceiptItem;
@@ -941,12 +948,23 @@ public sealed class ProcurementReceiptInspectionService :
             poLine.ReceivedQuantity += line.AcceptedQuantity;
             poLine.UpdatedAt = DateTime.UtcNow;
             await _unitOfWork.Repository<PurchaseOrderItem>().UpdateAsync(poLine);
-            await PostStockAsync(inspection.PurchaseOrderReceipt, receiptLine, poLine,
-                line.AcceptedQuantity, cancellationToken);
+            stockPostings.Add((receiptLine, poLine, line.AcceptedQuantity));
         }
-        // Persist the governed receipt acceptance and stock movement first so
-        // the linked GRN projection trigger can validate against durable values
-        // inside this same serializable transaction.
+
+        // Inventory-source authorization reloads the receipt with AsNoTracking.
+        // Persist the governed accepted quantities first, while retaining the
+        // surrounding serializable transaction, so it authorizes the same state.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var pendingInventoryLocations = new Dictionary<(Guid InventoryItemId, Guid LocationId),
+            InventoryLocation>();
+        var pendingWarehouseQuantities = new Dictionary<(Guid InventoryItemId, Guid WarehouseId),
+            WarehouseQuantity>();
+        foreach (var posting in stockPostings)
+            await PostStockAsync(inspection.PurchaseOrderReceipt, posting.ReceiptLine,
+                posting.PurchaseOrderLine, posting.Quantity, pendingInventoryLocations,
+                pendingWarehouseQuantities, cancellationToken);
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await SynchronizeLinkedGoodsReceiptNoteAsync(inspection, cancellationToken);
     }
@@ -1026,6 +1044,10 @@ public sealed class ProcurementReceiptInspectionService :
         PurchaseOrderReceiptItem receiptLine,
         PurchaseOrderItem poLine,
         decimal quantity,
+        IDictionary<(Guid InventoryItemId, Guid LocationId), InventoryLocation>
+            pendingInventoryLocations,
+        IDictionary<(Guid InventoryItemId, Guid WarehouseId), WarehouseQuantity>
+            pendingWarehouseQuantities,
         CancellationToken cancellationToken)
     {
         if (!poLine.InventoryItemId.HasValue || poLine.InventoryItemId == Guid.Empty) return;
@@ -1072,66 +1094,78 @@ public sealed class ProcurementReceiptInspectionService :
             ? inventoryItem.StandardCost
             : baseCost;
 
-        var inventoryLocation = await _unitOfWork.Repository<InventoryLocation>()
-            .FirstOrDefaultAsync(item => item.TenantId == _currentUser.TenantId &&
-                                         item.InventoryItemId == poLine.InventoryItemId.Value &&
-                                         item.LocationId == receiptLine.LocationId.Value);
-        if (inventoryLocation is null)
+        var inventoryLocationKey = (poLine.InventoryItemId.Value, receiptLine.LocationId.Value);
+        var inventoryLocationWasCached = pendingInventoryLocations.TryGetValue(
+            inventoryLocationKey, out var inventoryLocation);
+        var inventoryLocationWasPersisted = false;
+        if (!inventoryLocationWasCached)
         {
-            inventoryLocation = new InventoryLocation
+            inventoryLocation = await _unitOfWork.Repository<InventoryLocation>()
+                .FirstOrDefaultAsync(item => item.TenantId == _currentUser.TenantId &&
+                                             item.InventoryItemId == poLine.InventoryItemId.Value &&
+                                             item.LocationId == receiptLine.LocationId.Value);
+            inventoryLocationWasPersisted = inventoryLocation is not null;
+            if (inventoryLocation is null)
             {
-                TenantId = _currentUser.TenantId,
-                InventoryItemId = poLine.InventoryItemId.Value,
-                LocationId = receiptLine.LocationId.Value,
-                Quantity = baseQuantity,
-                AvailableQuantity = baseQuantity,
-                AverageCost = postedAverageCost,
-                LastMovementDate = DateTime.UtcNow,
-                CreatedById = _currentUser.UserId
-            };
-            await _unitOfWork.Repository<InventoryLocation>().AddAsync(inventoryLocation);
+                inventoryLocation = new InventoryLocation
+                {
+                    TenantId = _currentUser.TenantId,
+                    InventoryItemId = poLine.InventoryItemId.Value,
+                    LocationId = receiptLine.LocationId.Value,
+                    AverageCost = postedAverageCost,
+                    CreatedById = _currentUser.UserId
+                };
+                await _unitOfWork.Repository<InventoryLocation>().AddAsync(inventoryLocation);
+            }
+            pendingInventoryLocations[inventoryLocationKey] = inventoryLocation;
         }
-        else
-        {
-            inventoryLocation.Quantity += baseQuantity;
-            inventoryLocation.AvailableQuantity += baseQuantity;
-            inventoryLocation.AverageCost = postedAverageCost;
-            inventoryLocation.LastMovementDate = DateTime.UtcNow;
+
+        inventoryLocation!.Quantity += baseQuantity;
+        inventoryLocation.AvailableQuantity += baseQuantity;
+        inventoryLocation.AverageCost = postedAverageCost;
+        inventoryLocation.LastMovementDate = DateTime.UtcNow;
+        if (!inventoryLocationWasCached && inventoryLocationWasPersisted)
             await _unitOfWork.Repository<InventoryLocation>().UpdateAsync(inventoryLocation);
-        }
-        var warehouseQuantity = await _unitOfWork.Repository<WarehouseQuantity>()
-            .FirstOrDefaultAsync(item => item.TenantId == _currentUser.TenantId &&
-                                         item.InventoryItemId == poLine.InventoryItemId.Value &&
-                                         item.WarehouseId == location.InventoryWarehouseId);
-        if (warehouseQuantity is null)
+
+        var warehouseQuantityKey = (poLine.InventoryItemId.Value, location.InventoryWarehouseId);
+        var warehouseQuantityWasCached = pendingWarehouseQuantities.TryGetValue(
+            warehouseQuantityKey, out var warehouseQuantity);
+        var warehouseQuantityWasPersisted = false;
+        if (!warehouseQuantityWasCached)
         {
-            warehouseQuantity = new WarehouseQuantity
+            warehouseQuantity = await _unitOfWork.Repository<WarehouseQuantity>()
+                .FirstOrDefaultAsync(item => item.TenantId == _currentUser.TenantId &&
+                                             item.InventoryItemId == poLine.InventoryItemId.Value &&
+                                             item.WarehouseId == location.InventoryWarehouseId);
+            warehouseQuantityWasPersisted = warehouseQuantity is not null;
+            if (warehouseQuantity is null)
             {
-                TenantId = _currentUser.TenantId,
-                InventoryItemId = poLine.InventoryItemId.Value,
-                WarehouseId = location.InventoryWarehouseId,
-                CurrentStock = baseQuantity,
-                AvailableStock = baseQuantity,
-                AverageCost = postedAverageCost,
-                LastMovementDate = DateTime.UtcNow,
-                CreatedById = _currentUser.UserId
-            };
-            await _unitOfWork.Repository<WarehouseQuantity>().AddAsync(warehouseQuantity);
+                warehouseQuantity = new WarehouseQuantity
+                {
+                    TenantId = _currentUser.TenantId,
+                    InventoryItemId = poLine.InventoryItemId.Value,
+                    WarehouseId = location.InventoryWarehouseId,
+                    AverageCost = postedAverageCost,
+                    CreatedById = _currentUser.UserId
+                };
+                await _unitOfWork.Repository<WarehouseQuantity>().AddAsync(warehouseQuantity);
+            }
+            pendingWarehouseQuantities[warehouseQuantityKey] = warehouseQuantity;
         }
-        else
-        {
-            var priorWarehouseStock = warehouseQuantity.CurrentStock;
-            warehouseQuantity.AverageCost =
-                ProcurementReceiptInspectionRules.CalculateWeightedAverageCost(
-                    priorWarehouseStock,
-                    warehouseQuantity.AverageCost,
-                    baseQuantity,
-                    receiptValuationCost);
-            warehouseQuantity.CurrentStock += baseQuantity;
-            warehouseQuantity.AvailableStock += baseQuantity;
-            warehouseQuantity.LastMovementDate = DateTime.UtcNow;
+
+        var priorWarehouseStock = warehouseQuantity!.CurrentStock;
+        warehouseQuantity.AverageCost = priorWarehouseStock <= 0
+            ? postedAverageCost
+            : ProcurementReceiptInspectionRules.CalculateWeightedAverageCost(
+                priorWarehouseStock,
+                warehouseQuantity.AverageCost,
+                baseQuantity,
+                receiptValuationCost);
+        warehouseQuantity.CurrentStock += baseQuantity;
+        warehouseQuantity.AvailableStock += baseQuantity;
+        warehouseQuantity.LastMovementDate = DateTime.UtcNow;
+        if (!warehouseQuantityWasCached && warehouseQuantityWasPersisted)
             await _unitOfWork.Repository<WarehouseQuantity>().UpdateAsync(warehouseQuantity);
-        }
         var warehouse = await _unitOfWork.Repository<Warehouse>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                                   item.Id == location.InventoryWarehouseId && !item.IsDeleted)
@@ -1307,13 +1341,12 @@ public sealed class ProcurementReceiptInspectionService :
                         "Central-DMS evidence requires exactly one controlled upload ID.");
                 var version = await _unitOfWork.Repository<CentralDocumentVersion>()
                     .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
-                                          item.FileUploadRecordId == request.FileUploadRecordId &&
-                                          !item.IsDeleted &&
-                                          !item.DocumentRecord.IsDeleted &&
-                                          (item.DocumentRecord.SourceRecordId == inspection.Id ||
-                                           item.DocumentRecord.SourceRecordId == inspection.PurchaseOrderReceiptId ||
-                                           item.DocumentRecord.SourceRecordId ==
-                                               inspection.PurchaseOrderReceipt.PurchaseOrderId))
+                                           item.FileUploadRecordId == request.FileUploadRecordId &&
+                                           (item.DocumentRecord.SourceRecordId == inspection.Id ||
+                                            item.DocumentRecord.SourceRecordId == inspection.PurchaseOrderReceiptId ||
+                                            item.DocumentRecord.SourceRecordId ==
+                                                inspection.PurchaseOrderReceipt.PurchaseOrderId))
+                    .Where(CentralDocumentEvidenceRules.CurrentPublished())
                     .Include(item => item.DocumentRecord)
                     .AsNoTracking().OrderByDescending(item => item.CreatedAt)
                     .FirstOrDefaultAsync(cancellationToken)
@@ -1401,12 +1434,12 @@ public sealed class ProcurementReceiptInspectionService :
                 from version in _unitOfWork.Repository<CentralDocumentVersion>()
                     .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                                           item.FileUploadRecordId == row.FileUploadRecordId &&
-                                          !item.IsDeleted && !item.DocumentRecord.IsDeleted &&
                                           (item.DocumentRecord.SourceRecordId == inspection.Id ||
                                            item.DocumentRecord.SourceRecordId ==
                                                inspection.PurchaseOrderReceiptId ||
                                            item.DocumentRecord.SourceRecordId ==
-                                               inspection.PurchaseOrderReceipt.PurchaseOrderId))
+                                                inspection.PurchaseOrderReceipt.PurchaseOrderId))
+                    .Where(CentralDocumentEvidenceRules.CurrentPublished())
                 join upload in _unitOfWork.Repository<FileUploadRecord>()
                     .GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted)
                     on version.FileUploadRecordId equals upload.Id

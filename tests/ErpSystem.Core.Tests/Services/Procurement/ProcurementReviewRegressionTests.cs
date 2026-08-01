@@ -1,4 +1,6 @@
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.DocumentManagement;
+using ErpSystem.Core.Services.DocumentManagement;
 using ErpSystem.Data;
 using ErpSystem.Data.Repositories;
 using FluentAssertions;
@@ -352,6 +354,137 @@ public sealed class ProcurementReviewRegressionTests
     }
 
     [Fact]
+    public void Receipt_inspection_create_save_and_submit_events_share_their_state_transaction()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementReceiptInspectionService.cs");
+
+        foreach (var method in new[] { "InitializeAsync", "SaveAsync", "SubmitAsync" })
+        {
+            var start = source.IndexOf(
+                $"public async Task<ProcurementReceiptInspectionDto> {method}",
+                StringComparison.Ordinal);
+            var nextMethod = source.IndexOf(
+                "public async Task<ProcurementReceiptInspectionDto>",
+                start + 1,
+                StringComparison.Ordinal);
+            var execute = source.IndexOf("await ExecuteAsync(async () =>", start,
+                StringComparison.Ordinal);
+            var save = source.IndexOf("await _unitOfWork.SaveChangesAsync", execute,
+                StringComparison.Ordinal);
+            var controlEvent = source.IndexOf("await RecordEventAsync", save,
+                StringComparison.Ordinal);
+
+            execute.Should().BeGreaterThan(start);
+            save.Should().BeGreaterThan(execute);
+            controlEvent.Should().BeGreaterThan(save);
+            controlEvent.Should().BeLessThan(nextMethod,
+                $"{method} must persist state and its immutable event in one transaction");
+        }
+    }
+
+    [Fact]
+    public void Receipt_stock_authorization_observes_saved_acceptance_and_reuses_pending_balances()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementReceiptInspectionService.cs");
+        var applyStart = source.IndexOf(
+            "private async Task ApplyAcceptedQuantitiesAndStockAsync(",
+            StringComparison.Ordinal);
+        var applyEnd = source.IndexOf(
+            "private async Task SynchronizeLinkedGoodsReceiptNoteAsync(",
+            applyStart,
+            StringComparison.Ordinal);
+        var apply = source[applyStart..applyEnd];
+        var save = apply.IndexOf("await _unitOfWork.SaveChangesAsync", StringComparison.Ordinal);
+        var stock = apply.IndexOf("await PostStockAsync", StringComparison.Ordinal);
+
+        save.Should().BeGreaterThanOrEqualTo(0);
+        stock.Should().BeGreaterThan(save,
+            "the no-tracking source-control reload must see accepted receipt quantities");
+        apply.Should().Contain("pendingInventoryLocations");
+        apply.Should().Contain("pendingWarehouseQuantities");
+        source.Should().Contain("pendingInventoryLocations.TryGetValue");
+        source.Should().Contain("pendingWarehouseQuantities.TryGetValue");
+    }
+
+    [Fact]
+    public void Procurement_evidence_consumers_require_the_current_published_dms_version()
+    {
+        var rules = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "DocumentManagement",
+            "CentralDocumentEvidenceRules.cs");
+        var receipt = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementReceiptInspectionService.cs");
+        var apService = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorInvoiceMatchExceptionService.cs");
+        var apValidator = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorInvoiceMatchExceptionEvidenceValidator.cs");
+
+        rules.Should().Contain("LifecycleStatus == ActiveLifecycleStatus");
+        rules.Should().Contain("VersionStatus == PublishedVersionStatus");
+        rules.Should().Contain("CurrentVersion == version.VersionNumber");
+        rules.Should().Contain("version.Status == PublishedVersionStatus");
+        rules.Should().Contain("version.PublishedAt.HasValue");
+        receipt.Should().Contain("CentralDocumentEvidenceRules.CurrentPublished()");
+        apService.Should().Contain("CentralDocumentEvidenceRules.CurrentPublished()");
+        apValidator.Should().Contain("CentralDocumentEvidenceRules.CurrentPublished()");
+    }
+
+    [Fact]
+    public void Central_dms_evidence_rule_rejects_noncurrent_or_inactive_versions()
+    {
+        var record = new CentralDocumentRecord
+        {
+            LifecycleStatus = "Active",
+            VersionStatus = "Published",
+            CurrentVersion = "v2.0"
+        };
+        var version = new CentralDocumentVersion
+        {
+            DocumentRecord = record,
+            VersionNumber = "v2.0",
+            Status = "Published",
+            PublishedAt = DateTime.UtcNow
+        };
+        var isConsumable = CentralDocumentEvidenceRules.CurrentPublished().Compile();
+
+        isConsumable(version).Should().BeTrue();
+
+        record.LifecycleStatus = "Cancelled";
+        isConsumable(version).Should().BeFalse();
+        record.LifecycleStatus = "Active";
+        record.CurrentVersion = "v3.0";
+        isConsumable(version).Should().BeFalse();
+        record.CurrentVersion = "v2.0";
+        version.Status = "Superseded";
+        isConsumable(version).Should().BeFalse();
+        version.Status = "Published";
+        version.PublishedAt = null;
+        isConsumable(version).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Sequential_mrn_issue_action_is_hidden_until_the_grn_is_issued()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services",
+            "PurchaseOrderReceiptDocumentService.cs");
+
+        source.Should().Contain("var grnIssued = documents.Any");
+        source.Should().Contain("RequiresPriorGrnIssue(");
+        source.Should().Contain("bool issueSequenceSatisfied");
+        source.Should().Contain("if (issueAllowed && issueSequenceSatisfied)");
+        source.Should().Contain(
+            "return Map(document, config, manageAllowed, issueAllowed, issueSequenceSatisfied);");
+    }
+
+    [Fact]
     public void Receipt_document_sign_and_cancel_use_atomic_state_event_scope()
     {
         var source = ReadRepositoryFile(
@@ -470,7 +603,8 @@ public sealed class ProcurementReviewRegressionTests
         var issuedActionsEnd = source.IndexOf(
             "return result;", issuedActions, StringComparison.Ordinal);
         var unissuedStart = source.IndexOf(
-            "if (issueAllowed)", issuedActionsEnd, StringComparison.Ordinal);
+            "if (issueAllowed && issueSequenceSatisfied)", issuedActionsEnd,
+            StringComparison.Ordinal);
         var unissuedEnd = source.IndexOf(
             "if (canSign)", unissuedStart, StringComparison.Ordinal);
         var unissuedActions = source[unissuedStart..unissuedEnd];
