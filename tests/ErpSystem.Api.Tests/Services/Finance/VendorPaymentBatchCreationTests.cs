@@ -190,6 +190,33 @@ public sealed class VendorPaymentBatchCreationTests
             item.Id == selection.PaymentReadinessControlEventId &&
             item.RuleCode == ProcurementPaymentReadinessRules.RuleCode)).Should().BeTrue();
         workflow.Verify(item => item.StartApprovalWorkflowAsync("PaymentBatch", result.Id), Times.Once);
+
+        var manualPayment = new VendorPayment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            PaymentNumber = "VP-TDC0505-MANUAL",
+            SupplierId = supplier.Id,
+            PaymentDate = DateTime.UtcNow.Date,
+            TotalAmount = 50m,
+            CurrencyCode = "GHS",
+            Status = VendorPaymentStatus.Draft,
+            CreatedBy = "Tests"
+        };
+        db.Set<VendorPayment>().Add(manualPayment);
+        await db.SaveChangesAsync();
+
+        var allocate = () => service.AllocatePaymentAsync(
+            manualPayment.Id,
+            [new VendorPaymentAllocationCreateDto
+            {
+                VendorInvoiceId = invoice.Id,
+                AllocatedAmount = 50m
+            }]);
+
+        var exception = await allocate.Should().ThrowAsync<VendorPaymentControlException>();
+        exception.Which.Code.Should().Be("AP_PAYMENT_BALANCE_RESERVED");
+        (await db.Set<VendorPaymentAllocation>().CountAsync()).Should().Be(0);
     }
 
     private static ApplicationDbContext CreateContext()

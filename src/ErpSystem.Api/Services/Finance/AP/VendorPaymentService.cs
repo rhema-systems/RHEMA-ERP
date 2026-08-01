@@ -632,11 +632,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 if (invoice == null)
                     throw new KeyNotFoundException($"Vendor invoice with Id '{alloc.VendorInvoiceId}' not found.");
 
-                var balance = invoice.TotalAmount - invoice.PaidAmount;
+                var balance = await GetInvoiceUnreservedBalanceAsync(
+                    invoice,
+                    payment.Id,
+                    cancellationToken);
                 if (balance <= 0)
                     throw new VendorPaymentControlException(
-                        "AP_PAYMENT_BALANCE_BLOCKED",
-                        $"Invoice '{invoice.InvoiceNumber}' has no positive outstanding balance.");
+                        "AP_PAYMENT_BALANCE_RESERVED",
+                        $"Invoice '{invoice.InvoiceNumber}' has no unreserved outstanding balance.");
 
                 if (invoice.SupplierId != payment.SupplierId)
                 {
@@ -855,9 +858,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                     if (!string.Equals(NormalizeCurrency(invoice.CurrencyCode, functionalCurrency), functionalCurrency, StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("Foreign-currency supplier advance application is not supported until advance FX settlement is implemented.");
 
-                    var invoiceOutstanding = RoundMoney(invoice.TotalAmount - invoice.PaidAmount);
+                    var invoiceOutstanding = await GetInvoiceUnreservedBalanceAsync(
+                        invoice,
+                        payment.Id,
+                        cancellationToken);
                     if (requested.AllocatedAmount > invoiceOutstanding)
-                        throw new InvalidOperationException($"Supplier advance application exceeds the outstanding balance of invoice '{invoice.InvoiceNumber}'.");
+                        throw new VendorPaymentControlException(
+                            "AP_PAYMENT_BALANCE_RESERVED",
+                            $"Supplier advance application exceeds the unreserved outstanding balance of invoice '{invoice.InvoiceNumber}'.");
 
                     var allocation = new VendorPaymentAllocation
                     {
@@ -961,6 +969,60 @@ namespace ErpSystem.Api.Services.Finance.AP
                     await _unitOfWork.RollbackAsync(cancellationToken);
                 throw;
             }
+        }
+
+        private async Task<decimal> GetInvoiceUnreservedBalanceAsync(
+            VendorInvoice invoice,
+            Guid? currentPaymentId,
+            CancellationToken cancellationToken)
+        {
+            var liveAllocationReservation = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                .GetQueryable(allocation =>
+                    allocation.TenantId == TenantId &&
+                    allocation.VendorInvoiceId == invoice.Id &&
+                    !allocation.IsDeleted &&
+                    !allocation.VendorPayment.IsDeleted &&
+                    !allocation.VendorPayment.JournalEntryId.HasValue &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Failed)
+                .SumAsync(
+                    allocation => (decimal?)(allocation.AllocatedAmount +
+                                               allocation.DiscountAmount +
+                                               allocation.WithholdingTaxAmount),
+                    cancellationToken) ?? 0m;
+
+            var reservingBatchStatuses = new[]
+            {
+                PaymentBatchStatus.Draft,
+                PaymentBatchStatus.PendingApproval,
+                PaymentBatchStatus.Approved,
+                PaymentBatchStatus.Processing
+            };
+            var batchSelectionReservation = await _unitOfWork.Repository<PaymentBatchInvoice>()
+                .GetQueryable(selection =>
+                    selection.TenantId == TenantId &&
+                    selection.VendorInvoiceId == invoice.Id &&
+                    !selection.IsDeleted &&
+                    (!currentPaymentId.HasValue || selection.VendorPaymentId != currentPaymentId.Value) &&
+                    !selection.PaymentBatch.IsDeleted &&
+                    reservingBatchStatuses.Contains(selection.PaymentBatch.Status) &&
+                    !selection.VendorPayment.IsDeleted &&
+                    !selection.VendorPayment.JournalEntryId.HasValue &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Failed &&
+                    !selection.VendorPayment.Allocations.Any(allocation =>
+                        allocation.TenantId == TenantId &&
+                        allocation.VendorInvoiceId == invoice.Id &&
+                        !allocation.IsDeleted &&
+                        !allocation.IsReversal))
+                .SumAsync(selection => (decimal?)selection.Amount, cancellationToken) ?? 0m;
+
+            return RoundMoney(Math.Max(
+                invoice.TotalAmount -
+                invoice.PaidAmount -
+                liveAllocationReservation -
+                batchSelectionReservation,
+                0m));
         }
 
         public async Task ReverseAllocationAsync(Guid allocationId, string reason, CancellationToken cancellationToken = default)
@@ -1500,6 +1562,29 @@ namespace ErpSystem.Api.Services.Finance.AP
                 await _unitOfWork.AcquireTransactionLockAsync(
                     $"tdc0505-invoice:{TenantId:N}:{invoiceId:N}", cancellationToken);
 
+            // Refresh after taking the per-invoice locks. Another allocator may have
+            // committed between the initial UI/readiness query and this transaction.
+            invoices = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(i =>
+                    i.TenantId == TenantId &&
+                    dto.InvoiceIds.Contains(i.Id) &&
+                    !i.IsDeleted)
+                .Include(i => i.Supplier)
+                .ToListAsync(cancellationToken);
+            var availableBalanceByInvoice = new Dictionary<Guid, decimal>();
+            foreach (var invoice in invoices.OrderBy(item => item.Id))
+            {
+                var availableBalance = await GetInvoiceUnreservedBalanceAsync(
+                    invoice,
+                    currentPaymentId: null,
+                    cancellationToken);
+                if (availableBalance <= 0m)
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_BALANCE_RESERVED",
+                        $"Invoice '{invoice.InvoiceNumber}' has no unreserved outstanding balance.");
+                availableBalanceByInvoice[invoice.Id] = availableBalance;
+            }
+
             var batch = new PaymentBatch
             {
                 Id = batchId,
@@ -1528,7 +1613,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             foreach (var group in bySupplier)
             {
                 var supplier = group.First().Supplier;
-                var supplierTotal = group.Sum(i => i.TotalAmount - i.PaidAmount);
+                var supplierTotal = group.Sum(i => availableBalanceByInvoice[i.Id]);
 
                 var paymentNumber = await GeneratePaymentNumberAsync(cancellationToken);
                 var payment = new VendorPayment
@@ -1585,7 +1670,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         VendorPayment = payment,
                         VendorInvoiceId = invoice.Id,
                         VendorInvoice = invoice,
-                        Amount = RoundMoney(invoice.TotalAmount - invoice.PaidAmount),
+                        Amount = availableBalanceByInvoice[invoice.Id],
                         Status = "Pending",
                         CreatedAt = now,
                         CreatedBy = UserName

@@ -50,7 +50,7 @@ public sealed class ProcurementFinanceReconciliationTests
         var service = CreateService(db, tenantId);
 
         var report = await service.GetProcurementFinanceReconciliationAsync(
-            new DateTime(2026, 7, 31), fixture.PurchaseOrder.Id);
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
 
         report.RuleCode.Should().Be("AP-005");
         report.TaskCode.Should().Be("TDC-0508");
@@ -94,7 +94,7 @@ public sealed class ProcurementFinanceReconciliationTests
         var service = CreateService(db, tenantId);
 
         var report = await service.GetProcurementFinanceReconciliationAsync(
-            new DateTime(2026, 7, 31), fixture.PurchaseOrder.Id);
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
 
         report.IsReconciled.Should().BeFalse();
         report.UnbalancedPostingCount.Should().Be(1);
@@ -129,7 +129,7 @@ public sealed class ProcurementFinanceReconciliationTests
             PendingQuantity = 0m,
             StockEligibleQuantity = 10m,
             StockPostedQuantity = 10m,
-            StockPostedAtUtc = new DateTime(2026, 8, 2),
+            StockPostedAtUtc = new DateTime(2026, 9, 2),
             ApEligibleQuantity = 10m,
             ConfigurationProfileId = Guid.NewGuid(),
             PolicySetId = Guid.NewGuid(),
@@ -160,9 +160,199 @@ public sealed class ProcurementFinanceReconciliationTests
         var service = CreateService(db, tenantId);
 
         var report = await service.GetProcurementFinanceReconciliationAsync(
-            new DateTime(2026, 7, 31), fixture.PurchaseOrder.Id);
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
 
         report.Rows.Single().AcceptedReceiptAmount.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldNotSettleAllocationUntilItsPostingExistsAtCutoff()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        fixture.PaymentPosting.PostingDate = new DateTime(2026, 9, 2);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        var row = report.Rows.Single();
+        row.SettledAmount.Should().Be(0m);
+        row.PaymentPostedAmount.Should().Be(0m);
+        row.PaymentCount.Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldKeepSettlementActiveBeforeLaterControlledReversal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        await db.SaveChangesAsync();
+        db.FinancePostingEvents.Add(new FinancePostingEvent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SourceModule = "AP",
+            SourceDocumentType = "VendorPayment",
+            SourceDocumentId = fixture.Payment.Id,
+            PostingAction = "Reverse",
+            PostingStatus = "Posted",
+            PostingDate = new DateTime(2026, 9, 2),
+            TotalDebitAmount = 100m,
+            TotalCreditAmount = 100m,
+            FunctionalCurrencyCode = "GHS",
+            BookClassification = "IFRS"
+        });
+        await db.SaveChangesAsync();
+        fixture.Payment.Status = VendorPaymentStatus.Voided;
+        fixture.Payment.UpdatedAt = new DateTime(2026, 9, 2);
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        var row = report.Rows.Single();
+        row.SettledAmount.Should().Be(100m);
+        row.PaymentPostedAmount.Should().Be(100m);
+        row.PaymentCount.Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldApplyCutoffToMilestoneCreationAndLifecycleDates()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        await db.SaveChangesAsync();
+        var milestone = await db.ContractMilestones.SingleAsync();
+        milestone.CompletedAt = new DateTime(2026, 9, 2);
+        milestone.InvoicedAt = new DateTime(2026, 9, 3);
+        milestone.PaidAt = new DateTime(2026, 9, 4);
+        milestone.Status = "Paid";
+        var futureMilestone = new ContractMilestone
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ContractId = milestone.ContractId,
+            MilestoneName = "Future milestone",
+            PaymentAmount = 25m,
+            PaymentPercentage = 25m,
+            Status = "Pending"
+        };
+        db.ContractMilestones.Add(futureMilestone);
+        await db.SaveChangesAsync();
+        futureMilestone.CreatedAt = new DateTime(2026, 9, 2);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        var row = report.Rows.Single();
+        row.MilestoneAmount.Should().Be(100m);
+        row.CompletedMilestoneAmount.Should().Be(0m);
+        row.InvoicedMilestoneAmount.Should().Be(0m);
+        row.PaidMilestoneAmount.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldReconstructCertificateBeforeLaterCancellationAndRelease()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        await db.SaveChangesAsync();
+        var before = new
+        {
+            fixture.Certificate.Id,
+            fixture.Certificate.ContractId,
+            Status = ProjectPaymentCertificateStatuses.Approved,
+            fixture.Certificate.Currency,
+            fixture.Certificate.RetentionHeldAmount,
+            RetentionReleasedAmount = 0m,
+            fixture.Certificate.IssueDate,
+            fixture.Certificate.CreatedAt,
+            UpdatedAt = (DateTime?)null,
+            IsDeleted = false,
+            DeletedAt = (DateTime?)null
+        };
+        var after = new
+        {
+            fixture.Certificate.Id,
+            fixture.Certificate.ContractId,
+            Status = ProjectPaymentCertificateStatuses.Cancelled,
+            fixture.Certificate.Currency,
+            fixture.Certificate.RetentionHeldAmount,
+            RetentionReleasedAmount = 10m,
+            fixture.Certificate.IssueDate,
+            fixture.Certificate.CreatedAt,
+            UpdatedAt = (DateTime?)new DateTime(2026, 9, 2),
+            IsDeleted = false,
+            DeletedAt = (DateTime?)null
+        };
+        db.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserId = Guid.NewGuid(),
+            Username = "project.controller",
+            Action = ProjectPaymentCertificateAuditEvents.Snapshot,
+            Resource = ProjectPaymentCertificateAuditEvents.Resource,
+            ResourceId = fixture.Certificate.Id.ToString(),
+            OldValues = System.Text.Json.JsonSerializer.Serialize(before),
+            NewValues = System.Text.Json.JsonSerializer.Serialize(after),
+            IpAddress = "127.0.0.1",
+            Timestamp = new DateTime(2026, 9, 2)
+        });
+        db.ProcurementWorksCloseoutActions.Add(new ProcurementWorksCloseoutAction
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ContractId = fixture.Certificate.ContractId!.Value,
+            ProjectId = fixture.Certificate.ProjectId,
+            Sequence = 1,
+            ActionType = ProcurementWorksCloseoutActionType.RetentionRelease,
+            Status = ProcurementWorksCloseoutActionStatus.Approved,
+            ConfigurationProfileId = Guid.NewGuid(),
+            PolicySetId = Guid.NewGuid(),
+            AuthorityRuleId = Guid.NewGuid(),
+            AuthorityName = "Retention authority",
+            WorkflowDefinitionId = Guid.NewGuid(),
+            ProjectPaymentCertificateId = fixture.Certificate.Id,
+            EffectiveAtUtc = new DateTime(2026, 9, 2),
+            Amount = 10m,
+            Currency = "GHS",
+            SubmittedById = Guid.NewGuid(),
+            SubmittedByName = "Project Controller",
+            SubmittedAtUtc = new DateTime(2026, 9, 1),
+            DecidedById = Guid.NewGuid(),
+            DecidedByName = "Finance Controller",
+            DecidedAtUtc = new DateTime(2026, 9, 2),
+            Reason = "Release after reporting cutoff",
+            IdempotencyKey = "retention-after-cutoff",
+            CorrelationId = "retention-after-cutoff",
+            SourceSnapshotHash = new string('a', 64),
+            IntegrityHash = new string('b', 64)
+        });
+        await db.SaveChangesAsync();
+        fixture.Certificate.Status = ProjectPaymentCertificateStatuses.Cancelled;
+        fixture.Certificate.RetentionReleasedAmount = 10m;
+        fixture.Certificate.UpdatedAt = new DateTime(2026, 9, 2);
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        var row = report.Rows.Single();
+        row.RetentionHeldAmount.Should().Be(10m);
+        row.RetentionReleasedAmount.Should().Be(0m);
     }
 
     private static ApReportsService CreateService(ApplicationDbContext db, Guid tenantId)
@@ -303,6 +493,9 @@ public sealed class ProcurementFinanceReconciliationTests
             ExchangeRate = 1m,
             BaseCurrencyAmount = 100m,
             Status = VendorInvoiceStatus.Paid,
+            ApprovalStatus = "Approved",
+            SubmittedDate = new DateTime(2026, 7, 3),
+            ApprovedDate = new DateTime(2026, 7, 3),
             JournalEntryId = invoiceJournal.Id,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"

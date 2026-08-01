@@ -256,6 +256,12 @@ public static class ProjectPaymentCertificateStatuses
     public const string Cancelled = "Cancelled";
 }
 
+public static class ProjectPaymentCertificateAuditEvents
+{
+    public const string Resource = "ProjectPaymentCertificate";
+    public const string Snapshot = "ProjectPaymentCertificateSnapshot";
+}
+
 public static class ProjectExtensionOfTimeStatuses
 {
     public const string Draft = "Draft";

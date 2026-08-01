@@ -358,6 +358,29 @@ public sealed class ProcurementReviewRegressionTests
         source.Should().Contain("EnsureBatchResumeAllocationsMatch");
         source.Should().Contain("Checkpoint each item while the batch remains Processing");
         source.Should().Contain("AP_PAYMENT_BATCH_RESUME_ALLOCATION_MISMATCH");
+        source.Should().Contain("GetInvoiceUnreservedBalanceAsync");
+        source.Should().Contain("liveAllocationReservation");
+        source.Should().Contain("batchSelectionReservation");
+        source.Should().Contain("availableBalanceByInvoice");
+        source.Should().Contain("AP_PAYMENT_BALANCE_RESERVED");
+    }
+
+    [Fact]
+    public void Payment_certificate_history_is_persisted_for_cutoff_reconciliation()
+    {
+        var projectService = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Projects",
+            "ProjectService.CommercialAdministration.cs");
+        var reportService = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "ApReportsService.cs");
+
+        projectService.Should().Contain("AddPaymentCertificateSnapshotAuditAsync");
+        projectService.Should().Contain("ProjectPaymentCertificateAuditEvents.Snapshot");
+        projectService.Should().Contain("OldValues = oldValues is null");
+        reportService.Should().Contain("ResolvePaymentCertificateStateAsOf");
+        reportService.Should().Contain("firstAfterCutoff?.OldValues");
+        reportService.Should().Contain("ProcurementWorksCloseoutActionType.RetentionRelease");
     }
 
     [Fact]
