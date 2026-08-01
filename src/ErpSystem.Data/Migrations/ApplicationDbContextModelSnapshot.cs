@@ -30105,6 +30105,14 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("AverageCost")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("AlternateBarcode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Barcode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("Brand")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -30222,6 +30230,10 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<string>("QRCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<decimal>("ReorderLevel")
                         .HasColumnType("decimal(18,4)");
 
@@ -30297,16 +30309,36 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("IsSerialTracked");
 
-                    b.HasIndex("ItemCode")
-                        .IsUnique();
-
                     b.HasIndex("Status");
 
                     b.HasIndex("TenantId");
 
                     b.HasIndex("UnitOfMeasureScheduleId");
 
-                    b.ToTable("InventoryItems");
+                    b.HasIndex("TenantId", "AlternateBarcode")
+                        .IsUnique()
+                        .HasFilter("[AlternateBarcode] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "Barcode")
+                        .IsUnique()
+                        .HasFilter("[Barcode] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "ItemCode")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "QRCode")
+                        .IsUnique()
+                        .HasFilter("[QRCode] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.ToTable("InventoryItems", t =>
+                        {
+                            t.HasTrigger("TR_TDC0601_InventoryItems_IdentifierIntegrity");
+
+                            t.HasCheckConstraint("CK_InventoryItems_Identifiers_Normalized", "([Barcode] IS NULL OR [Barcode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([Barcode]))) COLLATE Latin1_General_100_BIN2) AND ([AlternateBarcode] IS NULL OR [AlternateBarcode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AlternateBarcode]))) COLLATE Latin1_General_100_BIN2) AND ([QRCode] IS NULL OR [QRCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([QRCode]))) COLLATE Latin1_General_100_BIN2)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryLayer", b =>
@@ -31417,7 +31449,18 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("InventoryItemId", "UnitOfMeasureId")
                         .IsUnique();
 
-                    b.ToTable("ItemUnitsOfMeasure");
+                    b.HasIndex("TenantId", "Barcode")
+                        .IsUnique()
+                        .HasFilter("[Barcode] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.ToTable("ItemUnitsOfMeasure", t =>
+                        {
+                            t.HasTrigger("TR_TDC0601_ItemUnitsOfMeasure_IdentifierIntegrity");
+
+                            t.HasCheckConstraint("CK_ItemUnitsOfMeasure_Barcode_Normalized", "[Barcode] IS NULL OR [Barcode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([Barcode]))) COLLATE Latin1_General_100_BIN2");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.LandedCost", b =>
@@ -89962,7 +90005,7 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("GlAccountId");
 
                     b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryItem", "InventoryItem")
-                        .WithMany()
+                        .WithMany("ItemUnitsOfMeasure")
                         .HasForeignKey("InventoryItemId");
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.TaxGroup", "TaxGroup")
@@ -110585,6 +110628,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Allocations");
 
                     b.Navigation("InventoryLocations");
+
+                    b.Navigation("ItemUnitsOfMeasure");
 
                     b.Navigation("StockAdjustments");
 

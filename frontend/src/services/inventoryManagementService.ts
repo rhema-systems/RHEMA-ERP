@@ -60,6 +60,7 @@ export interface CreateUnitOfMeasureConversionDto {
 // Item Unit of Measure
 export interface ItemUnitOfMeasureDto {
   id: string;
+  inventoryItemId?: string;
   unitOfMeasureId: string;
   unitCode: string;
   unitName: string;
@@ -68,6 +69,42 @@ export interface ItemUnitOfMeasureDto {
   isPurchaseUnit: boolean;
   isSalesUnit: boolean;
   barcode?: string;
+}
+
+export interface InventoryIdentifierMatchDto {
+  inventoryItemId: string;
+  itemCode: string;
+  itemName: string;
+  identifier: string;
+  identifierKind: 'PrimaryBarcode' | 'AlternateBarcode' | 'QRCode' | 'UnitBarcode';
+  itemUnitOfMeasureId?: string;
+  unitOfMeasureId?: string;
+  unitCode?: string;
+  conversionToBase: number;
+}
+
+export interface UpdateInventoryItemIdentifiersDto {
+  barcode?: string;
+  alternateBarcode?: string;
+  qrCode?: string;
+}
+
+export interface UpdateItemUnitIdentifierDto {
+  unitOfMeasureId: string;
+  conversionToBase: number;
+  isBaseUnit: boolean;
+  isPurchaseUnit: boolean;
+  isSalesUnit: boolean;
+  isStockingUnit?: boolean;
+  isStockingUnit: boolean;
+  barcode?: string;
+}
+
+export interface InventoryIdentifierImportResultDto {
+  totalRows: number;
+  updatedItems: number;
+  updatedUnits: number;
+  errors: string[];
 }
 
 // Inventory Category
@@ -124,6 +161,8 @@ export interface InventoryItemDto {
   manufacturer?: string;
   model?: string;
   barcode?: string;
+  alternateBarcode?: string;
+  qrCode?: string;
   primarySupplierId?: string;
   primarySupplierName?: string;
   leadTimeDays: number;
@@ -1227,6 +1266,58 @@ class InventoryManagementService {
    */
   async getItemUnitsOfMeasure(itemId: string): Promise<ItemUnitOfMeasureDto[]> {
     const response = await axios.get(`${API_URL}/InventoryItems/${itemId}/units`, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async getItemIdentifierUnits(itemId: string): Promise<ItemUnitOfMeasureDto[]> {
+    const response = await axios.get(`${API_URL}/inventory/item-identifiers/items/${itemId}/units`, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async updateItemIdentifiers(itemId: string, data: UpdateInventoryItemIdentifiersDto): Promise<InventoryItemDto> {
+    const response = await axios.put(`${API_URL}/inventory/item-identifiers/items/${itemId}`, data, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async updateItemUnitIdentifier(
+    itemId: string,
+    unitOfMeasureId: string,
+    data: UpdateItemUnitIdentifierDto
+  ): Promise<ItemUnitOfMeasureDto> {
+    const response = await axios.put(
+      `${API_URL}/inventory/item-identifiers/items/${itemId}/units/${unitOfMeasureId}`,
+      data,
+      { headers: this.getAuthHeaders() }
+    );
+    return response.data;
+  }
+
+  async resolveItemIdentifier(identifier: string): Promise<InventoryIdentifierMatchDto> {
+    const response = await axios.get(`${API_URL}/inventory/item-identifiers/resolve`, {
+      params: { identifier },
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async exportItemIdentifiers(): Promise<Blob> {
+    const response = await axios.get(`${API_URL}/inventory/item-identifiers/export`, {
+      headers: this.getAuthHeaders(),
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
+  async importItemIdentifiers(file: File): Promise<InventoryIdentifierImportResultDto> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await axios.post(`${API_URL}/inventory/item-identifiers/import`, formData, {
       headers: this.getAuthHeaders()
     });
     return response.data;

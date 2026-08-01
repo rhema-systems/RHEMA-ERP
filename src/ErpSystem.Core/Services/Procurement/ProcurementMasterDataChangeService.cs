@@ -11,6 +11,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
@@ -31,6 +32,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
     private readonly IWorkflowInstanceService _workflowInstances;
     private readonly INotificationTopicPublisher _notificationTopics;
     private readonly ILogger<ProcurementMasterDataChangeService> _logger;
+    private readonly IInventoryItemIdentifierService? _inventoryIdentifiers;
 
     public ProcurementMasterDataChangeService(
         IUnitOfWork unitOfWork,
@@ -38,7 +40,8 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         IProcurementControlEventService controlEvents,
         IWorkflowInstanceService workflowInstances,
         INotificationTopicPublisher notificationTopics,
-        ILogger<ProcurementMasterDataChangeService> logger)
+        ILogger<ProcurementMasterDataChangeService> logger,
+        IInventoryItemIdentifierService? inventoryIdentifiers = null)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -46,6 +49,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         _workflowInstances = workflowInstances;
         _notificationTopics = notificationTopics;
         _logger = logger;
+        _inventoryIdentifiers = inventoryIdentifiers;
     }
 
     private IGenericRepository<ProcurementMasterDataControlPolicy> Policies => _unitOfWork.Repository<ProcurementMasterDataControlPolicy>();
@@ -1236,6 +1240,19 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
                     ValidateSupplierCompliance(partner);
                 break;
             case InventoryItem item:
+                item.Barcode = NormalizeInventoryIdentifier(item.Barcode);
+                item.AlternateBarcode = NormalizeInventoryIdentifier(item.AlternateBarcode);
+                item.QRCode = NormalizeInventoryIdentifier(item.QRCode);
+                if (_inventoryIdentifiers is not null)
+                {
+                    await _inventoryIdentifiers.ValidateItemIdentifiersAsync(
+                        item.TenantId,
+                        item.Id,
+                        item.Barcode,
+                        item.AlternateBarcode,
+                        item.QRCode,
+                        cancellationToken);
+                }
                 if (!await ExistsTenantAsync<InventoryCategory>(item.CategoryId, cancellationToken))
                     throw new ProcurementMasterDataChangeValidationException("CATEGORY_NOT_FOUND", "Inventory item CategoryId must identify a current-tenant category.");
                 if (item.UnitOfMeasureScheduleId.HasValue && !await ExistsTenantAsync<UnitOfMeasureSchedule>(item.UnitOfMeasureScheduleId.Value, cancellationToken))
@@ -1317,6 +1334,12 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
     private Task<bool> ExistsTenantAsync<T>(Guid id, CancellationToken cancellationToken) where T : TenantEntity =>
         _unitOfWork.Repository<T>().GetQueryable(item => item.Id == id && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .AnyAsync(cancellationToken);
+
+    private static string? NormalizeInventoryIdentifier(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized.ToUpperInvariant();
+    }
 
     private static string NormalizeBeneficialOwnershipJson(string? value)
     {

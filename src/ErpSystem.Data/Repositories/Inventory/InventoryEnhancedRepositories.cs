@@ -118,10 +118,11 @@ public class ItemUnitOfMeasureRepository : GenericRepository<ItemUnitOfMeasure>,
     public async Task<ItemUnitOfMeasure?> GetByBarcodeAsync(string barcode)
     {
         if (string.IsNullOrWhiteSpace(barcode)) return null;
+        var normalized = barcode.Trim().ToUpperInvariant();
         return await _dbSet
             .Include(iu => iu.InventoryItem)
             .Include(iu => iu.UnitOfMeasure)
-            .FirstOrDefaultAsync(iu => iu.Barcode == barcode && !iu.IsDeleted);
+            .FirstOrDefaultAsync(iu => iu.Barcode == normalized && !iu.IsDeleted);
     }
 }
 

@@ -9420,7 +9420,25 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // InventoryItem entity
         builder.Entity<InventoryItem>(entity =>
         {
-            entity.HasIndex(i => i.ItemCode).IsUnique();
+            entity.ToTable("InventoryItems", table =>
+            {
+                table.HasTrigger("TR_TDC0601_InventoryItems_IdentifierIntegrity");
+                table.HasCheckConstraint(
+                    "CK_InventoryItems_Identifiers_Normalized",
+                    "([Barcode] IS NULL OR [Barcode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([Barcode]))) COLLATE Latin1_General_100_BIN2) AND ([AlternateBarcode] IS NULL OR [AlternateBarcode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AlternateBarcode]))) COLLATE Latin1_General_100_BIN2) AND ([QRCode] IS NULL OR [QRCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([QRCode]))) COLLATE Latin1_General_100_BIN2)");
+            });
+            entity.HasIndex(i => new { i.TenantId, i.ItemCode })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(i => new { i.TenantId, i.Barcode })
+                .IsUnique()
+                .HasFilter("[Barcode] IS NOT NULL AND [IsDeleted] = 0");
+            entity.HasIndex(i => new { i.TenantId, i.AlternateBarcode })
+                .IsUnique()
+                .HasFilter("[AlternateBarcode] IS NOT NULL AND [IsDeleted] = 0");
+            entity.HasIndex(i => new { i.TenantId, i.QRCode })
+                .IsUnique()
+                .HasFilter("[QRCode] IS NOT NULL AND [IsDeleted] = 0");
             entity.HasIndex(i => i.CategoryId);
             entity.HasIndex(i => i.Status);
             entity.HasIndex(i => i.ABCClass);
@@ -9975,11 +9993,21 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // ItemUnitOfMeasure entity
         builder.Entity<ItemUnitOfMeasure>(entity =>
         {
+            entity.ToTable("ItemUnitsOfMeasure", table =>
+            {
+                table.HasTrigger("TR_TDC0601_ItemUnitsOfMeasure_IdentifierIntegrity");
+                table.HasCheckConstraint(
+                    "CK_ItemUnitsOfMeasure_Barcode_Normalized",
+                    "[Barcode] IS NULL OR [Barcode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([Barcode]))) COLLATE Latin1_General_100_BIN2");
+            });
             entity.HasIndex(iu => new { iu.InventoryItemId, iu.UnitOfMeasureId }).IsUnique();
             entity.HasIndex(iu => iu.IsActive);
+            entity.HasIndex(iu => new { iu.TenantId, iu.Barcode })
+                .IsUnique()
+                .HasFilter("[Barcode] IS NOT NULL AND [IsDeleted] = 0");
 
             entity.HasOne(iu => iu.InventoryItem)
-                .WithMany() // TODO: restore .WithMany(i => i.ItemUnitsOfMeasure) when property exists
+                .WithMany(i => i.ItemUnitsOfMeasure)
                 .HasForeignKey(iu => iu.InventoryItemId)
                 .OnDelete(DeleteBehavior.Cascade);
 

@@ -87,14 +87,18 @@ public class InventoryItemRepository : GenericRepository<InventoryItem>, IInvent
             return new List<InventoryItem>();
         }
 
-        var lowerSearchTerm = searchTerm.ToLower();
+        var normalizedSearchTerm = searchTerm.Trim();
         return await _dbSet
             .Where(i => !i.IsDeleted &&
-                       (i.ItemCode.Contains(lowerSearchTerm, StringComparison.CurrentCultureIgnoreCase) ||
-                        i.Name.ToLower().Contains(lowerSearchTerm) ||
-                        (i.Description != null && i.Description.Contains(lowerSearchTerm, StringComparison.CurrentCultureIgnoreCase)) ||
-                        (i.Brand != null && i.Brand.Contains(lowerSearchTerm, StringComparison.CurrentCultureIgnoreCase)) ||
-                        (i.Manufacturer != null && i.Manufacturer.Contains(lowerSearchTerm, StringComparison.CurrentCultureIgnoreCase))))
+                       (i.ItemCode.Contains(normalizedSearchTerm) ||
+                        i.Name.Contains(normalizedSearchTerm) ||
+                        (i.Description != null && i.Description.Contains(normalizedSearchTerm)) ||
+                        (i.Brand != null && i.Brand.Contains(normalizedSearchTerm)) ||
+                        (i.Manufacturer != null && i.Manufacturer.Contains(normalizedSearchTerm)) ||
+                        (i.Barcode != null && i.Barcode.Contains(normalizedSearchTerm)) ||
+                        (i.AlternateBarcode != null && i.AlternateBarcode.Contains(normalizedSearchTerm)) ||
+                        (i.QRCode != null && i.QRCode.Contains(normalizedSearchTerm)) ||
+                        i.ItemUnitsOfMeasure.Any(unit => !unit.IsDeleted && unit.Barcode != null && unit.Barcode.Contains(normalizedSearchTerm))))
             .Include(i => i.Category)
             .OrderBy(i => i.ItemCode)
             .ToListAsync();

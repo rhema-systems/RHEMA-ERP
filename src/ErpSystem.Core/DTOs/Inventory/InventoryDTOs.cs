@@ -33,6 +33,9 @@ public class InventoryItemDto
     public string? ItemClassName { get; set; }
     public string? PriceGroupName { get; set; }
     public bool IsActive { get; set; }
+    public string? Barcode { get; set; }
+    public string? AlternateBarcode { get; set; }
+    public string? QRCode { get; set; }
     
     // Valuation
     public ValuationMethod ValuationMethod { get; set; } = ValuationMethod.WeightedAverage;
@@ -263,6 +266,56 @@ public class CreateInventoryItemDto
 public class UpdateInventoryItemDto : CreateInventoryItemDto
 {
     public bool IsActive { get; set; } = true;
+}
+
+public sealed class InventoryIdentifierMatchDto
+{
+    public Guid InventoryItemId { get; set; }
+    public string ItemCode { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public string Identifier { get; set; } = string.Empty;
+    public string IdentifierKind { get; set; } = string.Empty;
+    public Guid? ItemUnitOfMeasureId { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    public string? UnitCode { get; set; }
+    public decimal ConversionToBase { get; set; } = 1m;
+}
+
+public sealed class UpdateInventoryItemIdentifiersDto
+{
+    [MaxLength(100)]
+    public string? Barcode { get; set; }
+
+    [MaxLength(100)]
+    public string? AlternateBarcode { get; set; }
+
+    [MaxLength(100)]
+    public string? QRCode { get; set; }
+}
+
+public sealed class UpdateItemUnitIdentifierDto
+{
+    [Required]
+    public Guid UnitOfMeasureId { get; set; }
+
+    [Range(0.00000001, double.MaxValue)]
+    public decimal ConversionToBase { get; set; } = 1m;
+
+    public bool IsBaseUnit { get; set; }
+    public bool IsPurchaseUnit { get; set; }
+    public bool IsSalesUnit { get; set; }
+    public bool IsStockingUnit { get; set; }
+
+    [MaxLength(100)]
+    public string? Barcode { get; set; }
+}
+
+public class InventoryIdentifierImportResultDto
+{
+    public int TotalRows { get; set; }
+    public int UpdatedItems { get; set; }
+    public int UpdatedUnits { get; set; }
+    public List<string> Errors { get; set; } = [];
 }
 
 /// <summary>

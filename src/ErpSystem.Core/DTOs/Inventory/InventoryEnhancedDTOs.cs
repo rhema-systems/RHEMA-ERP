@@ -89,6 +89,7 @@ public class ItemUnitOfMeasureDto
     public bool IsBaseUnit { get; set; }
     public bool IsPurchaseUnit { get; set; }
     public bool IsSalesUnit { get; set; }
+    public bool IsStockingUnit { get; set; }
     public string? Barcode { get; set; }
     public decimal? Length { get; set; }
     public decimal? Width { get; set; }
