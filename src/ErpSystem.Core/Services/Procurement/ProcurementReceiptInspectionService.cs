@@ -106,6 +106,8 @@ public sealed class ProcurementReceiptInspectionService :
             .ToListAsync(cancellationToken);
         var current = history.FirstOrDefault(item =>
             item.Status is not ProcurementReceiptInspectionStatus.Cancelled);
+        var evidenceRequirementKeys = await LoadEvidenceRequirementKeysAsync(
+            current?.ConfigurationProfileId, cancellationToken);
         var externalLinked = _currentUser.IsExternalUser;
         var manageAllowed = false;
         var approveAllowed = false;
@@ -171,6 +173,7 @@ public sealed class ProcurementReceiptInspectionService :
                            current.SupplierAcknowledgementStatus,
                            current.ResolutionStatus),
             DecisionKeys = DecisionKeys,
+            EvidenceRequirementKeys = evidenceRequirementKeys,
             Current = current is null ? null : Map(current),
             History = history.Select(Map).ToList()
         };
@@ -660,44 +663,49 @@ public sealed class ProcurementReceiptInspectionService :
         CancellationToken cancellationToken = default)
     {
         var correlation = NormalizeCorrelation(correlationId);
-        var inspection = await LoadCaseAsync(caseId, cancellationToken);
-        var partner = await EnsureLinkedSupplierAsync(
-            inspection.PurchaseOrderReceipt.PurchaseOrder.BusinessPartnerId,
-            cancellationToken);
-        EnsureRowVersion(inspection.RowVersion, request.RowVersion);
-        if (!inspection.QualityHold || inspection.SupplierAcknowledgementStatus !=
-            ProcurementReceiptSupplierAcknowledgementStatus.Pending)
-            throw Conflict("RCV_SUPPLIER_ACK_NOT_AVAILABLE",
-                "Supplier acknowledgement is available only for an active rejected-quantity quality hold.");
-        var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
-        if (request.Acknowledged && evidence.Count == 0)
-            throw Validation("RCV_SUPPLIER_ACK_EVIDENCE_REQUIRED",
-                "Acknowledgement requires controlled supplier evidence.");
-        foreach (var item in evidence)
+        ProcurementReceiptInspectionCase? acknowledged = null;
+        await ExecuteAsync(async () =>
         {
-            item.InspectionCaseId = inspection.Id;
-            await Evidence.AddAsync(item);
-            inspection.Evidence.Add(item);
-        }
-        inspection.SupplierAcknowledgementStatus = request.Acknowledged
-            ? ProcurementReceiptSupplierAcknowledgementStatus.Acknowledged
-            : ProcurementReceiptSupplierAcknowledgementStatus.Disputed;
-        await AddActionAsync(inspection,
-            request.Acknowledged
-                ? ProcurementReceiptInspectionActionType.SupplierAcknowledged
-                : ProcurementReceiptInspectionActionType.SupplierDisputed,
-            request.Comment, request.Reference, correlation, request.IdempotencyKey,
-            partner.Id, cancellationToken);
-        inspection.IntegrityHash = CaseHash(inspection);
-        await Cases.UpdateAsync(inspection);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        await RecordEventAsync(inspection,
-            request.Acknowledged ? "SupplierAcknowledged" : "SupplierDisputed",
-            request.Acknowledged ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.ReviewRequired,
-            null, Snapshot(inspection), request.Comment, correlation, cancellationToken);
-        await PublishAsync("procurement.receipt-inspection.supplier-response", inspection,
+            var inspection = await LoadCaseAsync(caseId, cancellationToken);
+            var partner = await EnsureLinkedSupplierAsync(
+                inspection.PurchaseOrderReceipt.PurchaseOrder.BusinessPartnerId,
+                cancellationToken);
+            EnsureRowVersion(inspection.RowVersion, request.RowVersion);
+            if (!inspection.QualityHold || inspection.SupplierAcknowledgementStatus !=
+                ProcurementReceiptSupplierAcknowledgementStatus.Pending)
+                throw Conflict("RCV_SUPPLIER_ACK_NOT_AVAILABLE",
+                    "Supplier acknowledgement is available only for an active rejected-quantity quality hold.");
+            var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
+            if (request.Acknowledged && evidence.Count == 0)
+                throw Validation("RCV_SUPPLIER_ACK_EVIDENCE_REQUIRED",
+                    "Acknowledgement requires controlled supplier evidence.");
+            foreach (var item in evidence)
+            {
+                item.InspectionCaseId = inspection.Id;
+                await Evidence.AddAsync(item);
+                inspection.Evidence.Add(item);
+            }
+            inspection.SupplierAcknowledgementStatus = request.Acknowledged
+                ? ProcurementReceiptSupplierAcknowledgementStatus.Acknowledged
+                : ProcurementReceiptSupplierAcknowledgementStatus.Disputed;
+            await AddActionAsync(inspection,
+                request.Acknowledged
+                    ? ProcurementReceiptInspectionActionType.SupplierAcknowledged
+                    : ProcurementReceiptInspectionActionType.SupplierDisputed,
+                request.Comment, request.Reference, correlation, request.IdempotencyKey,
+                partner.Id, cancellationToken);
+            inspection.IntegrityHash = CaseHash(inspection);
+            await Cases.UpdateAsync(inspection);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await RecordEventAsync(inspection,
+                request.Acknowledged ? "SupplierAcknowledged" : "SupplierDisputed",
+                request.Acknowledged ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.ReviewRequired,
+                null, Snapshot(inspection), request.Comment, correlation, cancellationToken);
+            acknowledged = inspection;
+        }, cancellationToken);
+        await PublishAsync("procurement.receipt-inspection.supplier-response", acknowledged!,
             cancellationToken);
-        return Map(inspection);
+        return Map(acknowledged!);
     }
 
     public async Task<ProcurementReceiptInspectionDto> ResolveAsync(
@@ -707,87 +715,92 @@ public sealed class ProcurementReceiptInspectionService :
         CancellationToken cancellationToken = default)
     {
         var correlation = NormalizeCorrelation(correlationId);
-        var inspection = await LoadCaseAsync(caseId, cancellationToken);
-        await EnsureCapabilityAsync(ManagePermission, inspection.PurchaseOrderReceipt,
-            correlation, cancellationToken);
-        EnsureRowVersion(inspection.RowVersion, request.RowVersion);
-        if (!ProcurementReceiptInspectionRules.CanResolve(inspection.Status))
-            throw Conflict("RCV_RESOLUTION_NOT_AVAILABLE", "The receipt has no active quality-hold resolution.");
-        if (inspection.SupplierAcknowledgementStatus !=
-            ProcurementReceiptSupplierAcknowledgementStatus.Acknowledged)
-            throw Conflict("RCV_SUPPLIER_ACK_REQUIRED",
-                "The linked supplier must acknowledge the rejection note before return or replacement progression.");
-        if (request.ResolutionKind == ProcurementReceiptResolutionKind.None)
-            throw Validation("RCV_RESOLUTION_KIND_REQUIRED", "Return or Replacement must be selected.");
-        if (inspection.ResolutionKind != ProcurementReceiptResolutionKind.None &&
-            inspection.ResolutionKind != request.ResolutionKind)
-            throw Conflict("RCV_RESOLUTION_KIND_IMMUTABLE",
-                "The selected return/replacement route cannot be changed after progression begins.");
-        if (request.ResolutionKind == ProcurementReceiptResolutionKind.Replacement &&
-            inspection.ResolutionStatus ==
-            ProcurementReceiptResolutionStatus.ReplacementRequested)
+        ProcurementReceiptInspectionCase? resolved = null;
+        await ExecuteAsync(async () =>
         {
-            await _purchaseOrderSod.EnforceReceiptActionAsync(
-                inspection.PurchaseOrderReceipt.PurchaseOrder,
-                ProcurementPurchaseOrderSodRules.ConfirmReplacementReceipt,
-                correlation,
-                cancellationToken);
-        }
-        var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
-        if (evidence.Count == 0)
-            throw Validation("RCV_RESOLUTION_EVIDENCE_REQUIRED",
-                "Every return/replacement progression requires controlled evidence.");
-        foreach (var item in evidence)
-        {
-            item.InspectionCaseId = inspection.Id;
-            await Evidence.AddAsync(item);
-            inspection.Evidence.Add(item);
-        }
-        inspection.ResolutionKind = request.ResolutionKind;
-        ProcurementReceiptInspectionActionType action;
-        if (request.ResolutionKind == ProcurementReceiptResolutionKind.Return)
-        {
-            if (inspection.ResolutionStatus == ProcurementReceiptResolutionStatus.Required)
+            var inspection = await LoadCaseAsync(caseId, cancellationToken);
+            await EnsureCapabilityAsync(ManagePermission, inspection.PurchaseOrderReceipt,
+                correlation, cancellationToken);
+            EnsureRowVersion(inspection.RowVersion, request.RowVersion);
+            if (!ProcurementReceiptInspectionRules.CanResolve(inspection.Status))
+                throw Conflict("RCV_RESOLUTION_NOT_AVAILABLE", "The receipt has no active quality-hold resolution.");
+            if (inspection.SupplierAcknowledgementStatus !=
+                ProcurementReceiptSupplierAcknowledgementStatus.Acknowledged)
+                throw Conflict("RCV_SUPPLIER_ACK_REQUIRED",
+                    "The linked supplier must acknowledge the rejection note before return or replacement progression.");
+            if (request.ResolutionKind == ProcurementReceiptResolutionKind.None)
+                throw Validation("RCV_RESOLUTION_KIND_REQUIRED", "Return or Replacement must be selected.");
+            if (inspection.ResolutionKind != ProcurementReceiptResolutionKind.None &&
+                inspection.ResolutionKind != request.ResolutionKind)
+                throw Conflict("RCV_RESOLUTION_KIND_IMMUTABLE",
+                    "The selected return/replacement route cannot be changed after progression begins.");
+            if (request.ResolutionKind == ProcurementReceiptResolutionKind.Replacement &&
+                inspection.ResolutionStatus ==
+                ProcurementReceiptResolutionStatus.ReplacementRequested)
             {
-                inspection.ResolutionStatus = ProcurementReceiptResolutionStatus.Authorized;
-                inspection.Status = ProcurementReceiptInspectionStatus.ReturnPending;
-                action = ProcurementReceiptInspectionActionType.ReturnAuthorized;
+                await _purchaseOrderSod.EnforceReceiptActionAsync(
+                    inspection.PurchaseOrderReceipt.PurchaseOrder,
+                    ProcurementPurchaseOrderSodRules.ConfirmReplacementReceipt,
+                    correlation,
+                    cancellationToken);
             }
-            else if (inspection.ResolutionStatus == ProcurementReceiptResolutionStatus.Authorized)
+            var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
+            if (evidence.Count == 0)
+                throw Validation("RCV_RESOLUTION_EVIDENCE_REQUIRED",
+                    "Every return/replacement progression requires controlled evidence.");
+            foreach (var item in evidence)
             {
-                inspection.ResolutionStatus = ProcurementReceiptResolutionStatus.Dispatched;
-                inspection.Status = ProcurementReceiptInspectionStatus.ClosureReady;
-                action = ProcurementReceiptInspectionActionType.ReturnDispatched;
+                item.InspectionCaseId = inspection.Id;
+                await Evidence.AddAsync(item);
+                inspection.Evidence.Add(item);
             }
-            else
-                throw Conflict("RCV_RETURN_ALREADY_DISPATCHED", "The return route has already reached dispatch.");
-        }
-        else
-        {
-            if (inspection.ResolutionStatus == ProcurementReceiptResolutionStatus.Required)
+            inspection.ResolutionKind = request.ResolutionKind;
+            ProcurementReceiptInspectionActionType action;
+            if (request.ResolutionKind == ProcurementReceiptResolutionKind.Return)
             {
-                inspection.ResolutionStatus = ProcurementReceiptResolutionStatus.ReplacementRequested;
-                inspection.Status = ProcurementReceiptInspectionStatus.ReplacementPending;
-                action = ProcurementReceiptInspectionActionType.ReplacementRequested;
-            }
-            else if (inspection.ResolutionStatus == ProcurementReceiptResolutionStatus.ReplacementRequested)
-            {
-                await ValidateReplacementReceiptAsync(inspection, request.Reference, cancellationToken);
-                inspection.ResolutionStatus = ProcurementReceiptResolutionStatus.ReplacementReceived;
-                inspection.Status = ProcurementReceiptInspectionStatus.ClosureReady;
-                action = ProcurementReceiptInspectionActionType.ReplacementReceived;
+                if (inspection.ResolutionStatus == ProcurementReceiptResolutionStatus.Required)
+                {
+                    inspection.ResolutionStatus = ProcurementReceiptResolutionStatus.Authorized;
+                    inspection.Status = ProcurementReceiptInspectionStatus.ReturnPending;
+                    action = ProcurementReceiptInspectionActionType.ReturnAuthorized;
+                }
+                else if (inspection.ResolutionStatus == ProcurementReceiptResolutionStatus.Authorized)
+                {
+                    inspection.ResolutionStatus = ProcurementReceiptResolutionStatus.Dispatched;
+                    inspection.Status = ProcurementReceiptInspectionStatus.ClosureReady;
+                    action = ProcurementReceiptInspectionActionType.ReturnDispatched;
+                }
+                else
+                    throw Conflict("RCV_RETURN_ALREADY_DISPATCHED", "The return route has already reached dispatch.");
             }
             else
-                throw Conflict("RCV_REPLACEMENT_ALREADY_RECEIVED", "The replacement route has already been completed.");
-        }
-        await AddActionAsync(inspection, action, request.Comment, request.Reference,
-            correlation, request.IdempotencyKey, null, cancellationToken);
-        inspection.IntegrityHash = CaseHash(inspection);
-        await Cases.UpdateAsync(inspection);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        await RecordEventAsync(inspection, action.ToString(), ProcurementControlEventResult.Allowed,
-            null, Snapshot(inspection), request.Comment, correlation, cancellationToken);
-        return Map(inspection);
+            {
+                if (inspection.ResolutionStatus == ProcurementReceiptResolutionStatus.Required)
+                {
+                    inspection.ResolutionStatus = ProcurementReceiptResolutionStatus.ReplacementRequested;
+                    inspection.Status = ProcurementReceiptInspectionStatus.ReplacementPending;
+                    action = ProcurementReceiptInspectionActionType.ReplacementRequested;
+                }
+                else if (inspection.ResolutionStatus == ProcurementReceiptResolutionStatus.ReplacementRequested)
+                {
+                    await ValidateReplacementReceiptAsync(inspection, request.Reference, cancellationToken);
+                    inspection.ResolutionStatus = ProcurementReceiptResolutionStatus.ReplacementReceived;
+                    inspection.Status = ProcurementReceiptInspectionStatus.ClosureReady;
+                    action = ProcurementReceiptInspectionActionType.ReplacementReceived;
+                }
+                else
+                    throw Conflict("RCV_REPLACEMENT_ALREADY_RECEIVED", "The replacement route has already been completed.");
+            }
+            await AddActionAsync(inspection, action, request.Comment, request.Reference,
+                correlation, request.IdempotencyKey, null, cancellationToken);
+            inspection.IntegrityHash = CaseHash(inspection);
+            await Cases.UpdateAsync(inspection);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await RecordEventAsync(inspection, action.ToString(), ProcurementControlEventResult.Allowed,
+                null, Snapshot(inspection), request.Comment, correlation, cancellationToken);
+            resolved = inspection;
+        }, cancellationToken);
+        return Map(resolved!);
     }
 
     public async Task<ProcurementReceiptInspectionDto> CloseAsync(
@@ -1551,6 +1564,43 @@ public sealed class ProcurementReceiptInspectionService :
         }, correlation, cancellationToken);
         if (!decision.Allowed)
             throw new ProcurementReceiptInspectionAuthorizationException(decision.Message);
+    }
+
+    private async Task<IReadOnlyList<string>> LoadEvidenceRequirementKeysAsync(
+        Guid? configurationProfileId,
+        CancellationToken cancellationToken)
+    {
+        var profile = configurationProfileId.HasValue
+            ? await _configuration.GetProfileAsync(configurationProfileId.Value, cancellationToken)
+            : await _configuration.GetEffectiveProfileAsync(
+                "TDC-PROCUREMENT", DateTime.UtcNow, cancellationToken)
+              ?? throw Validation("RCV_CONFIGURATION_MISSING",
+                  "No effective Published TDC procurement configuration profile exists.");
+        var decision = profile.Decisions.SingleOrDefault(item => item.DecisionKey == "DEC-013")
+            ?? throw Validation("RCV_DEC013_MISSING",
+                "DEC-013 is missing from the effective configuration.");
+        ProcurementReceiptDocumentDecisionValueDto value;
+        try
+        {
+            value = JsonSerializer.Deserialize<ProcurementReceiptDocumentDecisionValueDto>(
+                        decision.Value.GetRawText(), JsonOptions)
+                    ?? throw new JsonException("DEC-013 is empty.");
+        }
+        catch (JsonException)
+        {
+            throw Validation("RCV_DEC013_INVALID",
+                "The effective DEC-013 receipt-document value is invalid.");
+        }
+
+        var requirements = value.EvidenceRequirements
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (requirements.Count == 0)
+            throw Validation("RCV_DEC013_EVIDENCE_MISSING",
+                "DEC-013 must define at least one receipt evidence requirement.");
+        return requirements;
     }
 
     private async Task<bool> CanUseCapabilityAsync(

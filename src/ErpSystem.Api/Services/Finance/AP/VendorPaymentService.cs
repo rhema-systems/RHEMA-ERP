@@ -344,7 +344,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     $"tdc0506-payment:{TenantId:N}:{id:N}", cancellationToken);
                 var payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
-                    .Include(item => item.Allocations.Where(allocation => !allocation.IsDeleted && !allocation.IsReversal))
+                    .Include(item => item.Allocations.Where(allocation => !allocation.IsDeleted))
                     .SingleOrDefaultAsync(cancellationToken)
                     ?? throw new KeyNotFoundException($"Vendor payment with Id '{id}' not found.");
 
@@ -357,7 +357,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                         "AP_PAYMENT_SUBMISSION_STATE_INVALID",
                         "Only draft manual payments can be submitted for authorization.");
 
-                foreach (var allocation in payment.Allocations.OrderBy(item => item.VendorInvoiceId))
+                var effectiveAllocations = GetEffectiveAllocations(payment.Allocations);
+                EnsureAllocationTotalIsValid(payment, effectiveAllocations);
+                foreach (var allocation in effectiveAllocations.OrderBy(item => item.VendorInvoiceId))
                 {
                     await _unitOfWork.AcquireTransactionLockAsync(
                         $"tdc0505-invoice:{TenantId:N}:{allocation.VendorInvoiceId:N}", cancellationToken);
@@ -832,7 +834,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 if (advanceAccount.AccountType != AccountType.Asset)
                     throw new InvalidOperationException("Supplier advance account must be an asset account.");
 
-                var currentlyAllocated = RoundMoney(payment.Allocations.Where(a => !a.IsReversal).Sum(a => a.AllocatedAmount));
+                var currentlyAllocated = RoundMoney(GetEffectiveAllocations(payment.Allocations)
+                    .Sum(a => a.AllocatedAmount));
                 var requestedTotal = RoundMoney(requestedAllocations.Sum(a => a.AllocatedAmount));
                 if (requestedTotal > RoundMoney(payment.TotalAmount - currentlyAllocated))
                     throw new InvalidOperationException("Supplier advance application exceeds the unallocated advance balance.");
@@ -889,8 +892,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     payment.Allocations.Add(allocation);
                     // This is a read-side operational snapshot. Recompute it from allocations so
                     // a stale value cannot cause an advance to be over-applied after a retry.
-                    payment.AllocatedAmount = RoundMoney(payment.Allocations
-                        .Where(a => !a.IsReversal)
+                    payment.AllocatedAmount = RoundMoney(GetEffectiveAllocations(payment.Allocations)
                         .Sum(a => a.AllocatedAmount));
                     payment.UpdatedAt = now;
                     payment.UpdatedBy = UserName;
@@ -1928,7 +1930,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Include(b => b.Items.Where(item => !item.IsDeleted))
                     .ThenInclude(i => i.VendorPayment)
                         .ThenInclude(payment => payment.Allocations.Where(allocation =>
-                            !allocation.IsDeleted && !allocation.IsReversal))
+                            !allocation.IsDeleted))
                 .Include(b => b.Items.Where(item => !item.IsDeleted))
                     .ThenInclude(i => i.Invoices.Where(selection => !selection.IsDeleted))
                         .ThenInclude(i => i.VendorInvoice)
@@ -2006,9 +2008,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-                    var existingAllocations = payment.Allocations
-                        .Where(allocation => !allocation.IsDeleted && !allocation.IsReversal)
-                        .ToList();
+                    var existingAllocations = GetEffectiveAllocations(payment.Allocations);
                     if (allocs.Any() && existingAllocations.Count == 0)
                     {
                         await AllocatePaymentAsync(payment.Id, allocs, cancellationToken);
@@ -2589,8 +2589,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             CancellationToken cancellationToken)
         {
             var now = DateTime.UtcNow;
-            foreach (var allocation in payment.Allocations
-                         .Where(item => !item.IsDeleted && !item.IsReversal)
+            foreach (var allocation in GetEffectiveAllocations(payment.Allocations)
                          .OrderBy(item => item.AllocationDate)
                          .ThenBy(item => item.Id))
             {
@@ -2658,11 +2657,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (payment.TotalAmount <= 0m)
                 throw new InvalidOperationException("AP payment amount must be positive.");
 
-            var activeAllocations = payment.Allocations?
-                .Where(a => !a.IsReversal)
-                .OrderBy(a => a.AllocationDate)
-                .ThenBy(a => a.Id)
-                .ToList() ?? new List<VendorPaymentAllocation>();
+            var allAllocations = payment.IsSupplierAdvance && payment.JournalEntryId.HasValue
+                ? new List<VendorPaymentAllocation>()
+                : payment.Allocations?.Where(a => !a.IsDeleted).ToList()
+                  ?? new List<VendorPaymentAllocation>();
+            var activeAllocations = GetEffectiveAllocations(allAllocations);
+            EnsureAllocationTotalIsValid(payment, activeAllocations);
 
             var isSupplierAdvance = activeAllocations.Count == 0;
             if (isSupplierAdvance &&
@@ -2714,13 +2714,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 if (!invoicePostingExists)
                     throw new InvalidOperationException($"AP payment cannot settle invoice '{allocation.VendorInvoice.InvoiceNumber}' because its central posting event was not found.");
 
-                var totalInvoiceSettlement = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                var invoiceAllocationHistory = await _unitOfWork.Repository<VendorPaymentAllocation>()
                     .GetQueryable(a =>
                         a.TenantId == tenantId &&
                         a.VendorInvoiceId == allocation.VendorInvoiceId &&
-                        !a.IsReversal &&
                         !a.IsDeleted)
-                    .SumAsync(a => a.AllocatedAmount + a.DiscountAmount + a.WithholdingTaxAmount, cancellationToken);
+                    .ToListAsync(cancellationToken);
+                var totalInvoiceSettlement = GetEffectiveAllocations(invoiceAllocationHistory)
+                    .Sum(a => a.AllocatedAmount + a.DiscountAmount + a.WithholdingTaxAmount);
 
                 if (RoundMoney(totalInvoiceSettlement) > RoundMoney(allocation.VendorInvoice.TotalAmount))
                     throw new InvalidOperationException($"AP payment would over-settle invoice '{allocation.VendorInvoice.InvoiceNumber}'.");
@@ -2728,12 +2729,6 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (activeAllocations.Count > 0)
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            var allocatedCashAmount = RoundMoney(activeAllocations.Sum(a => a.AllocatedAmount));
-            if (!isSupplierAdvance && allocatedCashAmount != RoundMoney(payment.TotalAmount))
-            {
-                throw new InvalidOperationException("AP payment amount must equal allocated cash amount before posting. Use the supplier-advance path for an unapplied payment.");
-            }
 
             var supplier = await ResolvePaymentSupplierForPostingAsync(payment, cancellationToken);
             var settings = await GetFinanceSettingsAsync(cancellationToken);
@@ -3093,6 +3088,44 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private static decimal RoundMoney(decimal amount)
             => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+
+        private static List<VendorPaymentAllocation> GetEffectiveAllocations(
+            IEnumerable<VendorPaymentAllocation>? allocations)
+        {
+            var live = allocations?.Where(item => !item.IsDeleted).ToList()
+                       ?? new List<VendorPaymentAllocation>();
+            var reversedOriginalIds = live
+                .Where(item => item.IsReversal && item.OriginalAllocationId.HasValue)
+                .Select(item => item.OriginalAllocationId!.Value)
+                .ToHashSet();
+
+            return live
+                .Where(item => !item.IsReversal && !reversedOriginalIds.Contains(item.Id))
+                .OrderBy(item => item.AllocationDate)
+                .ThenBy(item => item.Id)
+                .ToList();
+        }
+
+        private static void EnsureAllocationTotalIsValid(
+            VendorPayment payment,
+            IReadOnlyCollection<VendorPaymentAllocation> effectiveAllocations)
+        {
+            if (payment.IsSupplierAdvance && payment.JournalEntryId.HasValue)
+                return;
+
+            var hasInitialAllocationHistory = payment.Allocations?.Any(item =>
+                !item.IsDeleted && !item.IsReversal) == true;
+            if (!hasInitialAllocationHistory)
+                return;
+
+            var allocatedCashAmount = RoundMoney(effectiveAllocations.Sum(item => item.AllocatedAmount));
+            if (allocatedCashAmount != RoundMoney(payment.TotalAmount))
+            {
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_ALLOCATION_TOTAL_MISMATCH",
+                    "AP payment amount must equal the effective allocated cash amount. Reversed allocations must be replaced before authorization or posting.");
+            }
+        }
 
         private async Task<Supplier> ResolveSupplierForPaymentAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
         {

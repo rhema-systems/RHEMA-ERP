@@ -1002,6 +1002,7 @@ export interface ProcurementReceiptInspectionOverviewDto {
   canResolve: boolean;
   canClose: boolean;
   decisionKeys: string[];
+  evidenceRequirementKeys: string[];
   current?: ProcurementReceiptInspectionDto;
   history: ProcurementReceiptInspectionDto[];
 }

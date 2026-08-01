@@ -3,7 +3,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import type { ProcurementReceiptInspectionOverviewDto } from '@/services/purchasingService';
-import { ReceiptInspectionControl } from './ReceiptInspectionControl';
+import {
+  buildReceiptInspectionEvidenceRequests,
+  ReceiptInspectionControl,
+} from './ReceiptInspectionControl';
 
 const overview: ProcurementReceiptInspectionOverviewDto = {
   purchaseOrderReceiptId: 'receipt-0502',
@@ -17,6 +20,7 @@ const overview: ProcurementReceiptInspectionOverviewDto = {
   canResolve: false,
   canClose: false,
   decisionKeys: Array.from({ length: 14 }, (_, index) => `DEC-${String(index + 1).padStart(3, '0')}`),
+  evidenceRequirementKeys: ['INSPECTION_REPORT', 'DELIVERY_NOTE'],
   history: [],
   current: {
     id: 'case-0502',
@@ -69,6 +73,35 @@ const overview: ProcurementReceiptInspectionOverviewDto = {
 };
 
 describe('ReceiptInspectionControl', () => {
+  it('submits one controlled evidence reference for every configured requirement', () => {
+    const evidence = buildReceiptInspectionEvidenceRequests('SubmitReceiptInspection', [
+      {
+        requirementKey: 'INSPECTION_REPORT',
+        evidenceKind: 1,
+        evidenceId: 'upload-report',
+        evidenceReference: 'Inspection report',
+      },
+      {
+        requirementKey: 'DELIVERY_NOTE',
+        evidenceKind: 0,
+        evidenceId: 'workflow-delivery-note',
+        evidenceReference: 'Signed delivery note',
+      },
+    ]);
+
+    expect(evidence).toHaveLength(2);
+    expect(evidence[0]).toMatchObject({
+      actionKey: 'SubmitReceiptInspection',
+      requirementKey: 'INSPECTION_REPORT',
+      fileUploadRecordId: 'upload-report',
+    });
+    expect(evidence[1]).toMatchObject({
+      actionKey: 'SubmitReceiptInspection',
+      requirementKey: 'DELIVERY_NOTE',
+      workflowEvidenceDocumentId: 'workflow-delivery-note',
+    });
+  });
+
   it('shows supplier-scoped quality hold, eligibility, decision lineage and acknowledgement', () => {
     const markup = renderToStaticMarkup(
       <ReceiptInspectionControl
@@ -84,6 +117,8 @@ describe('ReceiptInspectionControl', () => {
     expect(markup).toContain('Acknowledge rejection');
     expect(markup).toContain('DEC-001');
     expect(markup).toContain('DEC-014');
+    expect(markup).toContain('INSPECTION_REPORT');
+    expect(markup).toContain('DELIVERY_NOTE');
     expect(markup).not.toContain('Save inspection');
   });
 });

@@ -202,11 +202,20 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             cancellationToken, documents[0].ConfigurationProfileId, documents[0].ConfigurationProfileVersion);
     }
 
-    public async Task<ProcurementReceiptDocumentDto> SignAsync(
+    public Task<ProcurementReceiptDocumentDto> SignAsync(
         Guid documentId,
         SignProcurementReceiptDocumentRequest request,
         string correlationId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        ExecuteAtomicAsync(
+            () => SignCoreAsync(documentId, request, correlationId, cancellationToken),
+            cancellationToken);
+
+    private async Task<ProcurementReceiptDocumentDto> SignCoreAsync(
+        Guid documentId,
+        SignProcurementReceiptDocumentRequest request,
+        string correlationId,
+        CancellationToken cancellationToken)
     {
         var correlation = Correlation(correlationId);
         var document = await LoadDocumentAsync(documentId, cancellationToken);
@@ -470,11 +479,20 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         return await MapForCurrentActorAsync(document, config, cancellationToken);
     }
 
-    public async Task<ProcurementReceiptDocumentDto> CancelAsync(
+    public Task<ProcurementReceiptDocumentDto> CancelAsync(
         Guid documentId,
         CancelProcurementReceiptDocumentRequest request,
         string correlationId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        ExecuteAtomicAsync(
+            () => CancelCoreAsync(documentId, request, correlationId, cancellationToken),
+            cancellationToken);
+
+    private async Task<ProcurementReceiptDocumentDto> CancelCoreAsync(
+        Guid documentId,
+        CancelProcurementReceiptDocumentRequest request,
+        string correlationId,
+        CancellationToken cancellationToken)
     {
         var correlation = Correlation(correlationId);
         var document = await LoadDocumentAsync(documentId, cancellationToken);
@@ -978,6 +996,34 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
     {
         if (!_currentUser.IsAuthenticated || _currentUser.UserId == Guid.Empty || _currentUser.TenantId == Guid.Empty)
             throw new ProcurementReceiptDocumentAuthorizationException("An authenticated tenant user is required.");
+    }
+
+    private async Task<T> ExecuteAtomicAsync<T>(
+        Func<Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        if (!_db.Database.IsRelational() || _db.Database.CurrentTransaction is not null)
+            return await operation();
+
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            _db.ChangeTracker.Clear();
+            await using var transaction = await _db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                var result = await operation();
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                _db.ChangeTracker.Clear();
+                throw;
+            }
+        });
     }
 
     private async Task RecordEventAsync(PurchaseOrderReceipt receipt, string action, ProcurementControlEventResult result, string reason, string correlation, object values, CancellationToken cancellationToken)

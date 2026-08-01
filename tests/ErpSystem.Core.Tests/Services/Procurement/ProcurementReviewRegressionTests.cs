@@ -321,6 +321,72 @@ public sealed class ProcurementReviewRegressionTests
     }
 
     [Fact]
+    public void Receipt_supplier_and_resolution_events_share_their_state_transaction()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementReceiptInspectionService.cs");
+
+        foreach (var method in new[] { "AcknowledgeAsync", "ResolveAsync" })
+        {
+            var start = source.IndexOf(
+                $"public async Task<ProcurementReceiptInspectionDto> {method}",
+                StringComparison.Ordinal);
+            var nextMethod = source.IndexOf(
+                "public async Task<ProcurementReceiptInspectionDto>",
+                start + 1,
+                StringComparison.Ordinal);
+            var execute = source.IndexOf("await ExecuteAsync(async () =>", start,
+                StringComparison.Ordinal);
+            var save = source.IndexOf("await _unitOfWork.SaveChangesAsync", execute,
+                StringComparison.Ordinal);
+            var controlEvent = source.IndexOf("await RecordEventAsync", save,
+                StringComparison.Ordinal);
+
+            execute.Should().BeGreaterThan(start);
+            save.Should().BeGreaterThan(execute);
+            controlEvent.Should().BeGreaterThan(save);
+            controlEvent.Should().BeLessThan(nextMethod,
+                $"{method} must commit its lifecycle state and immutable event together");
+        }
+    }
+
+    [Fact]
+    public void Receipt_document_sign_and_cancel_use_atomic_state_event_scope()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services",
+            "PurchaseOrderReceiptDocumentService.cs");
+
+        source.Should().Contain("private async Task<T> ExecuteAtomicAsync<T>(");
+        source.Should().Contain("BeginTransactionAsync(");
+        source.Should().Contain("IsolationLevel.Serializable");
+        source.Should().Contain("await transaction.RollbackAsync(cancellationToken);");
+
+        foreach (var operation in new[] { "Sign", "Cancel" })
+        {
+            var wrapper = source.IndexOf(
+                $"public Task<ProcurementReceiptDocumentDto> {operation}Async",
+                StringComparison.Ordinal);
+            var core = source.IndexOf(
+                $"private async Task<ProcurementReceiptDocumentDto> {operation}CoreAsync",
+                wrapper,
+                StringComparison.Ordinal);
+            var atomicCall = source.IndexOf("ExecuteAtomicAsync(", wrapper,
+                StringComparison.Ordinal);
+            var save = source.IndexOf("await _db.SaveChangesAsync", core,
+                StringComparison.Ordinal);
+            var controlEvent = source.IndexOf("await RecordEventAsync", save,
+                StringComparison.Ordinal);
+
+            atomicCall.Should().BeGreaterThan(wrapper);
+            atomicCall.Should().BeLessThan(core);
+            controlEvent.Should().BeGreaterThan(save,
+                $"{operation} state and its control event must execute in one atomic delegate");
+        }
+    }
+
+    [Fact]
     public void Approved_match_exception_evidence_is_revalidated_when_consumed()
     {
         var invoice = ReadRepositoryFile(

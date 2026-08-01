@@ -11,6 +11,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -339,6 +340,50 @@ public sealed class ApPaymentPostingMigrationTests
         (await db.AuditLogs.CountAsync(item => item.Action == FinanceAuditEvents.ApPaymentReversed)).Should().Be(1);
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task ReversedAllocation_ShouldBlockManualPaymentAuthorization()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(
+            db,
+            tenantId,
+            payment => payment.Status = VendorPaymentStatus.Draft);
+        var (service, _) = CreateService(db, tenantId);
+        await service.ReverseAllocationAsync(fixture.Allocation.Id, "replace incorrect allocation");
+
+        var submit = () => service.SubmitForAuthorizationAsync(fixture.Payment.Id);
+
+        var error = await submit.Should().ThrowAsync<VendorPaymentControlException>();
+        error.Which.Code.Should().Be("AP_PAYMENT_ALLOCATION_TOTAL_MISMATCH");
+        (await db.Set<VendorPayment>().SingleAsync(item => item.Id == fixture.Payment.Id))
+            .Status.Should().Be(VendorPaymentStatus.Draft);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task ReversedAllocation_ShouldNotPostOrSettleItsOriginalInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        await service.ReverseAllocationAsync(fixture.Allocation.Id, "allocation withdrawn");
+
+        var post = () => service.PostAsync(fixture.Payment.Id);
+
+        var error = await post.Should().ThrowAsync<VendorPaymentControlException>();
+        error.Which.Code.Should().Be("AP_PAYMENT_ALLOCATION_TOTAL_MISMATCH");
+        (await db.Set<VendorInvoice>().SingleAsync(item => item.Id == fixture.Invoice.Id))
+            .PaidAmount.Should().Be(0m);
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorPayment" && item.SourceDocumentId == fixture.Payment.Id))
+            .Should().Be(0);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -441,6 +486,7 @@ public sealed class ApPaymentPostingMigrationTests
     {
         SeedTenant(db, tenantId);
         var period = SeedOpenPeriod(db, tenantId, periodIsOpen, periodIsClosed);
+        SeedCurrentOperationalPeriodWhenNeeded(db, tenantId, period);
         var apAccount = SeedAccount(db, tenantId, "2000", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var bankGlAccount = SeedAccount(db, tenantId, "1100", AccountType.Asset);
         var expenseAccount = SeedAccount(db, tenantId, "6000", AccountType.Expense);
@@ -545,6 +591,36 @@ public sealed class ApPaymentPostingMigrationTests
 
         db.FiscalPeriods.Add(period);
         return period;
+    }
+
+    private static void SeedCurrentOperationalPeriodWhenNeeded(
+        ApplicationDbContext db,
+        Guid tenantId,
+        FiscalPeriod seededPeriod)
+    {
+        var today = DateTime.UtcNow.Date;
+        if (today >= seededPeriod.StartDate.Date && today <= seededPeriod.EndDate.Date)
+            return;
+
+        var start = new DateTime(today.Year, today.Month, 1);
+        var end = start.AddMonths(1).AddDays(-1);
+        db.FiscalPeriods.Add(new FiscalPeriod
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearId = seededPeriod.FiscalYearId,
+            PeriodName = start.ToString("MMMM yyyy"),
+            PeriodCode = start.ToString("yyyy-MM"),
+            PeriodNumber = start.Month,
+            PeriodType = PeriodType.Monthly,
+            StartDate = start,
+            EndDate = end,
+            PeriodDays = (end - start).Days + 1,
+            PeriodStatus = seededPeriod.IsClosed ? "Closed" : seededPeriod.IsOpen ? "Open" : "Future",
+            IsOpen = seededPeriod.IsOpen,
+            IsClosed = seededPeriod.IsClosed,
+            IsLocked = seededPeriod.IsLocked
+        });
     }
 
     private static Account SeedAccount(

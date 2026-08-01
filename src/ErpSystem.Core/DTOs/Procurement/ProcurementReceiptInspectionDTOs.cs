@@ -149,6 +149,7 @@ public sealed class ProcurementReceiptInspectionOverviewDto
     public bool CanResolve { get; init; }
     public bool CanClose { get; init; }
     public IReadOnlyList<string> DecisionKeys { get; init; } = [];
+    public IReadOnlyList<string> EvidenceRequirementKeys { get; init; } = [];
     public ProcurementReceiptInspectionDto? Current { get; init; }
     public IReadOnlyList<ProcurementReceiptInspectionDto> History { get; init; } = [];
 }

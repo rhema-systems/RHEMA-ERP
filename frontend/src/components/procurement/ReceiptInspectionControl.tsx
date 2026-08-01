@@ -30,6 +30,13 @@ type LineDraft = {
   quarantineLocationId: string;
 };
 
+type EvidenceDraft = {
+  requirementKey: string;
+  evidenceKind: ProcurementReceiptInspectionEvidenceKind;
+  evidenceId: string;
+  evidenceReference: string;
+};
+
 type Props = {
   receiptId: string;
   initialOverview?: ProcurementReceiptInspectionOverviewDto;
@@ -59,6 +66,23 @@ const requestKey = (prefix: string) =>
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'The request could not be completed.';
 
+export const buildReceiptInspectionEvidenceRequests = (
+  actionKey: string,
+  rows: EvidenceDraft[]
+): ProcurementReceiptInspectionEvidenceRequest[] => rows.map((row) => {
+  const id = row.evidenceId.trim();
+  if (!id || !row.evidenceReference.trim())
+    throw new Error(`Evidence ID and reference are required for ${row.requirementKey}.`);
+  return {
+    actionKey,
+    requirementKey: row.requirementKey,
+    referenceKind: row.evidenceKind,
+    workflowEvidenceDocumentId: row.evidenceKind === 0 ? id : undefined,
+    fileUploadRecordId: row.evidenceKind === 1 ? id : undefined,
+    evidenceReference: row.evidenceReference.trim(),
+  };
+});
+
 export function ReceiptInspectionControl({ receiptId, initialOverview, external = false, onChanged }: Props) {
   const [overview, setOverview] = useState<ProcurementReceiptInspectionOverviewDto | null>(initialOverview ?? null);
   const [loading, setLoading] = useState(!initialOverview);
@@ -68,10 +92,15 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
   const [comment, setComment] = useState('');
   const [reference, setReference] = useState('');
   const [resolutionKind, setResolutionKind] = useState<ProcurementReceiptResolutionKind>(1);
-  const [evidenceKind, setEvidenceKind] = useState<ProcurementReceiptInspectionEvidenceKind>(1);
-  const [evidenceId, setEvidenceId] = useState('');
-  const [evidenceReference, setEvidenceReference] = useState('');
-  const [requirementKey, setRequirementKey] = useState('INSPECTION_REPORT');
+  const [evidenceRows, setEvidenceRows] = useState<EvidenceDraft[]>(() =>
+    (initialOverview?.evidenceRequirementKeys?.length
+      ? initialOverview.evidenceRequirementKeys
+      : ['INSPECTION_REPORT']).map((requirementKey) => ({
+        requirementKey,
+        evidenceKind: 1,
+        evidenceId: '',
+        evidenceReference: '',
+      })));
 
   const current = overview?.current;
 
@@ -108,6 +137,23 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
       setResolutionKind(current.resolutionKind);
   }, [current]);
 
+  const evidenceRequirementKeys = useMemo(() => {
+    const configured = overview?.evidenceRequirementKeys ?? [];
+    return configured.length > 0 ? configured : ['INSPECTION_REPORT'];
+  }, [overview?.evidenceRequirementKeys]);
+
+  useEffect(() => {
+    setEvidenceRows((existing) => evidenceRequirementKeys.map((requirementKey) => {
+      const currentRow = existing.find((row) => row.requirementKey === requirementKey);
+      return currentRow ?? {
+        requirementKey,
+        evidenceKind: 1,
+        evidenceId: '',
+        evidenceReference: '',
+      };
+    }));
+  }, [evidenceRequirementKeys]);
+
   const totals = useMemo(() => lines.reduce(
     (value, line) => ({
       accepted: value.accepted + (Number(line.acceptedQuantity) || 0),
@@ -116,19 +162,8 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
     { accepted: 0, rejected: 0 }
   ), [lines]);
 
-  const controlledEvidence = (actionKey: string): ProcurementReceiptInspectionEvidenceRequest[] => {
-    const id = evidenceId.trim();
-    if (!id || !evidenceReference.trim() || !requirementKey.trim())
-      throw new Error('Evidence ID, evidence reference, and requirement key are required.');
-    return [{
-      actionKey,
-      requirementKey: requirementKey.trim(),
-      referenceKind: evidenceKind,
-      workflowEvidenceDocumentId: evidenceKind === 0 ? id : undefined,
-      fileUploadRecordId: evidenceKind === 1 ? id : undefined,
-      evidenceReference: evidenceReference.trim(),
-    }];
-  };
+  const controlledEvidence = (actionKey: string) =>
+    buildReceiptInspectionEvidenceRequests(actionKey, evidenceRows);
 
   const run = async (work: () => Promise<unknown>, success: string) => {
     try {
@@ -137,8 +172,11 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
       toast.success(success);
       setComment('');
       setReference('');
-      setEvidenceId('');
-      setEvidenceReference('');
+      setEvidenceRows((rows) => rows.map((row) => ({
+        ...row,
+        evidenceId: '',
+        evidenceReference: '',
+      })));
       await load();
       onChanged?.();
     } catch (operationError) {
@@ -234,12 +272,16 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
       </Card>}
 
       {(overview.canSubmit || overview.canAcknowledge || overview.canResolve || overview.canClose) && <Card>
-        <CardHeader><CardTitle className="text-base">Controlled evidence</CardTitle><CardDescription>Reference an already-retained workflow evidence document or malware-clean central DMS upload.</CardDescription></CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-          <div><Label>Evidence source</Label><Select value={String(evidenceKind)} onValueChange={(value) => setEvidenceKind(Number(value) as ProcurementReceiptInspectionEvidenceKind)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="1">Central DMS upload</SelectItem><SelectItem value="0">Workflow evidence</SelectItem></SelectContent></Select></div>
-          <div><Label>{evidenceKind === 1 ? 'File upload record ID' : 'Workflow evidence ID'}</Label><Input value={evidenceId} onChange={(event) => setEvidenceId(event.target.value)} /></div>
-          <div><Label>Requirement key</Label><Input value={requirementKey} onChange={(event) => setRequirementKey(event.target.value)} /></div>
-          <div><Label>Evidence reference</Label><Input value={evidenceReference} onChange={(event) => setEvidenceReference(event.target.value)} /></div>
+        <CardHeader><CardTitle className="text-base">Controlled evidence</CardTitle><CardDescription>Complete every DEC-013 requirement with an already-retained workflow evidence document or malware-clean central DMS upload.</CardDescription></CardHeader>
+        <CardContent className="space-y-4">
+          {evidenceRows.map((row, index) => <div key={row.requirementKey} className="rounded-lg border p-3">
+            <div className="mb-3 flex items-center justify-between gap-2"><Label>{row.requirementKey}</Label><Badge variant="outline">Required by DEC-013</Badge></div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div><Label>Evidence source</Label><Select value={String(row.evidenceKind)} onValueChange={(value) => setEvidenceRows((rows) => rows.map((item, rowIndex) => rowIndex === index ? { ...item, evidenceKind: Number(value) as ProcurementReceiptInspectionEvidenceKind, evidenceId: '' } : item))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="1">Central DMS upload</SelectItem><SelectItem value="0">Workflow evidence</SelectItem></SelectContent></Select></div>
+              <div><Label>{row.evidenceKind === 1 ? 'File upload record ID' : 'Workflow evidence ID'}</Label><Input value={row.evidenceId} onChange={(event) => setEvidenceRows((rows) => rows.map((item, rowIndex) => rowIndex === index ? { ...item, evidenceId: event.target.value } : item))} /></div>
+              <div><Label>Evidence reference</Label><Input value={row.evidenceReference} onChange={(event) => setEvidenceRows((rows) => rows.map((item, rowIndex) => rowIndex === index ? { ...item, evidenceReference: event.target.value } : item))} /></div>
+            </div>
+          </div>)}
         </CardContent>
       </Card>}
 
@@ -252,7 +294,7 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
           <div className="flex flex-wrap gap-2">
             {overview.canSubmit && <Button disabled={busy || !comment.trim()} onClick={() => void run(() => purchasingService.submitReceiptInspection(current.id, { comment: comment.trim(), rowVersion: current.rowVersion, evidence: controlledEvidence('SubmitReceiptInspection') }), 'Inspection submitted for independent approval.')}>Submit</Button>}
             {overview.canDecide && <><Button disabled={busy || !comment.trim()} onClick={() => void run(() => purchasingService.decideReceiptInspection(current.id, { approved: true, comment: comment.trim(), rowVersion: current.rowVersion }), 'Inspection approved and accepted stock posted.')}>Approve</Button><Button variant="destructive" disabled={busy || !comment.trim()} onClick={() => void run(() => purchasingService.decideReceiptInspection(current.id, { approved: false, comment: comment.trim(), rowVersion: current.rowVersion }), 'Inspection rejected by workflow.')}>Reject</Button></>}
-            {overview.canAcknowledge && <><Button disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.acknowledgeReceiptInspection(current.id, { acknowledged: true, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('supplier-ack'), rowVersion: current.rowVersion, evidence: controlledEvidence('SupplierAcknowledgement') }), 'Rejection note acknowledged.')}>Acknowledge rejection</Button><Button variant="destructive" disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.acknowledgeReceiptInspection(current.id, { acknowledged: false, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('supplier-dispute'), rowVersion: current.rowVersion, evidence: evidenceId.trim() ? controlledEvidence('SupplierDispute') : [] }), 'Rejection note disputed.')}>Dispute</Button></>}
+            {overview.canAcknowledge && <><Button disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.acknowledgeReceiptInspection(current.id, { acknowledged: true, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('supplier-ack'), rowVersion: current.rowVersion, evidence: controlledEvidence('SupplierAcknowledgement') }), 'Rejection note acknowledged.')}>Acknowledge rejection</Button><Button variant="destructive" disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.acknowledgeReceiptInspection(current.id, { acknowledged: false, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('supplier-dispute'), rowVersion: current.rowVersion, evidence: evidenceRows.some((row) => row.evidenceId.trim()) ? controlledEvidence('SupplierDispute') : [] }), 'Rejection note disputed.')}>Dispute</Button></>}
             {overview.canResolve && <Button disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.resolveReceiptInspection(current.id, { resolutionKind, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('receipt-resolution'), rowVersion: current.rowVersion, evidence: controlledEvidence('ResolutionEvidence') }), 'Return or replacement progression recorded.')}>Progress {resolutionKind === 1 ? 'return' : 'replacement'}</Button>}
             {overview.canClose && <Button disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.closeReceiptInspection(current.id, { resolutionKind: current.resolutionKind, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('receipt-closure'), rowVersion: current.rowVersion, evidence: controlledEvidence('ClosureEvidence') }), 'Inspection and quality hold closed.')}>Close case</Button>}
             {busy && <Loader2 className="h-5 w-5 animate-spin self-center" />}
