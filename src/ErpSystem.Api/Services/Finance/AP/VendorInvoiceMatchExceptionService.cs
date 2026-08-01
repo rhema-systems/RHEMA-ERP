@@ -208,6 +208,13 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
                 throw Conflict(
                     "AP_MATCH_EXCEPTION_IDEMPOTENCY_MISMATCH",
                     "The idempotency key is already bound to a different vendor invoice.");
+            if (!string.Equals(
+                    RequestFingerprint(invoiceId, request),
+                    RequestFingerprint(duplicate),
+                    StringComparison.Ordinal))
+                throw Conflict(
+                    "AP_MATCH_EXCEPTION_IDEMPOTENCY_PAYLOAD_MISMATCH",
+                    "The idempotency key is already bound to a different match-exception request payload.");
 
             return Map(duplicate, now);
         }
@@ -990,6 +997,64 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
                 .Select(value => new { value.RequirementKey, value.EvidenceHash }),
             Variances = item.Variances.OrderBy(value => value.Id)
                 .Select(value => new { value.VarianceType, value.ActualValue, value.ExpectedValue, value.VariancePercentage })
+        });
+
+    private static string RequestFingerprint(
+        Guid vendorInvoiceId,
+        CreateVendorInvoiceMatchExceptionDto request) =>
+        VendorInvoiceMatchExceptionRules.Hash(new
+        {
+            VendorInvoiceId = vendorInvoiceId,
+            RootCauseCategory = request.RootCauseCategory.Trim(),
+            RootCauseDescription = request.RootCauseDescription.Trim(),
+            Justification = request.Justification.Trim(),
+            CorrectiveAction = request.CorrectiveAction.Trim(),
+            request.CorrectiveActionOwnerId,
+            CorrectiveActionDueAtUtc = EnsureUtc(request.CorrectiveActionDueAtUtc),
+            ExpiresAtUtc = EnsureUtc(request.ExpiresAtUtc),
+            Evidence = request.Evidence
+                .Select(item => new
+                {
+                    RequirementKey = item.RequirementKey.Trim().ToUpperInvariant(),
+                    item.ReferenceKind,
+                    item.WorkflowEvidenceDocumentId,
+                    item.FileUploadRecordId,
+                    EvidenceReference = item.EvidenceReference.Trim()
+                })
+                .OrderBy(item => item.RequirementKey, StringComparer.Ordinal)
+                .ThenBy(item => item.ReferenceKind)
+                .ThenBy(item => item.WorkflowEvidenceDocumentId)
+                .ThenBy(item => item.FileUploadRecordId)
+                .ThenBy(item => item.EvidenceReference, StringComparer.Ordinal)
+                .ToArray()
+        });
+
+    private static string RequestFingerprint(VendorInvoiceMatchException item) =>
+        VendorInvoiceMatchExceptionRules.Hash(new
+        {
+            VendorInvoiceId = item.VendorInvoiceId,
+            RootCauseCategory = item.RootCauseCategory.Trim(),
+            RootCauseDescription = item.RootCauseDescription.Trim(),
+            Justification = item.Justification.Trim(),
+            CorrectiveAction = item.CorrectiveAction.Trim(),
+            item.CorrectiveActionOwnerId,
+            CorrectiveActionDueAtUtc = EnsureUtc(item.CorrectiveActionDueAtUtc),
+            ExpiresAtUtc = EnsureUtc(item.ExpiresAtUtc),
+            Evidence = item.Evidence
+                .Select(evidence => new
+                {
+                    RequirementKey = evidence.RequirementKey.Trim().ToUpperInvariant(),
+                    evidence.ReferenceKind,
+                    evidence.WorkflowEvidenceDocumentId,
+                    evidence.FileUploadRecordId,
+                    EvidenceReference = evidence.EvidenceReference.Trim()
+                })
+                .OrderBy(evidence => evidence.RequirementKey, StringComparer.Ordinal)
+                .ThenBy(evidence => evidence.ReferenceKind)
+                .ThenBy(evidence => evidence.WorkflowEvidenceDocumentId)
+                .ThenBy(evidence => evidence.FileUploadRecordId)
+                .ThenBy(evidence => evidence.EvidenceReference, StringComparer.Ordinal)
+                .ToArray()
         });
 
     private static string Normalize(string? value, int maximum)

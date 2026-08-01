@@ -22,6 +22,9 @@ public sealed class ProcurementReceiptInspectionCase : TenantEntity
     public ProcurementReceiptSupplierAcknowledgementStatus SupplierAcknowledgementStatus { get; set; }
     public ProcurementReceiptResolutionKind ResolutionKind { get; set; }
     public ProcurementReceiptResolutionStatus ResolutionStatus { get; set; }
+    public Guid? ReplacementPurchaseOrderReceiptId { get; set; }
+    public Guid? ReplacementInspectionCaseId { get; set; }
+    public DateTime? ReplacementLinkedAtUtc { get; set; }
     public decimal StockEligibleQuantity { get; set; }
     public decimal StockPostedQuantity { get; set; }
     public DateTime? StockPostedAtUtc { get; set; }
@@ -51,6 +54,8 @@ public sealed class ProcurementReceiptInspectionCase : TenantEntity
     [Timestamp] public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public PurchaseOrderReceipt PurchaseOrderReceipt { get; set; } = null!;
+    public PurchaseOrderReceipt? ReplacementPurchaseOrderReceipt { get; set; }
+    public ProcurementReceiptInspectionCase? ReplacementInspectionCase { get; set; }
     public WorkflowDefinition WorkflowDefinition { get; set; } = null!;
     public WorkflowInstance? WorkflowInstance { get; set; }
     public ICollection<ProcurementReceiptInspectionLine> Lines { get; set; } =

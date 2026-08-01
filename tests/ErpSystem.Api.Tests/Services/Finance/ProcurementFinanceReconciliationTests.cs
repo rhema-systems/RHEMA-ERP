@@ -15,6 +15,8 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Xunit;
 using ErpSystem.Shared;
@@ -513,6 +515,89 @@ public sealed class ProcurementFinanceReconciliationTests
         row.RetentionHeldAmount.Should().Be(10m);
         row.RetentionReleasedAmount.Should().Be(0m);
     }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldUseCommercialSnapshotBeforeLaterPoAmendment()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        await db.SaveChangesAsync();
+        var line = fixture.PurchaseOrder.Items.Single();
+        var beforeSnapshot = JsonSerializer.Serialize(new
+        {
+            fixture.PurchaseOrder.SourceRequisitionId,
+            Currency = "GHS",
+            TotalAmount = 100m,
+            Items = new[]
+            {
+                new { PurchaseOrderItemId = (Guid?)line.Id, UnitPrice = 10m }
+            }
+        });
+        var proposedSnapshot = JsonSerializer.Serialize(new
+        {
+            fixture.PurchaseOrder.SourceRequisitionId,
+            Currency = "GHS",
+            TotalAmount = 200m,
+            Items = new[]
+            {
+                new { PurchaseOrderItemId = (Guid?)line.Id, UnitPrice = 20m }
+            }
+        });
+        db.ProcurementPurchaseOrderAmendments.Add(
+            new ProcurementPurchaseOrderAmendment
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                PurchaseOrderId = fixture.PurchaseOrder.Id,
+                AmendmentNumber = "POA-0508-001",
+                AmendmentSequence = 1,
+                BaseRevisionNumber = 0,
+                ProposedRevisionNumber = 1,
+                Status = ProcurementPurchaseOrderAmendmentStatus.Applied,
+                Reason = "Price amendment after reporting cutoff",
+                ChangeScope = "Commercial",
+                BeforeSnapshotJson = beforeSnapshot,
+                BeforeIntegrityHash = Hash(beforeSnapshot),
+                ProposedSnapshotJson = proposedSnapshot,
+                ProposedIntegrityHash = Hash(proposedSnapshot),
+                DiffJson = "[]",
+                DiffIntegrityHash = Hash("[]"),
+                ProposedSourceReference = "TEST-SOURCE",
+                Currency = "GHS",
+                BeforeTotalAmount = 100m,
+                ProposedTotalAmount = 200m,
+                CommitmentDelta = 100m,
+                AppliedAtUtc = new DateTime(2026, 9, 2),
+                IdempotencyKey = "po-amendment-after-cutoff",
+                CorrelationId = "po-amendment-after-cutoff",
+                CreatedAt = new DateTime(2026, 9, 1)
+            });
+        fixture.PurchaseOrder.TotalAmount = 200m;
+        fixture.PurchaseOrder.SubTotal = 200m;
+        fixture.PurchaseOrder.RevisionNumber = 1;
+        fixture.PurchaseOrder.UpdatedAt = new DateTime(2026, 9, 2);
+        line.UnitPrice = 20m;
+        line.LineTotal = 200m;
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        var row = report.Rows.Single();
+        row.PurchaseOrderAmount.Should().Be(100m);
+        row.AcceptedReceiptAmount.Should().Be(100m);
+        row.CommitmentGroupOrderAmount.Should().Be(100m);
+        row.Issues.Should().NotContain(item =>
+            item.Code == "RECEIPT_EXCEEDS_ORDER" ||
+            item.Code == "COMMITMENT_ORDER_VARIANCE");
+    }
+
+    private static string Hash(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
+            .ToLowerInvariant();
 
     private static ApReportsService CreateService(ApplicationDbContext db, Guid tenantId)
     {

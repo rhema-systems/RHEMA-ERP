@@ -125,6 +125,9 @@ public sealed class ProcurementReceiptInspectionDto
     public ProcurementReceiptSupplierAcknowledgementStatus SupplierAcknowledgementStatus { get; init; }
     public ProcurementReceiptResolutionKind ResolutionKind { get; init; }
     public ProcurementReceiptResolutionStatus ResolutionStatus { get; init; }
+    public Guid? ReplacementPurchaseOrderReceiptId { get; init; }
+    public Guid? ReplacementInspectionCaseId { get; init; }
+    public DateTime? ReplacementLinkedAtUtc { get; init; }
     public decimal StockEligibleQuantity { get; init; }
     public decimal StockPostedQuantity { get; init; }
     public decimal ApEligibleQuantity { get; init; }

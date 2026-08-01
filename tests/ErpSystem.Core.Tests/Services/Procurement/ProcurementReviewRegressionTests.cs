@@ -272,6 +272,12 @@ public sealed class ProcurementReviewRegressionTests
         source.Should().Contain("acceptedByPurchaseOrderItem");
         source.Should().Contain(
             "every rejected purchase-order line");
+        source.Should().Contain("replacementRequestedAt");
+        source.Should().Contain("replacement.CreatedAt < replacementRequestedAt.Value");
+        source.Should().Contain("tdc0502-replacement:");
+        source.Should().Contain("RCV_REPLACEMENT_ALREADY_ALLOCATED");
+        source.Should().Contain("original.ReplacementPurchaseOrderReceiptId = replacement.Id");
+        source.Should().Contain("original.ReplacementInspectionCaseId = acceptedCaseId.Value");
     }
 
     [Fact]
@@ -592,6 +598,41 @@ public sealed class ProcurementReviewRegressionTests
         source.Should().Contain("RCV_IDEMPOTENCY_PAYLOAD_MISMATCH");
         source.Should().Contain("stored.ReceivedQuantity != requested.ReceivedQuantity");
         source.Should().Contain("stored.LocationId != requested.LocationId");
+    }
+
+    [Fact]
+    public void Grn_and_match_exception_replays_are_bound_to_complete_payloads()
+    {
+        var grn = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Inventory",
+            "GoodsReceiptNoteService.cs");
+        var exception = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorInvoiceMatchExceptionService.cs");
+
+        grn.Should().Contain("BuildIdempotencyRequestHash");
+        grn.Should().Contain("existing.IdempotencyRequestHash");
+        grn.Should().Contain("RCV_IDEMPOTENCY_PAYLOAD_MISMATCH");
+        grn.Should().Contain("item.StorageLocationId");
+        exception.Should().Contain("RequestFingerprint(invoiceId, request)");
+        exception.Should().Contain("RequestFingerprint(duplicate)");
+        exception.Should().Contain("AP_MATCH_EXCEPTION_IDEMPOTENCY_PAYLOAD_MISMATCH");
+        exception.Should().Contain("EvidenceReference = item.EvidenceReference.Trim()");
+    }
+
+    [Fact]
+    public void Historical_reconciliation_uses_applied_po_amendment_commercial_snapshots()
+    {
+        var report = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "ApReportsService.cs");
+
+        report.Should().Contain("ResolvePurchaseOrderCommercialStateAsOf");
+        report.Should().Contain("effectiveAmendment.BeforeSnapshotJson");
+        report.Should().Contain("effectiveAmendment.ProposedSnapshotJson");
+        report.Should().Contain("commercialState.ItemUnitPrices");
+        report.Should().Contain("PurchaseOrderAmount = RoundMoney(commercialState.TotalAmount)");
+        report.Should().Contain("HashJson(snapshotJson)");
     }
 
     [Fact]

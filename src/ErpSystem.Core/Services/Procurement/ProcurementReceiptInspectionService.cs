@@ -1226,6 +1226,31 @@ public sealed class ProcurementReceiptInspectionService :
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
             ?? throw Validation("RCV_REPLACEMENT_RECEIPT_NOT_FOUND",
                 "The replacement reference must identify another governed receipt for the same purchase order.");
+        var replacementRequestedAt = original.Actions
+            .Where(item => !item.IsDeleted &&
+                           item.ActionType == ProcurementReceiptInspectionActionType.ReplacementRequested)
+            .OrderByDescending(item => item.Sequence)
+            .Select(item => (DateTime?)item.OccurredAtUtc)
+            .FirstOrDefault();
+        if (!replacementRequestedAt.HasValue ||
+            replacement.CreatedAt < replacementRequestedAt.Value)
+            throw Conflict("RCV_REPLACEMENT_LINEAGE_INVALID",
+                "The replacement receipt must be created after this rejection's controlled replacement request.");
+
+        await _unitOfWork.AcquireTransactionLockAsync(
+            $"tdc0502-replacement:{_currentUser.TenantId:N}:{replacement.Id:N}",
+            cancellationToken);
+        var alreadyConsumed = await Cases.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id != original.Id &&
+                item.ReplacementPurchaseOrderReceiptId == replacement.Id)
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .AnyAsync(cancellationToken);
+        if (alreadyConsumed)
+            throw Conflict("RCV_REPLACEMENT_ALREADY_ALLOCATED",
+                "The replacement receipt is already bound to another rejected inspection.");
+
         var acceptedCaseId = await Cases.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.PurchaseOrderReceiptId == replacement.Id && !item.IsDeleted &&
@@ -1261,6 +1286,10 @@ public sealed class ProcurementReceiptInspectionService :
         if (insufficientLines.Count > 0)
             throw Conflict("RCV_REPLACEMENT_NOT_ACCEPTED",
                 "The replacement receipt must accept sufficient quantity for every rejected purchase-order line.");
+
+        original.ReplacementPurchaseOrderReceiptId = replacement.Id;
+        original.ReplacementInspectionCaseId = acceptedCaseId.Value;
+        original.ReplacementLinkedAtUtc = DateTime.UtcNow;
     }
 
     private async Task EnsureQuarantineLocationAsync(
@@ -1957,6 +1986,9 @@ public sealed class ProcurementReceiptInspectionService :
         SupplierAcknowledgementStatus = item.SupplierAcknowledgementStatus,
         ResolutionKind = item.ResolutionKind,
         ResolutionStatus = item.ResolutionStatus,
+        ReplacementPurchaseOrderReceiptId = item.ReplacementPurchaseOrderReceiptId,
+        ReplacementInspectionCaseId = item.ReplacementInspectionCaseId,
+        ReplacementLinkedAtUtc = item.ReplacementLinkedAtUtc,
         StockEligibleQuantity = item.StockEligibleQuantity,
         StockPostedQuantity = item.StockPostedQuantity,
         ApEligibleQuantity = item.ApEligibleQuantity,
@@ -2024,6 +2056,9 @@ public sealed class ProcurementReceiptInspectionService :
         item.SupplierAcknowledgementStatus,
         item.ResolutionKind,
         item.ResolutionStatus,
+        item.ReplacementPurchaseOrderReceiptId,
+        item.ReplacementInspectionCaseId,
+        item.ReplacementLinkedAtUtc,
         item.StockPostedQuantity,
         item.ApEligibleQuantity,
         item.ApBlockedQuantity,
@@ -2046,6 +2081,9 @@ public sealed class ProcurementReceiptInspectionService :
         item.SupplierAcknowledgementStatus,
         item.ResolutionKind,
         item.ResolutionStatus,
+        item.ReplacementPurchaseOrderReceiptId,
+        item.ReplacementInspectionCaseId,
+        item.ReplacementLinkedAtUtc,
         item.ConfigurationProfileId,
         item.ConfigurationProfileVersion,
         item.PolicySetId,

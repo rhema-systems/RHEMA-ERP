@@ -127,17 +127,49 @@ public sealed class VendorInvoiceMatchExceptionServiceTests
         var invoice = fixture.NewInvoice();
         var purchaseOrder = fixture.NewPurchaseOrder();
         invoice.PurchaseOrderId = purchaseOrder.Id;
-        var existing = fixture.NewException(invoice, purchaseOrder, "replay-key");
+        var request = ValidRequest("replay-key");
+        var existing = fixture.NewException(invoice, purchaseOrder, request);
         fixture.Context.AddRange(purchaseOrder, invoice, existing);
         await fixture.Context.SaveChangesAsync();
 
         var replay = await fixture.Service.RequestAsync(
             invoice.Id,
-            ValidRequest("replay-key"),
+            request,
             "correlation-replay");
 
         replay.Id.Should().Be(existing.Id);
         replay.VendorInvoiceId.Should().Be(invoice.Id);
+    }
+
+    [Fact]
+    public async Task IdempotencyReplayForSameInvoiceRejectsChangedRequestPayload()
+    {
+        await using var fixture = new Fixture(canManage: true);
+        var invoice = fixture.NewInvoice();
+        var purchaseOrder = fixture.NewPurchaseOrder();
+        invoice.PurchaseOrderId = purchaseOrder.Id;
+        var original = ValidRequest("same-invoice-changed-payload");
+        fixture.Context.AddRange(
+            purchaseOrder,
+            invoice,
+            fixture.NewException(invoice, purchaseOrder, original));
+        await fixture.Context.SaveChangesAsync();
+        var replay = ValidRequest(original.IdempotencyKey);
+        replay.CorrectiveActionOwnerId = original.CorrectiveActionOwnerId;
+        replay.CorrectiveActionDueAtUtc = original.CorrectiveActionDueAtUtc;
+        replay.ExpiresAtUtc = original.ExpiresAtUtc;
+        replay.Justification = "Changed justification that was never submitted.";
+
+        var action = () => fixture.Service.RequestAsync(
+            invoice.Id,
+            replay,
+            "correlation-changed-payload");
+
+        var exception = await action.Should()
+            .ThrowAsync<VendorInvoiceMatchExceptionControlException>();
+        exception.Which.Code.Should().Be(
+            "AP_MATCH_EXCEPTION_IDEMPOTENCY_PAYLOAD_MISMATCH");
+        exception.Which.StatusCode.Should().Be(StatusCodes.Status409Conflict);
     }
 
     [Fact]
@@ -298,7 +330,13 @@ public sealed class VendorInvoiceMatchExceptionServiceTests
         public VendorInvoiceMatchException NewException(
             VendorInvoice invoice,
             PurchaseOrder purchaseOrder,
-            string idempotencyKey) => new()
+            string idempotencyKey) =>
+            NewException(invoice, purchaseOrder, ValidRequest(idempotencyKey));
+
+        public VendorInvoiceMatchException NewException(
+            VendorInvoice invoice,
+            PurchaseOrder purchaseOrder,
+            CreateVendorInvoiceMatchExceptionDto request) => new()
         {
             Id = Guid.NewGuid(),
             TenantId = TenantId,
@@ -309,19 +347,19 @@ public sealed class VendorInvoiceMatchExceptionServiceTests
             Sequence = 1,
             Status = VendorInvoiceMatchExceptionStatus.Rejected,
             VarianceType = "Price",
-            RootCauseCategory = "Supplier pricing",
-            RootCauseDescription = "Existing controlled exception.",
-            Justification = "Existing controlled exception.",
-            CorrectiveAction = "Reconcile supplier price.",
-            CorrectiveActionOwnerId = UserId,
+            RootCauseCategory = request.RootCauseCategory,
+            RootCauseDescription = request.RootCauseDescription,
+            Justification = request.Justification,
+            CorrectiveAction = request.CorrectiveAction,
+            CorrectiveActionOwnerId = request.CorrectiveActionOwnerId,
             CorrectiveActionOwnerName = "AP test user",
-            CorrectiveActionDueAtUtc = DateTime.UtcNow.AddDays(2),
-            ExpiresAtUtc = DateTime.UtcNow.AddDays(5),
+            CorrectiveActionDueAtUtc = request.CorrectiveActionDueAtUtc,
+            ExpiresAtUtc = request.ExpiresAtUtc,
             InvoiceSnapshotHash = new string('a', 64),
             RequestedById = UserId,
             RequestedByName = "AP test user",
             RequestedAtUtc = DateTime.UtcNow,
-            IdempotencyKey = idempotencyKey,
+            IdempotencyKey = request.IdempotencyKey,
             CorrelationId = "existing-correlation",
             IntegrityHash = new string('b', 64),
             CreatedAt = DateTime.UtcNow

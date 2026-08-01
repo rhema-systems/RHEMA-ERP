@@ -29363,6 +29363,10 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("IdempotencyRequestHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<Guid?>("InspectedById")
                         .HasColumnType("uniqueidentifier");
 
@@ -29507,6 +29511,10 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("GoodsReceiptNotes", null, t =>
                         {
                             t.HasTrigger("TR_GoodsReceiptNotes_GovernedSource");
+
+                            t.HasTrigger("TR_TDC0501_GoodsReceiptIdempotencyFingerprint");
+
+                            t.HasCheckConstraint("CK_GoodsReceiptNotes_IdempotencyRequestHash", "[IdempotencyRequestHash] IS NULL OR LEN([IdempotencyRequestHash]) = 64");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -59833,6 +59841,15 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<Guid?>("ReplacementInspectionCaseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ReplacementLinkedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReplacementPurchaseOrderReceiptId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("ResolutionKind")
                         .HasColumnType("int");
 
@@ -59897,6 +59914,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("PurchaseOrderReceiptId");
 
+                    b.HasIndex("ReplacementInspectionCaseId");
+
+                    b.HasIndex("ReplacementPurchaseOrderReceiptId");
+
                     b.HasIndex("WorkflowDefinitionId");
 
                     b.HasIndex("WorkflowInstanceId");
@@ -59909,13 +59930,21 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "PurchaseOrderReceiptId", "Status");
 
+                    b.HasIndex("TenantId", "ReplacementPurchaseOrderReceiptId")
+                        .IsUnique()
+                        .HasFilter("[ReplacementPurchaseOrderReceiptId] IS NOT NULL");
+
                     b.ToTable("ProcurementReceiptInspectionCases", null, t =>
                         {
                             t.HasTrigger("TR_ProcurementReceiptInspectionCases_TDC0502Protected");
 
+                            t.HasTrigger("TR_TDC0502_ReceiptReplacementLineage");
+
                             t.HasCheckConstraint("CK_ProcurementReceiptInspectionCases_Hashes", "LEN([SourceSnapshotHash]) = 64 AND LEN([IntegrityHash]) = 64 AND ISJSON([SourceSnapshotJson]) = 1 AND ISJSON([DecisionSnapshotJson]) = 1");
 
                             t.HasCheckConstraint("CK_ProcurementReceiptInspectionCases_Quantities", "[ReceivedQuantity] > 0 AND [AcceptedQuantity] >= 0 AND [RejectedQuantity] >= 0 AND [PendingQuantity] >= 0 AND [AcceptedQuantity] + [RejectedQuantity] + [PendingQuantity] = [ReceivedQuantity] AND [StockEligibleQuantity] >= 0 AND [StockPostedQuantity] >= 0 AND [StockPostedQuantity] <= [StockEligibleQuantity] AND [ApEligibleQuantity] >= 0 AND [ApBlockedQuantity] >= 0");
+
+                            t.HasCheckConstraint("CK_ProcurementReceiptInspectionCases_ReplacementLineage", "([ReplacementPurchaseOrderReceiptId] IS NULL AND [ReplacementInspectionCaseId] IS NULL AND [ReplacementLinkedAtUtc] IS NULL) OR ([ReplacementPurchaseOrderReceiptId] IS NOT NULL AND [ReplacementInspectionCaseId] IS NOT NULL AND [ReplacementLinkedAtUtc] IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_ProcurementReceiptInspectionCases_Status", "[Status] BETWEEN 0 AND 10");
                         });
@@ -102589,6 +102618,16 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementReceiptInspectionCase", "ReplacementInspectionCase")
+                        .WithMany()
+                        .HasForeignKey("ReplacementInspectionCaseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.PurchaseOrderReceipt", "ReplacementPurchaseOrderReceipt")
+                        .WithMany()
+                        .HasForeignKey("ReplacementPurchaseOrderReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Workflow.WorkflowDefinition", "WorkflowDefinition")
                         .WithMany()
                         .HasForeignKey("WorkflowDefinitionId")
@@ -102601,6 +102640,10 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("PurchaseOrderReceipt");
+
+                    b.Navigation("ReplacementInspectionCase");
+
+                    b.Navigation("ReplacementPurchaseOrderReceipt");
 
                     b.Navigation("Tenant");
 

@@ -1,6 +1,7 @@
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
@@ -194,6 +195,9 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                 purchaseOrder,
                 ProcurementPurchaseOrderSodRules.CreateGoodsReceiptNote,
                 correlationId);
+            var requestHash = BuildIdempotencyRequestHash(
+                dto,
+                purchaseOrder.BusinessPartnerId);
 
             var existing = await _unitOfWork.Repository<GoodsReceiptNote>()
                 .GetQueryable(item =>
@@ -205,6 +209,14 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                 .SingleOrDefaultAsync();
             if (existing != null)
             {
+                if (string.IsNullOrWhiteSpace(existing.IdempotencyRequestHash) ||
+                    !string.Equals(
+                        existing.IdempotencyRequestHash,
+                        requestHash,
+                        StringComparison.Ordinal))
+                    throw new ProcurementReceiptSourceValidationException(
+                        "RCV_IDEMPOTENCY_PAYLOAD_MISMATCH",
+                        "The idempotency key is already bound to a different goods-receipt payload.");
                 return MapToDto(existing);
             }
 
@@ -397,6 +409,7 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                 Notes = dto.Notes,
                 ReceivedById = _currentUser.UserId,
                 IdempotencyKey = idempotencyKey,
+                IdempotencyRequestHash = requestHash,
                 CorrelationId = correlationId,
                 ReceiptTolerancePercent =
                     sourceSnapshot.TolerancePercent,
@@ -603,6 +616,70 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
             .ToLowerInvariant();
         return $"grn:{hash}";
     }
+
+    internal static string BuildIdempotencyRequestHash(
+        CreateGoodsReceiptNoteDto request,
+        Guid effectiveSupplierId)
+    {
+        var canonical = new
+        {
+            PurchaseOrderId = request.PurchaseOrderId.GetValueOrDefault(),
+            request.WarehouseId,
+            SupplierId = request.SupplierId is { } supplierId && supplierId != Guid.Empty
+                ? supplierId
+                : effectiveSupplierId,
+            ReceivingLocationId = request.ReceivingLocationId == Guid.Empty
+                ? null
+                : request.ReceivingLocationId,
+            DeliveryNoteNumber = NormalizeReplayText(request.DeliveryNoteNumber),
+            VehicleNumber = NormalizeReplayText(request.VehicleNumber),
+            DriverName = NormalizeReplayText(request.DriverName),
+            request.RequiresInspection,
+            Notes = NormalizeReplayText(request.Notes),
+            Items = request.Items
+                .Select(item => new
+                {
+                    item.PurchaseOrderItemId,
+                    item.InventoryItemId,
+                    item.ReceivedQuantity,
+                    item.UnitCost,
+                    LotNumber = NormalizeReplayText(item.LotNumber),
+                    SerialNumber = NormalizeReplayText(item.SerialNumber),
+                    ExpiryDate = NormalizeReplayDate(item.ExpiryDate),
+                    StorageLocationId = item.StorageLocationId == Guid.Empty
+                        ? null
+                        : item.StorageLocationId,
+                    Notes = NormalizeReplayText(item.Notes)
+                })
+                .OrderBy(item => item.PurchaseOrderItemId)
+                .ThenBy(item => item.InventoryItemId)
+                .ThenBy(item => item.StorageLocationId)
+                .ThenBy(item => item.LotNumber, StringComparer.Ordinal)
+                .ThenBy(item => item.SerialNumber, StringComparer.Ordinal)
+                .ThenBy(item => item.ExpiryDate)
+                .ThenBy(item => item.ReceivedQuantity)
+                .ThenBy(item => item.UnitCost)
+                .ThenBy(item => item.Notes, StringComparer.Ordinal)
+                .ToArray()
+        };
+        var json = JsonSerializer.Serialize(canonical, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        });
+        return Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(json)))
+            .ToLowerInvariant();
+    }
+
+    private static string? NormalizeReplayText(string? value) => value;
+
+    private static DateTime? NormalizeReplayDate(DateTime? value) =>
+        value?.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Unspecified => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc),
+            _ => value?.ToUniversalTime()
+        };
 
     public async Task<bool> SubmitForInspectionAsync(Guid grnId, Guid userId)
     {

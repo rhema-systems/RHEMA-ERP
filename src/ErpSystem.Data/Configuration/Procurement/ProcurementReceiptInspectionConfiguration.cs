@@ -10,19 +10,31 @@ public sealed class ProcurementReceiptInspectionCaseConfiguration :
     public void Configure(EntityTypeBuilder<ProcurementReceiptInspectionCase> builder)
     {
         builder.ToTable("ProcurementReceiptInspectionCases", table =>
-            table.HasTrigger("TR_ProcurementReceiptInspectionCases_TDC0502Protected"));
+        {
+            table.HasTrigger("TR_ProcurementReceiptInspectionCases_TDC0502Protected");
+            table.HasTrigger("TR_TDC0502_ReceiptReplacementLineage");
+        });
         builder.HasKey(item => item.Id);
         builder.Property(item => item.RowVersion).IsRowVersion();
         builder.HasIndex(item => new { item.TenantId, item.PurchaseOrderReceiptId, item.Sequence }).IsUnique();
         builder.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
         builder.HasIndex(item => new { item.TenantId, item.PurchaseOrderReceiptId, item.Status });
+        builder.HasIndex(item => new { item.TenantId, item.ReplacementPurchaseOrderReceiptId })
+            .IsUnique()
+            .HasFilter("[ReplacementPurchaseOrderReceiptId] IS NOT NULL");
         builder.HasCheckConstraint("CK_ProcurementReceiptInspectionCases_Quantities",
             "[ReceivedQuantity] > 0 AND [AcceptedQuantity] >= 0 AND [RejectedQuantity] >= 0 AND [PendingQuantity] >= 0 AND [AcceptedQuantity] + [RejectedQuantity] + [PendingQuantity] = [ReceivedQuantity] AND [StockEligibleQuantity] >= 0 AND [StockPostedQuantity] >= 0 AND [StockPostedQuantity] <= [StockEligibleQuantity] AND [ApEligibleQuantity] >= 0 AND [ApBlockedQuantity] >= 0");
         builder.HasCheckConstraint("CK_ProcurementReceiptInspectionCases_Status", "[Status] BETWEEN 0 AND 10");
         builder.HasCheckConstraint("CK_ProcurementReceiptInspectionCases_Hashes",
             "LEN([SourceSnapshotHash]) = 64 AND LEN([IntegrityHash]) = 64 AND ISJSON([SourceSnapshotJson]) = 1 AND ISJSON([DecisionSnapshotJson]) = 1");
+        builder.HasCheckConstraint("CK_ProcurementReceiptInspectionCases_ReplacementLineage",
+            "([ReplacementPurchaseOrderReceiptId] IS NULL AND [ReplacementInspectionCaseId] IS NULL AND [ReplacementLinkedAtUtc] IS NULL) OR ([ReplacementPurchaseOrderReceiptId] IS NOT NULL AND [ReplacementInspectionCaseId] IS NOT NULL AND [ReplacementLinkedAtUtc] IS NOT NULL)");
         builder.HasOne(item => item.PurchaseOrderReceipt).WithMany()
             .HasForeignKey(item => item.PurchaseOrderReceiptId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(item => item.ReplacementPurchaseOrderReceipt).WithMany()
+            .HasForeignKey(item => item.ReplacementPurchaseOrderReceiptId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(item => item.ReplacementInspectionCase).WithMany()
+            .HasForeignKey(item => item.ReplacementInspectionCaseId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.WorkflowDefinition).WithMany()
             .HasForeignKey(item => item.WorkflowDefinitionId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.WorkflowInstance).WithMany()

@@ -230,6 +230,9 @@ public class GoodsReceiptNote : TenantEntity
     [MaxLength(100)]
     public string? IdempotencyKey { get; set; }
 
+    [MaxLength(64)]
+    public string? IdempotencyRequestHash { get; set; }
+
     [MaxLength(100)]
     public string? CorrelationId { get; set; }
 

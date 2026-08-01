@@ -10134,7 +10134,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<GoodsReceiptNote>(entity =>
         {
             entity.ToTable("GoodsReceiptNotes", table =>
-                table.HasTrigger("TR_GoodsReceiptNotes_GovernedSource"));
+            {
+                table.HasTrigger("TR_GoodsReceiptNotes_GovernedSource");
+                table.HasTrigger("TR_TDC0501_GoodsReceiptIdempotencyFingerprint");
+                table.HasCheckConstraint(
+                    "CK_GoodsReceiptNotes_IdempotencyRequestHash",
+                    "[IdempotencyRequestHash] IS NULL OR LEN([IdempotencyRequestHash]) = 64");
+            });
             entity.Property(item => item.RowVersion)
                 .IsRowVersion()
                 .IsConcurrencyToken()

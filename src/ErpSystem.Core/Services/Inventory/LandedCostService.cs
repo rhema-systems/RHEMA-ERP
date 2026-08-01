@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
@@ -418,6 +421,8 @@ public class LandedCostService : ILandedCostService
             Notes = string.IsNullOrWhiteSpace(receipt.Notes) ? $"Created from Procurement Receipt {receipt.ReceiptNumber}" : receipt.Notes,
             IdempotencyKey =
                 $"procurement-receipt:{receipt.Id:N}",
+            IdempotencyRequestHash =
+                BuildReceiptProjectionRequestHash(receipt, grnItems, warehouseId),
             CorrelationId = receipt.CorrelationId,
             ReceiptTolerancePercent =
                 receipt.ReceiptTolerancePercent,
@@ -468,6 +473,8 @@ public class LandedCostService : ILandedCostService
                 revive.Notes = createdGrn.Notes;
                 revive.IdempotencyKey =
                     createdGrn.IdempotencyKey;
+                revive.IdempotencyRequestHash =
+                    createdGrn.IdempotencyRequestHash;
                 revive.CorrelationId =
                     createdGrn.CorrelationId;
                 revive.ReceiptTolerancePercent =
@@ -553,6 +560,57 @@ public class LandedCostService : ILandedCostService
             }
         }
         return createdGrn;
+    }
+
+    private static string BuildReceiptProjectionRequestHash(
+        PurchaseOrderReceipt receipt,
+        IEnumerable<GoodsReceiptNoteItem> items,
+        Guid warehouseId)
+    {
+        var canonical = new
+        {
+            receipt.Id,
+            receipt.PurchaseOrderId,
+            warehouseId,
+            receipt.ReceiptDate,
+            receipt.DeliveryNote,
+            receipt.CarrierName,
+            receipt.TrackingNumber,
+            receipt.RequiresInspection,
+            receipt.Notes,
+            receipt.ReceiptSourceIntegrityHash,
+            Items = items
+                .OrderBy(item => item.PurchaseOrderItemId)
+                .ThenBy(item => item.InventoryItemId)
+                .ThenBy(item => item.StorageLocationId)
+                .ThenBy(item => item.LotNumber, StringComparer.Ordinal)
+                .ThenBy(item => item.SerialNumber, StringComparer.Ordinal)
+                .ThenBy(item => item.ExpiryDate)
+                .ThenBy(item => item.ReceivedQuantity)
+                .ThenBy(item => item.AcceptedQuantity)
+                .ThenBy(item => item.RejectedQuantity)
+                .ThenBy(item => item.UnitCost)
+                .ThenBy(item => item.Notes, StringComparer.Ordinal)
+                .Select(item => new
+                {
+                    item.PurchaseOrderItemId,
+                    item.InventoryItemId,
+                    item.ReceivedQuantity,
+                    item.AcceptedQuantity,
+                    item.RejectedQuantity,
+                    item.UnitCost,
+                    item.StorageLocationId,
+                    item.LotNumber,
+                    item.SerialNumber,
+                    item.ExpiryDate,
+                    item.Notes
+                })
+                .ToArray()
+        };
+        var json = JsonSerializer.Serialize(canonical);
+        return Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(json)))
+            .ToLowerInvariant();
     }
 
     private async Task<Guid> ResolveInventoryGrnIdAsync(Guid receiptOrGrnId)

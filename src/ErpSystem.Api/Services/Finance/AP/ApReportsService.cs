@@ -14,6 +14,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -30,6 +31,8 @@ namespace ErpSystem.Api.Services.Finance.AP
     {
         private static readonly JsonSerializerOptions BudgetCommitmentSnapshotJsonOptions =
             new(JsonSerializerDefaults.Web);
+        private static readonly JsonSerializerOptions PurchaseOrderSnapshotJsonOptions =
+            new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
 
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
@@ -383,6 +386,26 @@ namespace ErpSystem.Api.Services.Finance.AP
             var purchaseOrders = purchaseOrderCandidates
                 .Where(item => purchaseOrderStatesAsOf.ContainsKey(item.Id))
                 .ToList();
+            var operativePurchaseOrderIds = purchaseOrders.Select(item => item.Id).ToList();
+            var purchaseOrderAmendments = operativePurchaseOrderIds.Count == 0
+                ? new List<ProcurementPurchaseOrderAmendment>()
+                : await _unitOfWork.Repository<ProcurementPurchaseOrderAmendment>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        operativePurchaseOrderIds.Contains(item.PurchaseOrderId) &&
+                        item.Status == ProcurementPurchaseOrderAmendmentStatus.Applied &&
+                        item.AppliedAtUtc.HasValue &&
+                        !item.IsDeleted)
+                    .AsNoTracking()
+                    .OrderBy(item => item.AppliedAtUtc)
+                    .ThenBy(item => item.AmendmentSequence)
+                    .ToListAsync(cancellationToken);
+            var purchaseOrderCommercialStates = purchaseOrders.ToDictionary(
+                item => item.Id,
+                item => ResolvePurchaseOrderCommercialStateAsOf(
+                    item,
+                    purchaseOrderAmendments.Where(amendment => amendment.PurchaseOrderId == item.Id),
+                    cutoffExclusive));
 
             var selectedPurchaseOrders = purchaseOrderId.HasValue
                 ? purchaseOrders.Where(item => item.Id == purchaseOrderId.Value).ToList()
@@ -425,8 +448,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                     group => group.Key,
                     group => group.OrderByDescending(item => item.Sequence).First());
             var sourceRequisitionIds = selectedPurchaseOrders
-                .Where(item => item.SourceRequisitionId.HasValue)
-                .Select(item => item.SourceRequisitionId!.Value)
+                .Select(item => purchaseOrderCommercialStates[item.Id].SourceRequisitionId)
+                .Where(item => item.HasValue)
+                .Select(item => item!.Value)
                 .Distinct()
                 .ToList();
             var contractIds = selectedPurchaseOrders
@@ -592,7 +616,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             var rows = new List<ProcurementFinanceReconciliationRowDto>();
             foreach (var purchaseOrder in selectedPurchaseOrders)
             {
-                var currency = NormalizeCurrency(purchaseOrder.Currency, "GHS");
+                var commercialState = purchaseOrderCommercialStates[purchaseOrder.Id];
+                var currency = NormalizeCurrency(commercialState.Currency, "GHS");
                 var poInvoices = allInvoices
                     .Where(item => item.PurchaseOrderId == purchaseOrder.Id)
                     .ToList();
@@ -622,14 +647,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .ToList();
                 var activeInvoiceIds = activeInvoices.Select(item => item.Id).ToHashSet();
 
-                var commitmentGroupOrders = purchaseOrder.SourceRequisitionId.HasValue
-                    ? purchaseOrders.Where(item =>
-                        item.SourceRequisitionId == purchaseOrder.SourceRequisitionId &&
-                        NormalizeCurrency(item.Currency, currency) == currency).ToList()
-                    : new List<PurchaseOrder>();
-                var activeCommitments = purchaseOrder.SourceRequisitionId.HasValue
+                var commitmentGroupOrders = commercialState.SourceRequisitionId.HasValue
+                    ? purchaseOrders
+                        .Select(item => purchaseOrderCommercialStates[item.Id])
+                        .Where(item =>
+                            item.SourceRequisitionId == commercialState.SourceRequisitionId &&
+                            NormalizeCurrency(item.Currency, currency) == currency)
+                        .ToList()
+                    : new List<PurchaseOrderCommercialState>();
+                var activeCommitments = commercialState.SourceRequisitionId.HasValue
                     ? activeCommitmentsAsOf.Where(item =>
-                        item.PurchaseRequisitionId == purchaseOrder.SourceRequisitionId.Value).ToList()
+                        item.PurchaseRequisitionId == commercialState.SourceRequisitionId.Value).ToList()
                     : new List<ProcurementBudgetCommitment>();
                 var contractMilestones = purchaseOrder.ContractId.HasValue
                     ? milestones.Where(item => item.ContractId == purchaseOrder.ContractId.Value).ToList()
@@ -647,7 +675,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         .Sum(item => item.Amount ?? 0m)
                     : 0m;
 
-                var itemPrices = purchaseOrder.Items.ToDictionary(item => item.Id, item => item.UnitPrice);
+                var itemPrices = commercialState.ItemUnitPrices;
                 var acceptedReceiptValue = 0m;
                 foreach (var receipt in purchaseOrder.Receipts.Where(receipt =>
                              receipt.Status != "Rejected" && receipt.Status != "Cancelled"))
@@ -734,9 +762,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                     PurchaseOrderNumber = purchaseOrder.OrderNumber,
                     PurchaseOrderStatus = purchaseOrderStatesAsOf[purchaseOrder.Id].Status,
                     CurrencyCode = currency,
-                    SourceRequisitionId = purchaseOrder.SourceRequisitionId,
+                    SourceRequisitionId = commercialState.SourceRequisitionId,
                     ContractId = purchaseOrder.ContractId,
-                    PurchaseOrderAmount = RoundMoney(purchaseOrder.TotalAmount),
+                    PurchaseOrderAmount = RoundMoney(commercialState.TotalAmount),
                     CommitmentAmount = RoundMoney(activeCommitments
                         .Where(item => NormalizeCurrency(item.Currency, currency) == currency)
                         .Sum(item => item.ReservedAmount)),
@@ -770,6 +798,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 var issues = BuildProcurementFinanceIssues(
                     purchaseOrder,
+                    commercialState.SourceRequisitionId,
                     row,
                     activeCommitments,
                     contracts.FirstOrDefault(item => item.Id == purchaseOrder.ContractId),
@@ -865,6 +894,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private static IReadOnlyList<ProcurementFinanceReconciliationIssueDto> BuildProcurementFinanceIssues(
             PurchaseOrder purchaseOrder,
+            Guid? sourceRequisitionId,
             ProcurementFinanceReconciliationRowDto row,
             IReadOnlyCollection<ProcurementBudgetCommitment> activeCommitments,
             Contract? contract,
@@ -898,7 +928,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 });
             }
 
-            if (purchaseOrder.SourceRequisitionId.HasValue)
+            if (sourceRequisitionId.HasValue)
             {
                 if (activeCommitments.Count == 0)
                 {
@@ -908,7 +938,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         "The governed purchase-order requisition has no active budget commitment.",
                         row.CommitmentGroupOrderAmount,
                         0m,
-                        purchaseOrder.SourceRequisitionId);
+                        sourceRequisitionId);
                 }
                 else
                 {
@@ -931,7 +961,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                             "The active requisition commitment does not equal the operative purchase-order family amount.",
                             row.CommitmentGroupOrderAmount,
                             row.CommitmentAmount,
-                            purchaseOrder.SourceRequisitionId);
+                            sourceRequisitionId);
                     }
                 }
             }
@@ -1231,6 +1261,109 @@ namespace ErpSystem.Api.Services.Finance.AP
                 "VendorPayment",
                 allocation.VendorPaymentId) != null;
         }
+
+        private static PurchaseOrderCommercialState ResolvePurchaseOrderCommercialStateAsOf(
+            PurchaseOrder purchaseOrder,
+            IEnumerable<ProcurementPurchaseOrderAmendment> amendments,
+            DateTime cutoffExclusive)
+        {
+            var ordered = amendments
+                .Where(item =>
+                    item.Status == ProcurementPurchaseOrderAmendmentStatus.Applied &&
+                    item.AppliedAtUtc.HasValue)
+                .OrderBy(item => item.AppliedAtUtc)
+                .ThenBy(item => item.AmendmentSequence)
+                .ToList();
+            var firstAfterCutoff = ordered.FirstOrDefault(item =>
+                item.AppliedAtUtc!.Value >= cutoffExclusive);
+            var effectiveAmendment = firstAfterCutoff ?? ordered.LastOrDefault(item =>
+                item.AppliedAtUtc!.Value < cutoffExclusive);
+            if (effectiveAmendment == null)
+            {
+                return new PurchaseOrderCommercialState(
+                    purchaseOrder.Id,
+                    purchaseOrder.SourceRequisitionId,
+                    purchaseOrder.Currency,
+                    purchaseOrder.TotalAmount,
+                    purchaseOrder.Items
+                        .Where(item => !item.IsDeleted)
+                        .ToDictionary(item => item.Id, item => item.UnitPrice));
+            }
+
+            var useBefore = firstAfterCutoff != null;
+            var snapshotJson = useBefore
+                ? effectiveAmendment.BeforeSnapshotJson
+                : effectiveAmendment.ProposedSnapshotJson;
+            var expectedHash = useBefore
+                ? effectiveAmendment.BeforeIntegrityHash
+                : effectiveAmendment.ProposedIntegrityHash;
+            if (string.IsNullOrWhiteSpace(snapshotJson) ||
+                string.IsNullOrWhiteSpace(expectedHash) ||
+                !string.Equals(HashJson(snapshotJson), expectedHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"PO_AMENDMENT_SNAPSHOT_INVALID: amendment {effectiveAmendment.Id} has no trustworthy commercial snapshot.");
+
+            PurchaseOrderCommercialSnapshot? snapshot;
+            try
+            {
+                snapshot = JsonSerializer.Deserialize<PurchaseOrderCommercialSnapshot>(
+                    snapshotJson,
+                    PurchaseOrderSnapshotJsonOptions);
+            }
+            catch (JsonException exception)
+            {
+                throw new InvalidOperationException(
+                    $"PO_AMENDMENT_SNAPSHOT_INVALID: amendment {effectiveAmendment.Id} has an unreadable commercial snapshot.",
+                    exception);
+            }
+            if (snapshot == null ||
+                string.IsNullOrWhiteSpace(snapshot.Currency) ||
+                snapshot.TotalAmount < 0)
+                throw new InvalidOperationException(
+                    $"PO_AMENDMENT_SNAPSHOT_INVALID: amendment {effectiveAmendment.Id} has an incomplete commercial snapshot.");
+
+            Dictionary<Guid, decimal> prices;
+            try
+            {
+                prices = snapshot.Items
+                    .Where(item => item.PurchaseOrderItemId.HasValue)
+                    .ToDictionary(
+                        item => item.PurchaseOrderItemId!.Value,
+                        item => item.UnitPrice);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new InvalidOperationException(
+                    $"PO_AMENDMENT_SNAPSHOT_INVALID: amendment {effectiveAmendment.Id} repeats a purchase-order line.",
+                    exception);
+            }
+
+            // A proposed amendment snapshot deliberately has no database line ID
+            // for lines introduced by that amendment. Once applied, those IDs live
+            // on the current PO. With no later amendment, merge only those missing
+            // IDs from the protected current state; when a later amendment exists,
+            // its before-snapshot already carries the generated IDs.
+            if (!useBefore)
+            {
+                foreach (var item in purchaseOrder.Items.Where(item => !item.IsDeleted))
+                {
+                    prices.TryAdd(item.Id, item.UnitPrice);
+                }
+            }
+
+            return new PurchaseOrderCommercialState(
+                purchaseOrder.Id,
+                snapshot.SourceRequisitionId == Guid.Empty
+                    ? null
+                    : snapshot.SourceRequisitionId,
+                snapshot.Currency,
+                snapshot.TotalAmount,
+                prices);
+        }
+
+        private static string HashJson(string value) =>
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
+                .ToLowerInvariant();
 
         private static PurchaseOrderStateAsOf? ResolvePurchaseOrderStateAsOf(
             PurchaseOrder purchaseOrder,
@@ -2800,6 +2933,27 @@ namespace ErpSystem.Api.Services.Finance.AP
             decimal ExchangeRate,
             decimal Debit,
             decimal Credit);
+
+        private sealed record PurchaseOrderCommercialState(
+            Guid PurchaseOrderId,
+            Guid? SourceRequisitionId,
+            string Currency,
+            decimal TotalAmount,
+            Dictionary<Guid, decimal> ItemUnitPrices);
+
+        private sealed class PurchaseOrderCommercialSnapshot
+        {
+            public Guid SourceRequisitionId { get; set; }
+            public string Currency { get; set; } = string.Empty;
+            public decimal TotalAmount { get; set; }
+            public List<PurchaseOrderCommercialSnapshotItem> Items { get; set; } = [];
+        }
+
+        private sealed class PurchaseOrderCommercialSnapshotItem
+        {
+            public Guid? PurchaseOrderItemId { get; set; }
+            public decimal UnitPrice { get; set; }
+        }
 
         private async Task RecordReportAuditAsync(string eventType, object report, CancellationToken cancellationToken)
         {
