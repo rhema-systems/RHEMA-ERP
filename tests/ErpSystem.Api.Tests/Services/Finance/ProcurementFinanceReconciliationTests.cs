@@ -468,6 +468,56 @@ public sealed class ProcurementFinanceReconciliationTests
 
     [Fact]
     [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldReconstructMilestoneAmountBeforeLaterPercentageEdit()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        await db.SaveChangesAsync();
+        var milestone = await db.ContractMilestones.SingleAsync(item =>
+            item.ContractId == fixture.PurchaseOrder.ContractId);
+        var before = JsonSerializer.Serialize(new
+        {
+            PaymentPercentage = 100m,
+            PaymentAmount = 100m
+        });
+        var after = JsonSerializer.Serialize(new
+        {
+            PaymentPercentage = 50m,
+            PaymentAmount = 50m
+        });
+        db.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserId = Guid.NewGuid(),
+            Username = "contract.controller",
+            Action = "Update",
+            Resource = nameof(ContractMilestone),
+            ResourceId = milestone.Id.ToString(),
+            OldValues = before,
+            NewValues = after,
+            IpAddress = "127.0.0.1",
+            Timestamp = new DateTime(2026, 9, 2)
+        });
+        milestone.PaymentPercentage = 50m;
+        milestone.PaymentAmount = 50m;
+        milestone.UpdatedAt = new DateTime(2026, 9, 2);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        var row = report.Rows.Single();
+        row.MilestoneAmount.Should().Be(100m);
+        row.CompletedMilestoneAmount.Should().Be(100m);
+        row.InvoicedMilestoneAmount.Should().Be(100m);
+        row.PaidMilestoneAmount.Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
     public async Task Reconciliation_ShouldReconstructCertificateBeforeLaterCancellationAndRelease()
     {
         var tenantId = Guid.NewGuid();

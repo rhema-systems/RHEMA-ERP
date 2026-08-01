@@ -18,6 +18,7 @@ using System.Security.Cryptography;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -565,6 +566,21 @@ namespace ErpSystem.Api.Services.Finance.AP
                     item.CreatedAt < cutoffExclusive &&
                     (!item.IsDeleted || !item.DeletedAt.HasValue || item.DeletedAt.Value >= cutoffExclusive))
                 .ToListAsync(cancellationToken);
+            var milestoneResourceIds = milestones.Select(item => item.Id.ToString()).ToList();
+            var milestoneAuditSnapshots = milestoneResourceIds.Count == 0
+                ? new List<AuditLog>()
+                : await _unitOfWork.Repository<AuditLog>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted &&
+                        item.Resource == nameof(ContractMilestone) &&
+                        item.ResourceId != null &&
+                        milestoneResourceIds.Contains(item.ResourceId))
+                    .AsNoTracking()
+                    .OrderBy(item => item.Timestamp)
+                    .ToListAsync(cancellationToken);
+            var milestoneAuditsByResourceId = milestoneAuditSnapshots
+                .ToLookup(item => item.ResourceId ?? string.Empty);
             var certificates = await _unitOfWork.Repository<ProjectPaymentCertificate>()
                 .GetQueryableIncludingDeleted(item =>
                     item.TenantId == tenantId &&
@@ -683,7 +699,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                                                out var contractValueAsOf)
                     ? contractMilestones.ToDictionary(
                         item => item.Id,
-                        item => ResolveMilestoneAmountAsOf(item, contractValueAsOf))
+                        item => ResolveMilestoneAmountAsOf(
+                            item,
+                            milestoneAuditsByResourceId[item.Id.ToString()],
+                            contractValueAsOf,
+                            cutoffExclusive))
                     : new Dictionary<Guid, decimal>();
                 var contractCertificates = purchaseOrder.ContractId.HasValue
                     ? certificateStatesAsOf.Where(item =>
@@ -1315,8 +1335,45 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private static decimal ResolveMilestoneAmountAsOf(
             ContractMilestone milestone,
-            decimal contractValueAsOf) =>
-            RoundMoney(contractValueAsOf * milestone.PaymentPercentage / 100m);
+            IEnumerable<AuditLog> auditSnapshots,
+            decimal contractValueAsOf,
+            DateTime cutoffExclusive)
+        {
+            var snapshots = auditSnapshots.OrderBy(item => item.Timestamp).ToList();
+            decimal? amount = null;
+            foreach (var snapshot in snapshots.Where(item => item.Timestamp < cutoffExclusive))
+            {
+                if (TryReadDecimalProperty(
+                        snapshot.NewValues,
+                        nameof(ContractMilestone.PaymentAmount),
+                        out var persistedAmount))
+                    amount = persistedAmount;
+            }
+
+            if (amount.HasValue)
+                return RoundMoney(amount.Value);
+
+            // The first mutation after the cutoff retains the state that immediately
+            // preceded it. This covers a later UpdateMilestoneAsync percentage change
+            // as well as a later contract-value recalculation of the same milestone.
+            var firstAfterCutoff = snapshots.FirstOrDefault(item =>
+                item.Timestamp >= cutoffExclusive &&
+                TryReadDecimalProperty(
+                    item.OldValues,
+                    nameof(ContractMilestone.PaymentAmount),
+                    out _));
+            if (firstAfterCutoff is not null &&
+                TryReadDecimalProperty(
+                    firstAfterCutoff.OldValues,
+                    nameof(ContractMilestone.PaymentAmount),
+                    out var precedingAmount))
+                return RoundMoney(precedingAmount);
+
+            // Compatibility fallback for legacy milestones that predate generic audit
+            // snapshots. The effective-dated contract value still prevents a later
+            // contract amendment from rewriting the earlier report.
+            return RoundMoney(contractValueAsOf * milestone.PaymentPercentage / 100m);
+        }
 
         private static PurchaseOrderCommercialState ResolvePurchaseOrderCommercialStateAsOf(
             PurchaseOrder purchaseOrder,
@@ -1638,6 +1695,43 @@ namespace ErpSystem.Api.Services.Finance.AP
                     return false;
                 value = property.Value.GetString() ?? string.Empty;
                 return !string.IsNullOrWhiteSpace(value);
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadDecimalProperty(
+            string? json,
+            string propertyName,
+            out decimal value)
+        {
+            value = 0m;
+            if (string.IsNullOrWhiteSpace(json))
+                return false;
+
+            try
+            {
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                    return false;
+                var property = document.RootElement.EnumerateObject()
+                    .FirstOrDefault(item => string.Equals(
+                        item.Name,
+                        propertyName,
+                        StringComparison.OrdinalIgnoreCase));
+                if (property.Value.ValueKind == JsonValueKind.Number &&
+                    property.Value.TryGetDecimal(out value))
+                    return true;
+                if (property.Value.ValueKind == JsonValueKind.String &&
+                    decimal.TryParse(
+                        property.Value.GetString(),
+                        NumberStyles.Number,
+                        CultureInfo.InvariantCulture,
+                        out value))
+                    return true;
+                return false;
             }
             catch (JsonException)
             {
