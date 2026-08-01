@@ -56,6 +56,20 @@ public sealed class ProcurementReceiptDocumentMigrationTests
         sql.Should().Contain("r.IsDeleted = 0");
     }
 
+    [Fact]
+    public void ForwardMigrationAllowsSnapshotFinalizationOnlyDuringIssueTransition()
+    {
+        var upSql = Sql(new TDC0509IssuedSnapshotTransition(), "Up");
+        var downSql = Sql(new TDC0509IssuedSnapshotTransition(), "Down");
+
+        upSql.Should().Contain("TR_ProcurementReceiptDocuments_TDC0509Protected");
+        upSql.Should().Contain("AND NOT (d.Status IN (0,1) AND i.Status = 2)");
+        upSql.Should().Contain("i.DecisionSnapshotJson <> d.DecisionSnapshotJson");
+        upSql.Should().Contain("RCV_DOCUMENT_ISSUE_BLOCKED");
+        upSql.Should().Contain("RCV_DOCUMENT_LINEAGE_IMMUTABLE");
+        downSql.Should().NotContain("AND NOT (d.Status IN (0,1) AND i.Status = 2)");
+    }
+
     private static IReadOnlyList<MigrationOperation> Operations()
     {
         var migration = new TDC0509ReceiptDocumentLifecycle();
@@ -68,4 +82,14 @@ public sealed class ProcurementReceiptDocumentMigrationTests
     private static string Sql() => string.Join(
         Environment.NewLine,
         Operations().OfType<SqlOperation>().Select(item => item.Sql));
+
+    private static string Sql(Migration migration, string method)
+    {
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+        return string.Join(
+            Environment.NewLine,
+            builder.Operations.OfType<SqlOperation>().Select(item => item.Sql));
+    }
 }

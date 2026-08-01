@@ -37,6 +37,7 @@
     <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\VendorInvoiceMatchingControllerTests.cs" />
+    <Compile Include="Controllers\Finance\VendorInvoiceMatchExceptionControllerTests.cs" />
     <Compile Include="Controllers\Finance\PaymentMethodControllerTests.cs" />
     <Compile Include="Controllers\Finance\ChequesControllerTests.cs" />
     <Compile Include="Controllers\Finance\BankStatementsControllerTests.cs" />
@@ -102,6 +103,7 @@
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ProcurementFinanceReconciliationTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentBatchCreationTests.cs" />
+    <Compile Include="Services\Finance\VendorInvoiceMatchExceptionServiceTests.cs" />
     <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ArCreditNotePostingMigrationTests.cs" />

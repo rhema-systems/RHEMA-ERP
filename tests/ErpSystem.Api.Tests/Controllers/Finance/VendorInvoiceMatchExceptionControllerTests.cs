@@ -27,10 +27,10 @@ public sealed class VendorInvoiceMatchExceptionControllerTests
     [InlineData(nameof(VendorInvoiceController.CompleteMatchExceptionCorrectiveAction), "match-exceptions/{exceptionId}/corrective-action/complete", FinancePermissions.ManageApInvoices)]
     public void RoutesUseExistingFinancePermissions(string action, string route, string permission)
     {
-        var method = typeof(VendorInvoiceController).GetMethod(action, BindingFlags.Instance | BindingFlags.Public);
+        var method = typeof(VendorInvoiceController).GetMethod(action, BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new InvalidOperationException($"Action {action} was not found.");
 
-        method.Should().NotBeNull();
-        var routeAttribute = method!.GetCustomAttributes<HttpMethodAttribute>().Single();
+        var routeAttribute = method.GetCustomAttributes<HttpMethodAttribute>().Single();
         routeAttribute.Template.Should().Be(route);
         method.GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be(permission);
     }

@@ -15,6 +15,7 @@ using ErpSystem.Core.Services.Finance;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using ErpSystem.Shared;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance.AP;
@@ -35,6 +36,8 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
     private readonly IProcurementConfigurationService _configuration;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly INotificationTopicPublisher _notifications;
+    private readonly IAuthorizationService _authorization;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<VendorInvoiceMatchExceptionService> _logger;
 
     public VendorInvoiceMatchExceptionService(
@@ -46,6 +49,8 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
         IProcurementConfigurationService configuration,
         IProcurementControlEventService controlEvents,
         INotificationTopicPublisher notifications,
+        IAuthorizationService authorization,
+        IHttpContextAccessor httpContextAccessor,
         ILogger<VendorInvoiceMatchExceptionService> logger)
     {
         _db = db;
@@ -56,6 +61,8 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
         _configuration = configuration;
         _controlEvents = controlEvents;
         _notifications = notifications;
+        _authorization = authorization;
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger;
     }
 
@@ -81,6 +88,12 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
             .OrderByDescending(item => item.Sequence)
             .ToListAsync(cancellationToken);
         var now = DateTime.UtcNow;
+        var principal = _httpContextAccessor.HttpContext?.User;
+        var canManageApInvoices = principal?.Identity?.IsAuthenticated == true &&
+            (await _authorization.AuthorizeAsync(
+                principal,
+                resource: null,
+                FinancePermissions.ManageApInvoices)).Succeeded;
         var active = history.FirstOrDefault(item =>
             item.ExpiresAtUtc > now && item.Status is
                 VendorInvoiceMatchExceptionStatus.PendingApproval or
@@ -106,7 +119,9 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
             VendorInvoiceId = invoice.Id,
             InvoiceNumber = invoice.InvoiceNumber,
             MatchingReadiness = readiness,
-            CanRequest = VendorInvoiceMatchExceptionRules.IsExceptionable(readiness) && active == null,
+            CanRequest = canManageApInvoices &&
+                         VendorInvoiceMatchExceptionRules.IsExceptionable(readiness) &&
+                         active == null,
             CanDecide = canDecide,
             CanCancel = active != null &&
                         VendorInvoiceMatchExceptionRules.CanCancel(active.Status) &&
@@ -170,11 +185,23 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
         var now = DateTime.UtcNow;
         var correlation = Normalize(suppliedCorrelation, 100);
         ValidateRequest(request, now);
+        var idempotencyKey = request.IdempotencyKey.Trim();
         await _unitOfWork.AcquireTransactionLockAsync($"tdc0507-invoice:{TenantId:N}:{invoiceId:N}", cancellationToken);
+        await _unitOfWork.AcquireTransactionLockAsync(
+            $"tdc0507-idempotency:{TenantId:N}:{idempotencyKey}",
+            cancellationToken);
 
         var duplicate = await ExceptionQuery().AsNoTracking()
-            .SingleOrDefaultAsync(item => item.IdempotencyKey == request.IdempotencyKey.Trim(), cancellationToken);
-        if (duplicate != null) return Map(duplicate, now);
+            .SingleOrDefaultAsync(item => item.IdempotencyKey == idempotencyKey, cancellationToken);
+        if (duplicate != null)
+        {
+            if (duplicate.VendorInvoiceId != invoiceId)
+                throw Conflict(
+                    "AP_MATCH_EXCEPTION_IDEMPOTENCY_MISMATCH",
+                    "The idempotency key is already bound to a different vendor invoice.");
+
+            return Map(duplicate, now);
+        }
 
         var invoice = await _db.VendorInvoices
             .Include(item => item.Supplier)
