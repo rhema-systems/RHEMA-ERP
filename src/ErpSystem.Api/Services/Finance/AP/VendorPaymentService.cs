@@ -440,6 +440,20 @@ namespace ErpSystem.Api.Services.Finance.AP
                     await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
                 }
+                else if (payment.Status is VendorPaymentStatus.Authorized or
+                         VendorPaymentStatus.PendingAuthorization or
+                         VendorPaymentStatus.Failed)
+                {
+                    // A finance-engine journal link is the durable posting
+                    // outcome. Restore an operational status that may have
+                    // been reset by a safe batch retry before post-processing.
+                    payment.Status = VendorPaymentStatus.Processed;
+                    payment.UpdatedAt = DateTime.UtcNow;
+                    payment.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<VendorPayment>()
+                        .UpdateAsync(payment);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
 
                 if (postingResult.WasDuplicate || wasAlreadyLinked)
                 {
@@ -1890,18 +1904,59 @@ namespace ErpSystem.Api.Services.Finance.AP
                 }
                 catch (Exception ex)
                 {
-                    item.ItemStatus = "Failed";
-                    item.FailureReason = ex.Message;
-                    item.VendorPayment.Status = VendorPaymentStatus.Failed;
-                    item.VendorPayment.UpdatedAt = DateTime.UtcNow;
-                    item.VendorPayment.UpdatedBy = UserName;
-                    foreach (var selection in item.Invoices)
+                    var postedPayment = await _unitOfWork
+                        .Repository<VendorPayment>()
+                        .GetQueryable(payment =>
+                            payment.TenantId == TenantId &&
+                            payment.Id == item.VendorPaymentId &&
+                            !payment.IsDeleted)
+                        .AsNoTracking()
+                        .Select(payment => new
+                        {
+                            payment.Status,
+                            payment.JournalEntryId
+                        })
+                        .SingleOrDefaultAsync(cancellationToken);
+                    var postingCommitted = postedPayment?.JournalEntryId is not null &&
+                                           postedPayment.Status is
+                                               VendorPaymentStatus.Processed or
+                                               VendorPaymentStatus.Cleared or
+                                               VendorPaymentStatus.Reconciled;
+
+                    if (postingCommitted)
                     {
-                        selection.Status = "Failed";
-                        selection.FailureReason = ex.Message;
+                        item.ItemStatus = "Processed";
+                        item.FailureReason = null;
+                        item.VendorPayment.Status = VendorPaymentStatus.Processed;
+                        item.VendorPayment.JournalEntryId =
+                            postedPayment!.JournalEntryId;
+                        foreach (var selection in item.Invoices)
+                        {
+                            selection.Status = "Processed";
+                            selection.FailureReason = null;
+                        }
+                        processedCount++;
+                        _logger.LogError(
+                            ex,
+                            "Payment batch item {ItemId} posted durably but a post-posting audit or FX step failed; preserving the committed payment outcome",
+                            item.Id);
                     }
-                    failedCount++;
-                    _logger.LogError(ex, "Failed to process batch item {ItemId}", item.Id);
+                    else
+                    {
+                        item.ItemStatus = "Failed";
+                        item.FailureReason = ex.Message;
+                        item.VendorPayment.Status = VendorPaymentStatus.Failed;
+                        item.VendorPayment.UpdatedAt = DateTime.UtcNow;
+                        item.VendorPayment.UpdatedBy = UserName;
+                        foreach (var selection in item.Invoices)
+                        {
+                            selection.Status = "Failed";
+                            selection.FailureReason = ex.Message;
+                        }
+                        failedCount++;
+                        _logger.LogError(ex,
+                            "Failed to process batch item {ItemId}", item.Id);
+                    }
                 }
             }
 

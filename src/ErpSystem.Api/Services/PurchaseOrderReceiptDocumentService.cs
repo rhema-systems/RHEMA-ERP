@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.DocumentManagement;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -511,6 +512,56 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         return (await DownloadAsync(grn.Id)).Content;
     }
 
+    public async Task<ProcurementReceiptDocumentFileDto> DownloadGrnAsync(
+        Guid receiptId,
+        CancellationToken cancellationToken = default)
+    {
+        var receipt = await LoadReceiptAsync(
+            receiptId, false, cancellationToken);
+        var registeredGrn = await DocumentQuery(false)
+            .Where(item =>
+                item.PurchaseOrderReceiptId == receipt.Id &&
+                item.DocumentKind == ProcurementReceiptDocumentKind.Grn)
+            .OrderByDescending(item => item.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (registeredGrn is not null)
+            return await DownloadAsync(registeredGrn.Id, cancellationToken);
+
+        await EnsureCapabilityAsync(
+            ReadPermission, receipt, Correlation(null), cancellationToken);
+
+        if (receipt.PurchaseOrder.ProcurementSourceType !=
+            ProcurementPurchaseOrderSourceType.HistoricalMigration)
+        {
+            throw new ProcurementReceiptDocumentNotFoundException(
+                "A GRN is not configured for this receipt.");
+        }
+
+        var locationIds = receipt.Items
+            .Where(item => item.LocationId.HasValue &&
+                           item.LocationId.Value != Guid.Empty)
+            .Select(item => item.LocationId!.Value)
+            .Distinct()
+            .ToList();
+        var locations = locationIds.Count == 0
+            ? new Dictionary<Guid, WarehouseLocation>()
+            : await _db.WarehouseLocations
+                .AsNoTracking()
+                .Where(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    locationIds.Contains(item.Id) &&
+                    !item.IsDeleted)
+                .Include(item => item.Warehouse)
+                .ToDictionaryAsync(item => item.Id, cancellationToken);
+
+        return new ProcurementReceiptDocumentFileDto
+        {
+            Content = BuildHistoricalGrnPdf(receipt, locations),
+            ContentType = "application/pdf",
+            FileName = $"GRN-{SafeFileName(receipt.ReceiptNumber)}.pdf"
+        };
+    }
+
     private async Task<ProcurementReceiptDocumentOverviewDto> BuildOverviewAsync(
         PurchaseOrderReceipt receipt,
         IReadOnlyList<ProcurementReceiptDocument> documents,
@@ -664,7 +715,10 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             .Where(item => item.TenantId == _currentUser.TenantId && item.Id == id && !item.IsDeleted)
             .Include(item => item.PurchaseOrder).ThenInclude(item => item.BusinessPartner)
             .Include(item => item.ReceivedBy).Include(item => item.InspectedBy)
-            .Include(item => item.Items).ThenInclude(item => item.PurchaseOrderItem).ThenInclude(item => item.InventoryItem);
+            .Include(item => item.Items).ThenInclude(item => item.PurchaseOrderItem)
+                .ThenInclude(item => item.InventoryItem)
+            .Include(item => item.Items).ThenInclude(item => item.PurchaseOrderItem)
+                .ThenInclude(item => item.Warehouse);
         if (!tracked) query = query.AsNoTracking();
         return await query.SingleOrDefaultAsync(cancellationToken)
                ?? throw new ProcurementReceiptDocumentNotFoundException("The receipt was not found in the current tenant.");
@@ -731,14 +785,47 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         if (_currentUser.IsExternalUser)
             throw new ProcurementReceiptDocumentAuthorizationException("External users cannot administer internal receipt documents.");
         if (IsAdministrator()) return;
+        var warehouseId = await ResolveWarehouseIdAsync(
+            receipt, cancellationToken);
         var decision = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permission,
             SourceType = EventType,
             SourceReference = receipt.ReceiptNumber,
-            WarehouseId = receipt.Items.Select(item => item.LocationId).FirstOrDefault(item => item.HasValue && item != Guid.Empty)
+            WarehouseId = warehouseId
         }, correlation, cancellationToken);
         if (!decision.Allowed) throw new ProcurementReceiptDocumentAuthorizationException(decision.Message);
+    }
+
+    private async Task<Guid?> ResolveWarehouseIdAsync(
+        PurchaseOrderReceipt receipt,
+        CancellationToken cancellationToken)
+    {
+        var warehouseId = receipt.PurchaseOrder.DeliveryWarehouseId ??
+                          receipt.Items
+                              .Select(item => item.PurchaseOrderItem.WarehouseId)
+                              .FirstOrDefault(item => item.HasValue &&
+                                                      item != Guid.Empty);
+        if (warehouseId.HasValue)
+            return warehouseId;
+
+        var locationIds = receipt.Items
+            .Select(item => item.LocationId)
+            .Where(item => item.HasValue && item.Value != Guid.Empty)
+            .Select(item => item!.Value)
+            .Distinct()
+            .ToList();
+        if (locationIds.Count == 0)
+            return null;
+
+        return await _db.WarehouseLocations
+            .AsNoTracking()
+            .Where(item =>
+                item.TenantId == _currentUser.TenantId &&
+                locationIds.Contains(item.Id) &&
+                !item.IsDeleted)
+            .Select(item => (Guid?)item.InventoryWarehouseId)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     private void EnsureAuthenticatedTenant()
@@ -838,6 +925,88 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             page.Footer().AlignCenter().Text(text => { text.Span("Page "); text.CurrentPageNumber(); text.Span(" of "); text.TotalPages(); });
         })).GeneratePdf();
     }
+
+    private static byte[] BuildHistoricalGrnPdf(
+        PurchaseOrderReceipt receipt,
+        IReadOnlyDictionary<Guid, WarehouseLocation> locations) =>
+        Document.Create(container => container.Page(page =>
+        {
+            page.Size(PageSizes.A4);
+            page.Margin(30);
+            page.DefaultTextStyle(style => style.FontSize(10));
+            page.Header().Column(column =>
+            {
+                column.Item().Text("GOODS RECEIVED NOTE (HISTORICAL)")
+                    .Bold().FontSize(18);
+                column.Item().Text(
+                    $"GRN: {receipt.ReceiptNumber} | PO: {receipt.PurchaseOrder.OrderNumber}");
+                column.Item().Text(
+                    $"Receipt date: {receipt.ReceiptDate:dd-MMM-yyyy} | Status: {receipt.Status}");
+                column.Item().PaddingTop(8).LineHorizontal(1);
+            });
+            page.Content().PaddingVertical(12).Column(column =>
+            {
+                column.Item().Text(
+                    $"Supplier: {receipt.PurchaseOrder.BusinessPartner?.PartnerName ?? "N/A"}");
+                if (!string.IsNullOrWhiteSpace(receipt.DeliveryNote))
+                    column.Item().Text($"Delivery note: {receipt.DeliveryNote}");
+                if (!string.IsNullOrWhiteSpace(receipt.Notes))
+                    column.Item().PaddingTop(6).Text($"Notes: {receipt.Notes}");
+
+                column.Item().PaddingTop(12).Table(table =>
+                {
+                    table.ColumnsDefinition(columns =>
+                    {
+                        columns.RelativeColumn(2);
+                        columns.RelativeColumn(4);
+                        columns.RelativeColumn();
+                        columns.RelativeColumn();
+                        columns.RelativeColumn(2);
+                    });
+                    table.Header(header =>
+                    {
+                        foreach (var value in new[]
+                                 { "Item", "Description", "UOM", "Received", "Location" })
+                        {
+                            header.Cell().Background(Colors.Grey.Lighten3)
+                                .Padding(5).Text(value).Bold();
+                        }
+                    });
+                    foreach (var line in receipt.Items.OrderBy(item => item.Id))
+                    {
+                        var inventoryItem = line.PurchaseOrderItem.InventoryItem;
+                        var location = line.LocationId.HasValue &&
+                                       locations.TryGetValue(
+                                           line.LocationId.Value,
+                                           out var resolved)
+                            ? $"{resolved.Warehouse?.Code} / {resolved.LocationCode}"
+                                .Trim(' ', '/')
+                            : line.PurchaseOrderItem.Warehouse?.Code ?? "-";
+                        table.Cell().Padding(5)
+                            .Text(inventoryItem?.ItemCode ?? "-");
+                        table.Cell().Padding(5).Text(
+                            inventoryItem?.Name ??
+                            line.PurchaseOrderItem.ItemDescription ?? "-");
+                        table.Cell().Padding(5).Text(
+                            line.UnitOfMeasure ??
+                            line.PurchaseOrderItem.UnitOfMeasure ?? "-");
+                        table.Cell().Padding(5).AlignRight()
+                            .Text(line.ReceivedQuantity.ToString("N2"));
+                        table.Cell().Padding(5).Text(location);
+                    }
+                });
+                column.Item().PaddingTop(16)
+                    .Text("Generated from a pre-governance historical receipt. New receipts must use the controlled DEC-013 document register.")
+                    .Italic().FontSize(8);
+            });
+            page.Footer().AlignCenter().Text(text =>
+            {
+                text.Span("Page ");
+                text.CurrentPageNumber();
+                text.Span(" of ");
+                text.TotalPages();
+            });
+        })).GeneratePdf();
 
     private static string SourceSnapshot(PurchaseOrderReceipt receipt, ProcurementReceiptDocumentKind kind, string number, Governance governance) => Serialize(new
     {

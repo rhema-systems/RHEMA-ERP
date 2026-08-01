@@ -2366,6 +2366,16 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private static string Csv(string value)
         {
+            // Prevent spreadsheet applications from interpreting exported,
+            // user-controlled text as a formula. The leading apostrophe is
+            // displayed as text by Excel-compatible readers.
+            var firstMeaningful = value.AsSpan().TrimStart();
+            if (!firstMeaningful.IsEmpty &&
+                firstMeaningful[0] is '=' or '+' or '-' or '@')
+            {
+                value = $"'{value}";
+            }
+
             if (value.Contains('"', StringComparison.Ordinal))
             {
                 value = value.Replace("\"", "\"\"", StringComparison.Ordinal);

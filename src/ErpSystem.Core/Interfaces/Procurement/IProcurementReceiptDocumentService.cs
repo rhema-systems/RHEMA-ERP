@@ -10,6 +10,7 @@ public interface IProcurementReceiptDocumentService
     Task<ProcurementReceiptDocumentDto> IssueAsync(Guid documentId, IssueProcurementReceiptDocumentRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementReceiptDocumentDto> CancelAsync(Guid documentId, CancelProcurementReceiptDocumentRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementReceiptDocumentOverviewDto> ReconcileAsync(Guid receiptId, string correlationId, CancellationToken cancellationToken = default);
+    Task<ProcurementReceiptDocumentFileDto> DownloadGrnAsync(Guid receiptId, CancellationToken cancellationToken = default);
     Task<ProcurementReceiptDocumentFileDto> DownloadAsync(Guid documentId, CancellationToken cancellationToken = default);
 }
 

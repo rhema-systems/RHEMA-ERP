@@ -100,10 +100,10 @@ public class FinanceApprovalsController : ControllerBase
         _displayService = displayService;
         _journalEntryService = journalEntryService;
         _invoiceService = invoiceService;
+        _inventoryValuationService = inventoryValuationService;
         _receiptPostingService = receiptPostingService;
         _vendorInvoiceService = vendorInvoiceService;
         _financeAuditService = financeAuditService;
-        _inventoryValuationService = inventoryValuationService;
         _logger = logger;
         _invoicePaymentSod = invoicePaymentSod;
         _vendorPaymentService = vendorPaymentService;
@@ -1606,26 +1606,8 @@ public class FinanceApprovalsController : ControllerBase
         invoice.UpdatedAt = DateTime.UtcNow;
         invoice.UpdatedBy = _currentUserService.UserName ?? "system";
 
-        // Opening-balance AP invoices preserve subledger balances but do not create
-        // inventory receipts; their GL impact is control account vs migration clearing.
-        foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == "Inventory"))
-        {
-            if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
-            {
-                await _inventoryValuationService.ProcessReceiptAsync(
-                    line.InventoryItemId.Value,
-                    line.WarehouseId.Value,
-                    line.LocationId,
-                    line.Quantity,
-                    line.UnitPrice,
-                    ReferenceType.VendorInvoice,
-                    invoice.InvoiceNumber,
-                    invoice.Id,
-                    line.LotNumber,
-                    line.SerialNumber,
-                    line.ExpirationDate);
-            }
-        }
+        // Inventory is posted only by the governed purchase-receipt/inspection
+        // lifecycle. Workflow approval of an invoice must not post stock again.
 
         await _db.SaveChangesAsync(cancellationToken);
         await RecordVendorInvoiceAuditAsync(

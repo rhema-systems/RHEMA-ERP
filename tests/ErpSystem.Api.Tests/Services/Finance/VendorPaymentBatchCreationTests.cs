@@ -16,12 +16,46 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Reflection;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class VendorPaymentBatchCreationTests
 {
+    [Theory]
+    [InlineData("=HYPERLINK(\"https://example.invalid\")")]
+    [InlineData(" +SUM(1,1)")]
+    [InlineData("@malicious")]
+    [InlineData("-1+2")]
+    public void ApCsvExportNeutralizesSpreadsheetFormulaPayloads(string value)
+    {
+        var method = typeof(ApReportsService).GetMethod(
+            "Csv",
+            BindingFlags.Static | BindingFlags.NonPublic,
+            binder: null,
+            types: [typeof(string)],
+            modifiers: null)!;
+
+        var result = (string)method.Invoke(null, [value])!;
+
+        result.TrimStart('"').Should().StartWith("'");
+    }
+
+    [Fact]
+    public void BatchFailureHandlingPreservesDurablyPostedPaymentOutcome()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorPaymentService.cs"));
+
+        source.Should().Contain("var postingCommitted =");
+        source.Should().Contain("postedPayment?.JournalEntryId is not null");
+        source.Should().Contain("VendorPaymentStatus.Reconciled");
+        source.Should().Contain("preserving the committed payment outcome");
+    }
+
     [Fact]
     public async Task CreatePaymentBatchAsync_AppendsReadinessBeforeAttachingCompleteAggregate()
     {
@@ -165,5 +199,18 @@ public sealed class VendorPaymentBatchCreationTests
             .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
         return new ApplicationDbContext(options);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null &&
+               !File.Exists(Path.Combine(directory.FullName, "ErpSystem.sln")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName ??
+               throw new DirectoryNotFoundException("Repository root not found.");
     }
 }

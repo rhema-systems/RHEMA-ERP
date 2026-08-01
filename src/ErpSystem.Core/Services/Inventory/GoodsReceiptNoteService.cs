@@ -1,4 +1,6 @@
 using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
@@ -281,14 +283,38 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                         "RCV_INVENTORY_ITEM_MISMATCH",
                         "The goods receipt item does not match its governed purchase-order line.");
                 }
+
+                var stockLocationId = itemDto.StorageLocationId ??
+                                      dto.ReceivingLocationId;
+                if (!stockLocationId.HasValue ||
+                    stockLocationId.Value == Guid.Empty)
+                {
+                    throw new ProcurementReceiptSourceValidationException(
+                        "RCV_STOCK_LOCATION_REQUIRED",
+                        "Every governed goods-receipt line requires a tenant-valid storage location before inspection approval.");
+                }
+
+                var stockLocationIsValid = await _unitOfWork
+                    .Repository<WarehouseLocation>()
+                    .GetQueryable(item =>
+                        item.TenantId == _currentUser.TenantId &&
+                        item.Id == stockLocationId.Value &&
+                        item.InventoryWarehouseId == dto.WarehouseId &&
+                        !item.IsDeleted)
+                    .AnyAsync();
+                if (!stockLocationIsValid)
+                {
+                    throw new ProcurementReceiptSourceValidationException(
+                        "RCV_LOCATION_INVALID",
+                        "Every governed goods-receipt line location must belong to the selected warehouse and tenant.");
+                }
             }
 
             // TDC-0502: the Inventory GRN is a projection of the same governed
             // procurement receipt. It is not a second inspection or stock-posting
             // authority.
-            var receiptIdempotencyKey = $"grn:{idempotencyKey}";
-            if (receiptIdempotencyKey.Length > 100)
-                receiptIdempotencyKey = receiptIdempotencyKey[..100];
+            var receiptIdempotencyKey =
+                BuildGovernedReceiptIdempotencyKey(idempotencyKey);
             var governedReceipt = new PurchaseOrderReceipt
             {
                 Id = governedReceiptId,
@@ -567,6 +593,15 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
             if (ownsTransaction && _unitOfWork.HasActiveTransaction)
                 await _unitOfWork.RollbackAsync();
         }
+    }
+
+    internal static string BuildGovernedReceiptIdempotencyKey(string sourceKey)
+    {
+        var normalized = sourceKey.Trim();
+        var hash = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(normalized)))
+            .ToLowerInvariant();
+        return $"grn:{hash}";
     }
 
     public async Task<bool> SubmitForInspectionAsync(Guid grnId, Guid userId)

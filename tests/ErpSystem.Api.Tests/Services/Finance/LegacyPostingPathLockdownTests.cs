@@ -65,6 +65,24 @@ public sealed class LegacyPostingPathLockdownTests
     }
 
     [Fact]
+    [Trait("Category", "Architecture")]
+    public void VendorInvoiceApproval_ShouldNotCreateInventoryReceipts()
+    {
+        var root = FindRepositoryRoot();
+        var service = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorInvoiceService.cs"));
+        var approvals = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Controllers", "Finance",
+            "FinanceApprovalsController.cs"));
+
+        service.Should().NotContain("ProcessReceiptAsync(");
+        approvals.Should().NotContain("ProcessReceiptAsync(");
+        service.Should().Contain(
+            "Inventory is posted only by the governed purchase-receipt/inspection");
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-LegacyPostingLockdown")]
     [Trait("Category", "Architecture")]
     public void CurrentFinancePostingServices_ShouldRouteThroughPostingEngine()

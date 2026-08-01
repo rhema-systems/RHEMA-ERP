@@ -93,6 +93,36 @@ public sealed class PurchaseOrderReceiptInspectionControllerTests
         problem.Extensions["readiness"].Should().BeSameAs(readiness);
     }
 
+    [Fact]
+    public async Task GrnRouteUsesGovernedServiceHistoricalFallbackContract()
+    {
+        var receiptId = Guid.NewGuid();
+        var documents = new Mock<IProcurementReceiptDocumentService>();
+        documents.Setup(item => item.DownloadGrnAsync(
+                receiptId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementReceiptDocumentFileDto
+            {
+                Content = [1, 2, 3],
+                ContentType = "application/pdf",
+                FileName = "GRN-HISTORICAL.pdf"
+            });
+        var controller = new PurchaseOrderReceiptsController(
+            null!, null!, documents.Object, null!,
+            NullLogger<PurchaseOrderReceiptsController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+
+        var result = await controller.GetGoodsReceivedNotePdf(receiptId);
+
+        var file = result.Should().BeOfType<FileContentResult>().Subject;
+        file.FileDownloadName.Should().Be("GRN-HISTORICAL.pdf");
+        documents.VerifyAll();
+    }
+
     private static string? HttpTemplate(MethodInfo method) =>
         method.GetCustomAttributes<HttpMethodAttribute>().Single().Template;
 }

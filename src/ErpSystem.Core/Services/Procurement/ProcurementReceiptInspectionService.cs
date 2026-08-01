@@ -107,24 +107,65 @@ public sealed class ProcurementReceiptInspectionService :
         var current = history.FirstOrDefault(item =>
             item.Status is not ProcurementReceiptInspectionStatus.Cancelled);
         var externalLinked = _currentUser.IsExternalUser;
+        var manageAllowed = false;
+        var approveAllowed = false;
+        var receiptSodAllowed = false;
+        var decisionSodAllowed = false;
+        var workflowDecisionAllowed = false;
+        if (!externalLinked)
+        {
+            var warehouseId = await ResolveWarehouseIdAsync(
+                receipt, cancellationToken);
+            manageAllowed = IsAdministrator() ||
+                            await CanUseCapabilityAsync(
+                                ManagePermission, receipt, warehouseId,
+                                cancellationToken);
+            approveAllowed = IsAdministrator() ||
+                             await CanUseCapabilityAsync(
+                                 ApprovePermission, receipt, warehouseId,
+                                 cancellationToken);
+            receiptSodAllowed = await CanReceiveIndependentlyAsync(
+                receipt, cancellationToken);
+            decisionSodAllowed = current is not null &&
+                                 await CanDecideIndependentlyAsync(
+                                     current, cancellationToken);
+            workflowDecisionAllowed = current is not null &&
+                                      current.Status ==
+                                      ProcurementReceiptInspectionStatus.PendingApproval &&
+                                      await _workflow.CanUserApproveAsync(
+                                          WorkflowEntityType,
+                                          current.Id,
+                                          _currentUser.UserId);
+        }
+
         return new ProcurementReceiptInspectionOverviewDto
         {
             PurchaseOrderReceiptId = receipt.Id,
             ReceiptNumber = receipt.ReceiptNumber,
             PurchaseOrderNumber = receipt.PurchaseOrder.OrderNumber,
             SupplierName = receipt.PurchaseOrder.BusinessPartner?.PartnerName ?? string.Empty,
-            CanEdit = !externalLinked && current is not null &&
+            CanEdit = !externalLinked && manageAllowed && receiptSodAllowed &&
+                      current is not null &&
                       ProcurementReceiptInspectionRules.CanEdit(current.Status),
-            CanSubmit = !externalLinked && current is not null &&
+            CanSubmit = !externalLinked && manageAllowed && receiptSodAllowed &&
+                        current is not null &&
                         ProcurementReceiptInspectionRules.CanSubmit(current.Status),
-            CanDecide = !externalLinked && current is not null &&
+            CanDecide = !externalLinked && approveAllowed &&
+                        decisionSodAllowed && workflowDecisionAllowed &&
+                        current is not null &&
                         ProcurementReceiptInspectionRules.CanDecide(current.Status),
             CanAcknowledge = externalLinked && current is not null && current.QualityHold &&
                              current.SupplierAcknowledgementStatus ==
                              ProcurementReceiptSupplierAcknowledgementStatus.Pending,
-            CanResolve = !externalLinked && current is not null &&
+            CanResolve = !externalLinked && manageAllowed && current is not null &&
+                         (current.ResolutionStatus !=
+                              ProcurementReceiptResolutionStatus.ReplacementRequested ||
+                          receiptSodAllowed) &&
                          ProcurementReceiptInspectionRules.CanResolve(current.Status),
-            CanClose = !externalLinked && current is not null &&
+            CanClose = !externalLinked && approveAllowed && receiptSodAllowed &&
+                       current is not null &&
+                       current.CreatedByUserId != _currentUser.UserId &&
+                       current.DecidedByUserId != _currentUser.UserId &&
                        current.Status == ProcurementReceiptInspectionStatus.ClosureReady &&
                        ProcurementReceiptInspectionRules.CanClose(
                            current.SupplierAcknowledgementStatus,
@@ -1332,8 +1373,8 @@ public sealed class ProcurementReceiptInspectionService :
             throw new ProcurementReceiptInspectionAuthorizationException(
                 "Supplier portal users cannot administer internal receipt inspection.");
         if (IsAdministrator()) return;
-        var warehouseId = receipt.Items.Select(item => item.LocationId)
-            .FirstOrDefault(item => item.HasValue && item != Guid.Empty);
+        var warehouseId = await ResolveWarehouseIdAsync(
+            receipt, cancellationToken);
         var decision = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permission,
@@ -1343,6 +1384,131 @@ public sealed class ProcurementReceiptInspectionService :
         }, correlation, cancellationToken);
         if (!decision.Allowed)
             throw new ProcurementReceiptInspectionAuthorizationException(decision.Message);
+    }
+
+    private async Task<bool> CanUseCapabilityAsync(
+        string permission,
+        PurchaseOrderReceipt receipt,
+        Guid? warehouseId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var decision = await _access.CheckCapabilityAsync(
+                new ProcurementAccessCapabilityRequest
+                {
+                    PermissionCode = permission,
+                    SourceType = EventType,
+                    SourceReference = receipt.ReceiptNumber,
+                    WarehouseId = warehouseId
+                },
+                NewCorrelation(),
+                cancellationToken);
+            return decision.Allowed;
+        }
+        catch (ProcurementAccessValidationException)
+        {
+            return false;
+        }
+        catch (ProcurementAccessNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    private async Task<Guid?> ResolveWarehouseIdAsync(
+        PurchaseOrderReceipt receipt,
+        CancellationToken cancellationToken)
+    {
+        var warehouseId = receipt.PurchaseOrder.DeliveryWarehouseId ??
+                          receipt.Items
+                              .Select(item => item.PurchaseOrderItem.WarehouseId)
+                              .FirstOrDefault(item => item.HasValue &&
+                                                      item != Guid.Empty);
+        if (warehouseId.HasValue)
+            return warehouseId;
+
+        var locationIds = receipt.Items
+            .Select(item => item.LocationId)
+            .Where(item => item.HasValue && item.Value != Guid.Empty)
+            .Select(item => item!.Value)
+            .Distinct()
+            .ToList();
+        if (locationIds.Count == 0)
+            return null;
+
+        return await _unitOfWork.Repository<WarehouseLocation>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                locationIds.Contains(item.Id) &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item => (Guid?)item.InventoryWarehouseId)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task<bool> CanReceiveIndependentlyAsync(
+        PurchaseOrderReceipt receipt,
+        CancellationToken cancellationToken)
+    {
+        var frameworkCreator = await _unitOfWork
+            .Repository<ProcurementFrameworkCallOff>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.PurchaseOrderId == receipt.PurchaseOrderId &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item => (Guid?)item.CreatedByUserId)
+            .FirstOrDefaultAsync(cancellationToken);
+        var participants = ProcurementPurchaseOrderSodRules.Participants(
+            receipt.PurchaseOrder.CreatedById,
+            frameworkCreator);
+        if (participants.Count == 0)
+            return false;
+
+        var decision = await _sod.CheckAsync(
+            new ProcurementSodGuardRequest
+            {
+                ControlCode = ProcurementPurchaseOrderSodRules.ReceiptControl,
+                SourceType = nameof(PurchaseOrder),
+                SourceReference = receipt.PurchaseOrder.OrderNumber,
+                ProhibitedActorUserIds = participants.ToList()
+            },
+            NewCorrelation(),
+            cancellationToken);
+        return decision.Allowed;
+    }
+
+    private async Task<bool> CanDecideIndependentlyAsync(
+        ProcurementReceiptInspectionCase inspection,
+        CancellationToken cancellationToken)
+    {
+        if (!inspection.SubmittedByUserId.HasValue)
+            return false;
+        var participants = new[]
+            {
+                inspection.CreatedByUserId,
+                inspection.SubmittedByUserId.Value,
+                inspection.PurchaseOrderReceipt.ReceivedById ?? Guid.Empty
+            }
+            .Where(item => item != Guid.Empty)
+            .Distinct()
+            .ToList();
+        if (participants.Count == 0)
+            return false;
+
+        var decision = await _sod.CheckAsync(
+            new ProcurementSodGuardRequest
+            {
+                ControlCode = "SOD-INITIATOR-APPROVER",
+                SourceType = EventType,
+                SourceReference =
+                    inspection.PurchaseOrderReceipt.ReceiptNumber,
+                ProhibitedActorUserIds = participants
+            },
+            NewCorrelation(),
+            cancellationToken);
+        return decision.Allowed;
     }
 
     private async Task AddActionAsync(

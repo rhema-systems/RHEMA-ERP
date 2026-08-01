@@ -649,27 +649,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
-            // Opening-balance AP invoices preserve subledger balances but do not create
-            // inventory receipts; their GL impact is control account vs migration clearing.
-            foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == "Inventory"))
-            {
-                if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
-                {
-                    await _inventoryValuationService.ProcessReceiptAsync(
-                        line.InventoryItemId.Value,
-                        line.WarehouseId.Value,
-                        line.LocationId,
-                        line.Quantity,
-                        line.UnitPrice,
-                        ErpSystem.Core.Enums.ReferenceType.VendorInvoice,
-                        invoice.InvoiceNumber,
-                        invoice.Id,
-                        line.LotNumber,
-                        line.SerialNumber,
-                        line.ExpirationDate
-                    );
-                }
-            }
+            // Inventory is posted only by the governed purchase-receipt/inspection
+            // lifecycle. Invoice approval recognizes the AP obligation and must not
+            // create a second stock receipt (or a phantom non-PO receipt).
 
             await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);

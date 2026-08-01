@@ -17,6 +17,26 @@ using Serilog;
 using Serilog.Events;
 using Syncfusion.Licensing;
 
+// Apply pending migrations without starting the web host or running seeders.
+// This is the controlled test/deployment database update entry point.
+if (args.Length > 0 && args[0] == "apply-migrations")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider
+            .GetRequiredService<ApplicationDbContext>();
+        await db.Database.MigrateAsync();
+    }
+
+    Console.WriteLine("Database migrations completed successfully.");
+    return;
+}
+
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
 {

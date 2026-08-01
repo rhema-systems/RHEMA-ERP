@@ -215,10 +215,8 @@ public class PurchaseOrderReceiptsController : ControllerBase
     {
         try
         {
-            var overview = await _documentService.GetOverviewAsync(id, HttpContext.RequestAborted);
-            var grn = overview.Documents.FirstOrDefault(item => item.DocumentKind == Core.Enums.ProcurementReceiptDocumentKind.Grn);
-            if (grn is null) return NotFound("A GRN is not configured for this receipt.");
-            var file = await _documentService.DownloadAsync(grn.Id, HttpContext.RequestAborted);
+            var file = await _documentService.DownloadGrnAsync(
+                id, HttpContext.RequestAborted);
             return File(file.Content, file.ContentType, file.FileName);
         }
         catch (ProcurementReceiptDocumentNotFoundException ex)
