@@ -180,8 +180,11 @@ public sealed class ProcurementReceiptInspectionService :
         };
     }
 
-    public async Task<IReadOnlyList<ProcurementReceiptInspectionOverviewDto>>
-        GetSupplierOverviewAsync(CancellationToken cancellationToken = default)
+    public async Task<ErpSystem.Core.DTOs.Common.PagedResult<ProcurementReceiptInspectionOverviewDto>>
+        GetSupplierOverviewAsync(
+            int page = 1,
+            int pageSize = 20,
+            CancellationToken cancellationToken = default)
     {
         EnsureAuthenticatedTenant();
         if (!_currentUser.IsExternalUser)
@@ -201,18 +204,107 @@ public sealed class ProcurementReceiptInspectionService :
             throw new ProcurementReceiptInspectionAuthorizationException(
                 "The current portal account is not linked to a supplier in this tenant.");
 
-        var receiptIds = await Cases.GetQueryable(item =>
+        var boundedPage = Math.Max(1, page);
+        var boundedPageSize = Math.Clamp(pageSize, 1, 50);
+        var skip = boundedPage > int.MaxValue / boundedPageSize
+            ? int.MaxValue
+            : (boundedPage - 1) * boundedPageSize;
+        var receiptQueue = Cases.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
                 partnerIds.Contains(item.PurchaseOrderReceipt.PurchaseOrder.BusinessPartnerId))
             .AsNoTracking()
-            .OrderByDescending(item => item.CreatedAt)
+            .GroupBy(item => item.PurchaseOrderReceiptId)
+            .Select(group => new
+            {
+                PurchaseOrderReceiptId = group.Key,
+                LastActivityAt = group.Max(item => item.UpdatedAt ?? item.CreatedAt)
+            });
+        var totalCount = await receiptQueue.CountAsync(cancellationToken);
+        var receiptIds = await receiptQueue
+            .OrderByDescending(item => item.LastActivityAt)
+            .ThenBy(item => item.PurchaseOrderReceiptId)
+            .Skip(skip)
+            .Take(boundedPageSize)
             .Select(item => item.PurchaseOrderReceiptId)
-            .Distinct()
             .ToListAsync(cancellationToken);
+        if (receiptIds.Count == 0)
+        {
+            return new ErpSystem.Core.DTOs.Common.PagedResult<ProcurementReceiptInspectionOverviewDto>
+            {
+                Items = [],
+                TotalCount = totalCount,
+                Page = boundedPage,
+                PageSize = boundedPageSize
+            };
+        }
+
+        var cases = await CaseQuery(false)
+            .AsSplitQuery()
+            .Where(item => receiptIds.Contains(item.PurchaseOrderReceiptId))
+            .ToListAsync(cancellationToken);
+        var currentByReceipt = cases
+            .GroupBy(item => item.PurchaseOrderReceiptId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(item => item.Sequence)
+                    .FirstOrDefault(item => item.Status is not
+                        ProcurementReceiptInspectionStatus.Cancelled));
+        var profileIds = currentByReceipt.Values
+            .Where(item => item is not null)
+            .Select(item => item!.ConfigurationProfileId)
+            .Distinct()
+            .ToList();
+        var decisions = await _unitOfWork.Repository<ProcurementConfigurationDecision>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                                  profileIds.Contains(item.ProfileId) &&
+                                  item.DecisionKey == "DEC-013" && !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item => new { item.ProfileId, item.ValueJson })
+            .ToListAsync(cancellationToken);
+        var requirementsByProfile = decisions.ToDictionary(
+            item => item.ProfileId,
+            item => ParseEvidenceRequirementKeys(item.ValueJson));
+        var casesByReceipt = cases
+            .GroupBy(item => item.PurchaseOrderReceiptId)
+            .ToDictionary(group => group.Key,
+                group => group.OrderByDescending(item => item.Sequence).ToList());
         var result = new List<ProcurementReceiptInspectionOverviewDto>(receiptIds.Count);
         foreach (var receiptId in receiptIds)
-            result.Add(await GetOverviewAsync(receiptId, cancellationToken));
-        return result;
+        {
+            var history = casesByReceipt[receiptId];
+            var current = currentByReceipt[receiptId];
+            IReadOnlyList<string> evidenceRequirementKeys = [];
+            if (current is not null)
+            {
+                if (!requirementsByProfile.TryGetValue(current.ConfigurationProfileId,
+                        out var configuredKeys))
+                    throw Validation("RCV_DEC013_MISSING",
+                        "DEC-013 is missing from the receipt inspection configuration profile.");
+                evidenceRequirementKeys = configuredKeys;
+            }
+            result.Add(new ProcurementReceiptInspectionOverviewDto
+            {
+                PurchaseOrderReceiptId = receiptId,
+                ReceiptNumber = history[0].PurchaseOrderReceipt.ReceiptNumber,
+                PurchaseOrderNumber = history[0].PurchaseOrderReceipt.PurchaseOrder.OrderNumber,
+                SupplierName = history[0].PurchaseOrderReceipt.PurchaseOrder.BusinessPartner?
+                    .PartnerName ?? string.Empty,
+                CanAcknowledge = current is not null && current.QualityHold &&
+                                 current.SupplierAcknowledgementStatus ==
+                                 ProcurementReceiptSupplierAcknowledgementStatus.Pending,
+                DecisionKeys = DecisionKeys,
+                EvidenceRequirementKeys = evidenceRequirementKeys,
+                Current = current is null ? null : Map(current),
+                History = history.Select(Map).ToList()
+            });
+        }
+        return new ErpSystem.Core.DTOs.Common.PagedResult<ProcurementReceiptInspectionOverviewDto>
+        {
+            Items = result,
+            TotalCount = totalCount,
+            Page = boundedPage,
+            PageSize = boundedPageSize
+        };
     }
 
     public async Task<ProcurementReceiptInspectionDto> InitializeAsync(
@@ -325,7 +417,12 @@ public sealed class ProcurementReceiptInspectionService :
             await Cases.AddAsync(created);
             await AddActionAsync(created, ProcurementReceiptInspectionActionType.Created,
                 "Inspection case initialized", "Pending governed inspection", correlation,
-                created.IdempotencyKey, null, cancellationToken);
+                created.IdempotencyKey, ActionFingerprint("initialize", new
+                {
+                    created.PurchaseOrderReceiptId,
+                    created.Sequence,
+                    created.SourceSnapshotHash
+                }), null, cancellationToken);
             receipt.RequiresInspection = true;
             receipt.Status = "Pending Inspection";
             receipt.InspectionResult = "Pending";
@@ -352,6 +449,11 @@ public sealed class ProcurementReceiptInspectionService :
             ProcurementPurchaseOrderSodRules.SaveReceiptInspection,
             correlation,
             cancellationToken);
+        var actionFingerprint = SaveActionFingerprint(request);
+        var replay = await TryReplayActionAsync(
+            null, receiptId, ProcurementReceiptInspectionActionType.Saved,
+            request.IdempotencyKey, actionFingerprint, cancellationToken);
+        if (replay is not null) return Map(replay);
         var inspectionExists = await CaseQuery(false).AnyAsync(item =>
             item.PurchaseOrderReceiptId == receiptId &&
             item.Status != ProcurementReceiptInspectionStatus.Cancelled &&
@@ -419,7 +521,7 @@ public sealed class ProcurementReceiptInspectionService :
             inspection.IntegrityHash = CaseHash(inspection);
             await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Saved,
                 request.Comment, "Inspection quantities saved", correlation,
-                request.IdempotencyKey.Trim(), null, cancellationToken);
+                request.IdempotencyKey.Trim(), actionFingerprint, null, cancellationToken);
             await Cases.UpdateAsync(inspection);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordEventAsync(inspection, "Saved", ProcurementControlEventResult.ReviewRequired,
@@ -444,6 +546,12 @@ public sealed class ProcurementReceiptInspectionService :
             ProcurementPurchaseOrderSodRules.SubmitReceiptInspection,
             correlation,
             cancellationToken);
+        var submitKey = $"submit:{inspection.Id:N}:{inspection.Sequence}";
+        var actionFingerprint = SubmitActionFingerprint(request);
+        var replay = await TryReplayActionAsync(
+            caseId, null, ProcurementReceiptInspectionActionType.Submitted,
+            submitKey, actionFingerprint, cancellationToken);
+        if (replay is not null) return Map(replay);
         await ExecuteAsync(async () =>
         {
             inspection = await LoadCaseAsync(caseId, cancellationToken);
@@ -486,7 +594,7 @@ public sealed class ProcurementReceiptInspectionService :
             inspection.WorkflowInstanceId = workflow.ExecutionResult.WorkflowInstanceId;
             await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Submitted,
                 request.Comment, "Submitted for independent approval", correlation,
-                $"submit:{inspection.Id:N}:{inspection.Sequence}", null, cancellationToken);
+                submitKey, actionFingerprint, null, cancellationToken);
             inspection.IntegrityHash = CaseHash(inspection);
             await Cases.UpdateAsync(inspection);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -507,9 +615,6 @@ public sealed class ProcurementReceiptInspectionService :
         var inspection = await LoadCaseAsync(caseId, cancellationToken);
         await EnsureCapabilityAsync(ApprovePermission, inspection.PurchaseOrderReceipt,
             correlation, cancellationToken);
-        EnsureRowVersion(inspection.RowVersion, request.RowVersion);
-        if (!ProcurementReceiptInspectionRules.CanDecide(inspection.Status))
-            throw Conflict("RCV_INSPECTION_NOT_DECIDABLE", "Only a Pending Approval inspection can be decided.");
         if (!inspection.SubmittedByUserId.HasValue)
             throw Conflict("RCV_INSPECTION_SUBMITTER_MISSING", "The inspection submitter was not retained.");
         if (request.Approved)
@@ -532,6 +637,18 @@ public sealed class ProcurementReceiptInspectionService :
                 inspection.PurchaseOrderReceipt.ReceivedById ?? Guid.Empty
             }.Where(item => item != Guid.Empty).Distinct().ToList()
         }, correlation, cancellationToken);
+        var decisionAction = request.Approved
+            ? ProcurementReceiptInspectionActionType.Approved
+            : ProcurementReceiptInspectionActionType.Rejected;
+        var decisionKey = $"decision:{inspection.Id:N}:{(request.Approved ? "approve" : "reject")}";
+        var actionFingerprint = DecisionActionFingerprint(request);
+        var replay = await TryReplayActionAsync(
+            caseId, null, decisionAction, decisionKey, actionFingerprint,
+            cancellationToken);
+        if (replay is not null) return Map(replay);
+        EnsureRowVersion(inspection.RowVersion, request.RowVersion);
+        if (!ProcurementReceiptInspectionRules.CanDecide(inspection.Status))
+            throw Conflict("RCV_INSPECTION_NOT_DECIDABLE", "Only a Pending Approval inspection can be decided.");
         ProcurementReceiptInspectionDto? result = null;
         string? publishTopic = null;
         await ExecuteAsync(async () =>
@@ -576,7 +693,7 @@ public sealed class ProcurementReceiptInspectionService :
                 inspection.Status = ProcurementReceiptInspectionStatus.Rejected;
                 await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Rejected,
                     request.Comment, "Inspection workflow rejected", correlation,
-                    $"decision:{inspection.Id:N}:reject", null, cancellationToken);
+                    decisionKey, actionFingerprint, null, cancellationToken);
                 inspection.IntegrityHash = CaseHash(inspection);
                 await Cases.UpdateAsync(inspection);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -632,11 +749,17 @@ public sealed class ProcurementReceiptInspectionService :
                         ProcurementReceiptInspectionActionType.RejectionNoteIssued,
                         "Formal rejection note issued for quarantined quantities.",
                         inspection.RejectionNoteNumber, correlation,
-                        $"rejection-note:{inspection.Id:N}", null, cancellationToken);
+                        $"rejection-note:{inspection.Id:N}",
+                        ActionFingerprint("rejection-note", new
+                        {
+                            inspection.RejectionNoteNumber,
+                            inspection.RejectedQuantity,
+                            DecisionFingerprint = actionFingerprint
+                        }), null, cancellationToken);
                 }
                 await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Approved,
                     request.Comment, hasRejection ? "Accepted with quality hold" : "Accepted and closed",
-                    correlation, $"decision:{inspection.Id:N}:approve", null, cancellationToken);
+                    correlation, decisionKey, actionFingerprint, null, cancellationToken);
                 inspection.IntegrityHash = CaseHash(inspection);
                 await Cases.UpdateAsync(inspection);
                 await _unitOfWork.Repository<PurchaseOrderReceipt>()
@@ -668,6 +791,18 @@ public sealed class ProcurementReceiptInspectionService :
         CancellationToken cancellationToken = default)
     {
         var correlation = NormalizeCorrelation(correlationId);
+        var initial = await LoadCaseAsync(caseId, cancellationToken);
+        await EnsureLinkedSupplierAsync(
+            initial.PurchaseOrderReceipt.PurchaseOrder.BusinessPartnerId,
+            cancellationToken);
+        var acknowledgementAction = request.Acknowledged
+            ? ProcurementReceiptInspectionActionType.SupplierAcknowledged
+            : ProcurementReceiptInspectionActionType.SupplierDisputed;
+        var actionFingerprint = AcknowledgementActionFingerprint(request);
+        var replay = await TryReplayActionAsync(
+            caseId, null, acknowledgementAction, request.IdempotencyKey,
+            actionFingerprint, cancellationToken);
+        if (replay is not null) return Map(replay);
         ProcurementReceiptInspectionCase? acknowledged = null;
         await ExecuteAsync(async () =>
         {
@@ -698,7 +833,7 @@ public sealed class ProcurementReceiptInspectionService :
                     ? ProcurementReceiptInspectionActionType.SupplierAcknowledged
                     : ProcurementReceiptInspectionActionType.SupplierDisputed,
                 request.Comment, request.Reference, correlation, request.IdempotencyKey,
-                partner.Id, cancellationToken);
+                actionFingerprint, partner.Id, cancellationToken);
             inspection.IntegrityHash = CaseHash(inspection);
             await Cases.UpdateAsync(inspection);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -720,6 +855,14 @@ public sealed class ProcurementReceiptInspectionService :
         CancellationToken cancellationToken = default)
     {
         var correlation = NormalizeCorrelation(correlationId);
+        var initial = await LoadCaseAsync(caseId, cancellationToken);
+        await EnsureCapabilityAsync(ManagePermission, initial.PurchaseOrderReceipt,
+            correlation, cancellationToken);
+        var actionFingerprint = ResolutionActionFingerprint("resolve", request);
+        var replay = await TryReplayActionAsync(
+            caseId, null, null, request.IdempotencyKey, actionFingerprint,
+            cancellationToken);
+        if (replay is not null) return Map(replay);
         ProcurementReceiptInspectionCase? resolved = null;
         await ExecuteAsync(async () =>
         {
@@ -797,7 +940,8 @@ public sealed class ProcurementReceiptInspectionService :
                     throw Conflict("RCV_REPLACEMENT_ALREADY_RECEIVED", "The replacement route has already been completed.");
             }
             await AddActionAsync(inspection, action, request.Comment, request.Reference,
-                correlation, request.IdempotencyKey, null, cancellationToken);
+                correlation, request.IdempotencyKey, actionFingerprint, null,
+                cancellationToken);
             inspection.IntegrityHash = CaseHash(inspection);
             await Cases.UpdateAsync(inspection);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -823,6 +967,11 @@ public sealed class ProcurementReceiptInspectionService :
             ProcurementPurchaseOrderSodRules.CloseReceiptInspection,
             correlation,
             cancellationToken);
+        var actionFingerprint = ResolutionActionFingerprint("close", request);
+        var replay = await TryReplayActionAsync(
+            caseId, null, ProcurementReceiptInspectionActionType.Closed,
+            request.IdempotencyKey, actionFingerprint, cancellationToken);
+        if (replay is not null) return Map(replay);
         EnsureRowVersion(inspection.RowVersion, request.RowVersion);
         if (inspection.Status != ProcurementReceiptInspectionStatus.ClosureReady ||
             !ProcurementReceiptInspectionRules.CanClose(
@@ -870,7 +1019,7 @@ public sealed class ProcurementReceiptInspectionService :
             inspection.QualityHoldReleasedAtUtc = DateTime.UtcNow;
             await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Closed,
                 request.Comment, request.Reference, correlation, request.IdempotencyKey,
-                null, cancellationToken);
+                actionFingerprint, null, cancellationToken);
             inspection.IntegrityHash = CaseHash(inspection);
             await Cases.UpdateAsync(inspection);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1644,11 +1793,16 @@ public sealed class ProcurementReceiptInspectionService :
         var decision = profile.Decisions.SingleOrDefault(item => item.DecisionKey == "DEC-013")
             ?? throw Validation("RCV_DEC013_MISSING",
                 "DEC-013 is missing from the effective configuration.");
+        return ParseEvidenceRequirementKeys(decision.Value.GetRawText());
+    }
+
+    private static IReadOnlyList<string> ParseEvidenceRequirementKeys(string valueJson)
+    {
         ProcurementReceiptDocumentDecisionValueDto value;
         try
         {
             value = JsonSerializer.Deserialize<ProcurementReceiptDocumentDecisionValueDto>(
-                        decision.Value.GetRawText(), JsonOptions)
+                        valueJson, JsonOptions)
                     ?? throw new JsonException("DEC-013 is empty.");
         }
         catch (JsonException)
@@ -1793,6 +1947,132 @@ public sealed class ProcurementReceiptInspectionService :
         return decision.Allowed;
     }
 
+    private async Task<ProcurementReceiptInspectionCase?> TryReplayActionAsync(
+        Guid? inspectionCaseId,
+        Guid? receiptId,
+        ProcurementReceiptInspectionActionType? action,
+        string idempotencyKey,
+        string requestFingerprint,
+        CancellationToken cancellationToken)
+    {
+        var normalizedKey = idempotencyKey.Trim();
+        var existing = await Actions.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.IdempotencyKey == normalizedKey && !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+        if (existing is null) return null;
+
+        EnsureActionReplayMatches(existing, inspectionCaseId, action,
+            requestFingerprint);
+        var inspection = await LoadCaseAsync(existing.InspectionCaseId,
+            cancellationToken);
+        if (receiptId.HasValue &&
+            inspection.PurchaseOrderReceiptId != receiptId.Value)
+            throw Conflict("RCV_ACTION_IDEMPOTENCY_CONFLICT",
+                "The action idempotency key belongs to another receipt operation.");
+        return inspection;
+    }
+
+    internal static void EnsureActionReplayMatches(
+        ProcurementReceiptInspectionAction existing,
+        Guid? inspectionCaseId,
+        ProcurementReceiptInspectionActionType? action,
+        string requestFingerprint)
+    {
+        if ((inspectionCaseId.HasValue &&
+             existing.InspectionCaseId != inspectionCaseId.Value) ||
+            (action.HasValue && existing.ActionType != action.Value))
+            throw Conflict("RCV_ACTION_IDEMPOTENCY_CONFLICT",
+                "The action idempotency key belongs to another receipt operation.");
+        if (string.IsNullOrWhiteSpace(existing.RequestFingerprint) ||
+            !string.Equals(existing.RequestFingerprint, requestFingerprint,
+                StringComparison.Ordinal))
+            throw Conflict("RCV_ACTION_IDEMPOTENCY_PAYLOAD_MISMATCH",
+                "The action idempotency key was already used with a different receipt-inspection payload.");
+    }
+
+    internal static string SaveActionFingerprint(
+        SaveProcurementReceiptInspectionRequest request) =>
+        ActionFingerprint("save", new
+        {
+            Comment = Trim(request.Comment, 1000),
+            Lines = request.Lines
+                .OrderBy(item => item.PurchaseOrderReceiptItemId)
+                .Select(item => new InspectionLineActionFingerprint(
+                    item.PurchaseOrderReceiptItemId,
+                    item.AcceptedQuantity,
+                    item.RejectedQuantity,
+                    Trim(item.RejectionReason, 1000),
+                    Trim(item.InspectionNotes, 1000),
+                    item.QuarantineLocationId))
+                .ToList()
+        });
+
+    internal static string SubmitActionFingerprint(
+        SubmitProcurementReceiptInspectionRequest request) =>
+        ActionFingerprint("submit", new
+        {
+            Comment = Trim(request.Comment, 1000),
+            Evidence = EvidenceActionFingerprint(request.Evidence)
+        });
+
+    internal static string DecisionActionFingerprint(
+        DecideProcurementReceiptInspectionRequest request) =>
+        ActionFingerprint("decision", new
+        {
+            request.Approved,
+            Comment = Trim(request.Comment, 1000)
+        });
+
+    internal static string AcknowledgementActionFingerprint(
+        ProcurementReceiptSupplierAcknowledgementRequest request) =>
+        ActionFingerprint("supplier-acknowledgement", new
+        {
+            request.Acknowledged,
+            Reference = Trim(request.Reference, 100),
+            Comment = Trim(request.Comment, 1000),
+            Evidence = EvidenceActionFingerprint(request.Evidence)
+        });
+
+    internal static string ResolutionActionFingerprint(
+        string operation,
+        ProcurementReceiptResolutionRequest request) =>
+        ActionFingerprint(operation, new
+        {
+            request.ResolutionKind,
+            Reference = Trim(request.Reference, 100),
+            Comment = Trim(request.Comment, 1000),
+            Evidence = EvidenceActionFingerprint(request.Evidence)
+        });
+
+    private static IReadOnlyList<InspectionEvidenceActionFingerprint>
+        EvidenceActionFingerprint(
+            IEnumerable<ProcurementReceiptInspectionEvidenceRequest> evidence) =>
+        evidence
+            .Select(item => new InspectionEvidenceActionFingerprint(
+                Trim(item.ActionKey, 100) ?? string.Empty,
+                Trim(item.RequirementKey, 200) ?? string.Empty,
+                item.ReferenceKind,
+                item.WorkflowEvidenceDocumentId,
+                item.FileUploadRecordId,
+                Trim(item.EvidenceReference, 1000) ?? string.Empty))
+            .OrderBy(item => item.ActionKey, StringComparer.Ordinal)
+            .ThenBy(item => item.RequirementKey, StringComparer.Ordinal)
+            .ThenBy(item => item.ReferenceKind)
+            .ThenBy(item => item.WorkflowEvidenceDocumentId)
+            .ThenBy(item => item.FileUploadRecordId)
+            .ThenBy(item => item.EvidenceReference, StringComparer.Ordinal)
+            .ToList();
+
+    private static string ActionFingerprint(string operation, object payload) =>
+        Hash(Serialize(new
+        {
+            SchemaVersion = "tdc.receipt-inspection-action.v1",
+            Operation = operation,
+            Payload = payload
+        }));
+
     private async Task AddActionAsync(
         ProcurementReceiptInspectionCase inspection,
         ProcurementReceiptInspectionActionType action,
@@ -1800,6 +2080,7 @@ public sealed class ProcurementReceiptInspectionService :
         string reference,
         string correlation,
         string idempotencyKey,
+        string requestFingerprint,
         Guid? actorBusinessPartnerId,
         CancellationToken cancellationToken)
     {
@@ -1809,9 +2090,8 @@ public sealed class ProcurementReceiptInspectionService :
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
         if (existing is not null)
         {
-            if (existing.InspectionCaseId != inspection.Id || existing.ActionType != action)
-                throw Conflict("RCV_ACTION_IDEMPOTENCY_CONFLICT",
-                    "The action idempotency key belongs to another receipt operation.");
+            EnsureActionReplayMatches(existing, inspection.Id, action,
+                requestFingerprint);
             return;
         }
         var persistedSequence = await Actions.GetQueryable(item =>
@@ -1845,6 +2125,7 @@ public sealed class ProcurementReceiptInspectionService :
             ActorName = ActorName,
             OccurredAtUtc = DateTime.UtcNow,
             IdempotencyKey = idempotencyKey.Trim(),
+            RequestFingerprint = requestFingerprint,
             CorrelationId = correlation,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = ActorName,
@@ -2166,6 +2447,22 @@ public sealed class ProcurementReceiptInspectionService :
     private static ProcurementReceiptInspectionNotFoundException NotFound(string code, string message) => new(code, message);
     private static ProcurementReceiptInspectionValidationException Validation(string code, string message) => new(code, message);
     private static ProcurementReceiptInspectionConflictException Conflict(string code, string message) => new(code, message);
+
+    private sealed record InspectionLineActionFingerprint(
+        Guid PurchaseOrderReceiptItemId,
+        decimal AcceptedQuantity,
+        decimal RejectedQuantity,
+        string? RejectionReason,
+        string? InspectionNotes,
+        Guid? QuarantineLocationId);
+
+    private sealed record InspectionEvidenceActionFingerprint(
+        string ActionKey,
+        string RequirementKey,
+        ProcurementReceiptInspectionEvidenceKind ReferenceKind,
+        Guid? WorkflowEvidenceDocumentId,
+        Guid? FileUploadRecordId,
+        string EvidenceReference);
 
     private sealed record Governance(
         ProcurementConfigurationProfileDto Profile,

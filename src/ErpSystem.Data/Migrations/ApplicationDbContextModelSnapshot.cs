@@ -59680,6 +59680,10 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("RequestFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<int>("ResolutionKind")
                         .HasColumnType("int");
 
@@ -59713,6 +59717,8 @@ namespace ErpSystem.Data.Migrations
                             t.HasTrigger("TR_ProcurementReceiptInspectionActions_TDC0502Immutable");
 
                             t.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Hash", "LEN([IntegrityHash]) = 64");
+
+                            t.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_RequestFingerprint", "[RequestFingerprint] IS NULL OR LEN([RequestFingerprint]) = 64");
 
                             t.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Sequence", "[Sequence] >= 1");
 

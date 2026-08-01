@@ -96,6 +96,8 @@ public sealed class ProcurementReceiptInspectionActionConfiguration :
         builder.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Sequence", "[Sequence] >= 1");
         builder.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Type", "[ActionType] BETWEEN 0 AND 14");
         builder.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Hash", "LEN([IntegrityHash]) = 64");
+        builder.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_RequestFingerprint",
+            "[RequestFingerprint] IS NULL OR LEN([RequestFingerprint]) = 64");
         builder.HasOne(item => item.InspectionCase).WithMany(item => item.Actions)
             .HasForeignKey(item => item.InspectionCaseId).OnDelete(DeleteBehavior.Restrict);
     }

@@ -1,11 +1,12 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Common;
 
 namespace ErpSystem.Core.Interfaces.Procurement;
 
 public interface IProcurementReceiptInspectionService
 {
     Task<ProcurementReceiptInspectionOverviewDto> GetOverviewAsync(Guid receiptId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<ProcurementReceiptInspectionOverviewDto>> GetSupplierOverviewAsync(CancellationToken cancellationToken = default);
+    Task<PagedResult<ProcurementReceiptInspectionOverviewDto>> GetSupplierOverviewAsync(int page = 1, int pageSize = 20, CancellationToken cancellationToken = default);
     Task<ProcurementReceiptInspectionDto> InitializeAsync(Guid receiptId, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementReceiptInspectionDto> SaveAsync(Guid receiptId, SaveProcurementReceiptInspectionRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementReceiptInspectionDto> SubmitAsync(Guid caseId, SubmitProcurementReceiptInspectionRequest request, string correlationId, CancellationToken cancellationToken = default);

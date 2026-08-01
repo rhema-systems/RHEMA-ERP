@@ -16,7 +16,10 @@ const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'The supplier inspection queue could not be loaded.';
 
 export default function SupplierReceiptInspectionsPage() {
+  const pageSize = 20;
   const [rows, setRows] = useState<ProcurementReceiptInspectionOverviewDto[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,13 +27,15 @@ export default function SupplierReceiptInspectionsPage() {
     try {
       setLoading(true);
       setError(null);
-      setRows(await purchasingService.getSupplierReceiptInspectionControls());
+      const result = await purchasingService.getSupplierReceiptInspectionControls(page, pageSize);
+      setRows(result.items);
+      setTotalCount(result.totalCount);
     } catch (loadError) {
       setError(messageOf(loadError));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -43,7 +48,16 @@ export default function SupplierReceiptInspectionsPage() {
       {loading ? <Card><CardContent className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading supplier-scoped inspections…</CardContent></Card>
         : error ? <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Inspection queue unavailable</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>
         : rows.length === 0 ? <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">No governed receipt inspection is linked to your supplier account.</CardContent></Card>
-        : rows.map((row) => <ReceiptInspectionControl key={row.purchaseOrderReceiptId} receiptId={row.purchaseOrderReceiptId} initialOverview={row} external onChanged={() => void load()} />)}
+        : <div className="space-y-4">
+          {rows.map((row) => <ReceiptInspectionControl key={row.purchaseOrderReceiptId} receiptId={row.purchaseOrderReceiptId} initialOverview={row} external onChanged={() => void load()} />)}
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>Page {page} of {Math.max(1, Math.ceil(totalCount / pageSize))} · {totalCount} inspection{totalCount === 1 ? '' : 's'}</span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" disabled={loading || page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</Button>
+              <Button variant="outline" size="sm" disabled={loading || page * pageSize >= totalCount} onClick={() => setPage((value) => value + 1)}>Next</Button>
+            </div>
+          </div>
+        </div>}
     </div>
   );
 }

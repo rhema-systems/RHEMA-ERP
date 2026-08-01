@@ -8,18 +8,21 @@ describe('receipt inspection client', () => {
   });
 
   it('loads only the authenticated supplier inspection queue', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('[]', {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      items: [], totalCount: 0, page: 2, pageSize: 25,
+    }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await purchasingService.getSupplierReceiptInspectionControls();
+    const result = await purchasingService.getSupplierReceiptInspectionControls(2, 25);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/PurchaseOrderReceipts/inspection-control/supplier',
+      '/api/PurchaseOrderReceipts/inspection-control/supplier?page=2&pageSize=25',
       expect.objectContaining({ headers: expect.any(Object) })
     );
+    expect(result).toMatchObject({ items: [], totalCount: 0, page: 2, pageSize: 25 });
   });
 
   it('sends row version and controlled evidence on submission', async () => {

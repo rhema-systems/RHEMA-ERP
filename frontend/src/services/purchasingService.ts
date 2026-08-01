@@ -1956,9 +1956,16 @@ export const purchasingService = {
     return response.json();
   },
 
-  async getSupplierReceiptInspectionControls(): Promise<ProcurementReceiptInspectionOverviewDto[]> {
+  async getSupplierReceiptInspectionControls(
+    page = 1,
+    pageSize = 20
+  ): Promise<PagedResult<ProcurementReceiptInspectionOverviewDto>> {
+    const query = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
     const response = await fetch(
-      `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/supplier`,
+      `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/supplier?${query}`,
       { headers: getAuthHeaders() }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));

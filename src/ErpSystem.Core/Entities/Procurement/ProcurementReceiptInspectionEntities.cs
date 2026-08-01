@@ -118,6 +118,7 @@ public sealed class ProcurementReceiptInspectionAction : TenantEntity
     [Required, StringLength(300)] public string ActorName { get; set; } = string.Empty;
     public DateTime OccurredAtUtc { get; set; }
     [Required, StringLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+    [StringLength(64)] public string? RequestFingerprint { get; set; }
     [Required, StringLength(100)] public string CorrelationId { get; set; } = string.Empty;
     [Required, StringLength(64)] public string IntegrityHash { get; set; } = string.Empty;
 

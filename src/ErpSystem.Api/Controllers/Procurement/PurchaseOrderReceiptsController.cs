@@ -40,10 +40,10 @@ public class PurchaseOrderReceiptsController : ControllerBase
         ExecuteInspectionAsync(() => _inspectionService.GetOverviewAsync(id, HttpContext.RequestAborted));
 
     [HttpGet("inspection-control/supplier")]
-    public Task<ActionResult<IReadOnlyList<ProcurementReceiptInspectionOverviewDto>>>
-        GetSupplierInspectionControl() =>
+    public Task<ActionResult<PagedResult<ProcurementReceiptInspectionOverviewDto>>>
+        GetSupplierInspectionControl([FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
         ExecuteInspectionAsync(() => _inspectionService.GetSupplierOverviewAsync(
-            HttpContext.RequestAborted));
+            page, pageSize, HttpContext.RequestAborted));
 
     [HttpPost("{id:guid}/inspection-control/initialize")]
     public Task<ActionResult<ProcurementReceiptInspectionDto>> InitializeInspection(Guid id) =>
