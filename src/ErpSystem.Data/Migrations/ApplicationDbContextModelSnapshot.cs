@@ -50576,6 +50576,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<DateTime?>("ConsumedAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -67167,6 +67170,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid?>("ApprovedById")

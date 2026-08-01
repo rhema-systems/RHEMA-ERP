@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -40,6 +41,83 @@ public sealed class VendorInvoiceMatchExceptionServiceTests
             It.IsAny<ClaimsPrincipal>(),
             null,
             FinancePermissions.ManageApInvoices), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OverviewExposesDecisionCapabilityOnlyToApInvoiceApprovers(bool canApprove)
+    {
+        await using var fixture = new Fixture(canManage: false, canApprove);
+        var invoice = fixture.NewInvoice();
+        invoice.SubmittedById = Guid.NewGuid();
+        var purchaseOrder = fixture.NewPurchaseOrder();
+        invoice.PurchaseOrderId = purchaseOrder.Id;
+        var exception = fixture.NewException(invoice, purchaseOrder, "decision-capability");
+        exception.Status = VendorInvoiceMatchExceptionStatus.PendingApproval;
+        exception.RequestedById = Guid.NewGuid();
+        exception.WorkflowInstanceId = Guid.NewGuid();
+        fixture.Context.AddRange(purchaseOrder, invoice, exception);
+        await fixture.Context.SaveChangesAsync();
+        fixture.InvoiceService
+            .Setup(service => service.GetThreeWayMatchReadinessAsync(invoice.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ExceptionableReadiness(invoice.Id));
+        fixture.Workflow
+            .Setup(service => service.CanUserApproveAsync(
+                VendorInvoiceMatchExceptionRules.WorkflowEntityType,
+                exception.Id,
+                fixture.UserId))
+            .ReturnsAsync(true);
+
+        var overview = await fixture.Service.GetOverviewAsync(invoice.Id);
+
+        overview.CanDecide.Should().Be(canApprove);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OverviewExposesCancellationCapabilityOnlyToApInvoiceManagers(bool canManage)
+    {
+        await using var fixture = new Fixture(canManage, canApprove: false);
+        var invoice = fixture.NewInvoice();
+        var purchaseOrder = fixture.NewPurchaseOrder();
+        invoice.PurchaseOrderId = purchaseOrder.Id;
+        var exception = fixture.NewException(invoice, purchaseOrder, "cancel-capability");
+        exception.Status = VendorInvoiceMatchExceptionStatus.PendingApproval;
+        fixture.Context.AddRange(purchaseOrder, invoice, exception);
+        await fixture.Context.SaveChangesAsync();
+        fixture.InvoiceService
+            .Setup(service => service.GetThreeWayMatchReadinessAsync(invoice.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ExceptionableReadiness(invoice.Id));
+
+        var overview = await fixture.Service.GetOverviewAsync(invoice.Id);
+
+        overview.CanCancel.Should().Be(canManage);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OverviewExposesCorrectiveCompletionOnlyToApInvoiceManagers(bool canManage)
+    {
+        await using var fixture = new Fixture(canManage, canApprove: false);
+        var invoice = fixture.NewInvoice();
+        var purchaseOrder = fixture.NewPurchaseOrder();
+        invoice.PurchaseOrderId = purchaseOrder.Id;
+        var exception = fixture.NewException(invoice, purchaseOrder, "corrective-capability");
+        exception.Status = VendorInvoiceMatchExceptionStatus.Approved;
+        exception.CorrectiveActionStatus = VendorInvoiceMatchCorrectiveActionStatus.Planned;
+        exception.CorrectiveActionOwnerId = fixture.UserId;
+        fixture.Context.AddRange(purchaseOrder, invoice, exception);
+        await fixture.Context.SaveChangesAsync();
+        fixture.InvoiceService
+            .Setup(service => service.GetThreeWayMatchReadinessAsync(invoice.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ExceptionableReadiness(invoice.Id));
+
+        var overview = await fixture.Service.GetOverviewAsync(invoice.Id);
+
+        overview.CanCompleteCorrectiveAction.Should().Be(canManage);
     }
 
     [Fact]
@@ -125,11 +203,14 @@ public sealed class VendorInvoiceMatchExceptionServiceTests
 
     private sealed class Fixture : IAsyncDisposable
     {
-        public Fixture(bool canManage)
+        public Fixture(bool canManage, bool canApprove = false)
         {
             Context = new ApplicationDbContext(
                 new DbContextOptionsBuilder<ApplicationDbContext>()
                     .UseInMemoryDatabase($"tdc0507-service-{Guid.NewGuid():N}")
+                    // ApplicationDbContext's tenant filter captures the constructor
+                    // tenant in its model. A fresh provider prevents a model cached
+                    // by a parallel fixture from applying another tenant's filter.
                     .EnableServiceProviderCaching(false)
                     .Options,
                 TenantId);
@@ -157,7 +238,13 @@ public sealed class VendorInvoiceMatchExceptionServiceTests
                     null,
                     FinancePermissions.ManageApInvoices))
                 .ReturnsAsync(canManage ? AuthorizationResult.Success() : AuthorizationResult.Failed());
+            Authorization.Setup(service => service.AuthorizeAsync(
+                    principal,
+                    null,
+                    FinancePermissions.ApproveApInvoices))
+                .ReturnsAsync(canApprove ? AuthorizationResult.Success() : AuthorizationResult.Failed());
             InvoiceService = new Mock<IVendorInvoiceService>();
+            Workflow = new Mock<IWorkflowService>();
 
             var unitOfWork = new Mock<IUnitOfWork>();
             unitOfWork.SetupGet(service => service.HasActiveTransaction).Returns(true);
@@ -170,7 +257,7 @@ public sealed class VendorInvoiceMatchExceptionServiceTests
                 unitOfWork.Object,
                 currentUser.Object,
                 InvoiceService.Object,
-                Mock.Of<IWorkflowService>(),
+                Workflow.Object,
                 Mock.Of<IProcurementConfigurationService>(),
                 Mock.Of<IProcurementControlEventService>(),
                 Mock.Of<INotificationTopicPublisher>(),
@@ -183,6 +270,7 @@ public sealed class VendorInvoiceMatchExceptionServiceTests
         public Guid UserId { get; } = Guid.NewGuid();
         public ApplicationDbContext Context { get; }
         public Mock<IVendorInvoiceService> InvoiceService { get; }
+        public Mock<IWorkflowService> Workflow { get; }
         public Mock<IAuthorizationService> Authorization { get; } = new();
         public VendorInvoiceMatchExceptionService Service { get; }
 

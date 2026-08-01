@@ -1126,6 +1126,13 @@ namespace ErpSystem.Api.Services.Finance.AP
             var result = new List<OutstandingVendorInvoiceDto>();
             foreach (var i in invoices)
             {
+                var unreservedBalance = await GetInvoiceUnreservedBalanceAsync(
+                    i,
+                    currentPaymentId: null,
+                    cancellationToken);
+                if (unreservedBalance <= 0m)
+                    continue;
+
                 var discountAvailable = i.EarlyPaymentDiscountPercentage > 0
                     && i.EarlyPaymentDiscountDueDate.HasValue
                     && i.EarlyPaymentDiscountDueDate.Value >= now.Date;
@@ -1139,14 +1146,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                     DueDate = i.DueDate,
                     TotalAmount = i.TotalAmount,
                     PaidAmount = i.PaidAmount,
-                    BalanceAmount = i.BalanceAmount,
+                    BalanceAmount = unreservedBalance,
                     DaysOverdue = i.DueDate.HasValue && i.DueDate.Value < now
                         ? (int)(now - i.DueDate.Value).TotalDays
                         : 0,
                     EarlyPaymentDiscountPercentage = i.EarlyPaymentDiscountPercentage,
                     EarlyPaymentDiscountDueDate = i.EarlyPaymentDiscountDueDate,
                     IsDiscountAvailable = discountAvailable,
-                    DiscountAmount = discountAvailable ? i.EarlyPaymentDiscountAmount : 0,
+                    DiscountAmount = discountAvailable
+                        ? RoundMoney(unreservedBalance *
+                                     i.EarlyPaymentDiscountPercentage / 100m)
+                        : 0m,
                     PaymentReadiness = await EvaluateInvoicePaymentReadinessAsync(i.Id, cancellationToken)
                 });
             }

@@ -63,6 +63,7 @@ public sealed class ProcurementBudgetCommitment : TenantEntity
     public string ReservedByName { get; set; } = string.Empty;
 
     public DateTime? ReleasedAtUtc { get; set; }
+    public DateTime? ConsumedAtUtc { get; set; }
     public Guid? ReleasedById { get; set; }
 
     [StringLength(300)]

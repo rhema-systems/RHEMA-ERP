@@ -15,6 +15,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Text.Json;
 using Xunit;
 using ErpSystem.Shared;
 
@@ -224,6 +225,164 @@ public sealed class ProcurementFinanceReconciliationTests
 
     [Fact]
     [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldExcludePurchaseOrderApprovedAfterCutoff()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        fixture.PurchaseOrder.CreatedAt = new DateTime(2026, 7, 1);
+        fixture.PurchaseOrder.ApprovedAt = new DateTime(2026, 9, 2);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var action = () => service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        await action.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldReconstructPurchaseOrderBeforeLaterCancellation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        fixture.PurchaseOrder.CreatedAt = new DateTime(2026, 7, 1);
+        fixture.PurchaseOrder.ApprovedAt = new DateTime(2026, 7, 2);
+        fixture.PurchaseOrder.Status = "Cancelled";
+        fixture.PurchaseOrder.CancelledAtUtc = new DateTime(2026, 9, 2);
+        fixture.PurchaseOrder.UpdatedAt = new DateTime(2026, 9, 2);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        report.Rows.Should().ContainSingle();
+        report.Rows.Single().PurchaseOrderStatus.Should().Be("Approved");
+    }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldUseCommitmentReservationIntervalAtCutoff()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        fixture.PurchaseOrder.CreatedAt = new DateTime(2026, 7, 1);
+        fixture.Commitment.CreatedAt = new DateTime(2026, 7, 1);
+        fixture.Commitment.Status = ProcurementBudgetCommitmentStatus.Released;
+        fixture.Commitment.ReleasedAtUtc = new DateTime(2026, 9, 2);
+        fixture.Commitment.UpdatedAt = new DateTime(2026, 9, 2);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var beforeRelease = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+        beforeRelease.Rows.Single().CommitmentAmount.Should().Be(100m);
+
+        fixture.Commitment.ReleasedAtUtc = new DateTime(2026, 8, 30);
+        fixture.Commitment.UpdatedAt = new DateTime(2026, 8, 30);
+        await db.SaveChangesAsync();
+
+        var afterRelease = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+        afterRelease.Rows.Single().CommitmentAmount.Should().Be(0m);
+
+        fixture.Commitment.Status = ProcurementBudgetCommitmentStatus.Consumed;
+        fixture.Commitment.ReleasedAtUtc = null;
+        fixture.Commitment.ConsumedAtUtc = new DateTime(2026, 9, 2);
+        fixture.Commitment.UpdatedAt = new DateTime(2026, 9, 2);
+        await db.SaveChangesAsync();
+
+        var beforeConsumption = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+        beforeConsumption.Rows.Single().CommitmentAmount.Should().Be(100m);
+
+        fixture.Commitment.ConsumedAtUtc = new DateTime(2026, 8, 30);
+        fixture.Commitment.UpdatedAt = new DateTime(2026, 8, 30);
+        await db.SaveChangesAsync();
+
+        var afterConsumption = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+        afterConsumption.Rows.Single().CommitmentAmount.Should().Be(0m);
+
+        fixture.Commitment.Status = ProcurementBudgetCommitmentStatus.Reserved;
+        fixture.Commitment.ReservedAtUtc = new DateTime(2026, 9, 2);
+        fixture.Commitment.UpdatedAt = new DateTime(2026, 9, 2);
+        await db.SaveChangesAsync();
+
+        var beforeReservation = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+        beforeReservation.Rows.Single().CommitmentAmount.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldUseCamelCaseControlEventSnapshotAtCutoff()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        fixture.Commitment.Status = ProcurementBudgetCommitmentStatus.Released;
+        fixture.Commitment.ReservedAmount = 20m;
+        fixture.Commitment.ReleasedAtUtc = new DateTime(2026, 9, 2);
+        fixture.Commitment.UpdatedAt = new DateTime(2026, 9, 2);
+
+        var historicalSnapshot = JsonSerializer.Serialize(new
+        {
+            fixture.Commitment.Id,
+            fixture.Commitment.ProcurementBudgetId,
+            fixture.Commitment.PurchaseRequisitionId,
+            fixture.Commitment.ReservationReference,
+            fixture.Commitment.ReservationSequence,
+            Status = (int)ProcurementBudgetCommitmentStatus.Reserved,
+            ReservedAmount = 100m,
+            fixture.Commitment.Currency,
+            fixture.Commitment.BudgetCommittedBefore,
+            fixture.Commitment.BudgetAvailableBefore,
+            fixture.Commitment.BudgetCommittedAfter,
+            fixture.Commitment.BudgetAvailableAfter,
+            fixture.Commitment.IsOverride,
+            fixture.Commitment.OverrideRuleCode,
+            fixture.Commitment.OverrideApprovalReference,
+            ReservedAtUtc = new DateTime(2026, 7, 1),
+            ReleasedAtUtc = (DateTime?)null,
+            ConsumedAtUtc = (DateTime?)null,
+            ReleaseReason = (string?)null
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        db.Set<ProcurementControlEvent>().Add(new ProcurementControlEvent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            EventKey = $"test:{Guid.NewGuid():N}",
+            EventType = "PurchaseRequisitionBudgetControl",
+            Action = "BudgetCommitmentReleased",
+            Result = ProcurementControlEventResult.Succeeded,
+            SourceType = "PurchaseRequisition",
+            SourceId = fixture.Commitment.PurchaseRequisitionId,
+            SourceReference = "PR-0508-001",
+            ActorUserId = Guid.NewGuid(),
+            ActorName = "Budget Controller",
+            BeforeJson = historicalSnapshot,
+            CorrelationId = "tdc0508-snapshot-test",
+            OccurredAtUtc = new DateTime(2026, 9, 2),
+            IntegrityHash = new string('a', 64),
+            CreatedAt = new DateTime(2026, 9, 2),
+            CreatedBy = "seed"
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        report.Rows.Single().CommitmentAmount.Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
     public async Task Reconciliation_ShouldApplyCutoffToMilestoneCreationAndLifecycleDates()
     {
         var tenantId = Guid.NewGuid();
@@ -416,6 +575,7 @@ public sealed class ProcurementFinanceReconciliationTests
             BusinessPartnerId = Guid.NewGuid(),
             OrderDate = new DateTime(2026, 7, 1),
             Status = "Approved",
+            ApprovedAt = new DateTime(2026, 7, 1),
             TotalAmount = 100m,
             Currency = "GHS",
             SourceRequisitionId = requisitionId,

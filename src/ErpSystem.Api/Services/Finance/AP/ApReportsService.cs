@@ -28,6 +28,9 @@ namespace ErpSystem.Api.Services.Finance.AP
     /// </summary>
     public class ApReportsService : IApReportsService
     {
+        private static readonly JsonSerializerOptions BudgetCommitmentSnapshotJsonOptions =
+            new(JsonSerializerDefaults.Web);
+
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ITenantSettingsService _tenantSettingsService;
@@ -337,20 +340,49 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             var tenantId = TenantId;
             var date = (asOfDate ?? DateTime.UtcNow).Date;
+            var cutoffExclusive = date.AddDays(1);
 
-            var purchaseOrders = await _unitOfWork.Repository<PurchaseOrder>()
-                .GetQueryable(item =>
+            var purchaseOrderCandidates = await _unitOfWork.Repository<PurchaseOrder>()
+                .GetQueryableIncludingDeleted(item =>
                     item.TenantId == tenantId &&
-                    !item.IsDeleted &&
-                    item.OrderDate.Date <= date &&
-                    item.Status != "Draft" &&
-                    item.Status != "Cancelled")
+                    item.CreatedAt < cutoffExclusive &&
+                    item.OrderDate < cutoffExclusive &&
+                    (!item.IsDeleted || !item.DeletedAt.HasValue ||
+                     item.DeletedAt.Value >= cutoffExclusive))
                 .Include(item => item.Items.Where(line => !line.IsDeleted))
                 .Include(item => item.Receipts.Where(receipt =>
-                    !receipt.IsDeleted && receipt.ReceiptDate.Date <= date))
+                    !receipt.IsDeleted && receipt.ReceiptDate < cutoffExclusive))
                     .ThenInclude(receipt => receipt.Items.Where(line => !line.IsDeleted))
                 .OrderBy(item => item.OrderNumber)
                 .ToListAsync(cancellationToken);
+
+            var purchaseOrderResourceIds = purchaseOrderCandidates
+                .Select(item => item.Id.ToString())
+                .ToList();
+            var purchaseOrderAudits = purchaseOrderResourceIds.Count == 0
+                ? new List<AuditLog>()
+                : await _unitOfWork.Repository<AuditLog>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted &&
+                        (item.Resource == nameof(PurchaseOrder) ||
+                         item.Resource == "Procurement.PurchaseOrder") &&
+                        item.ResourceId != null &&
+                        purchaseOrderResourceIds.Contains(item.ResourceId))
+                    .AsNoTracking()
+                    .OrderBy(item => item.Timestamp)
+                    .ToListAsync(cancellationToken);
+            var purchaseOrderStatesAsOf = purchaseOrderCandidates
+                .Select(item => ResolvePurchaseOrderStateAsOf(
+                    item,
+                    purchaseOrderAudits.Where(audit => audit.ResourceId == item.Id.ToString()),
+                    cutoffExclusive))
+                .Where(state => state is not null && IsOperativePurchaseOrderStatus(state.Status))
+                .Select(state => state!)
+                .ToDictionary(state => state.Id);
+            var purchaseOrders = purchaseOrderCandidates
+                .Where(item => purchaseOrderStatesAsOf.ContainsKey(item.Id))
+                .ToList();
 
             var selectedPurchaseOrders = purchaseOrderId.HasValue
                 ? purchaseOrders.Where(item => item.Id == purchaseOrderId.Value).ToList()
@@ -392,7 +424,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .ToDictionary(
                     group => group.Key,
                     group => group.OrderByDescending(item => item.Sequence).First());
-            var sourceRequisitionIds = purchaseOrders
+            var sourceRequisitionIds = selectedPurchaseOrders
                 .Where(item => item.SourceRequisitionId.HasValue)
                 .Select(item => item.SourceRequisitionId!.Value)
                 .Distinct()
@@ -404,12 +436,43 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .ToList();
 
             var commitments = await _unitOfWork.Repository<ProcurementBudgetCommitment>()
-                .GetQueryable(item =>
+                .GetQueryableIncludingDeleted(item =>
                     item.TenantId == tenantId &&
-                    !item.IsDeleted &&
-                    sourceRequisitionIds.Contains(item.PurchaseRequisitionId))
+                    sourceRequisitionIds.Contains(item.PurchaseRequisitionId) &&
+                    item.CreatedAt < cutoffExclusive &&
+                    (!item.IsDeleted || !item.DeletedAt.HasValue ||
+                     item.DeletedAt.Value >= cutoffExclusive))
                 .ToListAsync(cancellationToken);
-            var cutoffExclusive = date.AddDays(1);
+            var commitmentLifecycleActions = new[]
+            {
+                "BudgetCommitmentReserved",
+                "BudgetReservationReused",
+                "BudgetCommitmentReleased",
+                "BudgetCommitmentConsumed"
+            };
+            var commitmentLifecycleEvents = sourceRequisitionIds.Count == 0
+                ? new List<ProcurementControlEvent>()
+                : await _unitOfWork.Repository<ProcurementControlEvent>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted &&
+                        item.EventType == "PurchaseRequisitionBudgetControl" &&
+                        item.SourceId.HasValue &&
+                        sourceRequisitionIds.Contains(item.SourceId.Value) &&
+                        commitmentLifecycleActions.Contains(item.Action))
+                    .AsNoTracking()
+                    .OrderBy(item => item.OccurredAtUtc)
+                    .ToListAsync(cancellationToken);
+            var activeCommitmentsAsOf = commitments
+                .Select(item => ResolveBudgetCommitmentStateAsOf(
+                    item,
+                    commitmentLifecycleEvents.Where(controlEvent =>
+                        controlEvent.SourceId == item.PurchaseRequisitionId),
+                    cutoffExclusive))
+                .Where(item => item is not null &&
+                               item.Status == ProcurementBudgetCommitmentStatus.Reserved)
+                .Select(item => item!)
+                .ToList();
             var allInvoices = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(item =>
                     item.TenantId == tenantId &&
@@ -565,9 +628,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                         NormalizeCurrency(item.Currency, currency) == currency).ToList()
                     : new List<PurchaseOrder>();
                 var activeCommitments = purchaseOrder.SourceRequisitionId.HasValue
-                    ? commitments.Where(item =>
-                        item.PurchaseRequisitionId == purchaseOrder.SourceRequisitionId.Value &&
-                        item.Status == ProcurementBudgetCommitmentStatus.Reserved).ToList()
+                    ? activeCommitmentsAsOf.Where(item =>
+                        item.PurchaseRequisitionId == purchaseOrder.SourceRequisitionId.Value).ToList()
                     : new List<ProcurementBudgetCommitment>();
                 var contractMilestones = purchaseOrder.ContractId.HasValue
                     ? milestones.Where(item => item.ContractId == purchaseOrder.ContractId.Value).ToList()
@@ -670,7 +732,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 {
                     PurchaseOrderId = purchaseOrder.Id,
                     PurchaseOrderNumber = purchaseOrder.OrderNumber,
-                    PurchaseOrderStatus = purchaseOrder.Status,
+                    PurchaseOrderStatus = purchaseOrderStatesAsOf[purchaseOrder.Id].Status,
                     CurrencyCode = currency,
                     SourceRequisitionId = purchaseOrder.SourceRequisitionId,
                     ContractId = purchaseOrder.ContractId,
@@ -737,7 +799,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Rows = rows,
                 CurrencySummaries = BuildProcurementFinanceCurrencySummaries(
                     rows,
-                    commitments)
+                    activeCommitmentsAsOf)
             };
             report.IsReconciled =
                 report.UnbalancedPostingCount == 0 &&
@@ -1115,7 +1177,6 @@ namespace ErpSystem.Api.Services.Finance.AP
                     CommitmentAmount = RoundMoney(commitments
                         .Where(item =>
                             representedRequisitions.Contains(item.PurchaseRequisitionId) &&
-                            item.Status == ProcurementBudgetCommitmentStatus.Reserved &&
                             NormalizeCurrency(item.Currency, currency) == currency)
                         .Sum(item => item.ReservedAmount)),
                     AcceptedReceiptAmount = RoundMoney(currencyRows.Sum(item => item.AcceptedReceiptAmount)),
@@ -1169,6 +1230,230 @@ namespace ErpSystem.Api.Services.Finance.AP
                 postingEvents,
                 "VendorPayment",
                 allocation.VendorPaymentId) != null;
+        }
+
+        private static PurchaseOrderStateAsOf? ResolvePurchaseOrderStateAsOf(
+            PurchaseOrder purchaseOrder,
+            IEnumerable<AuditLog> auditSnapshots,
+            DateTime cutoffExclusive)
+        {
+            if (purchaseOrder.CreatedAt >= cutoffExclusive)
+                return null;
+
+            var snapshots = auditSnapshots.OrderBy(item => item.Timestamp).ToList();
+            string? status = null;
+            foreach (var snapshot in snapshots.Where(item => item.Timestamp < cutoffExclusive))
+            {
+                if (TryReadStringProperty(snapshot.NewValues, nameof(PurchaseOrder.Status), out var persistedStatus))
+                    status = persistedStatus;
+            }
+
+            var statusFromAudit = !string.IsNullOrWhiteSpace(status);
+            if (!statusFromAudit)
+            {
+                foreach (var snapshot in snapshots.Where(item => item.Timestamp >= cutoffExclusive))
+                {
+                    if (!TryReadStringProperty(snapshot.OldValues, nameof(PurchaseOrder.Status), out var precedingStatus))
+                        continue;
+                    status = precedingStatus;
+                    statusFromAudit = true;
+                    break;
+                }
+            }
+
+            if (!statusFromAudit)
+            {
+                status = purchaseOrder.Status;
+
+                // ApprovedAt is the authoritative lifecycle boundary for records
+                // whose approval occurred after the reporting cutoff. Legacy rows
+                // without an approval timestamp retain their persisted state.
+                if (purchaseOrder.ApprovedAt.HasValue &&
+                    purchaseOrder.ApprovedAt.Value >= cutoffExclusive)
+                {
+                    status = "Draft";
+                }
+                else if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
+                         ((purchaseOrder.CancelledAtUtc.HasValue &&
+                           purchaseOrder.CancelledAtUtc.Value >= cutoffExclusive) ||
+                          (!purchaseOrder.CancelledAtUtc.HasValue &&
+                           purchaseOrder.UpdatedAt.HasValue &&
+                           purchaseOrder.UpdatedAt.Value >= cutoffExclusive)))
+                {
+                    // The cancellation lifecycle timestamp is authoritative. UpdatedAt
+                    // remains a compatibility fallback for rows cancelled before the
+                    // timestamp column was introduced and backfilled.
+                    status = "Approved";
+                }
+            }
+
+            return new PurchaseOrderStateAsOf(purchaseOrder.Id, status ?? "Draft");
+        }
+
+        private static ProcurementBudgetCommitment? ResolveBudgetCommitmentStateAsOf(
+            ProcurementBudgetCommitment commitment,
+            IEnumerable<ProcurementControlEvent> lifecycleEvents,
+            DateTime cutoffExclusive)
+        {
+            var events = lifecycleEvents
+                .OrderBy(item => item.OccurredAtUtc)
+                .ThenBy(item => item.CreatedAt)
+                .ToList();
+            var latestAtCutoff = events.LastOrDefault(item => item.OccurredAtUtc < cutoffExclusive);
+            if (TryReadBudgetCommitmentSnapshot(latestAtCutoff?.AfterJson, out var persistedAtCutoff))
+                return persistedAtCutoff;
+
+            // The first lifecycle event after the cutoff carries the authoritative
+            // state immediately before that mutation. This preserves both status and
+            // reserved amount across later release/re-reservation cycles.
+            var firstAfterCutoff = events.FirstOrDefault(item => item.OccurredAtUtc >= cutoffExclusive);
+            if (TryReadBudgetCommitmentSnapshot(firstAfterCutoff?.BeforeJson, out var precedingState))
+                return precedingState;
+
+            if (commitment.ReservedAtUtc >= cutoffExclusive)
+                return null;
+
+            if (commitment.Status == ProcurementBudgetCommitmentStatus.Reserved)
+                return CopyBudgetCommitment(commitment, ProcurementBudgetCommitmentStatus.Reserved);
+
+            var terminalAt = commitment.Status == ProcurementBudgetCommitmentStatus.Consumed
+                ? commitment.ConsumedAtUtc ?? commitment.UpdatedAt
+                : commitment.ReleasedAtUtc ?? commitment.UpdatedAt;
+            return terminalAt.HasValue && terminalAt.Value >= cutoffExclusive
+                ? CopyBudgetCommitment(commitment, ProcurementBudgetCommitmentStatus.Reserved)
+                : CopyBudgetCommitment(commitment, commitment.Status);
+        }
+
+        private static bool TryReadBudgetCommitmentSnapshot(
+            string? json,
+            out ProcurementBudgetCommitment? commitment)
+        {
+            commitment = null;
+            if (string.IsNullOrWhiteSpace(json))
+                return false;
+
+            try
+            {
+                var snapshot = JsonSerializer.Deserialize<BudgetCommitmentSnapshot>(
+                    json,
+                    BudgetCommitmentSnapshotJsonOptions);
+                if (snapshot == null || !TryReadBudgetCommitmentStatus(snapshot.Status, out var status))
+                {
+                    return false;
+                }
+
+                commitment = new ProcurementBudgetCommitment
+                {
+                    Id = snapshot.Id,
+                    ProcurementBudgetId = snapshot.ProcurementBudgetId,
+                    PurchaseRequisitionId = snapshot.PurchaseRequisitionId,
+                    ReservationReference = snapshot.ReservationReference,
+                    ReservationSequence = snapshot.ReservationSequence,
+                    Status = status,
+                    ReservedAmount = snapshot.ReservedAmount,
+                    Currency = snapshot.Currency,
+                    BudgetCommittedBefore = snapshot.BudgetCommittedBefore,
+                    BudgetAvailableBefore = snapshot.BudgetAvailableBefore,
+                    BudgetCommittedAfter = snapshot.BudgetCommittedAfter,
+                    BudgetAvailableAfter = snapshot.BudgetAvailableAfter,
+                    IsOverride = snapshot.IsOverride,
+                    OverrideRuleCode = snapshot.OverrideRuleCode,
+                    OverrideApprovalReference = snapshot.OverrideApprovalReference,
+                    ReservedAtUtc = snapshot.ReservedAtUtc,
+                    ReleasedAtUtc = snapshot.ReleasedAtUtc,
+                    ConsumedAtUtc = snapshot.ConsumedAtUtc,
+                    ReleaseReason = snapshot.ReleaseReason
+                };
+                return true;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadBudgetCommitmentStatus(
+            JsonElement value,
+            out ProcurementBudgetCommitmentStatus status)
+        {
+            status = default;
+            if (value.ValueKind == JsonValueKind.Number &&
+                value.TryGetInt32(out var numericStatus) &&
+                Enum.IsDefined(typeof(ProcurementBudgetCommitmentStatus), numericStatus))
+            {
+                status = (ProcurementBudgetCommitmentStatus)numericStatus;
+                return true;
+            }
+
+            return value.ValueKind == JsonValueKind.String &&
+                   Enum.TryParse(value.GetString(), ignoreCase: true, out status) &&
+                   Enum.IsDefined(typeof(ProcurementBudgetCommitmentStatus), status);
+        }
+
+        private static ProcurementBudgetCommitment CopyBudgetCommitment(
+            ProcurementBudgetCommitment source,
+            ProcurementBudgetCommitmentStatus status) => new()
+        {
+            Id = source.Id,
+            TenantId = source.TenantId,
+            ProcurementBudgetId = source.ProcurementBudgetId,
+            PurchaseRequisitionId = source.PurchaseRequisitionId,
+            ReservationReference = source.ReservationReference,
+            ReservationSequence = source.ReservationSequence,
+            Status = status,
+            ReservedAmount = source.ReservedAmount,
+            Currency = source.Currency,
+            BudgetCommittedBefore = source.BudgetCommittedBefore,
+            BudgetAvailableBefore = source.BudgetAvailableBefore,
+            BudgetCommittedAfter = source.BudgetCommittedAfter,
+            BudgetAvailableAfter = source.BudgetAvailableAfter,
+            IsOverride = source.IsOverride,
+            OverrideRuleCode = source.OverrideRuleCode,
+            OverrideApprovalReference = source.OverrideApprovalReference,
+            ReservedAtUtc = source.ReservedAtUtc,
+            ReleasedAtUtc = source.ReleasedAtUtc,
+            ConsumedAtUtc = source.ConsumedAtUtc,
+            ReleaseReason = source.ReleaseReason,
+            CreatedAt = source.CreatedAt,
+            UpdatedAt = source.UpdatedAt
+        };
+
+        private static bool IsOperativePurchaseOrderStatus(string status) =>
+            !string.Equals(status, "Draft", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "Pending Approval", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "PendingApproval", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "Submitted", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "Rejected", StringComparison.OrdinalIgnoreCase);
+
+        private static bool TryReadStringProperty(
+            string? json,
+            string propertyName,
+            out string value)
+        {
+            value = string.Empty;
+            if (string.IsNullOrWhiteSpace(json))
+                return false;
+
+            try
+            {
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                    return false;
+                var property = document.RootElement.EnumerateObject()
+                    .FirstOrDefault(item => string.Equals(
+                        item.Name,
+                        propertyName,
+                        StringComparison.OrdinalIgnoreCase));
+                if (property.Value.ValueKind != JsonValueKind.String)
+                    return false;
+                value = property.Value.GetString() ?? string.Empty;
+                return !string.IsNullOrWhiteSpace(value);
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
         }
 
         private static PaymentCertificateStateAsOf? ResolvePaymentCertificateStateAsOf(
@@ -1268,6 +1553,29 @@ namespace ErpSystem.Api.Services.Finance.AP
             decimal RetentionReleasedAmount,
             DateTime IssueDate,
             bool IsDeleted);
+
+        private sealed record PurchaseOrderStateAsOf(Guid Id, string Status);
+
+        private sealed record BudgetCommitmentSnapshot(
+            Guid Id,
+            Guid ProcurementBudgetId,
+            Guid PurchaseRequisitionId,
+            string ReservationReference,
+            int ReservationSequence,
+            JsonElement Status,
+            decimal ReservedAmount,
+            string Currency,
+            decimal BudgetCommittedBefore,
+            decimal BudgetAvailableBefore,
+            decimal BudgetCommittedAfter,
+            decimal BudgetAvailableAfter,
+            bool IsOverride,
+            string? OverrideRuleCode,
+            string? OverrideApprovalReference,
+            DateTime ReservedAtUtc,
+            DateTime? ReleasedAtUtc,
+            DateTime? ConsumedAtUtc,
+            string? ReleaseReason);
 
         private async Task<ApAgingReportDto> GetSettlementReadModelAgingReportAsync(
             DateTime? asOfDate,

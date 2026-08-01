@@ -94,6 +94,11 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
                 principal,
                 resource: null,
                 FinancePermissions.ManageApInvoices)).Succeeded;
+        var canApproveApInvoices = principal?.Identity?.IsAuthenticated == true &&
+            (await _authorization.AuthorizeAsync(
+                principal,
+                resource: null,
+                FinancePermissions.ApproveApInvoices)).Succeeded;
         var active = history.FirstOrDefault(item =>
             item.ExpiresAtUtc > now && item.Status is
                 VendorInvoiceMatchExceptionStatus.PendingApproval or
@@ -106,7 +111,8 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
             VendorInvoiceMatchExceptionRules.CanDecide(active.Status))
         {
             var priorApprovers = await ApprovedActorIdsAsync(workflowId, cancellationToken);
-            canDecide = VendorInvoiceMatchExceptionRules.IsIndependent(
+            canDecide = canApproveApInvoices &&
+                        VendorInvoiceMatchExceptionRules.IsIndependent(
                             ActorId, active.RequestedById, invoice.SubmittedById, priorApprovers) &&
                         await _workflow.CanUserApproveAsync(
                             VendorInvoiceMatchExceptionRules.WorkflowEntityType,
@@ -123,10 +129,12 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
                          VendorInvoiceMatchExceptionRules.IsExceptionable(readiness) &&
                          active == null,
             CanDecide = canDecide,
-            CanCancel = active != null &&
+            CanCancel = canManageApInvoices &&
+                        active != null &&
                         VendorInvoiceMatchExceptionRules.CanCancel(active.Status) &&
                         (active.RequestedById == ActorId || IsPrivileged),
-            CanCompleteCorrectiveAction = correctiveActionItem != null &&
+            CanCompleteCorrectiveAction = canManageApInvoices &&
+                correctiveActionItem != null &&
                 VendorInvoiceMatchExceptionRules.CanCompleteCorrectiveAction(
                     correctiveActionItem!.Status, correctiveActionItem.CorrectiveActionStatus,
                     correctiveActionItem.ExpiresAtUtc, now) &&

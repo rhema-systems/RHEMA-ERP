@@ -233,6 +233,7 @@ public class PurchaseOrder : TenantEntity
     public Guid? RequestedById { get; set; }
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedAt { get; set; }
+    public DateTime? CancelledAtUtc { get; set; }
 
     // Financial
     [Column(TypeName = "decimal(18,2)")]

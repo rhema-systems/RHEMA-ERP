@@ -191,6 +191,17 @@ public sealed class VendorPaymentBatchCreationTests
             item.RuleCode == ProcurementPaymentReadinessRules.RuleCode)).Should().BeTrue();
         workflow.Verify(item => item.StartApprovalWorkflowAsync("PaymentBatch", result.Id), Times.Once);
 
+        (await service.GetOutstandingInvoicesAsync(supplier.Id)).Should().BeEmpty(
+            "a payment-batch selection that reserves the whole balance must disappear from the picker");
+        selection.Amount = 20m;
+        await db.SaveChangesAsync();
+        var partiallyReserved = await service.GetOutstandingInvoicesAsync(supplier.Id);
+        partiallyReserved.Should().ContainSingle();
+        partiallyReserved.Single().BalanceAmount.Should().Be(30m,
+            "the picker must expose only the unreserved allocatable balance");
+        selection.Amount = 50m;
+        await db.SaveChangesAsync();
+
         var manualPayment = new VendorPayment
         {
             Id = Guid.NewGuid(),
