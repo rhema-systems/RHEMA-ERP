@@ -424,6 +424,50 @@ public sealed class ProcurementFinanceReconciliationTests
 
     [Fact]
     [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldReconstructMilestoneAmountBeforeLaterContractValueAmendment()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        await db.SaveChangesAsync();
+        var contract = await db.Contracts.SingleAsync(item =>
+            item.Id == fixture.PurchaseOrder.ContractId);
+        var milestone = await db.ContractMilestones.SingleAsync(item =>
+            item.ContractId == contract.Id);
+        contract.ContractValue = 200m;
+        milestone.PaymentAmount = 200m;
+        db.ContractAmendments.Add(new ContractAmendment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ContractId = contract.Id,
+            AmendmentNumber = "AMD-0508-FUTURE",
+            SequenceNumber = 1,
+            AmendmentType = "ValueChange",
+            PreviousValue = 100m,
+            NewValue = 200m,
+            ValueChange = 100m,
+            Status = "Approved",
+            RequestedDate = new DateTime(2026, 9, 1),
+            ApprovedDate = new DateTime(2026, 9, 2),
+            CreatedAt = new DateTime(2026, 9, 1),
+            CreatedBy = "seed"
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        var row = report.Rows.Single();
+        row.MilestoneAmount.Should().Be(100m);
+        row.CompletedMilestoneAmount.Should().Be(100m);
+        row.InvoicedMilestoneAmount.Should().Be(100m);
+        row.PaidMilestoneAmount.Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
     public async Task Reconciliation_ShouldReconstructCertificateBeforeLaterCancellationAndRelease()
     {
         var tenantId = Guid.NewGuid();

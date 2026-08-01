@@ -530,13 +530,19 @@ namespace ErpSystem.Api.Services.Finance.AP
             Guid paymentId,
             List<VendorPaymentAllocationCreateDto> allocations,
             CancellationToken cancellationToken = default) =>
-            AllocatePaymentAsync(paymentId, allocations, cancellationToken, executionStrategyScope: false);
+            AllocatePaymentAsync(
+                paymentId,
+                allocations,
+                cancellationToken,
+                executionStrategyScope: false,
+                batchProcessorScope: false);
 
         private async Task<VendorPaymentAllocationResultDto> AllocatePaymentAsync(
             Guid paymentId,
             List<VendorPaymentAllocationCreateDto> allocations,
             CancellationToken cancellationToken,
-            bool executionStrategyScope)
+            bool executionStrategyScope,
+            bool batchProcessorScope)
         {
             var duplicateInvoiceIds = allocations
                 .GroupBy(item => item.VendorInvoiceId)
@@ -555,13 +561,15 @@ namespace ErpSystem.Api.Services.Finance.AP
                         paymentId,
                         allocations,
                         cancellationToken,
-                        executionStrategyScope: true),
+                        executionStrategyScope: true,
+                        batchProcessorScope),
                     cancellationToken);
             }
 
             var payment = await _unitOfWork.Repository<VendorPayment>()
                 .GetQueryable(p => p.TenantId == TenantId && p.Id == paymentId)
                 .Include(p => p.Allocations)
+                .Include(p => p.PaymentBatch)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (payment == null)
@@ -577,15 +585,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 return await AllocatePostedSupplierAdvanceAsync(paymentId, allocations, cancellationToken);
             }
 
-            if (payment.PaymentBatchId.HasValue && payment.Status != VendorPaymentStatus.Authorized)
-                throw new VendorPaymentControlException(
-                    "AP_PAYMENT_BATCH_DIRECT_ALLOCATION_BLOCKED",
-                    "Batch-owned payments can only be allocated by the approved batch processor.");
-
-            if (!payment.PaymentBatchId.HasValue && payment.Status != VendorPaymentStatus.Draft)
-                throw new VendorPaymentControlException(
-                    "AP_PAYMENT_ALLOCATION_SET_FROZEN",
-                    "A manual payment's invoice set cannot change after it is submitted for authorization.");
+            EnsureAllocationMutationAllowed(payment, batchProcessorScope);
 
             if (!_unitOfWork.HasActiveTransaction)
             {
@@ -613,7 +613,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(p => p.TenantId == TenantId && p.Id == paymentId && !p.IsDeleted)
                     .Include(p => p.Allocations)
+                    .Include(p => p.PaymentBatch)
                     .SingleAsync(cancellationToken);
+                EnsureAllocationMutationAllowed(payment, batchProcessorScope);
 
             var result = new VendorPaymentAllocationResultDto
             {
@@ -744,9 +746,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             // their central Finance posting succeeds.
 
             var createdAllocationIds = createdAllocations.Select(a => a.Id).ToHashSet();
-            payment.DiscountTaken = payment.Allocations
-                .Where(a => !a.IsReversal && !createdAllocationIds.Contains(a.Id))
-                .Sum(a => a.DiscountAmount) + createdAllocations.Sum(a => a.DiscountAmount);
+            payment.DiscountTaken = RoundMoney(GetEffectiveAllocations(
+                    payment.Allocations
+                        .Where(item => !createdAllocationIds.Contains(item.Id))
+                        .Concat(createdAllocations))
+                .Sum(item => item.DiscountAmount));
             payment.UpdatedAt = now;
             payment.UpdatedBy = UserName;
             await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
@@ -1111,56 +1115,124 @@ namespace ErpSystem.Api.Services.Finance.AP
                     0m)));
         }
 
-        public async Task ReverseAllocationAsync(Guid allocationId, string reason, CancellationToken cancellationToken = default)
+        public Task ReverseAllocationAsync(
+            Guid allocationId,
+            string reason,
+            CancellationToken cancellationToken = default) =>
+            ReverseAllocationAsync(
+                allocationId,
+                reason,
+                cancellationToken,
+                executionStrategyScope: false);
+
+        private async Task ReverseAllocationAsync(
+            Guid allocationId,
+            string reason,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
         {
-            var allocation = await _unitOfWork.Repository<VendorPaymentAllocation>()
-                .GetQueryable(a => a.TenantId == TenantId && a.Id == allocationId)
-                .Include(a => a.VendorPayment)
-                .Include(a => a.VendorInvoice)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (allocation == null)
-                throw new KeyNotFoundException($"Allocation with Id '{allocationId}' not found.");
-
-            if (allocation.IsReversal)
-                throw new InvalidOperationException("Cannot reverse a reversal allocation.");
-
-            if (allocation.VendorPayment.JournalEntryId.HasValue)
-                throw new InvalidOperationException("Posted vendor payment allocations cannot be reversed by mutation. Use a reversal, void, or adjustment workflow.");
-
-            var now = DateTime.UtcNow;
-
-            // Create reversal allocation
-            var reversal = new VendorPaymentAllocation
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
             {
-                Id = Guid.NewGuid(),
-                TenantId = TenantId,
-                VendorPaymentId = allocation.VendorPaymentId,
-                VendorInvoiceId = allocation.VendorInvoiceId,
-                AllocatedAmount = -allocation.AllocatedAmount,
-                DiscountAmount = -allocation.DiscountAmount,
-                WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
-                AllocationDate = now,
-                Notes = $"Reversal of allocation {allocationId}: {reason}",
-                IsReversal = true,
-                OriginalAllocationId = allocationId,
-                CreatedAt = now,
-                CreatedBy = UserName
-            };
+                await _unitOfWork.ExecuteInStrategyAsync(
+                    async () =>
+                    {
+                        await ReverseAllocationAsync(
+                            allocationId,
+                            reason,
+                            cancellationToken,
+                            executionStrategyScope: true);
+                        return true;
+                    },
+                    cancellationToken);
+                return;
+            }
 
-            await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(reversal);
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
-            // Restore payment unallocated
-            allocation.VendorPayment.AllocatedAmount -= allocation.AllocatedAmount;
-            if (allocation.VendorPayment.AllocatedAmount < 0)
-                allocation.VendorPayment.AllocatedAmount = 0;
-            allocation.VendorPayment.UpdatedAt = now;
-            allocation.VendorPayment.UpdatedBy = UserName;
-            await _unitOfWork.Repository<VendorPayment>().UpdateAsync(allocation.VendorPayment);
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"tdc0505-allocation-reversal:{TenantId:N}:{allocationId:N}",
+                    cancellationToken);
 
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+                var allocation = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                    .GetQueryable(a => a.TenantId == TenantId && a.Id == allocationId)
+                    .Include(a => a.VendorPayment)
+                        .ThenInclude(payment => payment.Allocations)
+                    .Include(a => a.VendorInvoice)
+                    .SingleOrDefaultAsync(cancellationToken);
 
-            _logger.LogInformation("Reversed allocation {AllocationId}. Reason: {Reason}", allocationId, reason);
+                if (allocation == null)
+                    throw new KeyNotFoundException($"Allocation with Id '{allocationId}' not found.");
+                if (allocation.IsReversal)
+                    throw new InvalidOperationException("Cannot reverse a reversal allocation.");
+                if (allocation.VendorPayment.PaymentBatchId.HasValue)
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_BATCH_ALLOCATION_FROZEN",
+                        "Batch-owned payment allocations are immutable after the batch invoice set is submitted.");
+                if (allocation.VendorPayment.JournalEntryId.HasValue)
+                    throw new InvalidOperationException("Posted vendor payment allocations cannot be reversed by mutation. Use a reversal, void, or adjustment workflow.");
+
+                var alreadyReversed = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                    .GetQueryableIncludingDeleted(item =>
+                        item.TenantId == TenantId &&
+                        item.IsReversal &&
+                        item.OriginalAllocationId == allocationId)
+                    .AnyAsync(cancellationToken);
+                if (alreadyReversed)
+                    throw AllocationAlreadyReversed(allocationId);
+
+                var now = DateTime.UtcNow;
+                var reversal = new VendorPaymentAllocation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    VendorPaymentId = allocation.VendorPaymentId,
+                    VendorInvoiceId = allocation.VendorInvoiceId,
+                    AllocatedAmount = -allocation.AllocatedAmount,
+                    DiscountAmount = -allocation.DiscountAmount,
+                    WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
+                    AllocationDate = now,
+                    Notes = $"Reversal of allocation {allocationId}: {reason}",
+                    IsReversal = true,
+                    OriginalAllocationId = allocationId,
+                    CreatedAt = now,
+                    CreatedBy = UserName
+                };
+
+                await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(reversal);
+
+                allocation.VendorPayment.AllocatedAmount = Math.Max(
+                    0m,
+                    allocation.VendorPayment.AllocatedAmount - allocation.AllocatedAmount);
+                allocation.VendorPayment.DiscountTaken = RoundMoney(
+                    GetEffectiveAllocations(allocation.VendorPayment.Allocations)
+                        .Where(item => item.Id != allocationId)
+                        .Sum(item => item.DiscountAmount));
+                allocation.VendorPayment.UpdatedAt = now;
+                allocation.VendorPayment.UpdatedBy = UserName;
+                await _unitOfWork.Repository<VendorPayment>().UpdateAsync(allocation.VendorPayment);
+
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                if (ownsTransaction)
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                _logger.LogInformation("Reversed allocation {AllocationId}. Reason: {Reason}", allocationId, reason);
+            }
+            catch (DbUpdateException exception) when (IsDuplicateAllocationReversal(exception))
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw AllocationAlreadyReversed(allocationId);
+            }
+            catch
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
         }
 
         public async Task<List<VendorPaymentAllocationDto>> GetPaymentAllocationsAsync(Guid paymentId, CancellationToken cancellationToken = default)
@@ -2133,7 +2205,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                     var existingAllocations = GetEffectiveAllocations(payment.Allocations);
                     if (allocs.Any() && existingAllocations.Count == 0)
                     {
-                        await AllocatePaymentAsync(payment.Id, allocs, cancellationToken);
+                        await AllocatePaymentAsync(
+                            payment.Id,
+                            allocs,
+                            cancellationToken,
+                            executionStrategyScope: false,
+                            batchProcessorScope: true);
                     }
                     else if (allocs.Any())
                     {
@@ -3223,6 +3300,42 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private static decimal RoundMoney(decimal amount)
             => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+
+        private static VendorPaymentControlException AllocationAlreadyReversed(Guid allocationId) =>
+            new(
+                "AP_PAYMENT_ALLOCATION_ALREADY_REVERSED",
+                $"Allocation '{allocationId}' already has an immutable reversal.");
+
+        private static bool IsDuplicateAllocationReversal(DbUpdateException exception) =>
+            exception.ToString().Contains(
+                "UX_VendorPaymentAllocation_TenantId_OriginalAllocationId_Reversal",
+                StringComparison.OrdinalIgnoreCase);
+
+        private static void EnsureAllocationMutationAllowed(
+            VendorPayment payment,
+            bool batchProcessorScope)
+        {
+            if (payment.PaymentBatchId.HasValue)
+            {
+                if (!batchProcessorScope ||
+                    payment.PaymentBatch?.Status != PaymentBatchStatus.Processing ||
+                    payment.Status != VendorPaymentStatus.Authorized)
+                {
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_BATCH_DIRECT_ALLOCATION_BLOCKED",
+                        "Batch-owned payment allocations are immutable outside the approved batch processor.");
+                }
+
+                return;
+            }
+
+            if (payment.Status != VendorPaymentStatus.Draft)
+            {
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_ALLOCATION_SET_FROZEN",
+                    "A manual payment's invoice set cannot change after it is submitted for authorization.");
+            }
+        }
 
         private static List<VendorPaymentAllocation> GetEffectiveAllocations(
             IEnumerable<VendorPaymentAllocation>? allocations)

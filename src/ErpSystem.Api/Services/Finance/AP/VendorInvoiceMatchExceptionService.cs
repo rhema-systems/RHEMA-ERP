@@ -924,6 +924,15 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
         Require(request.Justification, "AP_MATCH_EXCEPTION_JUSTIFICATION_REQUIRED");
         Require(request.CorrectiveAction, "AP_MATCH_EXCEPTION_CORRECTIVE_ACTION_REQUIRED");
         Require(request.IdempotencyKey, "AP_MATCH_EXCEPTION_IDEMPOTENCY_REQUIRED");
+        if (request.Evidence.Any(item => string.Equals(
+                item.RequirementKey?.Trim(),
+                VendorInvoiceMatchExceptionRules.CorrectiveCompletionEvidenceKey,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            throw Validation(
+                "AP_MATCH_EXCEPTION_COMPLETION_EVIDENCE_RESERVED",
+                "Corrective-action completion evidence can only be added after the exception is approved.");
+        }
         var expiry = EnsureUtc(request.ExpiresAtUtc);
         var due = EnsureUtc(request.CorrectiveActionDueAtUtc);
         if (request.CorrectiveActionOwnerId == Guid.Empty)

@@ -543,6 +543,21 @@ namespace ErpSystem.Api.Services.Finance.AP
                     !item.IsDeleted &&
                     contractIds.Contains(item.Id))
                 .ToListAsync(cancellationToken);
+            var contractValueAmendments = await _unitOfWork.Repository<ContractAmendment>()
+                .GetQueryableIncludingDeleted(item =>
+                    item.TenantId == tenantId &&
+                    contractIds.Contains(item.ContractId) &&
+                    item.Status == "Approved" &&
+                    item.ApprovedDate.HasValue &&
+                    item.AmendmentType == "ValueChange")
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+            var contractValuesAsOf = contracts.ToDictionary(
+                contract => contract.Id,
+                contract => ResolveContractValueAsOf(
+                    contract,
+                    contractValueAmendments.Where(item => item.ContractId == contract.Id),
+                    cutoffExclusive));
             var milestones = await _unitOfWork.Repository<ContractMilestone>()
                 .GetQueryableIncludingDeleted(item =>
                     item.TenantId == tenantId &&
@@ -662,6 +677,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var contractMilestones = purchaseOrder.ContractId.HasValue
                     ? milestones.Where(item => item.ContractId == purchaseOrder.ContractId.Value).ToList()
                     : new List<ContractMilestone>();
+                var milestoneAmountsAsOf = purchaseOrder.ContractId.HasValue &&
+                                           contractValuesAsOf.TryGetValue(
+                                               purchaseOrder.ContractId.Value,
+                                               out var contractValueAsOf)
+                    ? contractMilestones.ToDictionary(
+                        item => item.Id,
+                        item => ResolveMilestoneAmountAsOf(item, contractValueAsOf))
+                    : new Dictionary<Guid, decimal>();
                 var contractCertificates = purchaseOrder.ContractId.HasValue
                     ? certificateStatesAsOf.Where(item =>
                         item.ContractId == purchaseOrder.ContractId.Value &&
@@ -778,16 +801,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                     RetentionReleasedAmount = RoundMoney(Math.Max(
                         contractCertificates.Sum(item => item.RetentionReleasedAmount),
                         controlledRetentionReleased)),
-                    MilestoneAmount = RoundMoney(contractMilestones.Sum(item => item.PaymentAmount)),
+                    MilestoneAmount = RoundMoney(contractMilestones.Sum(item =>
+                        milestoneAmountsAsOf.GetValueOrDefault(item.Id))),
                     CompletedMilestoneAmount = RoundMoney(contractMilestones
                         .Where(item => item.CompletedAt.HasValue && item.CompletedAt.Value < cutoffExclusive)
-                        .Sum(item => item.PaymentAmount)),
+                        .Sum(item => milestoneAmountsAsOf.GetValueOrDefault(item.Id))),
                     InvoicedMilestoneAmount = RoundMoney(contractMilestones
                         .Where(item => item.InvoicedAt.HasValue && item.InvoicedAt.Value < cutoffExclusive)
-                        .Sum(item => item.PaymentAmount)),
+                        .Sum(item => milestoneAmountsAsOf.GetValueOrDefault(item.Id))),
                     PaidMilestoneAmount = RoundMoney(contractMilestones
                         .Where(item => item.PaidAt.HasValue && item.PaidAt.Value < cutoffExclusive)
-                        .Sum(item => item.PaymentAmount)),
+                        .Sum(item => milestoneAmountsAsOf.GetValueOrDefault(item.Id))),
                     InvoiceCount = activeInvoices.Count,
                     PaymentCount = activePoAllocations.Select(item => item.VendorPaymentId).Distinct().Count(),
                     PostingCount = poPostings.Count,
@@ -1261,6 +1285,38 @@ namespace ErpSystem.Api.Services.Finance.AP
                 "VendorPayment",
                 allocation.VendorPaymentId) != null;
         }
+
+        private static decimal ResolveContractValueAsOf(
+            Contract contract,
+            IEnumerable<ContractAmendment> amendments,
+            DateTime cutoffExclusive)
+        {
+            var ordered = amendments
+                .Where(item =>
+                    item.Status == "Approved" &&
+                    item.ApprovedDate.HasValue &&
+                    item.AmendmentType == "ValueChange")
+                .OrderBy(item => item.ApprovedDate)
+                .ThenBy(item => item.SequenceNumber)
+                .ToList();
+
+            // Contract approval applies NewValue and recalculates every milestone in-place.
+            // The first later amendment therefore carries the exact value immediately before
+            // it, while the latest amendment at the cutoff carries the effective new value.
+            var firstAfterCutoff = ordered.FirstOrDefault(item =>
+                item.ApprovedDate!.Value >= cutoffExclusive && item.PreviousValue.HasValue);
+            if (firstAfterCutoff?.PreviousValue is decimal precedingValue)
+                return precedingValue;
+
+            var latestAtCutoff = ordered.LastOrDefault(item =>
+                item.ApprovedDate!.Value < cutoffExclusive && item.NewValue.HasValue);
+            return latestAtCutoff?.NewValue ?? contract.ContractValue;
+        }
+
+        private static decimal ResolveMilestoneAmountAsOf(
+            ContractMilestone milestone,
+            decimal contractValueAsOf) =>
+            RoundMoney(contractValueAsOf * milestone.PaymentPercentage / 100m);
 
         private static PurchaseOrderCommercialState ResolvePurchaseOrderCommercialStateAsOf(
             PurchaseOrder purchaseOrder,

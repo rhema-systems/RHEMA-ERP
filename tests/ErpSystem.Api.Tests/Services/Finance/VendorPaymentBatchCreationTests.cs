@@ -193,6 +193,23 @@ public sealed class VendorPaymentBatchCreationTests
             item.RuleCode == ProcurementPaymentReadinessRules.RuleCode)).Should().BeTrue();
         workflow.Verify(item => item.StartApprovalWorkflowAsync("PaymentBatch", result.Id), Times.Once);
 
+        var ownedPayment = await db.Set<VendorPayment>()
+            .SingleAsync(item => item.PaymentBatchId == result.Id);
+        var ownedBatch = await db.Set<PaymentBatch>().SingleAsync(item => item.Id == result.Id);
+        ownedBatch.Status = PaymentBatchStatus.Approved;
+        ownedPayment.Status = VendorPaymentStatus.Authorized;
+        await db.SaveChangesAsync();
+        var directBatchAllocation = () => service.AllocatePaymentAsync(
+            ownedPayment.Id,
+            [new VendorPaymentAllocationCreateDto
+            {
+                VendorInvoiceId = invoice.Id,
+                AllocatedAmount = 1m
+            }]);
+        var frozenBatch = await directBatchAllocation
+            .Should().ThrowAsync<VendorPaymentControlException>();
+        frozenBatch.Which.Code.Should().Be("AP_PAYMENT_BATCH_DIRECT_ALLOCATION_BLOCKED");
+
         (await service.GetOutstandingInvoicesAsync(supplier.Id)).Should().BeEmpty(
             "a payment-batch selection that reserves the whole balance must disappear from the picker");
         selection.Amount = 20m;

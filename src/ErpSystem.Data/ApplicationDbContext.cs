@@ -2207,6 +2207,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.ApplicationPostingEventId });
             entity.HasIndex(e => new { e.TenantId, e.PaymentReadinessControlEventId });
+            entity.HasIndex(e => new { e.TenantId, e.OriginalAllocationId })
+                .HasDatabaseName("UX_VendorPaymentAllocation_TenantId_OriginalAllocationId_Reversal")
+                .HasFilter("[IsReversal] = 1 AND [OriginalAllocationId] IS NOT NULL")
+                .IsUnique();
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)

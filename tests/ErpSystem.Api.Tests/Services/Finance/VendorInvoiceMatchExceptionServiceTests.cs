@@ -195,6 +195,31 @@ public sealed class VendorInvoiceMatchExceptionServiceTests
         exception.Which.StatusCode.Should().Be(StatusCodes.Status409Conflict);
     }
 
+    [Fact]
+    public async Task InitialRequestRejectsReservedCorrectiveCompletionEvidence()
+    {
+        await using var fixture = new Fixture(canManage: true);
+        var request = ValidRequest("reserved-completion-evidence");
+        request.Evidence.Add(new VendorInvoiceMatchExceptionEvidenceRequestDto
+        {
+            RequirementKey = VendorInvoiceMatchExceptionRules.CorrectiveCompletionEvidenceKey,
+            ReferenceKind = VendorInvoiceMatchExceptionEvidenceKind.CentralDocument,
+            FileUploadRecordId = Guid.NewGuid(),
+            EvidenceReference = "Completion evidence submitted before approval"
+        });
+
+        var action = () => fixture.Service.RequestAsync(
+            Guid.NewGuid(),
+            request,
+            "reserved-completion-correlation");
+
+        var exception = await action.Should()
+            .ThrowAsync<VendorInvoiceMatchExceptionControlException>();
+        exception.Which.Code.Should().Be(
+            "AP_MATCH_EXCEPTION_COMPLETION_EVIDENCE_RESERVED");
+        exception.Which.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+    }
+
     private static InvoiceMatchingResultDto ExceptionableReadiness(Guid invoiceId) => new()
     {
         VendorInvoiceId = invoiceId,

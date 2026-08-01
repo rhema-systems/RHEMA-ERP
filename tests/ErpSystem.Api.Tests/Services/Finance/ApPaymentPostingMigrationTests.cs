@@ -384,6 +384,95 @@ public sealed class ApPaymentPostingMigrationTests
             .Should().Be(0);
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task AllocationReversal_ShouldBeSingleUseAndRecomputeEffectiveDiscount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(
+            db,
+            tenantId,
+            payment =>
+            {
+                payment.Status = VendorPaymentStatus.Draft;
+                payment.DiscountTaken = 13m;
+            });
+        fixture.Allocation.DiscountAmount = 10m;
+        db.Set<VendorPaymentAllocation>().Add(new VendorPaymentAllocation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            VendorPaymentId = fixture.Payment.Id,
+            VendorInvoiceId = fixture.Invoice.Id,
+            AllocatedAmount = 0m,
+            DiscountAmount = 3m,
+            AllocationDate = fixture.Payment.PaymentDate,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        await service.ReverseAllocationAsync(fixture.Allocation.Id, "replace first allocation");
+        var duplicate = () => service.ReverseAllocationAsync(
+            fixture.Allocation.Id,
+            "duplicate reversal attempt");
+
+        var exception = await duplicate.Should().ThrowAsync<VendorPaymentControlException>();
+        exception.Which.Code.Should().Be("AP_PAYMENT_ALLOCATION_ALREADY_REVERSED");
+        (await db.Set<VendorPaymentAllocation>().CountAsync(item =>
+            item.IsReversal && item.OriginalAllocationId == fixture.Allocation.Id)).Should().Be(1);
+        (await db.Set<VendorPayment>().SingleAsync(item => item.Id == fixture.Payment.Id))
+            .DiscountTaken.Should().Be(3m);
+
+        var uniqueness = db.Model.FindEntityType(typeof(VendorPaymentAllocation))!
+            .GetIndexes()
+            .Single(index => index.GetDatabaseName() ==
+                "UX_VendorPaymentAllocation_TenantId_OriginalAllocationId_Reversal");
+        uniqueness.IsUnique.Should().BeTrue();
+        uniqueness.GetFilter().Should().Be(
+            "[IsReversal] = 1 AND [OriginalAllocationId] IS NOT NULL");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task ApprovedBatchOwnedAllocation_ShouldRejectDirectReversal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var batch = new PaymentBatch
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BatchNumber = "PB-LOCKED-001",
+            Status = PaymentBatchStatus.Approved,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        var fixture = await SeedApprovedApPaymentAsync(
+            db,
+            tenantId,
+            payment =>
+            {
+                payment.Status = VendorPaymentStatus.Authorized;
+                payment.PaymentBatchId = batch.Id;
+                payment.PaymentBatch = batch;
+            });
+        var (service, _) = CreateService(db, tenantId);
+
+        var reverse = () => service.ReverseAllocationAsync(
+            fixture.Allocation.Id,
+            "direct batch mutation");
+
+        var exception = await reverse.Should().ThrowAsync<VendorPaymentControlException>();
+        exception.Which.Code.Should().Be("AP_PAYMENT_BATCH_ALLOCATION_FROZEN");
+        (await db.Set<VendorPaymentAllocation>().CountAsync(item => item.IsReversal))
+            .Should().Be(0);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

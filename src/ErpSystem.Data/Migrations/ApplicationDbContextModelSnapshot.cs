@@ -18167,6 +18167,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "PaymentReadinessControlEventId");
 
+                    b.HasIndex("TenantId", "OriginalAllocationId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_VendorPaymentAllocation_TenantId_OriginalAllocationId_Reversal")
+                        .HasFilter("[IsReversal] = 1 AND [OriginalAllocationId] IS NOT NULL");
+
                     b.ToTable("VendorPaymentAllocation", null, t =>
                         {
                             t.HasTrigger("TR_VendorPaymentAllocation_TDC0505PaymentReadiness");
