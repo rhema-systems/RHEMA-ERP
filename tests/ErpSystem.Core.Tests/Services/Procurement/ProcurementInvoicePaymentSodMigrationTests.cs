@@ -33,7 +33,27 @@ public sealed class ProcurementInvoicePaymentSodMigrationTests
         sql.Should().Contain("invoice.SubmittedById = payment.AuthorizedById");
         sql.Should().Contain("sodEvent.RuleCode = 'AP-004'");
         sql.Should().Contain("sodEvent.RuleVersion = 'TDC-0506'");
+        sql.Should().Contain("priorPayment.JournalEntryId IS NOT NULL");
+        sql.Should().Contain("priorPayment.InvoicePaymentSodControlEventId IS NULL");
+        sql.Should().Contain("payment.JournalEntryId = priorPayment.JournalEntryId");
         sql.Should().Contain("THROW 51641");
+        sql.Should().Contain("THROW 51642");
+    }
+
+    [Fact]
+    public void ForwardMigrationRepairsAlreadyAppliedHistoricalPaymentTrigger()
+    {
+        var migration = new TDC0506HistoricalPaymentSodCompatibility();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+        var sql = string.Join(Environment.NewLine,
+            builder.Operations.OfType<SqlOperation>().Select(item => item.Sql));
+
+        sql.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_VendorPayment_TDC0506InvoiceProcessorSod]");
+        sql.Should().Contain("priorPayment.JournalEntryId IS NOT NULL");
+        sql.Should().Contain("payment.JournalEntryId = priorPayment.JournalEntryId");
+        sql.Should().Contain("payment.AuthorizedById");
         sql.Should().Contain("THROW 51642");
     }
 

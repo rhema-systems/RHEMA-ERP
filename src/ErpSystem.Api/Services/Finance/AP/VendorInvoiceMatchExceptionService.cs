@@ -504,7 +504,8 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
             profile.Decisions.Count != 14 || profile.Decisions.Any(decision => !decision.IsComplete))
             throw Conflict("AP_MATCH_EXCEPTION_CONFIGURATION_CHANGED",
                 "The effective procurement configuration changed after this exception was requested.");
-        await RevalidateEvidenceAsync(item.VendorInvoice, item.Evidence, cancellationToken);
+        await VendorInvoiceMatchExceptionEvidenceValidator.RevalidateAsync(
+            _unitOfWork, TenantId, item.VendorInvoice, item.Evidence, cancellationToken);
     }
 
     private async Task<List<VendorInvoiceMatchExceptionEvidence>> ValidateEvidenceAsync(
@@ -608,71 +609,6 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
             });
         }
         return rows;
-    }
-
-    private async Task RevalidateEvidenceAsync(
-        VendorInvoice invoice,
-        IEnumerable<VendorInvoiceMatchExceptionEvidence> evidence,
-        CancellationToken cancellationToken)
-    {
-        foreach (var row in evidence)
-        {
-            if (row.ReferenceKind == VendorInvoiceMatchExceptionEvidenceKind.WorkflowEvidenceDocument)
-            {
-                var current = await (
-                    from document in _db.WorkflowEvidenceDocuments.AsNoTracking()
-                    join step in _db.WorkflowStepInstances.AsNoTracking()
-                        on document.StepInstanceId equals step.Id
-                    join workflow in _db.WorkflowInstances.AsNoTracking()
-                        on step.WorkflowInstanceId equals workflow.Id
-                    where document.TenantId == TenantId && step.TenantId == TenantId &&
-                          workflow.TenantId == TenantId && document.Id == row.WorkflowEvidenceDocumentId &&
-                          !document.IsDeleted && !step.IsDeleted && !workflow.IsDeleted &&
-                          (workflow.EntityId == invoice.Id || workflow.EntityId == invoice.PurchaseOrderId)
-                    select document).SingleOrDefaultAsync(cancellationToken);
-                if (current == null || !current.IsCurrent ||
-                    current.VerificationStatus != WorkflowEvidenceVerificationStatus.Verified ||
-                    current.MalwareScanStatus != WorkflowMalwareScanStatus.Clean ||
-                    !string.Equals(current.Sha256, row.EvidenceHash, StringComparison.OrdinalIgnoreCase))
-                    throw Conflict("AP_MATCH_EXCEPTION_EVIDENCE_STALE",
-                        "Linked workflow evidence is missing, stale, unverified, unsafe, or changed.");
-            }
-            else
-            {
-                var current = await (
-                    from version in _db.CentralDocumentVersions.AsNoTracking()
-                    join upload in _db.FileUploadRecords.AsNoTracking()
-                        on version.FileUploadRecordId equals upload.Id
-                    where version.TenantId == TenantId && upload.TenantId == TenantId &&
-                          version.FileUploadRecordId == row.FileUploadRecordId &&
-                          !version.IsDeleted && !version.DocumentRecord.IsDeleted && !upload.IsDeleted &&
-                          (version.DocumentRecord.SourceRecordId == invoice.Id ||
-                           version.DocumentRecord.SourceRecordId == invoice.PurchaseOrderId)
-                    select new
-                    {
-                        UploadId = upload.Id,
-                        version.DocumentRecordId,
-                        VersionId = version.Id,
-                        upload.FilePath,
-                        upload.FileSize,
-                        upload.ScannedAtUtc,
-                        upload.VirusScanStatus
-                    }).SingleOrDefaultAsync(cancellationToken);
-                var currentHash = current == null ? null : VendorInvoiceMatchExceptionRules.Hash(new
-                {
-                    Id = current.UploadId,
-                    current.DocumentRecordId,
-                    current.VersionId,
-                    current.FilePath,
-                    current.FileSize,
-                    current.ScannedAtUtc
-                });
-                if (current == null || current.VirusScanStatus != FileVirusScanStatus.Clean ||
-                    !string.Equals(currentHash, row.EvidenceHash, StringComparison.OrdinalIgnoreCase))
-                    throw Conflict("AP_MATCH_EXCEPTION_EVIDENCE_STALE",
-                        "Linked central-DMS evidence is missing, unsafe, relinked, or changed.");
-            }
-        }
     }
 
     private async Task<ProcurementControlEventDto> RecordEventAsync(

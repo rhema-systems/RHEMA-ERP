@@ -266,8 +266,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         var document = await LoadDocumentAsync(documentId, cancellationToken);
         await EnsureCapabilityAsync(IssuePermission, document.PurchaseOrderReceipt, correlation, cancellationToken);
         if (document.Status == ProcurementReceiptDocumentStatus.Issued)
-            return await MapForCurrentActorAsync(
-                document, DeserializeDecision(document.DecisionSnapshotJson), cancellationToken);
+            return await ResumeIssuedAsync(document, correlation, cancellationToken);
         EnsureRowVersion(document.RowVersion, request.RowVersion);
         if (document.Status == ProcurementReceiptDocumentStatus.Cancelled)
             throw Conflict("RCV_DOCUMENT_CANCELLED", "A cancelled receipt document cannot be issued.");
@@ -427,6 +426,47 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             $"{KindLabel(document.DocumentKind)} {document.DocumentNumber} issued to the central DMS.", correlation,
             new { document.Id, document.CentralDocumentRecordId, document.CentralDocumentVersionId }, cancellationToken);
         await PublishAsync(document, cancellationToken);
+        return await MapForCurrentActorAsync(document, config, cancellationToken);
+    }
+
+    private async Task<ProcurementReceiptDocumentDto> ResumeIssuedAsync(
+        ProcurementReceiptDocument document,
+        string correlation,
+        CancellationToken cancellationToken)
+    {
+        var config = DeserializeDecision(document.DecisionSnapshotJson);
+        await ReconcileDocumentAsync(document, config, cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var documentToken = $"\"id\":\"{document.Id:D}\"";
+        var hasIssuedEvent = await _db.ProcurementControlEvents.AsNoTracking()
+            .AnyAsync(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.EventType == EventType &&
+                item.Action == "Issued" &&
+                item.Result == ProcurementControlEventResult.Succeeded &&
+                item.SourceType == nameof(PurchaseOrderReceipt) &&
+                item.SourceId == document.PurchaseOrderReceiptId &&
+                item.ResultValuesJson != null &&
+                item.ResultValuesJson.Contains(documentToken) &&
+                !item.IsDeleted,
+                cancellationToken);
+        if (!hasIssuedEvent)
+        {
+            await RecordEventAsync(document.PurchaseOrderReceipt, "Issued",
+                ProcurementControlEventResult.Succeeded,
+                $"{KindLabel(document.DocumentKind)} {document.DocumentNumber} issued to the central DMS.",
+                correlation,
+                new
+                {
+                    document.Id,
+                    document.CentralDocumentRecordId,
+                    document.CentralDocumentVersionId
+                },
+                cancellationToken);
+            await PublishAsync(document, cancellationToken);
+        }
+
         return await MapForCurrentActorAsync(document, config, cancellationToken);
     }
 
@@ -736,7 +776,6 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         if (issueAllowed)
         {
             result.Add("issue");
-            result.Add("cancel");
         }
         if (canSign) result.Add("sign");
         return result;

@@ -1697,6 +1697,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     if (!TryGuid(root, "purchaseOrderId", out var purchaseOrderId) ||
                         purchaseOrderId != purchaseOrder.Id ||
                         !TryGuid(root, "workflowInstanceId", out var workflowInstanceId) ||
+                        !TryGuid(root, "exceptionId", out var exceptionId) ||
                         !root.TryGetProperty("invoiceSnapshotHash", out var hashElement) ||
                         !string.Equals(hashElement.GetString(), snapshotHash, StringComparison.OrdinalIgnoreCase) ||
                         !root.TryGetProperty("expiresAtUtc", out var expiryElement) ||
@@ -1709,6 +1710,35 @@ namespace ErpSystem.Api.Services.Finance.AP
                             !item.IsDeleted);
                     if (workflow == null || workflow.InitiatedById == candidate.ActorUserId)
                         continue;
+
+                    var approvedException = await _unitOfWork
+                        .Repository<VendorInvoiceMatchException>()
+                        .GetQueryable(item =>
+                            item.TenantId == TenantId &&
+                            item.Id == exceptionId &&
+                            item.VendorInvoiceId == invoice.Id &&
+                            item.PurchaseOrderId == purchaseOrder.Id &&
+                            item.Status == VendorInvoiceMatchExceptionStatus.Approved &&
+                            item.ApprovalControlEventId == candidate.Id &&
+                            !item.IsDeleted)
+                        .Include(item => item.Evidence)
+                        .AsNoTracking()
+                        .SingleOrDefaultAsync(cancellationToken);
+                    if (approvedException == null || approvedException.Evidence.Count == 0)
+                        continue;
+                    try
+                    {
+                        await VendorInvoiceMatchExceptionEvidenceValidator.RevalidateAsync(
+                            _unitOfWork, TenantId, invoice,
+                            approvedException.Evidence, cancellationToken);
+                    }
+                    catch (VendorInvoiceMatchExceptionControlException exception)
+                        when (exception.Code == "AP_MATCH_EXCEPTION_EVIDENCE_STALE")
+                    {
+                        // Evidence can be revoked after approval. A stale exception is
+                        // ignored so the current match remains visibly blocked.
+                        continue;
+                    }
                     return candidate;
                 }
                 catch (JsonException)

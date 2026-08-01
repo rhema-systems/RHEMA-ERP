@@ -130,6 +130,13 @@ public sealed class TDC0506InvoiceProcessorPaymentSod : Migration
                            OR ISNULL(payment.JournalEntryId, '00000000-0000-0000-0000-000000000000') <> ISNULL(priorPayment.JournalEntryId, '00000000-0000-0000-0000-000000000000')
                            OR ISNULL(payment.AuthorizedById, '00000000-0000-0000-0000-000000000000') <> ISNULL(priorPayment.AuthorizedById, '00000000-0000-0000-0000-000000000000')
                            OR ISNULL(payment.InvoicePaymentSodControlEventId, '00000000-0000-0000-0000-000000000000') <> ISNULL(priorPayment.InvoicePaymentSodControlEventId, '00000000-0000-0000-0000-000000000000'))
+                      AND NOT (
+                           priorPayment.JournalEntryId IS NOT NULL
+                       AND priorPayment.InvoicePaymentSodControlEventId IS NULL
+                       AND payment.JournalEntryId = priorPayment.JournalEntryId
+                       AND payment.InvoicePaymentSodControlEventId IS NULL
+                       AND ISNULL(payment.AuthorizedById, '00000000-0000-0000-0000-000000000000') = ISNULL(priorPayment.AuthorizedById, '00000000-0000-0000-0000-000000000000')
+                      )
                       AND (
                            payment.AuthorizedById IS NULL
                         OR sodEvent.Id IS NULL

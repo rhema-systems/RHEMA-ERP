@@ -320,6 +320,79 @@ public sealed class ProcurementReviewRegressionTests
             "(ProcurementReceiptDocumentStatus.PendingSignatures, ProcurementReceiptDocumentStatus.Cancelled)");
     }
 
+    [Fact]
+    public void Approved_match_exception_evidence_is_revalidated_when_consumed()
+    {
+        var invoice = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorInvoiceService.cs");
+        var exception = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorInvoiceMatchExceptionService.cs");
+        var validator = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorInvoiceMatchExceptionEvidenceValidator.cs");
+
+        exception.Should().Contain(
+            "VendorInvoiceMatchExceptionEvidenceValidator.RevalidateAsync");
+        invoice.Should().Contain("item.ApprovalControlEventId == candidate.Id");
+        invoice.Should().Contain(
+            "await VendorInvoiceMatchExceptionEvidenceValidator.RevalidateAsync");
+        validator.Should().Contain("current.IsCurrent");
+        validator.Should().Contain("WorkflowMalwareScanStatus.Clean");
+        validator.Should().Contain("FileVirusScanStatus.Clean");
+        validator.Should().Contain("row.EvidenceHash");
+    }
+
+    [Fact]
+    public void Payments_reject_duplicate_invoice_allocations_and_resume_processing_batches()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorPaymentService.cs");
+
+        source.Should().Contain("AP_PAYMENT_DUPLICATE_INVOICE_ALLOCATION");
+        source.Should().Contain(
+            "PaymentBatchStatus.Approved or PaymentBatchStatus.Processing");
+        source.Should().Contain("IsDurablyPosted(item.VendorPayment)");
+        source.Should().Contain("EnsureBatchResumeAllocationsMatch");
+        source.Should().Contain("Checkpoint each item while the batch remains Processing");
+        source.Should().Contain("AP_PAYMENT_BATCH_RESUME_ALLOCATION_MISMATCH");
+    }
+
+    [Fact]
+    public void Issued_document_retry_repairs_post_issue_work_and_unissued_actions_match_api()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services",
+            "PurchaseOrderReceiptDocumentService.cs");
+        var issuedBranch = source.IndexOf(
+            "if (document.Status == ProcurementReceiptDocumentStatus.Issued)",
+            StringComparison.Ordinal);
+        var resume = source.IndexOf(
+            "return await ResumeIssuedAsync(document, correlation, cancellationToken);",
+            issuedBranch, StringComparison.Ordinal);
+        var allowedActions = source.IndexOf(
+            "private static IReadOnlyList<string> AllowedActions(",
+            StringComparison.Ordinal);
+        var issuedActions = source.IndexOf(
+            "if (document.Status == ProcurementReceiptDocumentStatus.Issued)",
+            allowedActions, StringComparison.Ordinal);
+        var issuedActionsEnd = source.IndexOf(
+            "return result;", issuedActions, StringComparison.Ordinal);
+        var unissuedStart = source.IndexOf(
+            "if (issueAllowed)", issuedActionsEnd, StringComparison.Ordinal);
+        var unissuedEnd = source.IndexOf(
+            "if (canSign)", unissuedStart, StringComparison.Ordinal);
+        var unissuedActions = source[unissuedStart..unissuedEnd];
+
+        resume.Should().BeGreaterThan(issuedBranch);
+        source.Should().Contain("private async Task<ProcurementReceiptDocumentDto> ResumeIssuedAsync");
+        source.Should().Contain("hasIssuedEvent");
+        source.Should().Contain("await ReconcileDocumentAsync(document, config, cancellationToken)");
+        unissuedActions.Should().NotContain("result.Add(\"cancel\");");
+    }
+
     private static Warehouse NewWarehouse(Guid tenantId, Guid id) => new()
     {
         Id = id,

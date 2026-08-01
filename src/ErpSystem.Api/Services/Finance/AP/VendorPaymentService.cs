@@ -533,6 +533,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             CancellationToken cancellationToken,
             bool executionStrategyScope)
         {
+            var duplicateInvoiceIds = allocations
+                .GroupBy(item => item.VendorInvoiceId)
+                .Where(group => group.Count() > 1)
+                .Select(group => group.Key)
+                .ToList();
+            if (duplicateInvoiceIds.Count > 0)
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_DUPLICATE_INVOICE_ALLOCATION",
+                    "Each vendor invoice may appear only once in a payment allocation request.");
+
             if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
             {
                 return await _unitOfWork.ExecuteInStrategyAsync(
@@ -1819,19 +1829,22 @@ namespace ErpSystem.Api.Services.Finance.AP
                     "The authoritative invoice/payment SOD service is not configured.");
 
             var batch = await _unitOfWork.Repository<PaymentBatch>()
-                .GetQueryable(b => b.TenantId == TenantId && b.Id == batchId)
-                .Include(b => b.Items)
+                .GetQueryable(b => b.TenantId == TenantId && b.Id == batchId && !b.IsDeleted)
+                .Include(b => b.Items.Where(item => !item.IsDeleted))
                     .ThenInclude(i => i.VendorPayment)
-                .Include(b => b.Items)
-                    .ThenInclude(i => i.Invoices)
+                        .ThenInclude(payment => payment.Allocations.Where(allocation =>
+                            !allocation.IsDeleted && !allocation.IsReversal))
+                .Include(b => b.Items.Where(item => !item.IsDeleted))
+                    .ThenInclude(i => i.Invoices.Where(selection => !selection.IsDeleted))
                         .ThenInclude(i => i.VendorInvoice)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (batch == null)
                 throw new KeyNotFoundException($"Payment batch with Id '{batchId}' not found.");
 
-            if (batch.Status != PaymentBatchStatus.Approved)
-                throw new InvalidOperationException("Only approved batches can be processed.");
+            if (batch.Status is not (PaymentBatchStatus.Approved or PaymentBatchStatus.Processing))
+                throw new InvalidOperationException(
+                    "Only approved or interrupted processing batches can be processed.");
 
             if (batch.Items.Count == 0 || batch.Items.Any(item => item.Invoices.Count == 0))
                 throw new VendorPaymentControlException(
@@ -1841,7 +1854,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             await _invoicePaymentSod.RevalidateBatchAuthorizationAsync(batchId, cancellationToken);
 
             var now = DateTime.UtcNow;
-            foreach (var selection in batch.Items.SelectMany(item => item.Invoices)
+            var resumableItems = batch.Items
+                .Where(item => !IsDurablyPosted(item.VendorPayment))
+                .ToList();
+            foreach (var selection in resumableItems.SelectMany(item => item.Invoices)
                          .OrderBy(item => item.VendorInvoiceId))
             {
                 var decision = await RequireBatchInvoiceReadinessAsync(
@@ -1865,6 +1881,14 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var item in batch.Items)
             {
+                if (IsDurablyPosted(item.VendorPayment))
+                {
+                    MarkBatchItemProcessed(item);
+                    processedCount++;
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    continue;
+                }
+
                 try
                 {
                     var payment = item.VendorPayment;
@@ -1887,19 +1911,21 @@ namespace ErpSystem.Api.Services.Finance.AP
                     await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-                    if (allocs.Any())
+                    var existingAllocations = payment.Allocations
+                        .Where(allocation => !allocation.IsDeleted && !allocation.IsReversal)
+                        .ToList();
+                    if (allocs.Any() && existingAllocations.Count == 0)
                     {
                         await AllocatePaymentAsync(payment.Id, allocs, cancellationToken);
+                    }
+                    else if (allocs.Any())
+                    {
+                        EnsureBatchResumeAllocationsMatch(item, existingAllocations);
                     }
 
                     await PostAsync(payment.Id, cancellationToken);
 
-                    item.ItemStatus = "Processed";
-                    foreach (var selection in item.Invoices)
-                    {
-                        selection.Status = "Processed";
-                        selection.FailureReason = null;
-                    }
+                    MarkBatchItemProcessed(item);
                     processedCount++;
                 }
                 catch (Exception ex)
@@ -1958,6 +1984,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                             "Failed to process batch item {ItemId}", item.Id);
                     }
                 }
+
+                // Checkpoint each item while the batch remains Processing. A
+                // crash or cancellation can therefore resume without replaying
+                // a durable posting or its exact invoice allocations.
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
 
             // Persist item/selection outcomes while the batch is still Processing.
@@ -1980,6 +2011,44 @@ namespace ErpSystem.Api.Services.Finance.AP
                 batch.BatchNumber, processedCount, failedCount);
 
             return await GetPaymentBatchAsync(batchId, cancellationToken) ?? throw new InvalidOperationException("Batch not found after processing.");
+        }
+
+        private static bool IsDurablyPosted(VendorPayment payment) =>
+            payment.JournalEntryId.HasValue && payment.Status is
+                VendorPaymentStatus.Processed or
+                VendorPaymentStatus.Cleared or
+                VendorPaymentStatus.Reconciled;
+
+        private static void MarkBatchItemProcessed(PaymentBatchItem item)
+        {
+            item.ItemStatus = "Processed";
+            item.FailureReason = null;
+            foreach (var selection in item.Invoices)
+            {
+                selection.Status = "Processed";
+                selection.FailureReason = null;
+            }
+        }
+
+        private static void EnsureBatchResumeAllocationsMatch(
+            PaymentBatchItem item,
+            IReadOnlyCollection<VendorPaymentAllocation> existingAllocations)
+        {
+            var expected = item.Invoices
+                .GroupBy(selection => selection.VendorInvoiceId)
+                .ToDictionary(group => group.Key, group => group.Sum(selection => selection.Amount));
+            var actual = existingAllocations
+                .GroupBy(allocation => allocation.VendorInvoiceId)
+                .ToDictionary(group => group.Key, group => group.Sum(allocation =>
+                    allocation.AllocatedAmount + allocation.DiscountAmount +
+                    allocation.WithholdingTaxAmount));
+            var exact = expected.Count == actual.Count && expected.All(pair =>
+                actual.TryGetValue(pair.Key, out var allocated) &&
+                Math.Abs(allocated - pair.Value) <= 0.01m);
+            if (!exact)
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_BATCH_RESUME_ALLOCATION_MISMATCH",
+                    "The interrupted payment's saved allocations no longer match the batch's immutable invoice selections.");
         }
 
         private async Task<VendorPaymentInvoiceReadinessDto> EvaluateInvoicePaymentReadinessAsync(
