@@ -2109,6 +2109,21 @@ public class PurchaseOrdersController : ControllerBase
                 return NotFound($"Receipt with ID {receiptId} not found");
             }
 
+            var governedInspectionExists = await _unitOfWork
+                .Repository<ProcurementReceiptInspectionCase>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUserService.TenantId &&
+                    item.PurchaseOrderReceiptId == receipt.Id &&
+                    !item.IsDeleted)
+                .AnyAsync(HttpContext.RequestAborted);
+            if (governedInspectionExists ||
+                !string.IsNullOrWhiteSpace(receipt.ReceiptSourceIntegrityHash))
+            {
+                throw new ProcurementReceiptSourceValidationException(
+                    "RCV_INSPECTION_LIFECYCLE_REQUIRED",
+                    "This governed receipt must be decided and posted through the shared procurement receipt-inspection lifecycle.");
+            }
+
             if (receipt.Status != "Pending Inspection" && receipt.Status != "Inspected")
             {
                 return BadRequest($"Receipt cannot be completed in current status: {receipt.Status}");

@@ -216,6 +216,110 @@ public sealed class ProcurementReviewRegressionTests
         component.Should().Contain("roles.length > 0");
     }
 
+    [Fact]
+    public void Governed_receipts_cannot_use_legacy_completion_or_projection_cancellation()
+    {
+        var controller = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Controllers", "Procurement",
+            "PurchaseOrdersController.cs");
+        var grnService = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Inventory",
+            "GoodsReceiptNoteService.cs");
+
+        var endpoint = controller.IndexOf(
+            "public async Task<IActionResult> CompleteInspectionAndPostToInventory",
+            StringComparison.Ordinal);
+        var lifecycleGuard = controller.IndexOf(
+            "RCV_INSPECTION_LIFECYCLE_REQUIRED", endpoint,
+            StringComparison.Ordinal);
+        var legacyAcceptance = controller.IndexOf(
+            "receipt.Status = \"Accepted\"", endpoint,
+            StringComparison.Ordinal);
+
+        lifecycleGuard.Should().BeGreaterThan(endpoint);
+        lifecycleGuard.Should().BeLessThan(legacyAcceptance,
+            "governed receipts must fail closed before the legacy endpoint mutates state");
+        grnService.Should().Contain("if (grn.PurchaseOrderReceiptId.HasValue)");
+        grnService.Should().Contain(
+            "cannot be cancelled independently; use the linked receipt-inspection lifecycle");
+    }
+
+    [Fact]
+    public void Quality_hold_closure_revalidates_all_evidence_and_replacements_by_po_line()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementReceiptInspectionService.cs");
+        var closeStart = source.IndexOf(
+            "public async Task<ProcurementReceiptInspectionDto> CloseAsync",
+            StringComparison.Ordinal);
+        var closeEnd = source.IndexOf(
+            "public async Task EnsureEvidenceCurrentAsync", closeStart,
+            StringComparison.Ordinal);
+        var evidenceRevalidation = source.IndexOf(
+            "await RevalidateEvidenceAsync(inspection, cancellationToken);",
+            closeStart, StringComparison.Ordinal);
+        var release = source.IndexOf(
+            "inspection.QualityHold = false;", closeStart,
+            StringComparison.Ordinal);
+
+        evidenceRevalidation.Should().BeGreaterThan(closeStart);
+        evidenceRevalidation.Should().BeLessThan(release);
+        release.Should().BeLessThan(closeEnd);
+        source.Should().Contain("rejectedByPurchaseOrderItem");
+        source.Should().Contain("acceptedByPurchaseOrderItem");
+        source.Should().Contain(
+            "every rejected purchase-order line");
+    }
+
+    [Fact]
+    public void Receipt_document_issue_revalidates_evidence_and_hashes_finalized_content()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services",
+            "PurchaseOrderReceiptDocumentService.cs");
+        var issueStart = source.IndexOf(
+            "public async Task<ProcurementReceiptDocumentDto> IssueAsync",
+            StringComparison.Ordinal);
+        var evidenceRevalidation = source.IndexOf(
+            "_receiptInspection.EnsureEvidenceCurrentAsync", issueStart,
+            StringComparison.Ordinal);
+        var issuedSnapshot = source.IndexOf(
+            "var issuedSnapshot = IssuedSourceSnapshot(document, inspection);",
+            issueStart, StringComparison.Ordinal);
+        var pdf = source.IndexOf(
+            "var pdf = BuildPdf(document, template, inspection);",
+            issueStart, StringComparison.Ordinal);
+
+        evidenceRevalidation.Should().BeGreaterThan(issueStart);
+        issuedSnapshot.Should().BeGreaterThan(evidenceRevalidation);
+        issuedSnapshot.Should().BeLessThan(pdf,
+            "the PDF must advertise the hash of finalized acceptance, evidence, and signatures");
+        source.Should().Contain("tdc.receipt-document.issued.v2");
+        source.Should().Contain("evidence = inspection.Evidence");
+        source.Should().Contain("signatures = document.Signatures");
+    }
+
+    [Fact]
+    public void Unissued_receipt_documents_cannot_be_cancelled_and_stranded()
+    {
+        var service = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services",
+            "PurchaseOrderReceiptDocumentService.cs");
+        var rules = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementReceiptDocumentRules.cs");
+
+        service.Should().Contain(
+            "if (document.Status != ProcurementReceiptDocumentStatus.Issued)");
+        service.Should().Contain(
+            "unissued register entries must remain available for signature and issue");
+        rules.Should().NotContain(
+            "(ProcurementReceiptDocumentStatus.Draft, ProcurementReceiptDocumentStatus.Cancelled)");
+        rules.Should().NotContain(
+            "(ProcurementReceiptDocumentStatus.PendingSignatures, ProcurementReceiptDocumentStatus.Cancelled)");
+    }
+
     private static Warehouse NewWarehouse(Guid tenantId, Guid id) => new()
     {
         Id = id,

@@ -37,6 +37,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
     private readonly ICurrentUserProvider _currentUser;
     private readonly IProcurementAccessControlService _access;
     private readonly IProcurementConfigurationService _configuration;
+    private readonly IProcurementReceiptInspectionService _receiptInspection;
     private readonly IDocumentNumberingService _numbering;
     private readonly IFileStorageService _storage;
     private readonly IProcurementControlEventService _controlEvents;
@@ -48,6 +49,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         ICurrentUserProvider currentUser,
         IProcurementAccessControlService access,
         IProcurementConfigurationService configuration,
+        IProcurementReceiptInspectionService receiptInspection,
         IDocumentNumberingService numbering,
         IFileStorageService storage,
         IProcurementControlEventService controlEvents,
@@ -58,6 +60,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         _currentUser = currentUser;
         _access = access;
         _configuration = configuration;
+        _receiptInspection = receiptInspection;
         _numbering = numbering;
         _storage = storage;
         _controlEvents = controlEvents;
@@ -277,6 +280,16 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         var inspection = await LatestInspectionAsync(document.PurchaseOrderReceiptId, cancellationToken);
         if (!ProcurementReceiptDocumentRules.IsInspectionApproved(inspection?.Status))
             throw Validation("RCV_DOCUMENT_INSPECTION_NOT_APPROVED", "The governed receipt inspection must be approved or closed before issue.");
+        try
+        {
+            await _receiptInspection.EnsureEvidenceCurrentAsync(
+                inspection!.Id, cancellationToken);
+        }
+        catch (ProcurementReceiptInspectionException exception)
+        {
+            throw Conflict(exception.Code,
+                $"Receipt evidence is no longer valid for document issue: {exception.Message}");
+        }
         var evidence = await EvidenceKeysAsync(inspection!.Id, cancellationToken);
         var missingEvidence = ProcurementReceiptDocumentRules.MissingRequirements(config.EvidenceRequirements, evidence);
         if (missingEvidence.Count > 0)
@@ -292,6 +305,9 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             throw Validation("RCV_DOCUMENT_SEQUENCE_INVALID", "DEC-013 requires the GRN to be issued before the MRN.");
 
         var template = await EnsureTemplateAsync(document.TemplateCode, document.DocumentKind, cancellationToken);
+        var issuedSnapshot = IssuedSourceSnapshot(document, inspection);
+        document.SourceSnapshotJson = issuedSnapshot;
+        document.SourceIntegrityHash = Hash(issuedSnapshot);
         var pdf = BuildPdf(document, template, inspection);
         var fileName = $"{SafeFileName(document.DocumentNumber)}.pdf";
         await using var stream = new MemoryStream(pdf);
@@ -427,6 +443,9 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             return await MapForCurrentActorAsync(
                 document, DeserializeDecision(document.DecisionSnapshotJson), cancellationToken);
         EnsureRowVersion(document.RowVersion, request.RowVersion);
+        if (document.Status != ProcurementReceiptDocumentStatus.Issued)
+            throw Conflict("RCV_DOCUMENT_NOT_ISSUED",
+                "Only an issued receipt document can be cancelled; unissued register entries must remain available for signature and issue.");
         var now = DateTime.UtcNow;
         var before = document.Status.ToString();
         document.Status = ProcurementReceiptDocumentStatus.Cancelled;
@@ -796,6 +815,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
 
     private Task<ProcurementReceiptInspectionCase?> LatestInspectionAsync(Guid receiptId, CancellationToken cancellationToken) =>
         _db.ProcurementReceiptInspectionCases.AsNoTracking()
+            .Include(item => item.Evidence)
             .Where(item => item.TenantId == _currentUser.TenantId && item.PurchaseOrderReceiptId == receiptId && !item.IsDeleted && item.Status != ProcurementReceiptInspectionStatus.Cancelled)
             .OrderByDescending(item => item.Sequence).FirstOrDefaultAsync(cancellationToken);
 
@@ -1103,6 +1123,84 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         document = new { kind, number },
         configuration = new { governance.Profile.Id, governance.Profile.Version, DecisionId = governance.Decision.Id },
         lines = receipt.Items.OrderBy(item => item.Id).Select(item => new { item.Id, item.PurchaseOrderItemId, item.ReceivedQuantity, item.AcceptedQuantity, item.RejectedQuantity, item.ReceiptLineIntegrityHash })
+    });
+
+    private static string IssuedSourceSnapshot(
+        ProcurementReceiptDocument document,
+        ProcurementReceiptInspectionCase inspection) => Serialize(new
+    {
+        schemaVersion = "tdc.receipt-document.issued.v2",
+        receipt = new
+        {
+            document.PurchaseOrderReceipt.Id,
+            document.PurchaseOrderReceipt.ReceiptNumber,
+            document.PurchaseOrderReceipt.ReceiptDate,
+            document.PurchaseOrderReceipt.PurchaseOrderId,
+            document.PurchaseOrderReceipt.ReceiptSourceIntegrityHash
+        },
+        purchaseOrder = new
+        {
+            document.PurchaseOrderReceipt.PurchaseOrder.Id,
+            document.PurchaseOrderReceipt.PurchaseOrder.OrderNumber,
+            document.PurchaseOrderReceipt.PurchaseOrder.BusinessPartnerId,
+            SupplierName = document.PurchaseOrderReceipt.PurchaseOrder.BusinessPartner?.PartnerName
+        },
+        receiptDocument = new
+        {
+            document.Id,
+            document.DocumentKind,
+            document.DocumentNumber,
+            document.TemplateCode,
+            document.ConfigurationProfileId,
+            document.ConfigurationProfileVersion,
+            document.ConfigurationDecisionId,
+            DecisionSnapshotHash = Hash(document.DecisionSnapshotJson)
+        },
+        inspection = new
+        {
+            inspection.Id,
+            inspection.Sequence,
+            inspection.Status,
+            inspection.AcceptedQuantity,
+            inspection.RejectedQuantity,
+            inspection.DecidedAtUtc,
+            inspection.IntegrityHash
+        },
+        lines = document.PurchaseOrderReceipt.Items.OrderBy(item => item.Id).Select(item => new
+        {
+            item.Id,
+            item.PurchaseOrderItemId,
+            item.PurchaseOrderItem.InventoryItemId,
+            ItemCode = item.PurchaseOrderItem.InventoryItem?.ItemCode,
+            ItemName = item.PurchaseOrderItem.InventoryItem?.Name ??
+                       item.PurchaseOrderItem.ItemDescription,
+            item.ReceivedQuantity,
+            item.AcceptedQuantity,
+            item.RejectedQuantity,
+            item.ReceiptLineIntegrityHash
+        }),
+        evidence = inspection.Evidence.Where(item => !item.IsDeleted)
+            .OrderBy(item => item.ActionKey).ThenBy(item => item.RequirementKey)
+            .Select(item => new
+            {
+                item.Id,
+                item.ActionKey,
+                item.RequirementKey,
+                item.ReferenceKind,
+                item.WorkflowEvidenceDocumentId,
+                item.FileUploadRecordId,
+                item.EvidenceHash
+            }),
+        signatures = document.Signatures.Where(item => !item.IsDeleted)
+            .OrderBy(item => item.RequiredRole).Select(item => new
+            {
+                item.Id,
+                item.RequiredRole,
+                item.SignedByUserId,
+                item.SignedByName,
+                item.SignedAtUtc,
+                item.IntegrityHash
+            })
     });
 
     private static ProcurementReceiptDocumentDecisionValueDto DeserializeDecision(string json)

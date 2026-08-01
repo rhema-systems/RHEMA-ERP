@@ -900,6 +900,10 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
 
         if (grn.Status == GRNStatus.StockUpdated)
             throw new InvalidOperationException("Cannot cancel a posted GRN");
+        if (grn.PurchaseOrderReceiptId.HasValue)
+            throw new ProcurementReceiptSourceValidationException(
+                "RCV_INSPECTION_LIFECYCLE_REQUIRED",
+                "This GRN is a projection of a governed procurement receipt and cannot be cancelled independently; use the linked receipt-inspection lifecycle.");
 
         grn.Status = GRNStatus.Cancelled;
         grn.Notes = $"{grn.Notes}\nCancelled: {reason}";

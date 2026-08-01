@@ -60,6 +60,8 @@ public sealed class ProcurementReceiptDocumentRulesTests
     [Theory]
     [InlineData(ProcurementReceiptDocumentStatus.Draft, ProcurementReceiptDocumentStatus.Issued, true)]
     [InlineData(ProcurementReceiptDocumentStatus.PendingSignatures, ProcurementReceiptDocumentStatus.Issued, true)]
+    [InlineData(ProcurementReceiptDocumentStatus.Draft, ProcurementReceiptDocumentStatus.Cancelled, false)]
+    [InlineData(ProcurementReceiptDocumentStatus.PendingSignatures, ProcurementReceiptDocumentStatus.Cancelled, false)]
     [InlineData(ProcurementReceiptDocumentStatus.Issued, ProcurementReceiptDocumentStatus.Cancelled, true)]
     [InlineData(ProcurementReceiptDocumentStatus.Cancelled, ProcurementReceiptDocumentStatus.Issued, false)]
     [InlineData(ProcurementReceiptDocumentStatus.Issued, ProcurementReceiptDocumentStatus.Draft, false)]

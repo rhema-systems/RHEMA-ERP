@@ -815,30 +815,67 @@ public sealed class ProcurementReceiptInspectionService :
             inspection.CreatedByUserId == _currentUser.UserId)
             throw new ProcurementReceiptInspectionAuthorizationException(
                 "Quality-hold closure requires an actor independent from inspection creation and approval.");
-        var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
-        if (evidence.Count == 0)
-            throw Validation("RCV_CLOSURE_EVIDENCE_REQUIRED", "Closure evidence is required.");
-        foreach (var item in evidence)
+
+        ProcurementReceiptInspectionCase? closed = null;
+        await ExecuteAsync(async () =>
         {
-            item.InspectionCaseId = inspection.Id;
-            await Evidence.AddAsync(item);
-            inspection.Evidence.Add(item);
-        }
-        inspection.Status = ProcurementReceiptInspectionStatus.Closed;
-        inspection.ResolutionStatus = ProcurementReceiptResolutionStatus.Closed;
-        inspection.QualityHold = false;
-        inspection.QualityHoldReleasedAtUtc = DateTime.UtcNow;
-        await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Closed,
-            request.Comment, request.Reference, correlation, request.IdempotencyKey,
-            null, cancellationToken);
-        inspection.IntegrityHash = CaseHash(inspection);
-        await Cases.UpdateAsync(inspection);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        await RecordEventAsync(inspection, "Closed", ProcurementControlEventResult.Allowed,
-            null, Snapshot(inspection), request.Comment, correlation, cancellationToken);
-        await PublishAsync("procurement.receipt-inspection.closed", inspection,
+            inspection = await LoadCaseAsync(caseId, cancellationToken);
+            EnsureRowVersion(inspection.RowVersion, request.RowVersion);
+            if (inspection.Status != ProcurementReceiptInspectionStatus.ClosureReady ||
+                !ProcurementReceiptInspectionRules.CanClose(
+                    inspection.SupplierAcknowledgementStatus, inspection.ResolutionStatus))
+                throw Conflict("RCV_CLOSURE_NOT_READY",
+                    "Supplier acknowledgement and evidenced return dispatch or accepted replacement are required before closure.");
+            if (inspection.DecidedByUserId == _currentUser.UserId ||
+                inspection.CreatedByUserId == _currentUser.UserId)
+                throw new ProcurementReceiptInspectionAuthorizationException(
+                    "Quality-hold closure requires an actor independent from inspection creation and approval.");
+
+            var evidence = await ValidateEvidenceAsync(
+                inspection, request.Evidence, cancellationToken);
+            if (evidence.Count == 0)
+                throw Validation("RCV_CLOSURE_EVIDENCE_REQUIRED", "Closure evidence is required.");
+            foreach (var item in evidence)
+            {
+                item.InspectionCaseId = inspection.Id;
+                await Evidence.AddAsync(item);
+                inspection.Evidence.Add(item);
+            }
+
+            // The hold may be released only while every item relied on across
+            // submission, supplier acknowledgement, resolution, and closure is
+            // still source-bound, current, malware-clean, and hash-identical.
+            await RevalidateEvidenceAsync(inspection, cancellationToken);
+            inspection.Status = ProcurementReceiptInspectionStatus.Closed;
+            inspection.ResolutionStatus = ProcurementReceiptResolutionStatus.Closed;
+            inspection.QualityHold = false;
+            inspection.QualityHoldReleasedAtUtc = DateTime.UtcNow;
+            await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Closed,
+                request.Comment, request.Reference, correlation, request.IdempotencyKey,
+                null, cancellationToken);
+            inspection.IntegrityHash = CaseHash(inspection);
+            await Cases.UpdateAsync(inspection);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await RecordEventAsync(inspection, "Closed", ProcurementControlEventResult.Allowed,
+                null, Snapshot(inspection), request.Comment, correlation, cancellationToken);
+            closed = inspection;
+        }, cancellationToken);
+
+        await PublishAsync("procurement.receipt-inspection.closed", closed!,
             cancellationToken);
-        return Map(inspection);
+        return Map(closed!);
+    }
+
+    public async Task EnsureEvidenceCurrentAsync(
+        Guid caseId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
+        var inspection = await CaseQuery(false)
+            .SingleOrDefaultAsync(item => item.Id == caseId, cancellationToken)
+            ?? throw NotFound("RCV_INSPECTION_NOT_FOUND",
+                "The inspection case was not found in the current tenant.");
+        await RevalidateEvidenceAsync(inspection, cancellationToken);
     }
 
     public async Task EnsureApEligibilityAsync(
@@ -1139,16 +1176,41 @@ public sealed class ProcurementReceiptInspectionService :
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
             ?? throw Validation("RCV_REPLACEMENT_RECEIPT_NOT_FOUND",
                 "The replacement reference must identify another governed receipt for the same purchase order.");
-        var accepted = await Cases.GetQueryable(item =>
+        var acceptedCaseId = await Cases.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.PurchaseOrderReceiptId == replacement.Id && !item.IsDeleted &&
                 item.Status == ProcurementReceiptInspectionStatus.Closed)
             .AsNoTracking().OrderByDescending(item => item.Sequence)
-            .Select(item => (decimal?)item.AcceptedQuantity)
+            .Select(item => (Guid?)item.Id)
             .FirstOrDefaultAsync(cancellationToken);
-        if (!accepted.HasValue || accepted.Value < original.RejectedQuantity)
+        if (!acceptedCaseId.HasValue)
             throw Conflict("RCV_REPLACEMENT_NOT_ACCEPTED",
-                "The replacement receipt must be independently inspected and accept at least the rejected quantity.");
+                "The replacement receipt must be independently inspected and closed.");
+
+        var rejectedByPurchaseOrderItem = original.Lines
+            .Where(item => !item.IsDeleted && item.RejectedQuantity > 0)
+            .GroupBy(item => item.PurchaseOrderReceiptItem.PurchaseOrderItemId)
+            .ToDictionary(group => group.Key, group => group.Sum(item => item.RejectedQuantity));
+        var acceptedByPurchaseOrderItem = await Lines.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.InspectionCaseId == acceptedCaseId.Value && !item.IsDeleted)
+            .AsNoTracking()
+            .GroupBy(item => item.PurchaseOrderReceiptItem.PurchaseOrderItemId)
+            .Select(group => new
+            {
+                PurchaseOrderItemId = group.Key,
+                AcceptedQuantity = group.Sum(item => item.AcceptedQuantity)
+            })
+            .ToDictionaryAsync(item => item.PurchaseOrderItemId,
+                item => item.AcceptedQuantity, cancellationToken);
+        var insufficientLines = rejectedByPurchaseOrderItem
+            .Where(item => !acceptedByPurchaseOrderItem.TryGetValue(item.Key, out var accepted) ||
+                           accepted < item.Value)
+            .Select(item => item.Key)
+            .ToList();
+        if (insufficientLines.Count > 0)
+            throw Conflict("RCV_REPLACEMENT_NOT_ACCEPTED",
+                "The replacement receipt must accept sufficient quantity for every rejected purchase-order line.");
     }
 
     private async Task EnsureQuarantineLocationAsync(

@@ -13,6 +13,7 @@ public interface IProcurementReceiptInspectionService
     Task<ProcurementReceiptInspectionDto> AcknowledgeAsync(Guid caseId, ProcurementReceiptSupplierAcknowledgementRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementReceiptInspectionDto> ResolveAsync(Guid caseId, ProcurementReceiptResolutionRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementReceiptInspectionDto> CloseAsync(Guid caseId, ProcurementReceiptResolutionRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task EnsureEvidenceCurrentAsync(Guid caseId, CancellationToken cancellationToken = default);
     Task EnsureApEligibilityAsync(Guid purchaseOrderId, CancellationToken cancellationToken = default);
 }
 

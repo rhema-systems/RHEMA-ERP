@@ -34,9 +34,7 @@ public static class ProcurementReceiptDocumentRules
     {
         (ProcurementReceiptDocumentStatus.Draft, ProcurementReceiptDocumentStatus.PendingSignatures) => true,
         (ProcurementReceiptDocumentStatus.Draft, ProcurementReceiptDocumentStatus.Issued) => true,
-        (ProcurementReceiptDocumentStatus.Draft, ProcurementReceiptDocumentStatus.Cancelled) => true,
         (ProcurementReceiptDocumentStatus.PendingSignatures, ProcurementReceiptDocumentStatus.Issued) => true,
-        (ProcurementReceiptDocumentStatus.PendingSignatures, ProcurementReceiptDocumentStatus.Cancelled) => true,
         (ProcurementReceiptDocumentStatus.Issued, ProcurementReceiptDocumentStatus.Cancelled) => true,
         _ => false
     };
