@@ -656,6 +656,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var poAllocations = allocations
                     .Where(item => poInvoiceIds.Contains(item.VendorInvoiceId))
                     .ToList();
+                var effectivePoAllocations = GetEffectiveAllocationsAsOf(poAllocations);
                 var poPaymentIds = poAllocations.Select(item => item.VendorPaymentId).ToHashSet();
                 var poAllocationIds = poAllocations.Select(item => item.Id).ToHashSet();
                 var poPostings = postingEvents
@@ -747,8 +748,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     }
                 }
                 var acceptedReceiptAmount = RoundMoney(acceptedReceiptValue);
-                var settledAmount = RoundMoney(poAllocations
-                    .Where(item => !item.IsReversal && IsAllocationPostedAsOf(item, poPostings))
+                var settledAmount = RoundMoney(effectivePoAllocations
+                    .Where(item => IsAllocationPostedAsOf(item, poPostings))
                     .Sum(item => item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount));
                 var invoicePostedAmount = RoundMoney(poPostings
                     .Where(item =>
@@ -757,8 +758,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                         activeInvoiceIds.Contains(item.SourceDocumentId) &&
                         GetActivePostingAsOf(poPostings, "VendorInvoice", item.SourceDocumentId)?.Id == item.Id)
                     .Sum(item => GetTransactionDebit(item, currency)));
-                var activePoAllocations = poAllocations
-                    .Where(item => !item.IsReversal && IsAllocationPostedAsOf(item, poPostings))
+                var activePoAllocations = effectivePoAllocations
+                    .Where(item => IsAllocationPostedAsOf(item, poPostings))
                     .ToList();
                 var paymentPostedAmount = RoundMoney(activePoAllocations
                     .GroupBy(item => item.VendorPaymentId)
@@ -1304,6 +1305,20 @@ namespace ErpSystem.Api.Services.Finance.AP
                 postingEvents,
                 "VendorPayment",
                 allocation.VendorPaymentId) != null;
+        }
+
+        private static List<VendorPaymentAllocation> GetEffectiveAllocationsAsOf(
+            IEnumerable<VendorPaymentAllocation> allocations)
+        {
+            var allocationHistory = allocations.ToList();
+            var reversedOriginalIds = allocationHistory
+                .Where(item => item.IsReversal && item.OriginalAllocationId.HasValue)
+                .Select(item => item.OriginalAllocationId!.Value)
+                .ToHashSet();
+
+            return allocationHistory
+                .Where(item => !item.IsReversal && !reversedOriginalIds.Contains(item.Id))
+                .ToList();
         }
 
         private static decimal ResolveContractValueAsOf(

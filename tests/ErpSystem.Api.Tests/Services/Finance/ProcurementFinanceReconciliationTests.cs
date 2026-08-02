@@ -689,6 +689,53 @@ public sealed class ProcurementFinanceReconciliationTests
             item.Code == "COMMITMENT_ORDER_VARIANCE");
     }
 
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldExcludeReversedAllocationOriginalAtCutoff()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        var original = fixture.Payment.Allocations.Single();
+        fixture.Payment.Allocations.Add(new VendorPaymentAllocation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            VendorPaymentId = fixture.Payment.Id,
+            VendorInvoiceId = original.VendorInvoiceId,
+            AllocatedAmount = -original.AllocatedAmount,
+            DiscountAmount = -original.DiscountAmount,
+            WithholdingTaxAmount = -original.WithholdingTaxAmount,
+            AllocationDate = new DateTime(2026, 7, 5),
+            IsReversal = true,
+            OriginalAllocationId = original.Id,
+            CreatedAt = new DateTime(2026, 7, 5),
+            CreatedBy = "seed"
+        });
+        fixture.Payment.Allocations.Add(new VendorPaymentAllocation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            VendorPaymentId = fixture.Payment.Id,
+            VendorInvoiceId = original.VendorInvoiceId,
+            AllocatedAmount = original.AllocatedAmount,
+            DiscountAmount = original.DiscountAmount,
+            WithholdingTaxAmount = original.WithholdingTaxAmount,
+            AllocationDate = new DateTime(2026, 7, 5),
+            CreatedAt = new DateTime(2026, 7, 5),
+            CreatedBy = "seed"
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        var row = report.Rows.Single();
+        row.SettledAmount.Should().Be(100m);
+        row.PaymentPostedAmount.Should().Be(100m);
+    }
+
     private static string Hash(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
             .ToLowerInvariant();

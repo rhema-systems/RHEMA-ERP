@@ -21,7 +21,10 @@ using Syncfusion.Licensing;
 // This is the controlled test/deployment database update entry point.
 if (args.Length > 0 && args[0] == "apply-migrations")
 {
-    var tempBuilder = CreateSeedBuilder(args);
+    // Migration-only deployments must keep ASP.NET Core's Production default
+    // when ASPNETCORE_ENVIRONMENT is absent. Development is a convenience for
+    // explicit seed commands only and could select the wrong database here.
+    var tempBuilder = WebApplication.CreateBuilder(args);
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
     var tempApp = tempBuilder.Build();

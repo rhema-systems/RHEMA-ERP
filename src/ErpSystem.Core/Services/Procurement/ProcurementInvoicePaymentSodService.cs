@@ -63,7 +63,7 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
         var payment = await _unitOfWork.Repository<VendorPayment>()
             .GetQueryable(item => item.TenantId == TenantId && item.Id == paymentId && !item.IsDeleted)
             .Include(item => item.PaymentBatch)
-            .Include(item => item.Allocations.Where(allocation => !allocation.IsDeleted && !allocation.IsReversal))
+            .Include(item => item.Allocations.Where(allocation => !allocation.IsDeleted))
                 .ThenInclude(allocation => allocation.VendorInvoice)
             .AsNoTracking()
             .SingleOrDefaultAsync(cancellationToken)
@@ -78,7 +78,9 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
             payment.PaymentBatch?.BatchNumber ?? payment.PaymentNumber,
             payment.AuthorizedById,
             payment.InvoicePaymentSodControlEventId,
-            payment.Allocations.Select(item => item.VendorInvoice).ToList(),
+            GetEffectiveAllocations(payment.Allocations)
+                .Select(item => item.VendorInvoice)
+                .ToList(),
             cancellationToken);
     }
 
@@ -116,7 +118,7 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
         EnsureTenantAndActor();
         var payment = await _unitOfWork.Repository<VendorPayment>()
             .GetQueryable(item => item.TenantId == TenantId && item.Id == paymentId && !item.IsDeleted)
-            .Include(item => item.Allocations.Where(allocation => !allocation.IsDeleted && !allocation.IsReversal))
+            .Include(item => item.Allocations.Where(allocation => !allocation.IsDeleted))
                 .ThenInclude(allocation => allocation.VendorInvoice)
             .AsNoTracking()
             .SingleOrDefaultAsync(cancellationToken)
@@ -127,7 +129,9 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
             ProcurementInvoicePaymentSodRules.PaymentSourceType,
             payment.Id,
             payment.PaymentNumber,
-            payment.Allocations.Select(item => item.VendorInvoice).ToList(),
+            GetEffectiveAllocations(payment.Allocations)
+                .Select(item => item.VendorInvoice)
+                .ToList(),
             correlationId,
             enforce,
             cancellationToken);
@@ -371,6 +375,22 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
             EvaluatedAtUtc = DateTime.UtcNow,
             DecisionKeys = ProcurementInvoicePaymentSodRules.DecisionKeys
         });
+
+    private static List<VendorPaymentAllocation> GetEffectiveAllocations(
+        IEnumerable<VendorPaymentAllocation> allocations)
+    {
+        var allocationHistory = allocations
+            .Where(item => !item.IsDeleted)
+            .ToList();
+        var reversedOriginalIds = allocationHistory
+            .Where(item => item.IsReversal && item.OriginalAllocationId.HasValue)
+            .Select(item => item.OriginalAllocationId!.Value)
+            .ToHashSet();
+
+        return allocationHistory
+            .Where(item => !item.IsReversal && !reversedOriginalIds.Contains(item.Id))
+            .ToList();
+    }
 
     private Guid TenantId => _currentUser.TenantId ??
         throw new InvalidOperationException("An authenticated tenant is required for payment SOD evaluation.");

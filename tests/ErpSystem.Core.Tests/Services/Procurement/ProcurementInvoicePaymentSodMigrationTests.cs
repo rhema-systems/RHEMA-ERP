@@ -57,6 +57,23 @@ public sealed class ProcurementInvoicePaymentSodMigrationTests
         sql.Should().Contain("THROW 51642");
     }
 
+    [Fact]
+    public void ForwardMigrationExcludesReversedOriginalsFromPaymentSodTrigger()
+    {
+        var migration = new TDC0506EffectivePaymentAllocations();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+        var sql = string.Join(Environment.NewLine,
+            builder.Operations.OfType<SqlOperation>().Select(item => item.Sql));
+
+        sql.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_VendorPayment_TDC0506InvoiceProcessorSod]");
+        sql.Should().Contain("reversal.OriginalAllocationId = allocation.Id");
+        sql.Should().Contain("reversal.IsReversal = 1");
+        sql.Should().Contain("priorPayment.JournalEntryId IS NOT NULL");
+        sql.Should().Contain("THROW 51642");
+    }
+
     private static IReadOnlyList<MigrationOperation> Operations()
     {
         var migration = new TDC0506InvoiceProcessorPaymentSod();

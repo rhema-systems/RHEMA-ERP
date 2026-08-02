@@ -1282,7 +1282,37 @@ namespace ErpSystem.Api.Services.Finance.AP
             var skip = (int)Math.Min(
                 (long)(boundedPageNumber - 1) * boundedPageSize,
                 int.MaxValue);
-            var invoices = await _unitOfWork.Repository<VendorInvoice>()
+            var liveAllocations = _unitOfWork.Repository<VendorPaymentAllocation>()
+                .GetQueryable(allocation =>
+                    allocation.TenantId == TenantId &&
+                    !allocation.IsDeleted &&
+                    !allocation.VendorPayment.IsDeleted &&
+                    !allocation.VendorPayment.JournalEntryId.HasValue &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Failed);
+            var reservingBatchStatuses = new[]
+            {
+                PaymentBatchStatus.Draft,
+                PaymentBatchStatus.PendingApproval,
+                PaymentBatchStatus.Approved,
+                PaymentBatchStatus.Processing
+            };
+            var batchSelections = _unitOfWork.Repository<PaymentBatchInvoice>()
+                .GetQueryable(selection =>
+                    selection.TenantId == TenantId &&
+                    !selection.IsDeleted &&
+                    !selection.PaymentBatch.IsDeleted &&
+                    reservingBatchStatuses.Contains(selection.PaymentBatch.Status) &&
+                    !selection.VendorPayment.IsDeleted &&
+                    !selection.VendorPayment.JournalEntryId.HasValue &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Failed &&
+                    !selection.VendorPayment.Allocations.Any(allocation =>
+                        allocation.TenantId == TenantId &&
+                        allocation.VendorInvoiceId == selection.VendorInvoiceId &&
+                        !allocation.IsDeleted &&
+                        !allocation.IsReversal));
+            var invoicePage = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
                     i.SupplierId == resolvedSupplierId.Value &&
@@ -1290,23 +1320,32 @@ namespace ErpSystem.Api.Services.Finance.AP
                      i.Status == VendorInvoiceStatus.PartiallyPaid ||
                      i.Status == VendorInvoiceStatus.Overdue) &&
                     (i.TotalAmount - i.PaidAmount) > 0)
-                .OrderBy(i => i.DueDate)
-                .ThenBy(i => i.Id)
+                .Select(invoice => new
+                {
+                    Invoice = invoice,
+                    UnreservedBalance = invoice.TotalAmount - invoice.PaidAmount -
+                        (liveAllocations
+                            .Where(allocation => allocation.VendorInvoiceId == invoice.Id)
+                            .Sum(allocation => (decimal?)(allocation.AllocatedAmount +
+                                                         allocation.DiscountAmount +
+                                                         allocation.WithholdingTaxAmount)) ?? 0m) -
+                        (batchSelections
+                            .Where(selection => selection.VendorInvoiceId == invoice.Id)
+                            .Sum(selection => (decimal?)selection.Amount) ?? 0m)
+                })
+                .Where(item => item.UnreservedBalance > 0m)
+                .OrderBy(item => item.Invoice.DueDate)
+                .ThenBy(item => item.Invoice.Id)
                 .Skip(skip)
                 .Take(boundedPageSize)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
-            var unreservedBalances = await GetInvoiceUnreservedBalancesAsync(
-                invoices,
-                currentPaymentId: null,
-                cancellationToken);
 
             var result = new List<OutstandingVendorInvoiceDto>();
-            foreach (var i in invoices)
+            foreach (var row in invoicePage)
             {
-                var unreservedBalance = unreservedBalances.GetValueOrDefault(i.Id);
-                if (unreservedBalance <= 0m)
-                    continue;
+                var i = row.Invoice;
+                var unreservedBalance = RoundMoney(row.UnreservedBalance);
 
                 var discountAvailable = i.EarlyPaymentDiscountPercentage > 0
                     && i.EarlyPaymentDiscountDueDate.HasValue

@@ -63,6 +63,23 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
         fixture.Events.Should().ContainSingle(item => item.Result == ProcurementControlEventResult.Denied);
     }
 
+    [Fact]
+    public async Task ReversedOriginalInvoiceProcessorDoesNotParticipateInPaymentSod()
+    {
+        await using var fixture = await Fixture.CreateAsync(
+            sameActor: true,
+            reversedOriginalWithIndependentReplacement: true);
+
+        var readiness = await fixture.Service.EnforcePaymentApprovalAsync(
+            fixture.PaymentId, "tdc0506-reversed-original");
+
+        readiness.CanApprove.Should().BeTrue();
+        readiness.Invoices.Should().ContainSingle();
+        readiness.Invoices.Single().ConflictsWithCurrentActor.Should().BeFalse();
+        fixture.EnforcedRequests.Should().ContainSingle(item =>
+            !item.ProhibitedActorUserIds.Contains(readiness.CurrentActorUserId));
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly ApplicationDbContext _context;
@@ -92,7 +109,10 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
         public List<ProcurementSodGuardRequest> EnforcedRequests { get; }
         public List<ProcurementControlEventWriteRequest> Events { get; }
 
-        public static async Task<Fixture> CreateAsync(bool sameActor, bool processorMissing = false)
+        public static async Task<Fixture> CreateAsync(
+            bool sameActor,
+            bool processorMissing = false,
+            bool reversedOriginalWithIndependentReplacement = false)
         {
             var tenantId = Guid.NewGuid();
             var actorId = Guid.NewGuid();
@@ -106,7 +126,7 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
             var context = new ApplicationDbContext(options);
             var unitOfWork = new UnitOfWork(context);
 
-            context.VendorInvoices.Add(new VendorInvoice
+            var originalInvoice = new VendorInvoice
             {
                 Id = invoiceId,
                 TenantId = tenantId,
@@ -119,7 +139,8 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
                 Status = VendorInvoiceStatus.Approved,
                 SubmittedById = processorId,
                 SubmittedDate = processorId.HasValue ? DateTime.UtcNow : null
-            });
+            };
+            context.VendorInvoices.Add(originalInvoice);
             context.Set<VendorPayment>().Add(new VendorPayment
             {
                 Id = paymentId,
@@ -130,7 +151,7 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
                 CurrencyCode = "GHS",
                 Status = VendorPaymentStatus.PendingAuthorization
             });
-            context.Set<VendorPaymentAllocation>().Add(new VendorPaymentAllocation
+            var originalAllocation = new VendorPaymentAllocation
             {
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
@@ -138,7 +159,47 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
                 VendorInvoiceId = invoiceId,
                 AllocatedAmount = 100m,
                 AllocationDate = DateTime.UtcNow
-            });
+            };
+            context.Set<VendorPaymentAllocation>().Add(originalAllocation);
+            if (reversedOriginalWithIndependentReplacement)
+            {
+                var replacementInvoice = new VendorInvoice
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    InvoiceNumber = "INV-0506-REPLACEMENT",
+                    SupplierId = Guid.NewGuid(),
+                    SupplierName = "TDC supplier",
+                    InvoiceDate = DateTime.UtcNow,
+                    TotalAmount = 100m,
+                    CurrencyCode = "GHS",
+                    Status = VendorInvoiceStatus.Approved,
+                    SubmittedById = Guid.NewGuid(),
+                    SubmittedDate = DateTime.UtcNow
+                };
+                context.VendorInvoices.Add(replacementInvoice);
+                context.Set<VendorPaymentAllocation>().AddRange(
+                    new VendorPaymentAllocation
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        VendorPaymentId = paymentId,
+                        VendorInvoiceId = invoiceId,
+                        AllocatedAmount = -100m,
+                        AllocationDate = DateTime.UtcNow.AddSeconds(1),
+                        IsReversal = true,
+                        OriginalAllocationId = originalAllocation.Id
+                    },
+                    new VendorPaymentAllocation
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        VendorPaymentId = paymentId,
+                        VendorInvoiceId = replacementInvoice.Id,
+                        AllocatedAmount = 100m,
+                        AllocationDate = DateTime.UtcNow.AddSeconds(2)
+                    });
+            }
             await context.SaveChangesAsync();
 
             var current = new Mock<ICurrentUserService>();

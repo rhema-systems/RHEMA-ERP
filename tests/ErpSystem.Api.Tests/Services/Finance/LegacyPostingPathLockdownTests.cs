@@ -20,6 +20,28 @@ public sealed class LegacyPostingPathLockdownTests
     }
 
     [Fact]
+    [Trait("Category", "Deployment")]
+    public void MigrationOnlyCommand_ShouldPreserveAspNetCoreProductionDefault()
+    {
+        var root = FindRepositoryRoot();
+        var program = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Program.cs"));
+        var migrationStart = program.IndexOf(
+            "if (args.Length > 0 && args[0] == \"apply-migrations\")",
+            StringComparison.Ordinal);
+        var seedStart = program.IndexOf(
+            "// Check for seed command",
+            migrationStart,
+            StringComparison.Ordinal);
+        migrationStart.Should().BeGreaterThanOrEqualTo(0);
+        seedStart.Should().BeGreaterThan(migrationStart);
+
+        var migrationCommand = program[migrationStart..seedStart];
+        migrationCommand.Should().Contain("WebApplication.CreateBuilder(args)");
+        migrationCommand.Should().NotContain("CreateSeedBuilder(args)");
+        migrationCommand.Should().NotContain("Environment.SetEnvironmentVariable");
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-LegacyPostingLockdown")]
     [Trait("Category", "Architecture")]
     public void NormalRuntime_ShouldNotDependOnLegacySubledgerPostingService()

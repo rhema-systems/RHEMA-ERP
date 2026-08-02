@@ -271,6 +271,105 @@ public sealed class VendorPaymentBatchCreationTests
             "AP_PAYMENT_BATCH_CURRENCY_MISMATCH");
     }
 
+    [Fact]
+    public async Task OutstandingInvoicePicker_FiltersReservationsBeforePagination()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var supplier = new Supplier
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SupplierCode = "SUP-PAGED",
+            Name = "Paged supplier",
+            SupplierType = "Vendor",
+            Status = "Active",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "Tests"
+        };
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "Picker tenant",
+            Code = "PICK",
+            Status = TenantStatus.Active,
+            BaseCurrency = "GHS"
+        });
+        db.Suppliers.Add(supplier);
+
+        for (var index = 0; index < 50; index++)
+        {
+            var invoice = NewOpeningBalanceInvoice(
+                tenantId, supplier, userId, $"RESERVED-{index:00}", "GHS", 10m);
+            invoice.DueDate = DateTime.UtcNow.Date;
+            var payment = new VendorPayment
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                PaymentNumber = $"VP-RESERVED-{index:00}",
+                SupplierId = supplier.Id,
+                PaymentDate = DateTime.UtcNow.Date,
+                TotalAmount = 10m,
+                CurrencyCode = "GHS",
+                Status = VendorPaymentStatus.Draft,
+                CreatedBy = "Tests"
+            };
+            payment.Allocations.Add(new VendorPaymentAllocation
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                VendorPaymentId = payment.Id,
+                VendorInvoiceId = invoice.Id,
+                AllocatedAmount = 10m,
+                AllocationDate = DateTime.UtcNow,
+                CreatedBy = "Tests"
+            });
+            db.VendorInvoices.Add(invoice);
+            db.Set<VendorPayment>().Add(payment);
+        }
+
+        var selectable = NewOpeningBalanceInvoice(
+            tenantId, supplier, userId, "SELECTABLE-51", "GHS", 25m);
+        selectable.DueDate = DateTime.UtcNow.Date.AddDays(1);
+        db.VendorInvoices.Add(selectable);
+        await db.SaveChangesAsync();
+
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(item => item.TenantId).Returns(tenantId);
+        currentUser.SetupGet(item => item.UserId).Returns(userId.ToString());
+        currentUser.SetupGet(item => item.UserName).Returns("ap.officer");
+        currentUser.SetupGet(item => item.IsAuthenticated).Returns(true);
+        currentUser.SetupGet(item => item.Roles).Returns(new[] { "Accounts Officer" });
+        currentUser.SetupGet(item => item.Claims).Returns(new Dictionary<string, string>());
+        var invoiceService = new Mock<IVendorInvoiceService>();
+        invoiceService.Setup(item => item.GetThreeWayMatchReadinessAsync(
+                It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid invoiceId, CancellationToken _) => new InvoiceMatchingResultDto
+            {
+                VendorInvoiceId = invoiceId,
+                IsRequired = false,
+                IsMatched = true,
+                ApprovalReady = true,
+                SnapshotHash = "OPENING-BALANCE",
+                Message = "Three-way matching is not required."
+            });
+        var service = new VendorPaymentService(
+            new UnitOfWork(db),
+            currentUser.Object,
+            Mock.Of<ITenantSettingsService>(),
+            Mock.Of<ILogger<VendorPaymentService>>(),
+            Mock.Of<IDocumentNumberingService>(),
+            Mock.Of<IWorkflowService>(),
+            vendorInvoiceService: invoiceService.Object);
+
+        var result = await service.GetOutstandingInvoicesAsync(supplier.Id);
+
+        result.Should().ContainSingle(item => item.InvoiceId == selectable.Id);
+        result.Single().BalanceAmount.Should().Be(25m);
+    }
+
     private static VendorInvoice NewOpeningBalanceInvoice(
         Guid tenantId,
         Supplier supplier,
