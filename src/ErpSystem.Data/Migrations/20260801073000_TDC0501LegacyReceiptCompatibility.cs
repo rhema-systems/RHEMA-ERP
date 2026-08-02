@@ -287,6 +287,58 @@ public sealed class TDC0501LegacyReceiptCompatibility : Migration
           AND JSON_VALUE(receipt.ReceiptSourceSnapshotJson, '$.sourceType') =
               N'HistoricalMigration';
 
+        ;WITH legacyLineCandidates AS
+        (
+            SELECT grnLine.Id,
+                   MIN(poLine.Id) AS PurchaseOrderItemId,
+                   COUNT_BIG(*) AS CandidateCount
+            FROM GoodsReceiptNoteItems grnLine
+            INNER JOIN GoodsReceiptNotes grn
+                ON grn.Id = grnLine.GoodsReceiptNoteId
+               AND grn.TenantId = grnLine.TenantId
+               AND grn.IsDeleted = 0
+            INNER JOIN PurchaseOrderItems poLine
+                ON poLine.PurchaseOrderId = grn.PurchaseOrderId
+               AND poLine.InventoryItemId = grnLine.InventoryItemId
+               AND poLine.TenantId = grnLine.TenantId
+               AND poLine.IsDeleted = 0
+            WHERE grnLine.IsDeleted = 0
+              AND grnLine.PurchaseOrderItemId IS NULL
+              AND JSON_VALUE(grn.ReceiptSourceSnapshotJson, '$.sourceType') =
+                  N'HistoricalMigration'
+            GROUP BY grnLine.Id
+        )
+        UPDATE grnLine
+        SET grnLine.PurchaseOrderItemId = candidate.PurchaseOrderItemId
+        FROM GoodsReceiptNoteItems grnLine
+        INNER JOIN legacyLineCandidates candidate
+            ON candidate.Id = grnLine.Id
+           AND candidate.CandidateCount = 1;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM GoodsReceiptNoteItems grnLine
+            INNER JOIN GoodsReceiptNotes grn
+                ON grn.Id = grnLine.GoodsReceiptNoteId
+               AND grn.TenantId = grnLine.TenantId
+               AND grn.IsDeleted = 0
+            WHERE grnLine.IsDeleted = 0
+              AND JSON_VALUE(grn.ReceiptSourceSnapshotJson, '$.sourceType') =
+                  N'HistoricalMigration'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM PurchaseOrderItems poLine
+                  WHERE poLine.Id = grnLine.PurchaseOrderItemId
+                    AND poLine.PurchaseOrderId = grn.PurchaseOrderId
+                    AND poLine.InventoryItemId = grnLine.InventoryItemId
+                    AND poLine.TenantId = grnLine.TenantId
+                    AND poLine.IsDeleted = 0
+              )
+        )
+            THROW 51637, 'TDC0501_LEGACY_GRN_LINE_UNRESOLVED: repair ambiguous or missing purchase-order line linkage before enabling governed receipt capacity.', 1;
+
         UPDATE grnLine
         SET grnLine.OrderedQuantity = poLine.OrderedQuantity,
             grnLine.PreviouslyReceiptedQuantitySnapshot =

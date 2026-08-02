@@ -249,6 +249,16 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
             cancellationToken)
             ?? throw Validation("AP_MATCH_EXCEPTION_OWNER_INVALID",
                 "The corrective-action owner is not an active user in the current tenant.");
+        var ownerCanComplete = await _db.UserRoles.AsNoTracking()
+            .Where(userRole => userRole.UserId == owner.Id)
+            .AnyAsync(userRole => userRole.Role.RolePermissions.Any(rolePermission =>
+                    rolePermission.Permission.Name.ToUpper() ==
+                    FinancePermissions.ManageApInvoices.ToUpper()),
+                cancellationToken);
+        if (!ownerCanComplete)
+            throw Validation(
+                "AP_MATCH_EXCEPTION_OWNER_PERMISSION_REQUIRED",
+                "The corrective-action owner must have permission to manage AP invoices so the assigned action can be completed.");
         var profile = await _configuration.GetEffectiveProfileAsync("TDC-PROCUREMENT", now, cancellationToken);
         if (profile == null || profile.Decisions.Count != 14 || profile.Decisions.Any(item => !item.IsComplete))
             throw Conflict("AP_MATCH_EXCEPTION_CONFIGURATION_MISSING",
@@ -507,6 +517,20 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
                 "Only the assigned corrective-action owner or a tenant administrator can complete it.");
         var completionEvidence = await ValidateEvidenceAsync(item.VendorInvoice, request.Evidence, cancellationToken);
         EnsureRequiredEvidence(completionEvidence, new[] { VendorInvoiceMatchExceptionRules.CorrectiveCompletionEvidenceKey });
+        var existingEvidenceKeys = item.Evidence
+            .Where(evidence => !evidence.IsDeleted)
+            .Select(evidence => evidence.RequirementKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var repeatedEvidenceKeys = completionEvidence
+            .Select(evidence => evidence.RequirementKey)
+            .Where(existingEvidenceKeys.Contains)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (repeatedEvidenceKeys.Length > 0)
+            throw Validation(
+                "AP_MATCH_EXCEPTION_EVIDENCE_ALREADY_ATTACHED",
+                $"Corrective-action evidence cannot reuse requirement keys already attached to the exception: {string.Join(", ", repeatedEvidenceKeys)}.");
         foreach (var evidence in completionEvidence) item.Evidence.Add(evidence);
         item.CorrectiveActionStatus = VendorInvoiceMatchCorrectiveActionStatus.Completed;
         item.CorrectiveActionCompletedAtUtc = now;

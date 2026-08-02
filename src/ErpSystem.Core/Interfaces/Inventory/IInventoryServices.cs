@@ -194,6 +194,12 @@ public interface IPhysicalCountService
 /// </summary>
 public interface IInventoryValuationService
 {
+    /// <summary>
+    /// Clears request-scoped valuation state before an execution-strategy attempt.
+    /// A retry must never reuse entities that were detached by a rolled-back attempt.
+    /// </summary>
+    void ResetProcessingAttempt();
+
     Task<InventoryValuationSummaryDto> GetItemValuationAsync(Guid inventoryItemId);
     Task<IEnumerable<InventoryCostLayerDto>> GetCostLayersAsync(Guid inventoryItemId, Guid? warehouseId = null);
     Task<decimal> GetInventoryValueAsync(Guid? warehouseId = null, Guid? categoryId = null);

@@ -550,15 +550,17 @@ public sealed class ProcurementReviewRegressionTests
     }
 
     [Fact]
-    public void Payments_reject_duplicate_invoice_allocations_and_resume_processing_batches()
+    public void Payments_reject_duplicate_invoice_allocations_and_serialize_processing_batches()
     {
         var source = ReadRepositoryFile(
             "src", "ErpSystem.Api", "Services", "Finance", "AP",
             "VendorPaymentService.cs");
 
         source.Should().Contain("AP_PAYMENT_DUPLICATE_INVOICE_ALLOCATION");
-        source.Should().Contain(
-            "PaymentBatchStatus.Approved or PaymentBatchStatus.Processing");
+        source.Should().Contain("ExecuteUpdateAsync");
+        source.Should().Contain("AP_PAYMENT_BATCH_ALREADY_PROCESSING");
+        source.Should().Contain("interruptedBefore");
+        source.Should().Contain("batch.ProcessedDate = DateTime.UtcNow");
         source.Should().Contain("IsDurablyPosted(item.VendorPayment)");
         source.Should().Contain("EnsureBatchResumeAllocationsMatch");
         source.Should().Contain("Checkpoint each item while the batch remains Processing");
@@ -568,6 +570,37 @@ public sealed class ProcurementReviewRegressionTests
         source.Should().Contain("batchSelectionReservation");
         source.Should().Contain("availableBalanceByInvoice");
         source.Should().Contain("AP_PAYMENT_BALANCE_RESERVED");
+    }
+
+    [Fact]
+    public void Inspection_retries_reset_source_and_valuation_attempt_state()
+    {
+        var inspection = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementReceiptInspectionService.cs");
+        var valuation = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Inventory",
+            "InventoryValuationService.cs");
+
+        inspection.Should().Contain("_sourceControl.ResetInventoryPostingAttempt();");
+        inspection.Should().Contain("_valuation.ResetProcessingAttempt();");
+        valuation.Should().Contain("public void ResetProcessingAttempt()");
+        valuation.Should().Contain("_balanceCache.Clear();");
+        valuation.Should().Contain("_movementNumberPrefix = null;");
+        valuation.Should().Contain("_movementNumberNext = 0;");
+    }
+
+    [Fact]
+    public void Match_exception_assignment_and_completion_fail_before_database_uniqueness_errors()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorInvoiceMatchExceptionService.cs");
+
+        source.Should().Contain("AP_MATCH_EXCEPTION_OWNER_PERMISSION_REQUIRED");
+        source.Should().Contain("FinancePermissions.ManageApInvoices");
+        source.Should().Contain("AP_MATCH_EXCEPTION_EVIDENCE_ALREADY_ATTACHED");
+        source.Should().Contain("existingEvidenceKeys.Contains");
     }
 
     [Fact]

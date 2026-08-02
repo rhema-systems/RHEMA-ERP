@@ -45,6 +45,13 @@ public class InventoryValuationService : IInventoryValuationService
 
     #region Public Interface Methods
 
+    public void ResetProcessingAttempt()
+    {
+        _balanceCache.Clear();
+        _movementNumberPrefix = null;
+        _movementNumberNext = 0;
+    }
+
     public async Task<InventoryValuationSummaryDto> GetItemValuationAsync(Guid inventoryItemId)
     {
         var item = await _unitOfWork.Repository<InventoryItem>()

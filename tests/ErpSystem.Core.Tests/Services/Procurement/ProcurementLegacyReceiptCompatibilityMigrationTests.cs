@@ -21,6 +21,10 @@ public sealed class ProcurementLegacyReceiptCompatibilityMigrationTests
         sql.Should().Contain("priorPurchase.Quantity + priorDirectGrn.Quantity");
         sql.Should().Contain("d.Id IS NOT NULL");
         sql.Should().Contain("legacyRow.Id IS NULL");
+        sql.Should().Contain("legacyLineCandidates");
+        sql.Should().Contain("candidate.CandidateCount = 1");
+        sql.Should().Contain("TDC0501_LEGACY_GRN_LINE_UNRESOLVED");
+        sql.Should().Contain("poLine.Id = grnLine.PurchaseOrderItemId");
         sql.Should().Contain("DISABLE TRIGGER");
         sql.Should().Contain("ENABLE TRIGGER");
     }

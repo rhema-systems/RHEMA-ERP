@@ -2158,6 +2158,45 @@ namespace ErpSystem.Api.Services.Finance.AP
                     ProcurementInvoicePaymentSodRules.EvidenceCode,
                     "The authoritative invoice/payment SOD service is not configured.");
 
+            var claimAt = DateTime.UtcNow;
+            var interruptedBefore = claimAt.AddMinutes(-30);
+            var processorId = CurrentUserId == Guid.Empty ? (Guid?)null : CurrentUserId;
+            var claimed = await _unitOfWork.Repository<PaymentBatch>()
+                .GetQueryable(batch =>
+                    batch.TenantId == TenantId &&
+                    batch.Id == batchId &&
+                    !batch.IsDeleted &&
+                    (batch.Status == PaymentBatchStatus.Approved ||
+                     (batch.Status == PaymentBatchStatus.Processing &&
+                      (!batch.ProcessedDate.HasValue || batch.ProcessedDate < interruptedBefore))))
+                .ExecuteUpdateAsync(updates => updates
+                        .SetProperty(batch => batch.Status, PaymentBatchStatus.Processing)
+                        .SetProperty(batch => batch.ProcessedById, processorId)
+                        .SetProperty(batch => batch.ProcessedDate, claimAt)
+                        .SetProperty(batch => batch.UpdatedAt, claimAt)
+                        .SetProperty(batch => batch.UpdatedBy, UserName),
+                    cancellationToken);
+
+            if (claimed == 0)
+            {
+                var currentState = await _unitOfWork.Repository<PaymentBatch>()
+                    .GetQueryable(batch =>
+                        batch.TenantId == TenantId &&
+                        batch.Id == batchId &&
+                        !batch.IsDeleted)
+                    .AsNoTracking()
+                    .Select(batch => (PaymentBatchStatus?)batch.Status)
+                    .SingleOrDefaultAsync(cancellationToken);
+                if (!currentState.HasValue)
+                    throw new KeyNotFoundException($"Payment batch with Id '{batchId}' not found.");
+                if (currentState == PaymentBatchStatus.Processing)
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_BATCH_ALREADY_PROCESSING",
+                        "This payment batch is already being processed. An interrupted claim can be resumed after its 30-minute lease expires.");
+                throw new InvalidOperationException(
+                    "Only approved or interrupted processing batches can be processed.");
+            }
+
             var batch = await _unitOfWork.Repository<PaymentBatch>()
                 .GetQueryable(b => b.TenantId == TenantId && b.Id == batchId && !b.IsDeleted)
                 .Include(b => b.Items.Where(item => !item.IsDeleted))
@@ -2170,11 +2209,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (batch == null)
-                throw new KeyNotFoundException($"Payment batch with Id '{batchId}' not found.");
-
-            if (batch.Status is not (PaymentBatchStatus.Approved or PaymentBatchStatus.Processing))
-                throw new InvalidOperationException(
-                    "Only approved or interrupted processing batches can be processed.");
+                throw new KeyNotFoundException($"Payment batch with Id '{batchId}' not found after its processing claim was acquired.");
 
             if (batch.Items.Count == 0 || batch.Items.Any(item => item.Invoices.Count == 0))
                 throw new VendorPaymentControlException(
@@ -2183,7 +2218,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             await _invoicePaymentSod.RevalidateBatchAuthorizationAsync(batchId, cancellationToken);
 
-            var now = DateTime.UtcNow;
+            var now = claimAt;
             var resumableItems = batch.Items
                 .Where(item => !IsDurablyPosted(item.VendorPayment))
                 .ToList();
@@ -2321,6 +2356,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 // Checkpoint each item while the batch remains Processing. A
                 // crash or cancellation can therefore resume without replaying
                 // a durable posting or its exact invoice allocations.
+                batch.ProcessedDate = DateTime.UtcNow;
+                batch.UpdatedAt = batch.ProcessedDate.Value;
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
 

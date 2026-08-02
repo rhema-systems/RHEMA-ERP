@@ -2141,14 +2141,17 @@ public sealed class ProcurementReceiptInspectionService :
         if (_unitOfWork.HasActiveTransaction)
         {
             _sourceControl.ResetInventoryPostingAttempt();
+            _valuation.ResetProcessingAttempt();
             await action();
             return;
         }
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
             // The execution strategy can invoke this delegate more than once. Quantities
-            // accumulated by a rolled-back attempt must never leak into its retry.
+            // and cached valuation entities accumulated by a rolled-back attempt must
+            // never leak into its retry.
             _sourceControl.ResetInventoryPostingAttempt();
+            _valuation.ResetProcessingAttempt();
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             try
             {
