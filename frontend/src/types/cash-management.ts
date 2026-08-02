@@ -11,8 +11,33 @@ export enum BankAccountType {
 export enum CashTransactionType {
     Receipt = 'Receipt',
     Payment = 'Payment',
-    Transfer = 'Transfer'
+    Transfer = 'Transfer',
+    Deposit = 'Deposit',
+    ReturnedCheque = 'ReturnedCheque'
 }
+
+export type LiquidityAccountType =
+    | 'Bank'
+    | 'UndepositedCash'
+    | 'ChequesAwaitingDeposit'
+    | 'MobileMoneyClearing'
+    | 'CardSettlementClearing'
+    | 'CashTill'
+    | 'OtherSettlementClearing';
+
+export type BankDepositStatus =
+    | 'Draft'
+    | 'Submitted'
+    | 'Approved'
+    | 'Posted'
+    | 'Returned'
+    | 'Rejected'
+    | 'Cancelled'
+    | 'Reversed';
+
+export type DepositPolicy = 'DepositIntact' | 'ControlledNetBanking';
+export type BankDepositAllocationType = 'Receipt' | 'Deduction';
+export type ReturnedChequeCaseStatus = BankDepositStatus;
 
 export enum ReconciliationStatus {
     Pending = 'Pending',
@@ -229,6 +254,165 @@ export interface CreateBankAccountDto {
     openingBalanceExchangeRate?: number;
     openingDate: string;
     notes?: string;
+}
+
+export interface LiquidityAccount {
+    id: string;
+    code: string;
+    name: string;
+    accountType: LiquidityAccountType;
+    currency: string;
+    glAccountId: string;
+    glAccountNumber: string;
+    glAccountName: string;
+    bankAccountId?: string;
+    bankAccountName?: string;
+    providerName?: string;
+    providerAccountReference?: string;
+    allowsNegativeBalance: boolean;
+    allowsManualAllocations: boolean;
+    isActive: boolean;
+    isSystemAccount: boolean;
+    notes?: string;
+    currentBalance: number;
+    availableToSettle: number;
+    openEntryCount: number;
+    rowVersion: string;
+}
+
+export interface LiquidityAccountEntry {
+    id: string;
+    liquidityAccountId: string;
+    liquidityAccountName: string;
+    entryNumber: string;
+    entryDate: string;
+    entryType: string;
+    direction: 'Increase' | 'Decrease';
+    amount: number;
+    allocatedAmount: number;
+    remainingAmount: number;
+    currency: string;
+    sourceDocumentType: string;
+    sourceDocumentId: string;
+    referenceNumber?: string;
+    counterpartyName?: string;
+    description?: string;
+    isReversed: boolean;
+    rowVersion: string;
+}
+
+export interface PostedLiquidityPaymentCandidate {
+    accountTransactionId: string;
+    journalEntryId: string;
+    journalEntryNumber: string;
+    transactionDate: string;
+    liquidityAccountId: string;
+    liquidityAccountName: string;
+    currency: string;
+    amount: number;
+    referenceNumber?: string;
+    description?: string;
+}
+
+export interface BankingAttachment {
+    id: string;
+    fileId: string;
+    fileName: string;
+    fileUrl: string;
+    contentType: string;
+    fileSize: number;
+    documentType: string;
+    isPrimaryEvidence: boolean;
+    uploadedAt: string;
+    uploadedBy?: string;
+}
+
+export interface BankDepositAllocation {
+    id: string;
+    liquidityAccountEntryId: string;
+    sourceDocumentType: string;
+    sourceDocumentId: string;
+    entryNumber: string;
+    entryDate: string;
+    liquidityAccountName: string;
+    entryType: string;
+    allocationType: BankDepositAllocationType;
+    amount: number;
+    referenceNumber?: string;
+    counterpartyName?: string;
+    description?: string;
+    notes?: string;
+}
+
+export interface BankDeposit {
+    id: string;
+    depositNumber: string;
+    bankAccountId: string;
+    bankAccountName: string;
+    depositDate: string;
+    depositReference: string;
+    currency: string;
+    status: BankDepositStatus;
+    policySnapshot: DepositPolicy;
+    totalReceipts: number;
+    totalDeductions: number;
+    netAmount: number;
+    notes?: string;
+    workflowInstanceId?: string;
+    submittedAt?: string;
+    approvedAt?: string;
+    postedAt?: string;
+    journalEntryId?: string;
+    cashTransactionId?: string;
+    rejectionReason?: string;
+    cancellationReason?: string;
+    allocations: BankDepositAllocation[];
+    attachments: BankingAttachment[];
+    rowVersion: string;
+}
+
+export interface BankingSetupStatus {
+    isConfigured: boolean;
+    requiresProvisioningWizard: boolean;
+    coaType: string;
+    baseCurrency: string;
+    depositPolicy: DepositPolicy;
+    requirePrimaryEvidence: boolean;
+    missingAccountTypes: LiquidityAccountType[];
+    accounts: LiquidityAccount[];
+}
+
+export interface ReturnedChequeCase {
+    id: string;
+    caseNumber: string;
+    customerPaymentId: string;
+    paymentNumber: string;
+    customerId: string;
+    customerName: string;
+    bankDepositBatchId?: string;
+    depositNumber?: string;
+    bankAccountId: string;
+    bankAccountName: string;
+    chequeNumber: string;
+    drawerBank?: string;
+    returnDate: string;
+    bankReference: string;
+    returnReason: string;
+    returnedAmount: number;
+    bankChargeAmount: number;
+    chargeTreatment: 'CustomerRecoverable' | 'BankChargeExpense' | 'Split';
+    customerRecoverableChargeAmount: number;
+    expenseChargeAmount: number;
+    status: ReturnedChequeCaseStatus;
+    workflowInstanceId?: string;
+    submittedAt?: string;
+    approvedAt?: string;
+    postedAt?: string;
+    journalEntryId?: string;
+    notes?: string;
+    rejectionReason?: string;
+    attachments: BankingAttachment[];
+    rowVersion: string;
 }
 
 export interface UpdateBankAccountDto {

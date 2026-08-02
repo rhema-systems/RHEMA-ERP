@@ -49,6 +49,7 @@ publish/
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+outputs/
 x64/
 x86/
 bld/

@@ -574,6 +574,8 @@ export default function SupplierEvidencePacksPage() {
               totalPages={Math.ceil(
                 packs.data.totalCount / (filters.pageSize ?? 25)
               )}
+              totalItems={packs.data.totalCount}
+              pageSize={filters.pageSize ?? 25}
               onPageChange={(page) =>
                 setFilters((current) => ({ ...current, page }))
               }

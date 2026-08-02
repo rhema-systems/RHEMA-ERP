@@ -13,14 +13,19 @@ public class BankReconciliationEngine
         List<BankStatementLine> statementLines)
     {
         var matches = new List<MatchResult>();
+        // Matching needs a shrinking candidate set to prevent one statement line from being
+        // selected twice. Keep that set private: the service still needs its original tracked
+        // rows after this method returns so it can mark each selected line as reconciled.
+        var availableStatementLines = statementLines.ToList();
 
         foreach (var transaction in transactions)
         {
-            var bestMatch = FindBestMatch(transaction, statementLines);
+            var bestMatch = FindBestMatch(transaction, availableStatementLines);
             if (bestMatch != null && bestMatch.Confidence >= 80) // 80% confidence threshold
             {
                 matches.Add(bestMatch);
-                statementLines.Remove(statementLines.First(l => l.Id == bestMatch.StatementLineId));
+                availableStatementLines.Remove(
+                    availableStatementLines.First(l => l.Id == bestMatch.StatementLineId));
             }
         }
 
@@ -126,7 +131,9 @@ public class BankReconciliationEngine
         return transaction.TransactionType switch
         {
             CashTransactionType.Receipt => line.CreditAmount > 0m && line.DebitAmount == 0m,
+            CashTransactionType.Deposit => line.CreditAmount > 0m && line.DebitAmount == 0m,
             CashTransactionType.Payment => line.DebitAmount > 0m && line.CreditAmount == 0m,
+            CashTransactionType.ReturnedCheque => line.DebitAmount > 0m && line.CreditAmount == 0m,
             CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-OUT", StringComparison.OrdinalIgnoreCase)
                 => line.DebitAmount > 0m && line.CreditAmount == 0m,
             CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-IN", StringComparison.OrdinalIgnoreCase)
@@ -140,7 +147,9 @@ public class BankReconciliationEngine
         return transaction.TransactionType switch
         {
             CashTransactionType.Receipt => line.CreditAmount,
+            CashTransactionType.Deposit => line.CreditAmount,
             CashTransactionType.Payment => line.DebitAmount,
+            CashTransactionType.ReturnedCheque => line.DebitAmount,
             CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-OUT", StringComparison.OrdinalIgnoreCase)
                 => line.DebitAmount,
             CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-IN", StringComparison.OrdinalIgnoreCase)

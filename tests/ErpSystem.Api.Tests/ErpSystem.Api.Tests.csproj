@@ -91,10 +91,15 @@
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
+    <Compile Include="Services\Finance\BudgetServiceHardeningTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
     <Compile Include="Services\Finance\FinanceAuditFoundationTests.cs" />
     <Compile Include="Services\Finance\JournalEntryLifecycleBatch5Tests.cs" />
+    <Compile Include="Services\Finance\JournalBatchServiceTests.cs" />
+    <Compile Include="Services\Finance\JournalBatchSqlServerReleaseGateTests.cs" />
+    <Compile Include="Services\Finance\JournalBatchSpreadsheetServiceTests.cs" />
+    <Compile Include="Services\Finance\FinancialStatementLayoutImportServiceTests.cs" />
     <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.cs" />
@@ -103,6 +108,7 @@
     <Compile Include="Services\Finance\CashBankTransactionPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\CashBankWorkflowApprovalHardeningTests.cs" />
     <Compile Include="Services\Finance\CashBankOperationalBalanceHardeningTests.cs" />
+    <Compile Include="Services\Finance\BankingSettlementReleaseGateTests.cs" />
     <Compile Include="Services\Finance\BankReconciliationPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\AccountingPeriodClosePostingDateTests.cs" />
     <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />
@@ -124,10 +130,13 @@
     <Compile Include="Services\Finance\FiscalYearCloseTests.cs" />
     <Compile Include="Services\Finance\FiscalYearDeletionGuardTests.cs" />
     <Compile Include="Services\Finance\FiscalPeriodModuleLockTests.cs" />
+    <Compile Include="Services\Finance\FinancialStatementLayoutServiceTests.cs" />
+    <Compile Include="Services\Finance\FinancialStatementLayoutExecutionServiceTests.cs" />
     <Compile Include="Services\Finance\RecurringJournalRecurrenceCalculatorTests.cs" />
     <Compile Include="Services\Finance\FinanceRouteContractTests.cs" />
     <Compile Include="Services\Finance\PaymentTermBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\ControlledOpeningBalancePostingTests.cs" />
+    <Compile Include="Services\Finance\AllocationRunBatchServiceTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDepreciationServiceTests.cs" />
     <Compile Include="Services\Finance\FixedAssetServiceImportTests.cs" />
     <Compile Include="Services\TenantSettingsServiceTests.cs" />

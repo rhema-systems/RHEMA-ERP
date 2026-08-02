@@ -12,10 +12,12 @@ import type {
     CreateBudgetReturnDto,
     UpdateBudgetReturnDto,
     SubmitBudgetReturnDto,
-    ApproveBudgetReturnDto,
-    RejectBudgetReturnDto,
     BulkSaveBudgetEntriesDto,
-    BudgetSummaryDto
+    BudgetSummaryDto,
+    BudgetAuditEvent,
+    AdoptBudgetScenarioDto,
+    ConsolidatedBudgetView,
+    BudgetScenarioComparison
 } from '@/types/budget';
 
 import { apiService } from '@/services/api.service';
@@ -41,20 +43,36 @@ class BudgetDataService {
         return apiService.get<BudgetScenario>(`/budget/scenarios/${id}`);
     }
 
+    async getScenariosForYear(fiscalYearId: string): Promise<BudgetScenario[]> {
+        return apiService.get<BudgetScenario[]>(`/budget/scenarios/year/${fiscalYearId}`);
+    }
+
     async createScenario(dto: CreateBudgetScenarioDto): Promise<BudgetScenario> {
         return apiService.post<BudgetScenario>('/budget/scenarios', dto);
     }
 
     async updateScenario(id: string, dto: UpdateBudgetScenarioDto): Promise<BudgetScenario> {
-        return apiService.put<BudgetScenario>(`/budget/scenarios/${id}`, dto);
+        return apiService.put<BudgetScenario>(`/budget/scenarios/${id}`, { ...dto, id });
     }
 
     async deleteScenario(id: string): Promise<void> {
         return apiService.delete(`/budget/scenarios/${id}`);
     }
 
-    async lockScenario(id: string): Promise<BudgetScenario> {
-        return apiService.post<BudgetScenario>(`/budget/scenarios/${id}/lock`, {});
+    async openScenario(id: string, rowVersion: string): Promise<BudgetScenario> {
+        return apiService.post<BudgetScenario>(`/budget/scenarios/${id}/open`, { rowVersion });
+    }
+
+    async submitScenario(id: string, rowVersion: string): Promise<BudgetScenario> {
+        return apiService.post<BudgetScenario>(`/budget/scenarios/${id}/submit`, { rowVersion });
+    }
+
+    async archiveScenario(id: string, rowVersion: string): Promise<BudgetScenario> {
+        return apiService.post<BudgetScenario>(`/budget/scenarios/${id}/archive`, { rowVersion });
+    }
+
+    async adoptScenario(id: string, dto: AdoptBudgetScenarioDto): Promise<BudgetScenario> {
+        return apiService.post<BudgetScenario>(`/budget/scenarios/${id}/adopt`, dto);
     }
 
     // ===== BUDGET RETURNS =====
@@ -83,12 +101,11 @@ class BudgetDataService {
         return apiService.post<BudgetReturn>(`/budget/returns/${dto.returnId}/submit`, dto);
     }
 
-    async approveReturn(dto: ApproveBudgetReturnDto): Promise<BudgetReturn> {
-        return apiService.post<BudgetReturn>(`/budget/returns/${dto.returnId}/approve`, dto);
-    }
-
-    async rejectReturn(dto: RejectBudgetReturnDto): Promise<BudgetReturn> {
-        return apiService.post<BudgetReturn>(`/budget/returns/${dto.returnId}/reject`, dto);
+    async recallReturn(returnId: string, rowVersion: string, reason?: string): Promise<BudgetReturn> {
+        return apiService.post<BudgetReturn>(`/budget/returns/${returnId}/recall`, {
+            rowVersion,
+            reason,
+        });
     }
 
     // ===== BUDGET ENTRIES =====
@@ -97,15 +114,50 @@ class BudgetDataService {
         return apiService.get<BudgetEntry[]>(`/budget/returns/${returnId}/entries`);
     }
 
-    async bulkSaveEntries(dto: BulkSaveBudgetEntriesDto): Promise<boolean> {
-        await apiService.post('/budget/entries/bulk-save', dto);
-        return true;
+    async bulkSaveEntries(dto: BulkSaveBudgetEntriesDto): Promise<BudgetReturn> {
+        return apiService.post<BudgetReturn>('/budget/entries/bulk-save', {
+            budgetReturnId: dto.returnId,
+            returnRowVersion: dto.returnRowVersion,
+            entries: dto.entries,
+        });
+    }
+
+    async getScenarioAuditHistory(id: string): Promise<BudgetAuditEvent[]> {
+        return apiService.get<BudgetAuditEvent[]>(`/budget/scenarios/${id}/audit-history`);
+    }
+
+    async getReturnAuditHistory(id: string): Promise<BudgetAuditEvent[]> {
+        return apiService.get<BudgetAuditEvent[]>(`/budget/returns/${id}/audit-history`);
     }
 
     // ===== ANALYTICS =====
 
     async getBudgetSummary(scenarioId: string): Promise<BudgetSummaryDto> {
         return apiService.get<BudgetSummaryDto>(`/budget/analytics/summary/${scenarioId}`);
+    }
+
+    async getConsolidatedView(
+        scenarioId: string,
+        approvedOnly: boolean
+    ): Promise<ConsolidatedBudgetView> {
+        return apiService.get<ConsolidatedBudgetView>(
+            `/budget/scenarios/${scenarioId}/consolidated?approvedOnly=${approvedOnly}`
+        );
+    }
+
+    async getActiveBudgetVsActual(fiscalYearId: string): Promise<ConsolidatedBudgetView> {
+        return apiService.get<ConsolidatedBudgetView>(
+            `/budget/analytics/budget-vs-actual/fiscal-year/${fiscalYearId}`
+        );
+    }
+
+    async compareScenarios(
+        baseScenarioId: string,
+        comparisonScenarioId: string
+    ): Promise<BudgetScenarioComparison> {
+        return apiService.get<BudgetScenarioComparison>(
+            `/budget/scenarios/${baseScenarioId}/compare/${comparisonScenarioId}`
+        );
     }
 }
 

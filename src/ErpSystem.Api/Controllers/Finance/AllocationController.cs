@@ -310,6 +310,149 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Retrieves controlled allocation run batches.
+        /// </summary>
+        [HttpGet("runs")]
+        public async Task<ActionResult<IReadOnlyList<AllocationRunBatchDto>>> GetRunBatches([FromQuery] string? status = null)
+        {
+            try
+            {
+                return Ok(await _allocationService.GetRunBatchesAsync(status));
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Retrieves one controlled allocation run batch with its approved preview lines.
+        /// </summary>
+        [HttpGet("runs/{id}")]
+        public async Task<ActionResult<AllocationRunBatchDto>> GetRunBatch(Guid id)
+        {
+            var batch = await _allocationService.GetRunBatchByIdAsync(id);
+            if (batch == null)
+                return NotFound(new { error = $"Allocation run batch with ID '{id}' not found" });
+
+            return Ok(batch);
+        }
+
+        /// <summary>
+        /// Calculates a draft allocation run batch for review and workflow approval.
+        /// </summary>
+        [HttpPost("rules/{id}/runs")]
+        public async Task<ActionResult<AllocationRunBatchDto>> CreateRunBatch(Guid id, [FromBody] CreateAllocationRunBatchDto dto)
+        {
+            try
+            {
+                if (id != dto.AllocationRuleId)
+                {
+                    dto = dto with { AllocationRuleId = id };
+                }
+
+                var batch = await _allocationService.CreateRunBatchAsync(dto);
+                return CreatedAtAction(nameof(GetRunBatch), new { id = batch.Id }, batch);
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Submits a draft allocation run batch into approval workflow.
+        /// </summary>
+        [HttpPost("runs/{id}/submit")]
+        public async Task<ActionResult<AllocationRunBatchDto>> SubmitRunBatch(Guid id, [FromBody] SubmitAllocationRunBatchDto? dto)
+        {
+            try
+            {
+                return Ok(await _allocationService.SubmitRunBatchAsync(id, dto?.Comment));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Approves the current workflow step for an allocation run batch.
+        /// </summary>
+        [HttpPost("runs/{id}/approve")]
+        public async Task<ActionResult<AllocationRunBatchDto>> ApproveRunBatch(Guid id, [FromBody] SubmitAllocationRunBatchDto? dto)
+        {
+            try
+            {
+                return Ok(await _allocationService.ApproveRunBatchAsync(id, dto?.Comment));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return StatusCode(403, new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Rejects the current workflow step for an allocation run batch.
+        /// </summary>
+        [HttpPost("runs/{id}/reject")]
+        public async Task<ActionResult<AllocationRunBatchDto>> RejectRunBatch(Guid id, [FromBody] RejectAllocationRunBatchDto dto)
+        {
+            try
+            {
+                return Ok(await _allocationService.RejectRunBatchAsync(id, dto.Reason));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return StatusCode(403, new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Posts an approved allocation run batch to GL using its approved snapshot lines.
+        /// </summary>
+        [HttpPost("runs/{id}/post")]
+        public async Task<ActionResult<AllocationRunBatchDto>> PostRunBatch(Guid id)
+        {
+            try
+            {
+                return Ok(await _allocationService.PostRunBatchAsync(id));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Permanently deletes an allocation rule from the system.
         /// </summary>
         /// <remarks>

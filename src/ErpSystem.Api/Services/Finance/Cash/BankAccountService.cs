@@ -145,6 +145,26 @@ public class BankAccountService : IBankAccountService
 
             _context.BankAccounts.Add(account);
             await _context.SaveChangesAsync();
+            if (account.GLAccountId.HasValue)
+            {
+                _context.LiquidityAccounts.Add(new LiquidityAccount
+                {
+                    TenantId = tenantId,
+                    Code = await BuildUniqueBankLiquidityCodeAsync(account, tenantId),
+                    Name = account.AccountName,
+                    AccountType = LiquidityAccountType.Bank,
+                    Currency = account.Currency,
+                    GLAccountId = account.GLAccountId.Value,
+                    BankAccountId = account.Id,
+                    IsActive = account.IsActive,
+                    IsSystemAccount = true,
+                    AllowsManualAllocations = false,
+                    Notes = "Bank subtype maintained automatically from the bank account master.",
+                    CreatedById = account.CreatedById,
+                    CreatedBy = account.CreatedBy
+                });
+                await _context.SaveChangesAsync();
+            }
 
             await dbTransaction.CommitAsync();
 
@@ -170,6 +190,38 @@ public class BankAccountService : IBankAccountService
         account.GLAccountId = dto.GLAccountId;
         account.IsActive = dto.IsActive;
         account.Notes = dto.Notes;
+
+        var liquidityAccount = await _context.LiquidityAccounts
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.BankAccountId == account.Id);
+        if (account.GLAccountId.HasValue)
+        {
+            if (liquidityAccount == null)
+            {
+                liquidityAccount = new LiquidityAccount
+                {
+                    TenantId = tenantId,
+                    Code = await BuildUniqueBankLiquidityCodeAsync(account, tenantId),
+                    AccountType = LiquidityAccountType.Bank,
+                    Currency = account.Currency,
+                    BankAccountId = account.Id,
+                    IsSystemAccount = true,
+                    AllowsManualAllocations = false,
+                    CreatedBy = _currentUserService.UserName
+                };
+                _context.LiquidityAccounts.Add(liquidityAccount);
+            }
+            liquidityAccount.Name = account.AccountName;
+            liquidityAccount.GLAccountId = account.GLAccountId.Value;
+            liquidityAccount.IsActive = account.IsActive;
+            liquidityAccount.UpdatedAt = DateTime.UtcNow;
+            liquidityAccount.UpdatedBy = _currentUserService.UserName;
+        }
+        else if (liquidityAccount != null)
+        {
+            liquidityAccount.IsActive = false;
+            liquidityAccount.UpdatedAt = DateTime.UtcNow;
+            liquidityAccount.UpdatedBy = _currentUserService.UserName;
+        }
 
         await _context.SaveChangesAsync();
 
@@ -273,6 +325,21 @@ public class BankAccountService : IBankAccountService
         }
 
         await _context.SaveChangesAsync();
+    }
+
+    private async Task<string> BuildUniqueBankLiquidityCodeAsync(BankAccount account, Guid tenantId)
+    {
+        var compact = new string(account.AccountNumber.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        var baseCode = $"BANK-{compact}";
+        if (baseCode.Length > 30)
+        {
+            baseCode = baseCode[..30];
+        }
+        if (!await _context.LiquidityAccounts.AnyAsync(item => item.TenantId == tenantId && item.Code == baseCode))
+        {
+            return baseCode;
+        }
+        return $"BANK-{account.Id.ToString("N")[..8]}".ToUpperInvariant();
     }
 
     private static string NormalizeCurrency(string? currency)

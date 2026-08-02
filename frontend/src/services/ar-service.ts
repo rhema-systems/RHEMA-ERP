@@ -58,7 +58,7 @@ export interface PaymentQuery {
 
 export type EstateArSource = 'facilities' | 'property-management';
 
-// Estate/Finance integration: Estate requests billing work, but Finance AR remains the owner of invoices and payments.
+// Estate requests billing work, while Finance AR remains the owner of invoices and payments.
 export interface EstateArResultNotificationRequest {
     actionType: string;
     financeArEntityId?: string | null;
@@ -248,7 +248,6 @@ class ArService {
     }
 
     public async notifyEstateArResult(source: EstateArSource, data: EstateArResultNotificationRequest): Promise<void> {
-        // Estate/Finance integration: post Finance AR outcomes back to the correct Estate workspace without duplicating AR logic.
         const basePath = source === 'facilities'
             ? '/estate/facilities/ar-billing/results'
             : '/estate/property-management/ar-billing/results';

@@ -24,7 +24,8 @@ import type {
     WhtCertificate,
     WhtCertificateQuery,
     GenerateWhtCertificateDto,
-    FinancePagedResult
+    FinancePagedResult,
+    TaxConfigurationVersion
 } from '@/types/tax';
 import { apiService } from '@/services/api.service';
 
@@ -96,6 +97,10 @@ class TaxDataService {
 
     async getTaxById(id: string): Promise<Tax> {
         return apiService.get<Tax>(`/finance/tax/taxes/${id}`);
+    }
+
+    async getTaxConfigurationVersions(id: string): Promise<TaxConfigurationVersion[]> {
+        return apiService.get<TaxConfigurationVersion[]>(`/finance/tax/taxes/${id}/versions`);
     }
 
     async createTax(dto: CreateTaxDto): Promise<Tax> {

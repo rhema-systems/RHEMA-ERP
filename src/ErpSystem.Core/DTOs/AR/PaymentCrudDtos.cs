@@ -16,7 +16,9 @@ public class PaymentCreateDto
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
     public Guid? BankAccountId { get; set; }
+    public Guid? LiquidityAccountId { get; set; }
     public string? CheckNumber { get; set; }
+    public string? ChequeDrawerBank { get; set; }
     public string? TransactionReference { get; set; }
     public Guid? WithholdingTaxId { get; set; }
     public Guid? WithholdingTaxAccountId { get; set; }
@@ -39,7 +41,9 @@ public class PaymentUpdateDto
     public string PaymentMethod { get; set; } = string.Empty;
     public Guid? PaymentMethodId { get; set; }
     public Guid? BankAccountId { get; set; }
+    public Guid? LiquidityAccountId { get; set; }
     public string? CheckNumber { get; set; }
+    public string? ChequeDrawerBank { get; set; }
     public string? TransactionReference { get; set; }
     public Guid? WithholdingTaxId { get; set; }
     public Guid? WithholdingTaxAccountId { get; set; }

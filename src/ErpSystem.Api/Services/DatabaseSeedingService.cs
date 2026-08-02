@@ -348,6 +348,29 @@ namespace ErpSystem.Web.Services
                             spec.Description,
                             FinanceApprovalStages);
                     }
+                    var chiefAccountantStage = new[]
+                    {
+                        new WorkflowApprovalStageSeed(
+                            "Chief Accountant Approval",
+                            new[] { "Chief Accountant" },
+                            "Maker-checker approval of deposit evidence, net banking, destination account, and returned-cheque accounting.")
+                    };
+                    await EnsureSequentialWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        "BankDepositBatch",
+                        "Bank Deposit",
+                        typeof(BankDepositBatch).FullName,
+                        "Bank Deposit Approval",
+                        "Every banking deposit requires Chief Accountant approval before the net bank movement is posted.",
+                        chiefAccountantStage);
+                    await EnsureSequentialWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        "ReturnedChequeCase",
+                        "Returned Cheque",
+                        typeof(ReturnedChequeCase).FullName,
+                        "Returned Cheque Approval",
+                        "Returned cheque cases require Chief Accountant approval before AR is reopened and the bank debit is posted.",
+                        chiefAccountantStage);
                 }
             }
             catch (Exception ex)
@@ -363,6 +386,8 @@ namespace ErpSystem.Web.Services
                 // General Ledger
                 new("JournalEntry", "Journal Entry", typeof(JournalEntry).FullName, "Journal Entry Approval",
                     "Sequential finance journal approval: Accounts Officer review -> Finance Manager approval -> Financial Controller final approval."),
+                new("JournalBatch", "Journal Batch", typeof(JournalBatch).FullName, "Journal Batch Approval",
+                    "Batch-level journal approval with per-entry decisions, control totals, partial posting, and batch reversal controls."),
 
                 // Accounts Payable
                 new("FinancePurchaseOrder", "Finance Purchase Order", typeof(FinancePurchaseOrder).FullName, "Finance Purchase Order Approval",
@@ -405,6 +430,8 @@ namespace ErpSystem.Web.Services
                     "Unit budget approval before use in unit-account budget variance reporting."),
                 new("AllocationRule", "Allocation", typeof(AllocationRule).FullName, "Allocation Rule Approval",
                     "Allocation rule approval before use in finance allocation runs."),
+                new("AllocationRunBatch", "Allocation Run Batch", typeof(AllocationRunBatch).FullName, "Allocation Run Batch Approval",
+                    "Controlled allocation run approval before posting generated allocation journals to GL."),
 
                 // Cash and bank
                 new("CashTransaction", "Bank Transaction", typeof(CashTransaction).FullName, "Bank Transaction Approval",
@@ -4281,6 +4308,13 @@ namespace ErpSystem.Web.Services
                     changed = true;
                 }
 
+                if (sequentialDefinition.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Published)
+                {
+                    sequentialDefinition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published;
+                    sequentialDefinition.PublishedAt ??= repairNow;
+                    changed = true;
+                }
+
                 if (sequentialDefinition.Description != description)
                 {
                     sequentialDefinition.Description = description;
@@ -4377,12 +4411,15 @@ namespace ErpSystem.Web.Services
             _context.WorkflowDefinitions.Add(new WorkflowDefinition
             {
                 Id = definitionId,
+                DefinitionKey = definitionId,
                 TenantId = tenantId,
                 Name = safeDefinitionName,
                 Description = description,
                 EntityTypeId = entityType.Id,
                 Version = version,
                 IsActive = true,
+                LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+                PublishedAt = now,
                 CreatedAt = now,
                 CreatedBy = "System"
             });
@@ -6137,6 +6174,9 @@ namespace ErpSystem.Web.Services
             await CreateTestUserAsync("financial.controller", "financial.controller@default.com", "Finance123!",
                 "Abena", "Dapaah", defaultTenant.Id, "Financial Controller", AuthenticationProvider.Local);
 
+            await CreateTestUserAsync("chief.accountant", "chief.accountant@default.com", "Finance123!",
+                "Nana", "Adu", defaultTenant.Id, "Chief Accountant", AuthenticationProvider.Local);
+
             await CreateTestUserAsync("budget.officer", "budget.officer@default.com", "Finance123!",
                 "Kojo", "Nkrumah", defaultTenant.Id, "Budget Officer", AuthenticationProvider.Local);
 
@@ -6428,6 +6468,7 @@ namespace ErpSystem.Web.Services
                 new { Name = "Senior Accountant", Description = "Review role for journals, AP/AR transactions, budgets, and period activities" },
                 new { Name = "Finance Manager", Description = "Finance approval role for journals, budgets, AP/AR, and reporting" },
                 new { Name = "Financial Controller", Description = "Senior finance control role for posting, period close, and finance administration" },
+                new { Name = "Chief Accountant", Description = "Maker-checker approval role for bank deposits, returned cheques, and treasury settlement controls" },
                 new { Name = "Budget Officer", Description = "Budget preparation role for scenario returns and worksheet coordination" },
                 new { Name = "HR User", Description = "User with access to HR module" },
                 new { Name = "Sales User", Description = "User with access to sales module" },
@@ -6880,6 +6921,13 @@ namespace ErpSystem.Web.Services
                 },
                 new
                 {
+                    Name = "Finance.BudgetReturns.Edit",
+                    DisplayName = "Edit Assigned Budget Returns",
+                    Description = "Edit assigned budget worksheets before submission",
+                    Category = "Finance - Budgeting"
+                },
+                new
+                {
                     Name = "Finance.BudgetReturns.Submit",
                     DisplayName = "Submit Budget Returns",
                     Description = "Submit assigned budget worksheets",
@@ -6977,7 +7025,8 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Read",
                     "Finance.JournalEntries.Create",
                     "Finance.JournalEntries.Edit",
-                    "Finance.JournalEntries.Write"
+                    "Finance.JournalEntries.Write",
+                    "Finance.JournalBatches.View"
                 },
                 ["Finance Clerk"] = new[]
                 {
@@ -6986,6 +7035,13 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalEntries.Create",
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write",
+                    "Finance.JournalBatches.View",
+                    "Finance.JournalBatches.Create",
+                    "Finance.JournalBatches.Edit",
+                    "Finance.JournalBatches.Delete",
+                    "Finance.JournalBatches.Import",
+                    "Finance.JournalBatches.Export",
+                    "Finance.JournalBatches.Copy",
                     "Finance.ChartOfAccounts.Manage",
                     "Finance.AP.Invoices.Create",
                     "Finance.AP.Invoices.Edit",
@@ -6998,6 +7054,7 @@ namespace ErpSystem.Web.Services
                     "Finance.AR.Payments.Receive",
                     "Finance.BankAccounts.Manage",
                     "Finance.CashBank.Transactions.Record",
+                    "Finance.Banking.Deposits.Create",
                     "Finance.Budgeting.Read"
                 },
                 ["Accounts Officer"] = new[]
@@ -7008,6 +7065,15 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write",
                     "Finance.JournalEntries.SubmitForApproval",
+                    "Finance.JournalBatches.View",
+                    "Finance.JournalBatches.Create",
+                    "Finance.JournalBatches.Edit",
+                    "Finance.JournalBatches.Delete",
+                    "Finance.JournalBatches.SubmitForApproval",
+                    "Finance.JournalBatches.Approve",
+                    "Finance.JournalBatches.Import",
+                    "Finance.JournalBatches.Export",
+                    "Finance.JournalBatches.Copy",
                     "Finance.AP.Invoices.Create",
                     "Finance.AP.Invoices.Edit",
                     "Finance.AP.Invoices.Write",
@@ -7020,6 +7086,9 @@ namespace ErpSystem.Web.Services
                     "Finance.AR.Invoices.Send",
                     "Finance.AR.Payments.Receive",
                     "Finance.CashBank.Transactions.Record",
+                    "Finance.Banking.Deposits.Create",
+                    "Finance.Banking.Deposits.Submit",
+                    "Finance.Banking.ReturnedCheques.Manage",
                     "Finance.Workflow.Submit",
                     // Accounts Officers are configured as first-stage finance workflow reviewers.
                     // The generic permission opens the endpoint; the workflow assignment check
@@ -7028,6 +7097,7 @@ namespace ErpSystem.Web.Services
                     "Finance.Workflow.Reject",
                     "Finance.Migration.OpeningBalances.Prepare",
                     "Finance.Budgeting.Read",
+                    "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Submit"
                 },
                 ["Accounts Payable Officer"] = new[]
@@ -7071,6 +7141,16 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write",
                     "Finance.JournalEntries.SubmitForApproval",
+                    "Finance.JournalBatches.View",
+                    "Finance.JournalBatches.Create",
+                    "Finance.JournalBatches.Edit",
+                    "Finance.JournalBatches.Delete",
+                    "Finance.JournalBatches.SubmitForApproval",
+                    "Finance.JournalBatches.Approve",
+                    "Finance.JournalBatches.Post",
+                    "Finance.JournalBatches.Import",
+                    "Finance.JournalBatches.Export",
+                    "Finance.JournalBatches.Copy",
                     "Finance.AP.Invoices.Create",
                     "Finance.AP.Invoices.Edit",
                     "Finance.AP.Invoices.Write",
@@ -7086,6 +7166,10 @@ namespace ErpSystem.Web.Services
                     "Finance.BankAccounts.Manage",
                     "Finance.CashBank.Transactions.Record",
                     "Finance.BankReconciliation.Perform",
+                    "Finance.Banking.LiquidityAccounts.Manage",
+                    "Finance.Banking.Deposits.Create",
+                    "Finance.Banking.Deposits.Submit",
+                    "Finance.Banking.ReturnedCheques.Manage",
                     "Finance.Reports.Run",
                     "Finance.Workflow.Submit",
                     // Senior Accountants share the first-stage reviewer assignment with
@@ -7096,6 +7180,7 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Read",
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
+                    "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Submit"
                 },
                 ["Finance Manager"] = new[]
@@ -7103,6 +7188,12 @@ namespace ErpSystem.Web.Services
                     "Finance.Read",
                     "Finance.Write",
                     "Finance.JournalEntries.Approve",
+                    "Finance.JournalBatches.View",
+                    "Finance.JournalBatches.Approve",
+                    "Finance.JournalBatches.Post",
+                    "Finance.JournalBatches.Reverse",
+                    "Finance.JournalBatches.Export",
+                    "Finance.JournalBatches.Copy",
                     "Finance.AP.Invoices.Approve",
                     "Finance.AP.Payments.Approve",
                     "Finance.AR.Invoices.ApprovePost",
@@ -7116,8 +7207,29 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Read",
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
+                    "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Approve",
                     "Finance.Budgeting.Lock"
+                },
+                ["Chief Accountant"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.Write",
+                    "Finance.BankAccounts.Manage",
+                    "Finance.BankReconciliation.Perform",
+                    "Finance.BankReconciliation.Approve",
+                    "Finance.Banking.LiquidityAccounts.Manage",
+                    "Finance.Banking.Deposits.Create",
+                    "Finance.Banking.Deposits.Submit",
+                    "Finance.Banking.Deposits.Approve",
+                    "Finance.Banking.Settings.Manage",
+                    "Finance.Banking.ReturnedCheques.Manage",
+                    "Finance.Workflow.Submit",
+                    "Finance.Workflow.Approve",
+                    "Finance.Workflow.Reject",
+                    "Finance.Workflow.RequestChanges",
+                    "Finance.Workflow.PostAfterApproval",
+                    "Finance.Reports.Run"
                 },
                 ["Financial Controller"] = FinancePermissions.AllNames,
                 ["Budget Officer"] = new[]
@@ -7126,6 +7238,7 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Read",
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
+                    "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Submit"
                 }
             };

@@ -81,7 +81,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal ExchangeRate { get; set; }
         public Guid? BankAccountId { get; set; }
         public string? BankAccountName { get; set; }
+        public Guid? LiquidityAccountId { get; set; }
+        public string? LiquidityAccountName { get; set; }
+        public Guid? LiquidityAccountEntryId { get; set; }
         public string? CheckNumber { get; set; }
+        public string? ChequeDrawerBank { get; set; }
         public string? TransactionReference { get; set; }
         public Guid? WithholdingTaxId { get; set; }
         public Guid? WithholdingTaxAccountId { get; set; }

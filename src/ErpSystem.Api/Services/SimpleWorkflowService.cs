@@ -904,6 +904,47 @@ public class SimpleWorkflowService : IWorkflowService
         };
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
 
+        if (IsEntityType(entityTypeRecord, "BankDepositBatch", "Bank Deposit"))
+        {
+            var deposit = await _unitOfWork.Repository<BankDepositBatch>()
+                .FirstOrDefaultAsync(
+                    item => item.TenantId == tenantId && item.Id == entityId,
+                    item => item.BankAccount)
+                ?? throw new InvalidOperationException("Bank deposit not found");
+            context["depositNumber"] = deposit.DepositNumber;
+            context["depositDate"] = deposit.DepositDate;
+            context["depositReference"] = deposit.DepositReference;
+            context["status"] = deposit.Status.ToString();
+            context["currency"] = deposit.Currency;
+            context["totalReceipts"] = deposit.TotalReceipts;
+            context["totalDeductions"] = deposit.TotalDeductions;
+            context["netAmount"] = deposit.NetAmount;
+            context["bankAccountId"] = deposit.BankAccountId;
+            context["bankAccountName"] = deposit.BankAccount?.AccountName ?? string.Empty;
+            context["submittedById"] = deposit.SubmittedById;
+        }
+
+        if (IsEntityType(entityTypeRecord, "ReturnedChequeCase", "Returned Cheque"))
+        {
+            var returnedCheque = await _unitOfWork.Repository<ReturnedChequeCase>()
+                .FirstOrDefaultAsync(
+                    item => item.TenantId == tenantId && item.Id == entityId,
+                    item => item.BankAccount,
+                    item => item.CustomerPayment)
+                ?? throw new InvalidOperationException("Returned cheque case not found");
+            context["caseNumber"] = returnedCheque.CaseNumber;
+            context["chequeNumber"] = returnedCheque.ChequeNumber;
+            context["returnDate"] = returnedCheque.ReturnDate;
+            context["status"] = returnedCheque.Status.ToString();
+            context["returnedAmount"] = returnedCheque.ReturnedAmount;
+            context["bankChargeAmount"] = returnedCheque.BankChargeAmount;
+            context["bankAccountId"] = returnedCheque.BankAccountId;
+            context["bankAccountName"] = returnedCheque.BankAccount?.AccountName ?? string.Empty;
+            context["customerPaymentId"] = returnedCheque.CustomerPaymentId;
+            context["paymentNumber"] = returnedCheque.CustomerPayment?.PaymentNumber ?? string.Empty;
+            context["submittedById"] = returnedCheque.SubmittedById;
+        }
+
         if (IsEntityType(entityTypeRecord, "ExchangeRate", "Exchange Rate"))
         {
             var rate = await _unitOfWork.Repository<ExchangeRate>()
@@ -963,6 +1004,21 @@ public class SimpleWorkflowService : IWorkflowService
             context["totalDebit"] = batch.TotalDebit;
             context["totalCredit"] = batch.TotalCredit;
             context["difference"] = batch.Difference;
+        }
+
+        if (IsEntityType(entityTypeRecord, "AllocationRunBatch", "Allocation Run Batch"))
+        {
+            var batch = await _unitOfWork.Repository<AllocationRunBatch>()
+                .FirstOrDefaultAsync(b => b.TenantId == tenantId && b.Id == entityId, b => b.FiscalPeriod)
+                ?? throw new InvalidOperationException("Allocation run batch not found");
+            context["status"] = batch.Status.ToString();
+            context["batchNumber"] = batch.BatchNumber;
+            context["allocationDate"] = batch.AllocationDate;
+            context["fiscalPeriodId"] = batch.FiscalPeriodId;
+            context["periodCode"] = batch.FiscalPeriod?.PeriodCode ?? string.Empty;
+            context["bookClassification"] = batch.BookClassification;
+            context["totalAllocated"] = batch.TotalAllocated;
+            context["sourcePeriodBalance"] = batch.SourcePeriodBalance;
         }
 
         if (IsEntityType(entityTypeRecord, "AssetValuation", "Asset Valuation"))
@@ -1601,6 +1657,27 @@ public class SimpleWorkflowService : IWorkflowService
                 {
                     item.EntityTitle = $"{closure.Project?.ProjectCode ?? "PRJ"} - Closure";
                     item.EntityDescription = closure.Project?.Title ?? string.Empty;
+                    return;
+                }
+            }
+            catch
+            {
+                // ignore and fall through
+            }
+        }
+
+        if (IsEntityType(entityTypeRecord, "AllocationRunBatch", "Allocation Run Batch"))
+        {
+            try
+            {
+                var batch = await _unitOfWork.Repository<AllocationRunBatch>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.AllocationRule);
+                if (batch != null)
+                {
+                    item.EntityTitle = batch.BatchNumber;
+                    item.EntityDescription = batch.AllocationRule == null
+                        ? batch.Description ?? string.Empty
+                        : $"{batch.AllocationRule.Code} - {batch.AllocationRule.Name}";
                     return;
                 }
             }

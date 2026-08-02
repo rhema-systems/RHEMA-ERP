@@ -47,6 +47,7 @@ const defaultFormData: CreateTaxDto = {
     thresholdAmount: null,
     taxPayableAccountId: null,
     taxReceivableAccountId: null,
+    effectiveFrom: new Date().toISOString().slice(0, 10),
 };
 
 function formatAccount(account?: Account) {
@@ -117,6 +118,7 @@ function TaxAccountPicker({ id, value, label, placeholder, accounts, disabled, o
 export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, onOpenChange, onSaved }: TaxFormDialogProps) {
     const [formData, setFormData] = useState<CreateTaxDto>(defaultFormData);
     const [isSaving, setIsSaving] = useState(false);
+    const [changeReason, setChangeReason] = useState('');
     const { toast } = useToast();
     const isEditing = Boolean(tax);
 
@@ -146,7 +148,9 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
                 thresholdAmount: tax.thresholdAmount ?? null,
                 taxPayableAccountId: tax.taxPayableAccountId ?? null,
                 taxReceivableAccountId: tax.taxReceivableAccountId ?? null,
+                effectiveFrom: tax.effectiveFrom?.slice(0, 10),
             });
+            setChangeReason('');
             return;
         }
 
@@ -169,6 +173,7 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
                     ...payload,
                     clearTaxPayableAccount: Boolean(tax.taxPayableAccountId && !formData.taxPayableAccountId),
                     clearTaxReceivableAccount: Boolean(tax.taxReceivableAccountId && !formData.taxReceivableAccountId),
+                    changeReason: changeReason.trim() || undefined,
                 } as UpdateTaxDto)
                 : await taxDataService.createTax(payload);
 
@@ -217,7 +222,31 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
                                 placeholder="Value Added Tax"
                             />
                         </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="tax-effective-from">Rate Effective Date *</Label>
+                            <Input
+                                id="tax-effective-from"
+                                type="date"
+                                value={formData.effectiveFrom?.slice(0, 10) || ''}
+                                onChange={(event) => setFormData({ ...formData, effectiveFrom: event.target.value })}
+                            />
+                        </div>
                     </div>
+
+                    {isEditing && (
+                        <div className="space-y-2">
+                            <Label htmlFor="tax-change-reason">Change Reason</Label>
+                            <Input
+                                id="tax-change-reason"
+                                value={changeReason}
+                                onChange={(event) => setChangeReason(event.target.value)}
+                                placeholder="Regulatory change, GL remapping, threshold revision…"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Saved with the immutable configuration version for audit.
+                            </p>
+                        </div>
+                    )}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">

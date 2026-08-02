@@ -7,6 +7,7 @@
 // ============================================
 
 export type UnitJournalEntryStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Posted' | 'Reversed';
+export type AllocationRunBatchStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Posted' | 'Cancelled';
 export type NumeratorDenominatorType = 'FinancialAccount' | 'UnitAccount' | 'Constant';
 export type RatioResultFormat = 'Decimal' | 'Percentage' | 'Currency';
 
@@ -34,8 +35,11 @@ export interface UnitAccount {
     description?: string;
     unitTypeId: string;
     unitType?: UnitType;
+    unitTypeCode?: string;
+    unitTypeName?: string;
     parentAccountId?: string;
     parentAccount?: UnitAccount;
+    parentAccountNumber?: string;
     accountLevel: number;
     isPostingAccount: boolean;
     isActive: boolean;
@@ -51,12 +55,14 @@ export interface UnitJournalEntry {
     id: string;
     entryNumber: string;
     entryDate: string;
-    fiscalYearId: string;
-    fiscalPeriodId: string;
+    fiscalYearId?: string;
+    fiscalPeriodId?: string;
+    fiscalPeriodName?: string;
     description?: string;
     status: UnitJournalEntryStatus;
     sourceDocument?: string;
-    lines: UnitJournalEntryLine[];
+    lineCount?: number;
+    lines?: UnitJournalEntryLine[];
     approvedAt?: string;
     approvedBy?: string;
     postedAt?: string;
@@ -70,10 +76,12 @@ export interface UnitJournalEntry {
 
 export interface UnitJournalEntryLine {
     id: string;
-    unitJournalEntryId: string;
+    unitJournalEntryId?: string;
     lineNumber: number;
     unitAccountId: string;
     unitAccount?: UnitAccount;
+    unitAccountNumber?: string;
+    unitAccountName?: string;
     quantity: number;
     description?: string;
 }
@@ -94,14 +102,23 @@ export interface RatioDefinition {
     code: string;
     name: string;
     description?: string;
+    ratioType?: string;
     numeratorType: NumeratorDenominatorType;
     numeratorAccountId?: string;
+    numeratorUnitAccountId?: string;
+    numeratorConstantValue?: number;
+    /** @deprecated Use numeratorConstantValue. */
     numeratorConstant?: number;
     denominatorType: NumeratorDenominatorType;
     denominatorAccountId?: string;
+    denominatorUnitAccountId?: string;
+    denominatorConstantValue?: number;
+    /** @deprecated Use denominatorConstantValue. */
     denominatorConstant?: number;
     resultFormat: RatioResultFormat;
-    decimalPlaces: number;
+    formatPrecision?: number;
+    /** @deprecated Use formatPrecision. */
+    decimalPlaces?: number;
     isActive: boolean;
     createdAt: string;
     createdBy: string;
@@ -161,6 +178,7 @@ export interface CreateUnitJournalEntryDto {
     entryDate: string;
     description?: string;
     sourceDocument?: string;
+    fiscalPeriodId?: string;
     lines: CreateUnitJournalEntryLineDto[];
 }
 
@@ -184,27 +202,28 @@ export interface CreateRatioDefinitionDto {
     code: string;
     name: string;
     description?: string;
+    ratioType?: string;
     numeratorType: NumeratorDenominatorType;
     numeratorAccountId?: string;
+    numeratorUnitAccountId?: string;
+    numeratorConstantValue?: number;
+    /** @deprecated Use numeratorConstantValue. */
     numeratorConstant?: number;
     denominatorType: NumeratorDenominatorType;
     denominatorAccountId?: string;
+    denominatorUnitAccountId?: string;
+    denominatorConstantValue?: number;
+    /** @deprecated Use denominatorConstantValue. */
     denominatorConstant?: number;
     resultFormat: RatioResultFormat;
-    decimalPlaces: number;
+    formatPrecision?: number;
+    /** @deprecated Use formatPrecision. */
+    decimalPlaces?: number;
 }
 
 export interface UpdateRatioDefinitionDto {
     name?: string;
     description?: string;
-    numeratorType?: NumeratorDenominatorType;
-    numeratorAccountId?: string;
-    numeratorConstant?: number;
-    denominatorType?: NumeratorDenominatorType;
-    denominatorAccountId?: string;
-    denominatorConstant?: number;
-    resultFormat?: RatioResultFormat;
-    decimalPlaces?: number;
 }
 
 export interface RatioCalculationRequest {
@@ -218,12 +237,19 @@ export interface RatioCalculationResult {
     ratioId: string;
     ratioCode: string;
     ratioName: string;
+    fiscalPeriodId?: string;
+    periodName?: string;
+    numerator?: number;
+    denominator?: number;
+    /** @deprecated Use numerator. */
     numeratorValue: number;
+    /** @deprecated Use denominator. */
     denominatorValue: number;
-    result: number | null;
+    result: number;
+    formattedResult?: string;
+    /** @deprecated Use formattedResult. */
     resultFormatted: string;
     calculatedAt: string;
-    periodName?: string;
 }
 
 export interface RatioTrendResult {
@@ -313,7 +339,7 @@ export interface AllocationRule {
 
 export interface AllocationTarget {
     id: string;
-    allocationRuleId: string;
+    allocationRuleId?: string;
     targetAccountId: string;
     targetAccountNumber?: string;
     targetAccountName?: string;
@@ -330,6 +356,17 @@ export interface CreateAllocationRuleDto {
     sourceAccountId: string;
     allocationType: AllocationType;
     driverUnitAccountId?: string;
+    autoReverse: boolean;
+    targets: CreateAllocationTargetDto[];
+}
+
+export interface UpdateAllocationRuleDto {
+    name: string;
+    description?: string;
+    sourceAccountId: string;
+    allocationType: AllocationType;
+    driverUnitAccountId?: string;
+    isActive: boolean;
     autoReverse: boolean;
     targets: CreateAllocationTargetDto[];
 }
@@ -352,6 +389,13 @@ export interface AllocationRunResult {
     lines: AllocationLineResult[];
 }
 
+export interface RunAllocationDto {
+    allocationRuleId: string;
+    fiscalPeriodId: string;
+    allocationDate: string;
+    description?: string;
+}
+
 export interface AllocationLineResult {
     targetAccountId: string;
     targetAccountNumber: string;
@@ -359,4 +403,60 @@ export interface AllocationLineResult {
     allocationBasis: number;
     allocationPercent: number;
     allocatedAmount: number;
+}
+
+export interface AllocationRunBatch {
+    id: string;
+    batchNumber: string;
+    allocationRuleId: string;
+    ruleCode: string;
+    ruleName: string;
+    fiscalPeriodId: string;
+    periodCode: string;
+    periodName: string;
+    allocationDate: string;
+    description?: string;
+    status: AllocationRunBatchStatus;
+    sourceAccountId: string;
+    sourceAccountNumber: string;
+    sourceAccountName: string;
+    sourcePeriodBalance: number;
+    totalAllocated: number;
+    allocationType: AllocationType;
+    bookClassification: string;
+    functionalCurrencyCode: string;
+    workflowInstanceId?: string;
+    journalEntryId?: string;
+    journalEntryNumber?: string;
+    submittedAt?: string;
+    submittedByName?: string;
+    approvedAt?: string;
+    approvedByName?: string;
+    postedAt?: string;
+    postedByName?: string;
+    rejectionReason?: string;
+    createdAt: string;
+    lines: AllocationRunBatchLine[];
+}
+
+export interface AllocationRunBatchLine {
+    id: string;
+    lineNumber: number;
+    targetAccountId: string;
+    targetAccountNumber: string;
+    targetAccountName: string;
+    targetDriverUnitAccountId?: string;
+    targetDriverUnitAccountNumber?: string;
+    targetDriverUnitAccountName?: string;
+    allocationBasis: number;
+    allocationPercent: number;
+    allocatedAmount: number;
+    costCenterCode?: string;
+}
+
+export interface CreateAllocationRunBatchDto {
+    allocationRuleId: string;
+    fiscalPeriodId: string;
+    allocationDate: string;
+    description?: string;
 }

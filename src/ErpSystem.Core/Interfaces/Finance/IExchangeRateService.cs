@@ -25,6 +25,7 @@ namespace ErpSystem.Core.Interfaces.Finance
             string? targetCurrency = null,
             DateTime? effectiveDate = null,
             string? rateType = null,
+            string? quoteSide = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -42,6 +43,8 @@ namespace ErpSystem.Core.Interfaces.Finance
             string targetCurrencyCode,
             string? baseCurrencyCode = null,
             DateTime? effectiveDate = null,
+            string? rateType = null,
+            string? quoteSide = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>

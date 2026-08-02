@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -11,7 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers, Check, ChevronsUpDown } from 'lucide-react';
+import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers, Check, ChevronsUpDown, Banknote } from 'lucide-react';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { FinanceSettings, UpdateFinanceSettingsDto, Account } from '@/types/finance';
 import { useToast } from '@/hooks/use-toast';
@@ -111,6 +112,20 @@ export default function FinanceSettingsPage() {
         discountReceivedAccountId: undefined,
         migrationClearingAccountId: undefined,
         openingBalanceAutoRoutingEnabled: true,
+        bankDepositPolicy: 'DepositIntact',
+        requireBankDepositPrimaryEvidence: true,
+        autoPostBankDepositAfterApproval: true,
+        bankStatementMatchDateToleranceDays: 3,
+        chequeClearingPeriodDays: 3,
+        defaultReturnedChequeChargeTreatment: 'CustomerRecoverable',
+        directionalExchangeRatePolicyEnabled: false,
+        defaultTransactionQuoteSide: 'Mid',
+        arInvoiceQuoteSide: 'Mid',
+        arSettlementQuoteSide: 'Buying',
+        apInvoiceQuoteSide: 'Mid',
+        apSettlementQuoteSide: 'Selling',
+        closingQuoteSide: 'Mid',
+        requireExchangeRateOverrideApproval: true,
     });
 
     useEffect(() => {
@@ -146,6 +161,23 @@ export default function FinanceSettingsPage() {
                 discountReceivedAccountId: data.discountReceivedAccountId,
                 migrationClearingAccountId: data.migrationClearingAccountId,
                 openingBalanceAutoRoutingEnabled: data.openingBalanceAutoRoutingEnabled ?? true,
+                bankDepositPolicy: data.bankDepositPolicy ?? 'DepositIntact',
+                requireBankDepositPrimaryEvidence: data.requireBankDepositPrimaryEvidence ?? true,
+                autoPostBankDepositAfterApproval: data.autoPostBankDepositAfterApproval ?? true,
+                maximumDepositDeductionAmount: data.maximumDepositDeductionAmount,
+                maximumDepositDeductionPercentage: data.maximumDepositDeductionPercentage,
+                bankStatementMatchDateToleranceDays: data.bankStatementMatchDateToleranceDays ?? 3,
+                chequeClearingPeriodDays: data.chequeClearingPeriodDays ?? 3,
+                returnedChequeBankChargeAccountId: data.returnedChequeBankChargeAccountId,
+                defaultReturnedChequeChargeTreatment: data.defaultReturnedChequeChargeTreatment ?? 'CustomerRecoverable',
+                directionalExchangeRatePolicyEnabled: data.directionalExchangeRatePolicyEnabled ?? false,
+                defaultTransactionQuoteSide: data.defaultTransactionQuoteSide ?? 'Mid',
+                arInvoiceQuoteSide: data.arInvoiceQuoteSide ?? 'Mid',
+                arSettlementQuoteSide: data.arSettlementQuoteSide ?? 'Buying',
+                apInvoiceQuoteSide: data.apInvoiceQuoteSide ?? 'Mid',
+                apSettlementQuoteSide: data.apSettlementQuoteSide ?? 'Selling',
+                closingQuoteSide: data.closingQuoteSide ?? 'Mid',
+                requireExchangeRateOverrideApproval: true,
             });
 
             // Load accounts for the current COA type
@@ -267,6 +299,12 @@ export default function FinanceSettingsPage() {
                                 Chart of Accounts
                             </Button>
                         </Link>
+                        <Link href="/finance/cash/liquidity-accounts">
+                            <Button variant="outline" size="sm">
+                                <Banknote className="mr-2 h-4 w-4" />
+                                Banking Setup
+                            </Button>
+                        </Link>
                     </div>
                     {formData.coaType === 'Standard' && (
                         <p className="text-xs text-muted-foreground mt-2">
@@ -341,6 +379,132 @@ export default function FinanceSettingsPage() {
                     </div>
                 </CardContent>
             </Card >
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Exchange Rate Policy</CardTitle>
+                    <CardDescription>
+                        Buying and selling are defined from the bank/provider perspective. Mid is the accounting reference rate.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                    <div className="flex items-center justify-between rounded-md border p-4">
+                        <div>
+                            <Label htmlFor="directionalRates">Enforce directional rates</Label>
+                            <p className="text-sm text-muted-foreground">
+                                Enable after approved Buying and Selling rates have been loaded for every active currency.
+                            </p>
+                        </div>
+                        <Switch
+                            id="directionalRates"
+                            checked={formData.directionalExchangeRatePolicyEnabled ?? false}
+                            onCheckedChange={checked => setFormData({ ...formData, directionalExchangeRatePolicyEnabled: checked })}
+                        />
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        {([
+                            ['defaultTransactionQuoteSide', 'Manual GL transactions'],
+                            ['arInvoiceQuoteSide', 'AR invoice recognition'],
+                            ['arSettlementQuoteSide', 'AR cash settlement'],
+                            ['apInvoiceQuoteSide', 'AP invoice recognition'],
+                            ['apSettlementQuoteSide', 'AP cash settlement'],
+                            ['closingQuoteSide', 'Period-end revaluation'],
+                        ] as const).map(([field, label]) => (
+                            <div className="space-y-2" key={field}>
+                                <Label>{label}</Label>
+                                <Select
+                                    value={formData[field] ?? 'Mid'}
+                                    disabled={!formData.directionalExchangeRatePolicyEnabled}
+                                    onValueChange={value => setFormData({ ...formData, [field]: value as UpdateFinanceSettingsDto[typeof field] })}
+                                >
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="Mid">Mid / Reference</SelectItem>
+                                        <SelectItem value="Buying">Buying (bank buys FX)</SelectItem>
+                                        <SelectItem value="Selling">Selling (bank sells FX)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        ))}
+                    </div>
+                    <Alert>
+                        <Lock className="h-4 w-4" />
+                        <AlertTitle>Override control is mandatory</AlertTitle>
+                        <AlertDescription>
+                            A document-level rate override requires an authorised approver and a recorded reason. One approved override is applied consistently to all balancing lines.
+                        </AlertDescription>
+                    </Alert>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Banking & Settlement Controls</CardTitle>
+                    <CardDescription>
+                        Tenant policy for net banking, deposit evidence, reconciliation tolerances, and returned cheques.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                            <Label>Deposit policy</Label>
+                            <Select
+                                value={formData.bankDepositPolicy ?? 'DepositIntact'}
+                                onValueChange={(value) => setFormData({ ...formData, bankDepositPolicy: value as UpdateFinanceSettingsDto['bankDepositPolicy'] })}
+                            >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="DepositIntact">Deposit intact — no deductions</SelectItem>
+                                    <SelectItem value="ControlledNetBanking">Controlled net banking</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Returned-cheque charge default</Label>
+                            <Select
+                                value={formData.defaultReturnedChequeChargeTreatment ?? 'CustomerRecoverable'}
+                                onValueChange={(value) => setFormData({ ...formData, defaultReturnedChequeChargeTreatment: value as UpdateFinanceSettingsDto['defaultReturnedChequeChargeTreatment'] })}
+                            >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="CustomerRecoverable">Recover from customer</SelectItem>
+                                    <SelectItem value="BankChargeExpense">Bank charge expense</SelectItem>
+                                    <SelectItem value="Split">Split at case capture</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <div className="flex items-center justify-between rounded-md border p-3">
+                            <div><Label htmlFor="bankEvidence">Require primary bank evidence</Label><p className="text-xs text-muted-foreground">Deposit slip or bank advice before submission.</p></div>
+                            <Switch id="bankEvidence" checked={formData.requireBankDepositPrimaryEvidence ?? true} onCheckedChange={checked => setFormData({ ...formData, requireBankDepositPrimaryEvidence: checked })} />
+                        </div>
+                        <div className="flex items-center justify-between rounded-md border p-3">
+                            <div><Label htmlFor="bankAutoPost">Post after final approval</Label><p className="text-xs text-muted-foreground">Chief Accountant approval creates the bank transaction.</p></div>
+                            <Switch id="bankAutoPost" checked={formData.autoPostBankDepositAfterApproval ?? true} onCheckedChange={checked => setFormData({ ...formData, autoPostBankDepositAfterApproval: checked })} />
+                        </div>
+                    </div>
+                    {formData.bankDepositPolicy === 'ControlledNetBanking' && (
+                        <div className="grid gap-4 md:grid-cols-2">
+                            <div className="space-y-2"><Label>Maximum deduction amount</Label><Input type="number" min={0} step="0.01" value={formData.maximumDepositDeductionAmount ?? ''} onChange={event => setFormData({ ...formData, maximumDepositDeductionAmount: event.target.value ? Number(event.target.value) : undefined })} /></div>
+                            <div className="space-y-2"><Label>Maximum deduction percentage</Label><Input type="number" min={0} max={100} step="0.01" value={formData.maximumDepositDeductionPercentage ?? ''} onChange={event => setFormData({ ...formData, maximumDepositDeductionPercentage: event.target.value ? Number(event.target.value) : undefined })} /></div>
+                        </div>
+                    )}
+                    <div className="grid gap-4 md:grid-cols-3">
+                        <div className="space-y-2"><Label>Statement date tolerance (days)</Label><Input type="number" min={0} max={30} value={formData.bankStatementMatchDateToleranceDays ?? 3} onChange={event => setFormData({ ...formData, bankStatementMatchDateToleranceDays: Number(event.target.value) })} /></div>
+                        <div className="space-y-2"><Label>Cheque clearing period (days)</Label><Input type="number" min={0} max={90} value={formData.chequeClearingPeriodDays ?? 3} onChange={event => setFormData({ ...formData, chequeClearingPeriodDays: Number(event.target.value) })} /></div>
+                        <div className="space-y-2"><Label>Returned-cheque bank charge GL</Label><AccountPicker id="returnedChequeBankCharge" value={formData.returnedChequeBankChargeAccountId} placeholder="Search expense accounts..." accounts={accounts.filter(account => account.accountType === 'Expense')} onChange={value => setFormData({ ...formData, returnedChequeBankChargeAccountId: value })} /></div>
+                    </div>
+                    <Alert>
+                        <AlertTriangle className="h-4 w-4" />
+                        <AlertTitle>Liquidity master data</AlertTitle>
+                        <AlertDescription>
+                            Holding accounts are maintained separately so they do not become fake bank accounts or appear in bank reconciliation.
+                            <Link className="ml-1 font-medium underline" href="/finance/cash/liquidity-accounts">Open Banking Setup</Link>
+                        </AlertDescription>
+                    </Alert>
+                </CardContent>
+            </Card>
 
             {/* Default Accounts */}
             < Card >

@@ -29,6 +29,7 @@ import type {
     CreateSubledgerAdjustmentJournalDto,
     UpdateFinanceSettingsDto,
     AddCurrencyLinkDto,
+    UpdateCurrencyLinkRatePolicyDto,
     ModuleDefinition,
     OpeningBalanceBatch,
     OpeningBalanceDiagnostic,
@@ -43,6 +44,8 @@ import type {
     DetailedLedgerRequestDto,
     IncomeStatementReportDto,
     IncomeStatementRequestDto,
+    FinancialStatementLayoutSummaryDto,
+    FinancialStatementType,
     MultiCurrencyDetailReportDto,
     MultiCurrencyDetailRequestDto,
     SubledgerAdjustmentJournal,
@@ -172,13 +175,15 @@ class FinanceDataService {
         baseCurrencyCode?: string;
         targetCurrencyCode?: string;
         rateType?: string;
+        quoteSide?: string;
         startDate?: string;
         endDate?: string;
     }): Promise<ExchangeRate[]> {
         const queryParams = new URLSearchParams();
-        if (filters?.baseCurrencyCode) queryParams.append('baseCurrencyCode', filters.baseCurrencyCode);
-        if (filters?.targetCurrencyCode) queryParams.append('targetCurrencyCode', filters.targetCurrencyCode);
+        if (filters?.baseCurrencyCode) queryParams.append('fromCurrency', filters.baseCurrencyCode);
+        if (filters?.targetCurrencyCode) queryParams.append('toCurrency', filters.targetCurrencyCode);
         if (filters?.rateType) queryParams.append('rateType', filters.rateType);
+        if (filters?.quoteSide) queryParams.append('quoteSide', filters.quoteSide);
         if (filters?.startDate) queryParams.append('startDate', filters.startDate);
         if (filters?.endDate) queryParams.append('endDate', filters.endDate);
 
@@ -504,6 +509,8 @@ class FinanceDataService {
         if (params.periodEnd) queryParams.append('periodEnd', params.periodEnd);
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
         if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
+        if (params.layoutId) queryParams.append('layoutId', params.layoutId);
+        if (params.useDefaultLayout !== undefined) queryParams.append('useDefaultLayout', String(params.useDefaultLayout));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
 
         return apiService.get<IncomeStatementReportDto>(`/finance/statements/income-statement?${queryParams}`);
@@ -514,9 +521,24 @@ class FinanceDataService {
         if (params.asAtDate) queryParams.append('asAtDate', params.asAtDate);
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
         if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
+        if (params.layoutId) queryParams.append('layoutId', params.layoutId);
+        if (params.useDefaultLayout !== undefined) queryParams.append('useDefaultLayout', String(params.useDefaultLayout));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
 
         return apiService.get<BalanceSheetReportDto>(`/finance/statements/balance-sheet?${queryParams}`);
+    }
+
+    async getFinancialStatementLayouts(
+        statementType: FinancialStatementType,
+        accountingBookId?: string,
+    ): Promise<FinancialStatementLayoutSummaryDto[]> {
+        const queryParams = new URLSearchParams();
+        queryParams.append('statementType', statementType);
+        if (accountingBookId) queryParams.append('accountingBookId', accountingBookId);
+
+        return apiService.get<FinancialStatementLayoutSummaryDto[]>(
+            `/finance/financial-statement-layouts?${queryParams}`,
+        );
     }
 
     async getCashFlowStatement(params: CashFlowStatementRequestDto): Promise<CashFlowStatementReportDto> {
@@ -620,6 +642,17 @@ class FinanceDataService {
             currencyCode,
             linkedCurrencyCode: currencyCode,
         });
+    }
+
+    async updateAccountCurrencyLinkRatePolicy(
+        accountId: string,
+        currencyCode: string,
+        dto: UpdateCurrencyLinkRatePolicyDto
+    ): Promise<AccountCurrencyLink> {
+        return apiService.put<AccountCurrencyLink>(
+            `/finance/accounts/${accountId}/currencies/${currencyCode}/rate-policy`,
+            dto
+        );
     }
 
     async removeAccountCurrencyLink(accountId: string, currencyCode: string): Promise<void> {

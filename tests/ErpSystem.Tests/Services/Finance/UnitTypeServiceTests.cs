@@ -5,6 +5,7 @@ using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.UnitAccounting;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
@@ -25,8 +26,8 @@ namespace ErpSystem.Tests.Services.Finance
         private readonly Mock<IUnitOfWork> _mockUnitOfWork;
         private readonly Mock<ICurrentUserService> _mockCurrentUserService;
         private readonly Mock<ILogger<UnitTypeService>> _mockLogger;
-        private readonly Mock<IRepository<UnitType>> _mockUnitTypeRepository;
-        private readonly Mock<IRepository<UnitAccount>> _mockUnitAccountRepository;
+        private readonly Mock<IGenericRepository<UnitType>> _mockUnitTypeRepository;
+        private readonly Mock<IGenericRepository<UnitAccount>> _mockUnitAccountRepository;
         private readonly UnitTypeService _service;
         private readonly Guid _tenantId = Guid.NewGuid();
         private readonly string _userName = "test-user";
@@ -36,8 +37,8 @@ namespace ErpSystem.Tests.Services.Finance
             _mockUnitOfWork = new Mock<IUnitOfWork>();
             _mockCurrentUserService = new Mock<ICurrentUserService>();
             _mockLogger = new Mock<ILogger<UnitTypeService>>();
-            _mockUnitTypeRepository = new Mock<IRepository<UnitType>>();
-            _mockUnitAccountRepository = new Mock<IRepository<UnitAccount>>();
+            _mockUnitTypeRepository = new Mock<IGenericRepository<UnitType>>();
+            _mockUnitAccountRepository = new Mock<IGenericRepository<UnitAccount>>();
 
             // Setup current user service
             _mockCurrentUserService.Setup(s => s.TenantId).Returns(_tenantId);
@@ -205,7 +206,9 @@ namespace ErpSystem.Tests.Services.Finance
             };
 
             SetupQueryable(new List<UnitType>()); // No existing types
-            _mockUnitTypeRepository.Setup(r => r.AddAsync(It.IsAny<UnitType>())).Returns(Task.CompletedTask);
+            _mockUnitTypeRepository
+                .Setup(r => r.AddAsync(It.IsAny<UnitType>()))
+                .ReturnsAsync((UnitType entity) => entity);
             _mockUnitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
             // Act
@@ -449,11 +452,11 @@ namespace ErpSystem.Tests.Services.Finance
             _mockUnitTypeRepository
                 .Setup(r => r.GetQueryable(It.IsAny<Expression<Func<UnitType, bool>>>()))
                 .Returns((Expression<Func<UnitType, bool>> predicate) =>
-                    unitTypes.AsQueryable().Where(predicate));
+                    unitTypes.Where(predicate.Compile()).AsAsyncQueryable());
 
             _mockUnitAccountRepository
                 .Setup(r => r.GetQueryable(It.IsAny<Expression<Func<UnitAccount, bool>>>()))
-                .Returns(new List<UnitAccount>().AsQueryable());
+                .Returns(new List<UnitAccount>().AsAsyncQueryable());
         }
 
         private void SetupAccountQueryable(List<UnitAccount> accounts)
@@ -461,7 +464,7 @@ namespace ErpSystem.Tests.Services.Finance
             _mockUnitAccountRepository
                 .Setup(r => r.GetQueryable(It.IsAny<Expression<Func<UnitAccount, bool>>>()))
                 .Returns((Expression<Func<UnitAccount, bool>> predicate) =>
-                    accounts.AsQueryable().Where(predicate));
+                    accounts.Where(predicate.Compile()).AsAsyncQueryable());
         }
 
         #endregion

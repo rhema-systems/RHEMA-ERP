@@ -85,6 +85,17 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 settings.RealizedFxGainAccountId,
                 settings.RealizedFxLossAccountId
             };
+            var beforeFxPolicy = new
+            {
+                settings.DirectionalExchangeRatePolicyEnabled,
+                settings.DefaultTransactionQuoteSide,
+                settings.ArInvoiceQuoteSide,
+                settings.ArSettlementQuoteSide,
+                settings.ApInvoiceQuoteSide,
+                settings.ApSettlementQuoteSide,
+                settings.ClosingQuoteSide,
+                settings.RequireExchangeRateOverrideApproval
+            };
 
             // Check if COA type can be changed
             if (dto.CoaType != null && dto.CoaType != settings.CoaType)
@@ -234,6 +245,51 @@ namespace ErpSystem.Api.Services.Finance.Settings
             if (dto.DiscountReceivedAccountId.HasValue) settings.DiscountReceivedAccountId = dto.DiscountReceivedAccountId;
             if (dto.MigrationClearingAccountId.HasValue) settings.MigrationClearingAccountId = dto.MigrationClearingAccountId;
             if (dto.OpeningBalanceAutoRoutingEnabled.HasValue) settings.OpeningBalanceAutoRoutingEnabled = dto.OpeningBalanceAutoRoutingEnabled.Value;
+            if (dto.BankDepositPolicy.HasValue) settings.BankDepositPolicy = dto.BankDepositPolicy.Value;
+            if (dto.RequireBankDepositPrimaryEvidence.HasValue)
+                settings.RequireBankDepositPrimaryEvidence = dto.RequireBankDepositPrimaryEvidence.Value;
+            if (dto.AutoPostBankDepositAfterApproval.HasValue)
+                settings.AutoPostBankDepositAfterApproval = dto.AutoPostBankDepositAfterApproval.Value;
+            if (dto.MaximumDepositDeductionAmount.HasValue)
+            {
+                if (dto.MaximumDepositDeductionAmount.Value < 0m)
+                    throw new InvalidOperationException("Maximum deposit deduction amount cannot be negative.");
+                settings.MaximumDepositDeductionAmount = dto.MaximumDepositDeductionAmount;
+            }
+            if (dto.MaximumDepositDeductionPercentage.HasValue)
+            {
+                if (dto.MaximumDepositDeductionPercentage.Value is < 0m or > 100m)
+                    throw new InvalidOperationException("Maximum deposit deduction percentage must be between 0 and 100.");
+                settings.MaximumDepositDeductionPercentage = dto.MaximumDepositDeductionPercentage;
+            }
+            if (dto.BankStatementMatchDateToleranceDays.HasValue)
+                settings.BankStatementMatchDateToleranceDays = Math.Clamp(dto.BankStatementMatchDateToleranceDays.Value, 0, 30);
+            if (dto.ChequeClearingPeriodDays.HasValue)
+                settings.ChequeClearingPeriodDays = Math.Clamp(dto.ChequeClearingPeriodDays.Value, 0, 90);
+            if (dto.ReturnedChequeBankChargeAccountId.HasValue)
+                settings.ReturnedChequeBankChargeAccountId = dto.ReturnedChequeBankChargeAccountId;
+            if (dto.DefaultReturnedChequeChargeTreatment.HasValue)
+                settings.DefaultReturnedChequeChargeTreatment = dto.DefaultReturnedChequeChargeTreatment.Value;
+            if (dto.DirectionalExchangeRatePolicyEnabled.HasValue)
+                settings.DirectionalExchangeRatePolicyEnabled = dto.DirectionalExchangeRatePolicyEnabled.Value;
+            if (dto.DefaultTransactionQuoteSide != null)
+                settings.DefaultTransactionQuoteSide = ParseQuoteSide(dto.DefaultTransactionQuoteSide);
+            if (dto.ArInvoiceQuoteSide != null)
+                settings.ArInvoiceQuoteSide = ParseQuoteSide(dto.ArInvoiceQuoteSide);
+            if (dto.ArSettlementQuoteSide != null)
+                settings.ArSettlementQuoteSide = ParseQuoteSide(dto.ArSettlementQuoteSide);
+            if (dto.ApInvoiceQuoteSide != null)
+                settings.ApInvoiceQuoteSide = ParseQuoteSide(dto.ApInvoiceQuoteSide);
+            if (dto.ApSettlementQuoteSide != null)
+                settings.ApSettlementQuoteSide = ParseQuoteSide(dto.ApSettlementQuoteSide);
+            if (dto.ClosingQuoteSide != null)
+                settings.ClosingQuoteSide = ParseQuoteSide(dto.ClosingQuoteSide);
+            if (dto.RequireExchangeRateOverrideApproval.HasValue)
+            {
+                if (!dto.RequireExchangeRateOverrideApproval.Value)
+                    throw new InvalidOperationException("Exchange-rate policy overrides must retain approval and reason controls.");
+                settings.RequireExchangeRateOverrideApproval = true;
+            }
 
             await _context.SaveChangesAsync();
 
@@ -256,6 +312,28 @@ namespace ErpSystem.Api.Services.Finance.Settings
                     settings,
                     beforeValues: beforeFxMappings,
                     afterValues: afterFxMappings);
+            }
+
+            var afterFxPolicy = new
+            {
+                settings.DirectionalExchangeRatePolicyEnabled,
+                settings.DefaultTransactionQuoteSide,
+                settings.ArInvoiceQuoteSide,
+                settings.ArSettlementQuoteSide,
+                settings.ApInvoiceQuoteSide,
+                settings.ApSettlementQuoteSide,
+                settings.ClosingQuoteSide,
+                settings.RequireExchangeRateOverrideApproval
+            };
+
+            if (!Equals(beforeFxPolicy, afterFxPolicy))
+            {
+                await RecordFinanceSettingsAuditAsync(
+                    FinanceAuditEvents.ExchangeRatePolicyChanged,
+                    tenantId,
+                    settings,
+                    beforeValues: beforeFxPolicy,
+                    afterValues: afterFxPolicy);
             }
 
             var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
@@ -334,6 +412,14 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 : currencyCode.Trim().ToUpperInvariant();
         }
 
+        private static ExchangeRateQuoteSide ParseQuoteSide(string value)
+        {
+            if (!Enum.TryParse<ExchangeRateQuoteSide>(value.Trim(), ignoreCase: true, out var quoteSide))
+                throw new InvalidOperationException("Exchange-rate quote side must be Mid, Buying, or Selling.");
+
+            return quoteSide;
+        }
+
         private static FinanceSettingsDto MapToDto(FinanceSettings settings, BaseCurrencyReferenceDto baseCurrency, bool transactionsExist)
         {
             return new FinanceSettingsDto
@@ -370,6 +456,23 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 DiscountReceivedAccountId = settings.DiscountReceivedAccountId,
                 MigrationClearingAccountId = settings.MigrationClearingAccountId,
                 OpeningBalanceAutoRoutingEnabled = settings.OpeningBalanceAutoRoutingEnabled,
+                BankDepositPolicy = settings.BankDepositPolicy,
+                RequireBankDepositPrimaryEvidence = settings.RequireBankDepositPrimaryEvidence,
+                AutoPostBankDepositAfterApproval = settings.AutoPostBankDepositAfterApproval,
+                MaximumDepositDeductionAmount = settings.MaximumDepositDeductionAmount,
+                MaximumDepositDeductionPercentage = settings.MaximumDepositDeductionPercentage,
+                BankStatementMatchDateToleranceDays = settings.BankStatementMatchDateToleranceDays,
+                ChequeClearingPeriodDays = settings.ChequeClearingPeriodDays,
+                ReturnedChequeBankChargeAccountId = settings.ReturnedChequeBankChargeAccountId,
+                DefaultReturnedChequeChargeTreatment = settings.DefaultReturnedChequeChargeTreatment,
+                DirectionalExchangeRatePolicyEnabled = settings.DirectionalExchangeRatePolicyEnabled,
+                DefaultTransactionQuoteSide = settings.DefaultTransactionQuoteSide.ToString(),
+                ArInvoiceQuoteSide = settings.ArInvoiceQuoteSide.ToString(),
+                ArSettlementQuoteSide = settings.ArSettlementQuoteSide.ToString(),
+                ApInvoiceQuoteSide = settings.ApInvoiceQuoteSide.ToString(),
+                ApSettlementQuoteSide = settings.ApSettlementQuoteSide.ToString(),
+                ClosingQuoteSide = settings.ClosingQuoteSide.ToString(),
+                RequireExchangeRateOverrideApproval = settings.RequireExchangeRateOverrideApproval,
                 TransactionsExist = transactionsExist
             };
         }

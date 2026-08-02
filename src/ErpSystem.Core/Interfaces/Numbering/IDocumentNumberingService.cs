@@ -49,6 +49,7 @@ public static class DocumentNumberingModules
 public static class FinanceDocumentTypes
 {
     public const string JournalEntry = "JournalEntry";
+    public const string JournalBatch = "JournalBatch";
     public const string UnitJournalEntry = "UnitJournalEntry";
     public const string ARInvoice = "ARInvoice";
     public const string ARPayment = "ARPayment";
@@ -66,6 +67,9 @@ public static class FinanceDocumentTypes
     public const string CashReceipt = "CashReceipt";
     public const string CashPayment = "CashPayment";
     public const string BankTransfer = "BankTransfer";
+    public const string BankDeposit = "BankDeposit";
+    public const string LiquidityEntry = "LiquidityEntry";
+    public const string ReturnedCheque = "ReturnedCheque";
     public const string CurrencyRevaluation = "CurrencyRevaluation";
     public const string YearEndClose = "YearEndClose";
     public const string FixedAssetJournal = "FixedAssetJournal";
@@ -94,6 +98,7 @@ public static class DocumentSequenceDefaults
         return new List<DocumentSequenceDefinition>
         {
             Finance(tenantId, FinanceDocumentTypes.JournalEntry, "General Journal Entry", "JE-{YYYY}-{######}", 6, DocumentSequenceResetPolicies.Yearly, true, "GL journal entries, reversals, and subledger postings."),
+            Finance(tenantId, FinanceDocumentTypes.JournalBatch, "General Journal Batch", "JB-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, false, "Controlled groups of manual GL journal entries."),
             Finance(tenantId, FinanceDocumentTypes.UnitJournalEntry, "Unit Journal Entry", "UJE-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, true, "Unit accounting journal entries and reversals."),
             Finance(tenantId, FinanceDocumentTypes.ARInvoice, "Customer Invoice", "INV-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Accounts receivable invoices."),
             Finance(tenantId, FinanceDocumentTypes.ARPayment, "Customer Payment", "PMT-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Accounts receivable receipts/payments."),
@@ -111,6 +116,9 @@ public static class DocumentSequenceDefaults
             Finance(tenantId, FinanceDocumentTypes.CashReceipt, "Cash Receipt", "RCT-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Cash management receipts."),
             Finance(tenantId, FinanceDocumentTypes.CashPayment, "Cash Payment", "CPY-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Cash management payments."),
             Finance(tenantId, FinanceDocumentTypes.BankTransfer, "Bank Transfer", "TRF-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Bank and cash transfers."),
+            Finance(tenantId, FinanceDocumentTypes.BankDeposit, "Bank Deposit", "DEP-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Approved settlements from liquidity accounts into bank accounts."),
+            Finance(tenantId, FinanceDocumentTypes.LiquidityEntry, "Liquidity Entry", "LQE-{YYYY}{MM}-{#####}", 5, DocumentSequenceResetPolicies.Monthly, true, "Operational settlement subledger entries."),
+            Finance(tenantId, FinanceDocumentTypes.ReturnedCheque, "Returned Cheque", "RCH-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Returned customer cheque cases."),
             Finance(tenantId, FinanceDocumentTypes.CurrencyRevaluation, "Currency Revaluation", "REV-{YYYY}{MM}{DD}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Multi-currency revaluation journals."),
             Finance(tenantId, FinanceDocumentTypes.YearEndClose, "Year-end Close", "YE-CLOSE-{YYYY}-{###}", 3, DocumentSequenceResetPolicies.Yearly, false, "Fiscal year closing journals."),
             Finance(tenantId, FinanceDocumentTypes.FixedAssetJournal, "Fixed Asset Journal", "FAJ-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, false, "Fixed asset depreciation, transfer, disposal, and valuation journals."),

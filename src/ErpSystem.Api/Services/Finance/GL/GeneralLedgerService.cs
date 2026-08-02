@@ -26,6 +26,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IDocumentNumberingService _documentNumberingService;
         private readonly IAccountingBookService _accountingBookService;
         private readonly IFinancePostingEngine _financePostingEngine;
+        private readonly IFinancialStatementLayoutExecutionService? _statementLayoutExecutionService;
 
         public GeneralLedgerService(
             ApplicationDbContext context,
@@ -35,7 +36,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IFiscalPeriodService fiscalPeriodService,
             IDocumentNumberingService documentNumberingService,
             IAccountingBookService accountingBookService,
-            IFinancePostingEngine financePostingEngine)
+            IFinancePostingEngine financePostingEngine,
+            IFinancialStatementLayoutExecutionService? statementLayoutExecutionService = null)
         {
             _context = context;
             _reportingContext = reportingContext;
@@ -45,6 +47,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _documentNumberingService = documentNumberingService;
             _accountingBookService = accountingBookService;
             _financePostingEngine = financePostingEngine;
+            _statementLayoutExecutionService = statementLayoutExecutionService;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -675,6 +678,16 @@ namespace ErpSystem.Api.Services.Finance.GL
             balanceSheet.TotalAssets = assetsSection.SectionTotal;
             balanceSheet.TotalLiabilities = liabilitiesSection.SectionTotal;
             balanceSheet.TotalEquity = equitySection.SectionTotal;
+            balanceSheet.LayoutExecution = await ExecuteStatementLayoutAsync(
+                FinancialStatementType.BalanceSheet,
+                bookClassification,
+                null,
+                request.AsAtDate,
+                request.LayoutId,
+                request.UseDefaultLayout,
+                request.IncludeAccountDetails,
+                request.AccountIds,
+                request.SegmentFilters);
 
             return balanceSheet;
         }
@@ -1226,8 +1239,92 @@ namespace ErpSystem.Api.Services.Finance.GL
                 - incomeStatement.TotalOtherExpenses;
             incomeStatement.NetProfit = incomeStatement.ProfitBeforeTax - incomeStatement.TaxExpense;
             incomeStatement.PresentationWarnings = BuildDisposalGainPresentationWarnings(disposalGainPresentationAccounts);
+            incomeStatement.LayoutExecution = await ExecuteStatementLayoutAsync(
+                FinancialStatementType.IncomeStatement,
+                bookClassification,
+                request.PeriodStart,
+                request.PeriodEnd,
+                request.LayoutId,
+                request.UseDefaultLayout,
+                request.IncludeAccountDetails,
+                request.AccountIds,
+                request.SegmentFilters);
 
             return incomeStatement;
+        }
+
+        private async Task<FinancialStatementLayoutExecutionDto?> ExecuteStatementLayoutAsync(
+            FinancialStatementType statementType,
+            string bookClassification,
+            DateTime? periodStart,
+            DateTime periodEnd,
+            Guid? layoutId,
+            bool useDefaultLayout,
+            bool includeAccountDetails,
+            IEnumerable<Guid>? accountIds,
+            IEnumerable<FinanceSegmentFilterDto>? segmentFilters)
+        {
+            var requestedLayoutId = layoutId.HasValue && layoutId.Value != Guid.Empty
+                ? layoutId
+                : null;
+            if (!requestedLayoutId.HasValue && !useDefaultLayout)
+            {
+                return null;
+            }
+
+            if (_statementLayoutExecutionService == null)
+            {
+                if (requestedLayoutId.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        "Financial statement layout execution is not available.");
+                }
+
+                return null;
+            }
+
+            var books = await _accountingBookService.GetBooksAsync();
+            var book = books?.FirstOrDefault(candidate =>
+                NormalizeBookClassification(candidate.Code).Equals(
+                    bookClassification,
+                    StringComparison.OrdinalIgnoreCase));
+            if (book == null)
+            {
+                if (requestedLayoutId.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        $"Accounting book '{bookClassification}' is not available for the selected layout.");
+                }
+
+                return null;
+            }
+
+            try
+            {
+                return await _statementLayoutExecutionService.ExecutePublishedAsync(
+                    new FinancialStatementLayoutExecutionRequestDto
+                    {
+                        LayoutId = requestedLayoutId,
+                        StatementType = statementType,
+                        AccountingBookId = book.Id,
+                        PeriodStart = periodStart,
+                        PeriodEnd = periodEnd,
+                        IncludeAccountDetails = includeAccountDetails,
+                        IncludeHiddenRows = false,
+                        AccountIds = accountIds?
+                            .Where(accountId => accountId != Guid.Empty)
+                            .Distinct()
+                            .ToList() ?? new List<Guid>(),
+                        SegmentFilters = segmentFilters?.ToList()
+                            ?? new List<FinanceSegmentFilterDto>()
+                    });
+            }
+            catch (KeyNotFoundException) when (!requestedLayoutId.HasValue)
+            {
+                // A default layout is optional during rollout. The established
+                // account-classification report remains the safe fallback.
+                return null;
+            }
         }
 
         private async Task<HashSet<Guid>> GetTenantDisposalGainAccountIdsAsync(Guid tenantId)

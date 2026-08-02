@@ -32,6 +32,9 @@ namespace ErpSystem.Core.DTOs.Finance
         
         /// <summary>Rate type: "Daily", "Average", "MonthEnd", "YearEnd", "Budget", "Fixed"</summary>
         public string RateType { get; set; } = "Daily";
+
+        /// <summary>Provider/bank quote side: Mid, Buying, or Selling.</summary>
+        public string QuoteSide { get; set; } = "Mid";
         
         /// <summary>Rate source: "Manual", "API", "CentralBank", "Market"</summary>
         public string RateSource { get; set; } = "Manual";
@@ -90,6 +93,10 @@ namespace ErpSystem.Core.DTOs.Finance
         [Required]
         [MaxLength(20)]
         public string RateType { get; set; } = "Daily";
+
+        [Required]
+        [MaxLength(20)]
+        public string QuoteSide { get; set; } = "Mid";
         
         [Required]
         [MaxLength(20)]
@@ -118,6 +125,9 @@ namespace ErpSystem.Core.DTOs.Finance
         
         [MaxLength(20)]
         public string RateType { get; set; } = "Daily";
+
+        [MaxLength(20)]
+        public string QuoteSide { get; set; } = "Mid";
         
         [MaxLength(20)]
         public string RateSource { get; set; } = "Manual";

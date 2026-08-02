@@ -48,6 +48,8 @@ public sealed class FinanceReportExportRequestDto
     public bool IncludeAccountDetails { get; set; }
     public bool IncludeReversed { get; set; } = true;
     public bool IncludeOpeningBalances { get; set; } = true;
+    public Guid? LayoutId { get; set; }
+    public bool UseDefaultLayout { get; set; } = true;
     public List<Guid> AccountIds { get; set; } = new();
     public List<Guid> BankAccountIds { get; set; } = new();
     public List<Guid> GlAccountIds { get; set; } = new();

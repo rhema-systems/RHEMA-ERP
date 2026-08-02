@@ -29,6 +29,7 @@ import type {
   AccountCurrencyLink,
   // Enums
   ExchangeRateType,
+  ExchangeRateQuoteSide,
   AccountType,
   AccountStatus,
   JournalType,
@@ -104,6 +105,7 @@ export interface CreateExchangeRateDto {
   effectiveDate: string;
   expiryDate?: string;
   rateType: ExchangeRateType;
+  quoteSide?: ExchangeRateQuoteSide;
   rateSource: string;
   sourceName?: string;
   sourceReference?: string;
@@ -115,6 +117,7 @@ export interface CreateExchangeRateDto {
 export interface ExchangeRateFilters {
   currencyCode?: string;
   rateType?: ExchangeRateType;
+  quoteSide?: ExchangeRateQuoteSide;
   from?: string;
   to?: string;
   isActive?: boolean;
@@ -495,6 +498,7 @@ class FinanceService {
     const params = new URLSearchParams();
     if (filters?.currencyCode) params.append('currencyCode', filters.currencyCode);
     if (filters?.rateType) params.append('rateType', filters.rateType);
+    if (filters?.quoteSide) params.append('quoteSide', filters.quoteSide);
     if (filters?.from) params.append('from', filters.from);
     if (filters?.to) params.append('to', filters.to);
     if (filters?.isActive !== undefined) params.append('isActive', String(filters.isActive));
@@ -522,6 +526,10 @@ class FinanceService {
    */
   async createExchangeRate(data: CreateExchangeRateDto): Promise<ExchangeRate> {
     return apiService.post<ExchangeRate>(`${this.baseUrl}/exchange-rates`, data);
+  }
+
+  async updateExchangeRate(id: string, data: CreateExchangeRateDto): Promise<ExchangeRate> {
+    return apiService.put<ExchangeRate>(`${this.baseUrl}/exchange-rates/${id}`, data);
   }
 
   /**

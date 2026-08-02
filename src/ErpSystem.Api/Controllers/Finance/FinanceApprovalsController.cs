@@ -45,6 +45,7 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("UnitJournalEntry"),
         Normalize("UnitAccountBudget"),
         Normalize("AllocationRule"),
+        Normalize("AllocationRunBatch"),
         Normalize("CashTransaction"),
         Normalize("BankReconciliation"),
         Normalize("OpeningBalanceBatch"),
@@ -482,6 +483,17 @@ public class FinanceApprovalsController : ControllerBase
             return item == null ? FinanceApprovalFacts.Empty : new(item.Code, item.Name, item.ApprovalStatus, item.LastRunDate, null, null);
         }
 
+        if (key == Normalize("AllocationRunBatch"))
+        {
+            var item = await _db.Set<AllocationRunBatch>()
+                .AsNoTracking()
+                .Include(x => x.AllocationRule)
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            return item == null
+                ? FinanceApprovalFacts.Empty
+                : new(item.BatchNumber, item.AllocationRule?.Name ?? item.Description, item.Status.ToString(), item.AllocationDate, item.TotalAllocated, item.FunctionalCurrencyCode);
+        }
+
         if (key == Normalize("CashTransaction"))
         {
             var item = await _db.Set<CashTransaction>().AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
@@ -743,24 +755,65 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
+        if (key == Normalize("AllocationRunBatch"))
+        {
+            await UpdateIfFoundAsync(_db.Set<AllocationRunBatch>(), tenantId, entityId, item =>
+            {
+                item.Status = AllocationRunBatchStatus.Approved;
+                item.ApprovedAt = now;
+                item.ApprovedBy = userId;
+                item.ApprovedByName = _currentUserService.UserName;
+            }, cancellationToken);
+            return;
+        }
+
         if (key == Normalize("BudgetReturn"))
         {
             await UpdateIfFoundAsync(_db.BudgetReturns, tenantId, entityId, item =>
             {
                 item.Status = "Approved";
                 item.ApprovedDate = now;
+                item.ApproverUserId = userId;
+                item.RejectionReason = null;
             }, cancellationToken);
+            await RecordBudgetAuditAsync(
+                tenantId,
+                "BudgetReturn",
+                entityId,
+                FinanceAuditEvents.BudgetReturnApproved,
+                "Submitted",
+                "Approved",
+                comments,
+                cancellationToken);
             return;
         }
 
         if (key == Normalize("BudgetScenario"))
         {
-            await UpdateIfFoundAsync(_db.BudgetScenarios, tenantId, entityId, item =>
-            {
-                item.Status = "Locked";
-                item.LockedDate = now;
-                item.LockedByUserId = userId;
-            }, cancellationToken);
+            var scenario = await _db.BudgetScenarios.FirstOrDefaultAsync(
+                item => item.TenantId == tenantId && item.Id == entityId && !item.IsDeleted,
+                cancellationToken);
+            if (scenario == null)
+                return;
+
+            scenario.Status = "Approved";
+            // Approval authorizes and locks the scenario. Adoption as the official
+            // reporting baseline is a separate, explicit Budgeting action.
+            scenario.IsActive = false;
+            scenario.LockedDate = now;
+            scenario.LockedByUserId = userId;
+            scenario.UpdatedAt = now;
+            scenario.LastModifiedById = userId;
+            await _db.SaveChangesAsync(cancellationToken);
+            await RecordBudgetAuditAsync(
+                tenantId,
+                "BudgetScenario",
+                entityId,
+                FinanceAuditEvents.BudgetScenarioApproved,
+                "InReview",
+                "Approved",
+                comments,
+                cancellationToken);
             return;
         }
 
@@ -1194,13 +1247,54 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
+        if (key == Normalize("AllocationRunBatch"))
+        {
+            await UpdateIfFoundAsync(_db.Set<AllocationRunBatch>(), tenantId, entityId, item =>
+            {
+                item.Status = AllocationRunBatchStatus.Rejected;
+                item.RejectionReason = reason;
+            }, cancellationToken);
+            return;
+        }
+
         if (key == Normalize("BudgetReturn"))
         {
             await UpdateIfFoundAsync(_db.BudgetReturns, tenantId, entityId, item =>
             {
                 item.Status = "Rejected";
                 item.RejectionReason = reason;
+                item.ApprovedDate = null;
             }, cancellationToken);
+            await RecordBudgetAuditAsync(
+                tenantId,
+                "BudgetReturn",
+                entityId,
+                FinanceAuditEvents.BudgetReturnRejected,
+                "Submitted",
+                "Rejected",
+                reason,
+                cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("BudgetScenario"))
+        {
+            await UpdateIfFoundAsync(_db.BudgetScenarios, tenantId, entityId, item =>
+            {
+                item.Status = "Collecting";
+                item.LockedDate = null;
+                item.LockedByUserId = null;
+                item.Description = AppendReason(item.Description, reason);
+            }, cancellationToken);
+            await RecordBudgetAuditAsync(
+                tenantId,
+                "BudgetScenario",
+                entityId,
+                FinanceAuditEvents.BudgetScenarioRejected,
+                "InReview",
+                "Collecting",
+                reason,
+                cancellationToken);
             return;
         }
 
@@ -1725,6 +1819,38 @@ public class FinanceApprovalsController : ControllerBase
             Reason = eventType == FinanceAuditEvents.BankReconciliationRejected ? comment : null,
             Resource = "Finance.BankReconciliation",
             ResourceId = reconciliation.Id.ToString()
+        }, cancellationToken);
+    }
+
+    private async Task RecordBudgetAuditAsync(
+        Guid tenantId,
+        string entityType,
+        Guid entityId,
+        string eventType,
+        string fromStatus,
+        string toStatus,
+        string? comment,
+        CancellationToken cancellationToken)
+    {
+        if (_financeAuditService == null)
+            return;
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = eventType,
+            TenantId = tenantId,
+            SourceModule = "BUDGETING",
+            SourceDocumentType = entityType,
+            SourceDocumentId = entityId,
+            BeforeValues = new { Status = fromStatus },
+            AfterValues = new { Status = toStatus },
+            Comment = comment,
+            Reason = eventType is FinanceAuditEvents.BudgetReturnRejected
+                or FinanceAuditEvents.BudgetScenarioRejected
+                    ? comment
+                    : null,
+            Resource = $"Finance.{entityType}",
+            ResourceId = entityId.ToString()
         }, cancellationToken);
     }
 

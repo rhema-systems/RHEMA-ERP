@@ -136,7 +136,12 @@ if (args.Length > 0 && args[0] == "seed-workflows")
     using (var scope = tempApp.Services.CreateScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await db.Database.MigrateAsync();
+        var skipMigrations = args.Any(argument =>
+            string.Equals(argument, "--skip-migrations", StringComparison.OrdinalIgnoreCase));
+        if (!skipMigrations)
+        {
+            await db.Database.MigrateAsync();
+        }
 
         var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
         await seedingService.SeedWorkflowDefinitionsAsync();

@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Entities.Base;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Finance
 {
@@ -166,6 +167,34 @@ namespace ErpSystem.Core.Entities.Finance
         public virtual Account? ControlAccountGRVAccrual { get; set; }
 
         public Guid? DefaultBankAccountId { get; set; }
+
+        /// <summary>
+        /// Enables directional Buy/Sell selection. Kept off during migration so
+        /// tenants can load and approve directional rates before enforcing them.
+        /// </summary>
+        public bool DirectionalExchangeRatePolicyEnabled { get; set; }
+        public ExchangeRateQuoteSide DefaultTransactionQuoteSide { get; set; } = ExchangeRateQuoteSide.Mid;
+        public ExchangeRateQuoteSide ArInvoiceQuoteSide { get; set; } = ExchangeRateQuoteSide.Mid;
+        public ExchangeRateQuoteSide ArSettlementQuoteSide { get; set; } = ExchangeRateQuoteSide.Buying;
+        public ExchangeRateQuoteSide ApInvoiceQuoteSide { get; set; } = ExchangeRateQuoteSide.Mid;
+        public ExchangeRateQuoteSide ApSettlementQuoteSide { get; set; } = ExchangeRateQuoteSide.Selling;
+        public ExchangeRateQuoteSide ClosingQuoteSide { get; set; } = ExchangeRateQuoteSide.Mid;
+        public bool RequireExchangeRateOverrideApproval { get; set; } = true;
+
+        /// <summary>
+        /// Banking and settlement controls. DepositIntact is the safe tenant default.
+        /// </summary>
+        public DepositPolicy BankDepositPolicy { get; set; } = DepositPolicy.DepositIntact;
+        public bool RequireBankDepositPrimaryEvidence { get; set; } = true;
+        public bool AutoPostBankDepositAfterApproval { get; set; } = true;
+        public decimal? MaximumDepositDeductionAmount { get; set; }
+        public decimal? MaximumDepositDeductionPercentage { get; set; }
+        public int BankStatementMatchDateToleranceDays { get; set; } = 3;
+        public int ChequeClearingPeriodDays { get; set; } = 3;
+        public Guid? ReturnedChequeBankChargeAccountId { get; set; }
+        public virtual Account? ReturnedChequeBankChargeAccount { get; set; }
+        public ReturnedChequeChargeTreatment DefaultReturnedChequeChargeTreatment { get; set; } =
+            ReturnedChequeChargeTreatment.CustomerRecoverable;
 
         /// <summary>
         /// Contra-revenue / expense account debited when customer settlement discounts are allowed.

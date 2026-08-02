@@ -74,6 +74,8 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
         public async Task<RatioDefinitionDto> CreateAsync(CreateRatioDefinitionDto dto, CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(dto);
+
             var exists = await _unitOfWork.Repository<RatioDefinition>()
                 .GetQueryable(r => r.TenantId == TenantId && r.Code == dto.Code && !r.IsDeleted)
                 .AnyAsync(cancellationToken);
@@ -81,21 +83,29 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (exists)
                 throw new InvalidOperationException($"Ratio definition with code '{dto.Code}' already exists.");
 
+            var numeratorType = ParseComponentType(dto.NumeratorType);
+            var denominatorType = ParseComponentType(dto.DenominatorType);
+            var resultFormat = ParseResultFormat(dto.ResultFormat);
+            ValidateRatioComponent(numeratorType, dto.NumeratorAccountId ?? dto.NumeratorUnitAccountId, dto.NumeratorConstantValue, "Numerator");
+            ValidateRatioComponent(denominatorType, dto.DenominatorAccountId ?? dto.DenominatorUnitAccountId, dto.DenominatorConstantValue, "Denominator");
+            await ValidateRatioAccountReferencesAsync(numeratorType, dto.NumeratorAccountId ?? dto.NumeratorUnitAccountId, cancellationToken);
+            await ValidateRatioAccountReferencesAsync(denominatorType, dto.DenominatorAccountId ?? dto.DenominatorUnitAccountId, cancellationToken);
+
             var now = DateTime.UtcNow;
             var ratio = new RatioDefinition
             {
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
-                Code = dto.Code.ToUpper(),
-                Name = dto.Name,
-                Description = dto.Description,
-                NumeratorType = ParseComponentType(dto.NumeratorType),
+                Code = dto.Code.Trim().ToUpperInvariant(),
+                Name = dto.Name.Trim(),
+                Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim(),
+                NumeratorType = numeratorType,
                 NumeratorAccountId = dto.NumeratorAccountId ?? dto.NumeratorUnitAccountId,
                 NumeratorConstant = dto.NumeratorConstantValue,
-                DenominatorType = ParseComponentType(dto.DenominatorType),
+                DenominatorType = denominatorType,
                 DenominatorAccountId = dto.DenominatorAccountId ?? dto.DenominatorUnitAccountId,
                 DenominatorConstant = dto.DenominatorConstantValue,
-                ResultFormat = ParseResultFormat(dto.ResultFormat),
+                ResultFormat = resultFormat,
                 DecimalPlaces = dto.FormatPrecision,
                 IsActive = true,
                 CreatedAt = now,
@@ -380,9 +390,16 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
                 case RatioComponentType.UnitAccount:
                     if (!accountId.HasValue) return 0;
-                    var account = await _unitOfWork.Repository<UnitAccount>()
-                        .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == accountId.Value && !a.IsDeleted);
-                    return account?.CurrentBalance ?? 0;
+                    return await _unitOfWork.Repository<UnitJournalEntryLine>()
+                        .GetQueryable(l => l.TenantId == TenantId
+                            && l.UnitAccountId == accountId.Value
+                            && !l.IsDeleted
+                            && l.UnitJournalEntry!.TenantId == TenantId
+                            && (l.UnitJournalEntry.Status == UnitJournalEntryStatus.Posted
+                                || l.UnitJournalEntry.Status == UnitJournalEntryStatus.Reversed)
+                            && l.UnitJournalEntry.EntryDate >= startDate.Date
+                            && l.UnitJournalEntry.EntryDate <= endDate.Date)
+                        .SumAsync(l => l.Quantity, cancellationToken);
 
                 case RatioComponentType.Constant:
                     return constantValue ?? 0;
@@ -396,10 +413,47 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
         {
             return format switch
             {
-                RatioResultFormat.Percentage => $"{result * 100:N}{precision}%",
+                RatioResultFormat.Percentage => (result * 100).ToString($"N{precision}") + "%",
                 RatioResultFormat.Currency => result.ToString($"C{precision}"),
                 _ => result.ToString($"N{precision}")
             };
+        }
+
+        private static void ValidateRatioComponent(
+            RatioComponentType componentType,
+            Guid? accountId,
+            decimal? constantValue,
+            string componentName)
+        {
+            if (componentType == RatioComponentType.Constant)
+            {
+                if (!constantValue.HasValue)
+                    throw new ArgumentException($"{componentName} constant value is required.");
+                return;
+            }
+
+            if (!accountId.HasValue || accountId.Value == Guid.Empty)
+                throw new ArgumentException($"{componentName} account is required.");
+        }
+
+        private async Task ValidateRatioAccountReferencesAsync(
+            RatioComponentType componentType,
+            Guid? accountId,
+            CancellationToken cancellationToken)
+        {
+            if (!accountId.HasValue || componentType == RatioComponentType.Constant)
+                return;
+
+            var exists = componentType == RatioComponentType.FinancialAccount
+                ? await _unitOfWork.Repository<Account>()
+                    .GetQueryable(a => a.TenantId == TenantId && a.Id == accountId.Value && !a.IsDeleted)
+                    .AnyAsync(cancellationToken)
+                : await _unitOfWork.Repository<UnitAccount>()
+                    .GetQueryable(a => a.TenantId == TenantId && a.Id == accountId.Value && a.IsActive && !a.IsDeleted)
+                    .AnyAsync(cancellationToken);
+
+            if (!exists)
+                throw new ArgumentException($"{componentType} ratio account '{accountId}' was not found for the current tenant.");
         }
 
         private RatioComponentType ParseComponentType(string typeString)

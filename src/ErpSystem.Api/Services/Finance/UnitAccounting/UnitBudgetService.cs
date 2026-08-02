@@ -189,7 +189,14 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 var account = budget.UnitAccount;
                 if (account == null) continue;
 
-                var actualQuantity = account.CurrentBalance;
+                var actualQuantity = await _unitOfWork.Repository<UnitAccountBalance>()
+                    .GetQueryable(balance => balance.TenantId == TenantId
+                        && balance.UnitAccountId == budget.UnitAccountId
+                        && balance.FiscalPeriodId == budget.FiscalPeriodId
+                        && !balance.IsDeleted)
+                    .Select(balance => (decimal?)balance.ClosingBalance)
+                    .FirstOrDefaultAsync(cancellationToken) ?? 0m;
+
                 var budgetQuantity = budget.BudgetQuantity;
                 var variance = actualQuantity - budgetQuantity;
                 var variancePercent = budgetQuantity != 0 ? (variance / budgetQuantity) * 100 : 0;

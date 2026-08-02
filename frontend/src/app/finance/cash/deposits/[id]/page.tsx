@@ -1,0 +1,124 @@
+'use client';
+
+import { ChangeEvent, useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { ArrowLeft, CheckCircle2, FileText, Landmark, Loader2, RotateCcw, Send, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
+import type { BankDeposit } from '@/types/cash-management';
+
+export default function BankDepositDetailPage() {
+    const params = useParams<{ id: string }>();
+    const [deposit, setDeposit] = useState<BankDeposit | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [working, setWorking] = useState(false);
+
+    const load = useCallback(async () => {
+        try {
+            setDeposit(await cashManagementDataService.getBankDeposit(params.id));
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Could not load deposit.');
+        } finally {
+            setLoading(false);
+        }
+    }, [params.id]);
+
+    useEffect(() => { void load(); }, [load]);
+
+    const run = async (operation: () => Promise<BankDeposit>, message: string) => {
+        setWorking(true);
+        try {
+            setDeposit(await operation());
+            toast.success(message);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'The action failed.');
+        } finally {
+            setWorking(false);
+        }
+    };
+
+    const upload = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file || !deposit) return;
+        setWorking(true);
+        try {
+            const fileId = await cashManagementDataService.uploadBankingEvidence(file);
+            setDeposit(await cashManagementDataService.linkBankDepositAttachment(deposit.id, fileId));
+            toast.success('Deposit slip attached.');
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Could not attach evidence.');
+        } finally {
+            event.target.value = '';
+            setWorking(false);
+        }
+    };
+
+    if (loading || !deposit) {
+        return <div className="flex min-h-[50vh] items-center justify-center"><Loader2 className="h-7 w-7 animate-spin" /></div>;
+    }
+
+    const editable = deposit.status === 'Draft' || deposit.status === 'Returned';
+    const submitted = deposit.status === 'Submitted';
+
+    return (
+        <div className="space-y-6 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                    <Button variant="ghost" size="icon" asChild><Link href="/finance/cash/deposits"><ArrowLeft className="h-4 w-4" /></Link></Button>
+                    <div><div className="flex items-center gap-2"><h1 className="text-3xl font-bold">{deposit.depositNumber}</h1><Badge>{deposit.status}</Badge></div><p className="text-muted-foreground">{deposit.bankAccountName} · {deposit.depositReference}</p></div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    {editable && (
+                        <>
+                            <Button variant="outline" asChild><label className="cursor-pointer"><FileText className="mr-2 h-4 w-4" />Attach deposit slip<input className="hidden" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={upload} /></label></Button>
+                            <Button disabled={working || !deposit.attachments.some(item => item.isPrimaryEvidence)} onClick={() => void run(() => cashManagementDataService.submitBankDeposit(deposit.id), 'Deposit submitted to the Chief Accountant.')}><Send className="mr-2 h-4 w-4" />Submit</Button>
+                        </>
+                    )}
+                    {submitted && (
+                        <>
+                            <Button disabled={working} onClick={() => void run(() => cashManagementDataService.approveBankDeposit(deposit.id), 'Deposit approved and posted.')}><CheckCircle2 className="mr-2 h-4 w-4" />Approve</Button>
+                            <Button variant="outline" disabled={working} onClick={() => { const comments = window.prompt('What needs to be corrected?'); if (comments) void run(() => cashManagementDataService.returnBankDeposit(deposit.id, comments), 'Deposit returned for changes.'); }}><RotateCcw className="mr-2 h-4 w-4" />Return</Button>
+                            <Button variant="destructive" disabled={working} onClick={() => { const reason = window.prompt('Rejection reason'); if (reason) void run(() => cashManagementDataService.rejectBankDeposit(deposit.id, reason), 'Deposit rejected.'); }}><XCircle className="mr-2 h-4 w-4" />Reject</Button>
+                        </>
+                    )}
+                    {deposit.status === 'Approved' && (
+                        <Button disabled={working} onClick={() => void run(() => cashManagementDataService.postBankDeposit(deposit.id), 'Deposit posted to the bank control account.')}><Landmark className="mr-2 h-4 w-4" />Post deposit</Button>
+                    )}
+                </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Selected receipts</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{deposit.currency} {deposit.totalReceipts.toLocaleString(undefined, { minimumFractionDigits: 2 })}</CardContent></Card>
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Approved deductions</CardTitle></CardHeader><CardContent className="text-2xl font-semibold text-red-600">{deposit.currency} {deposit.totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2 })}</CardContent></Card>
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Net on deposit slip</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{deposit.currency} {deposit.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</CardContent></Card>
+            </div>
+            <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
+                <Card>
+                    <CardHeader><CardTitle>Settlement lines</CardTitle><CardDescription>Partial allocations are reserved while this batch remains open.</CardDescription></CardHeader>
+                    <CardContent className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead className="border-b text-left text-muted-foreground"><tr><th className="p-3">Source</th><th className="p-3">Counterparty</th><th className="p-3">Holding account</th><th className="p-3">Kind</th><th className="p-3 text-right">Amount</th></tr></thead>
+                            <tbody>{deposit.allocations.map(item => <tr key={item.id} className="border-b"><td className="p-3"><div className="font-medium">{item.entryNumber}</div><div className="text-xs text-muted-foreground">{item.referenceNumber}</div></td><td className="p-3">{item.counterpartyName ?? item.description}</td><td className="p-3">{item.liquidityAccountName}</td><td className={`p-3 ${item.allocationType === 'Deduction' ? 'text-red-600' : 'text-green-700'}`}>{item.allocationType}</td><td className="p-3 text-right">{deposit.currency} {item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td></tr>)}</tbody>
+                        </table>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader><CardTitle>Evidence & posting</CardTitle><CardDescription>Evidence is frozen once submitted.</CardDescription></CardHeader>
+                    <CardContent className="space-y-4">
+                        {deposit.attachments.length === 0 ? <p className="text-sm text-muted-foreground">No evidence attached.</p> : deposit.attachments.map(item => <a key={item.id} className="flex items-center gap-2 rounded-md border p-3 text-sm hover:bg-muted" href={item.fileUrl} target="_blank" rel="noreferrer"><FileText className="h-4 w-4" /><span className="flex-1 truncate">{item.fileName}</span>{item.isPrimaryEvidence && <Badge variant="secondary">Primary</Badge>}</a>)}
+                        <div className="space-y-2 border-t pt-4 text-sm">
+                            <div className="flex justify-between"><span className="text-muted-foreground">Deposit date</span><span>{new Date(deposit.depositDate).toLocaleDateString()}</span></div>
+                            <div className="flex justify-between"><span className="text-muted-foreground">Policy</span><span>{deposit.policySnapshot}</span></div>
+                            <div className="flex justify-between"><span className="text-muted-foreground">Submitted</span><span>{deposit.submittedAt ? new Date(deposit.submittedAt).toLocaleString() : '—'}</span></div>
+                            <div className="flex justify-between"><span className="text-muted-foreground">Posted</span><span>{deposit.postedAt ? new Date(deposit.postedAt).toLocaleString() : '—'}</span></div>
+                            {deposit.journalEntryId && <Button className="w-full" variant="outline" asChild><Link href={`/finance/journal-entries/${deposit.journalEntryId}`}>View posting journal</Link></Button>}
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+        </div>
+    );
+}
