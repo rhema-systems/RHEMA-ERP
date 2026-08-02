@@ -12,6 +12,7 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public class FinanceSettingsMigrationGapTests
 {
     private const string MigrationId = "20260731140309_RepairMissingFinanceSettingsColumns";
+    private const string ReconciliationMigrationId = "20260801160552_ReconcileFinanceMasterModelSnapshot";
 
     private static readonly string[] MissingColumns =
     {
@@ -36,7 +37,7 @@ public class FinanceSettingsMigrationGapTests
 
     [Fact]
     [Trait("Category", "Architecture")]
-    public void RepairMigration_ShouldBeDiscoveredAsTheLatestEfCoreMigration()
+    public void RepairMigration_ShouldBeDiscoveredBeforeTheMetadataReconciliationMigration()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=MigrationDiscovery;Trusted_Connection=True")
@@ -46,7 +47,9 @@ public class FinanceSettingsMigrationGapTests
         var migrations = context.GetService<IMigrationsAssembly>().Migrations;
 
         migrations.Should().ContainKey(MigrationId);
-        migrations.Keys.Max(StringComparer.Ordinal).Should().Be(MigrationId);
+        migrations.Should().ContainKey(ReconciliationMigrationId);
+        migrations.Keys.Max(StringComparer.Ordinal).Should().Be(ReconciliationMigrationId);
+        string.CompareOrdinal(MigrationId, ReconciliationMigrationId).Should().BeNegative();
     }
 
     [Fact]
