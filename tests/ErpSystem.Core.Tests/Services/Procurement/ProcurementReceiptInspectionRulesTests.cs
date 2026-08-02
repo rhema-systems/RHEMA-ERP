@@ -120,4 +120,19 @@ public sealed class ProcurementReceiptInspectionRulesTests
         ProcurementReceiptInspectionRules.CanClose(acknowledgement, resolution)
             .Should().Be(expected);
     }
+
+    [Theory]
+    [InlineData(ProcurementReceiptSupplierAcknowledgementStatus.Pending, true, true)]
+    [InlineData(ProcurementReceiptSupplierAcknowledgementStatus.Pending, false, true)]
+    [InlineData(ProcurementReceiptSupplierAcknowledgementStatus.Disputed, true, true)]
+    [InlineData(ProcurementReceiptSupplierAcknowledgementStatus.Disputed, false, false)]
+    [InlineData(ProcurementReceiptSupplierAcknowledgementStatus.Acknowledged, true, false)]
+    public void SupplierCanAcknowledgeAPreviouslyDisputedRejectionNote(
+        ProcurementReceiptSupplierAcknowledgementStatus status,
+        bool acknowledged,
+        bool expected)
+    {
+        ProcurementReceiptInspectionRules.CanSupplierRespond(status, acknowledged)
+            .Should().Be(expected);
+    }
 }

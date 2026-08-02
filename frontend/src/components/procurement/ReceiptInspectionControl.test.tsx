@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { ProcurementReceiptInspectionOverviewDto } from '@/services/purchasingService';
 import {
   buildReceiptInspectionEvidenceRequests,
+  receiptInspectionResolutionActionKey,
   ReceiptInspectionControl,
 } from './ReceiptInspectionControl';
 
@@ -72,6 +73,11 @@ const overview: ProcurementReceiptInspectionOverviewDto = {
   },
 };
 
+const requireCurrentInspection = () => {
+  if (!overview.current) throw new Error('The test fixture requires a current inspection.');
+  return overview.current;
+};
+
 describe('ReceiptInspectionControl', () => {
   it('submits one controlled evidence reference for every configured requirement', () => {
     const evidence = buildReceiptInspectionEvidenceRequests('SubmitReceiptInspection', [
@@ -120,5 +126,54 @@ describe('ReceiptInspectionControl', () => {
     expect(markup).toContain('INSPECTION_REPORT');
     expect(markup).toContain('DELIVERY_NOTE');
     expect(markup).not.toContain('Save inspection');
+  });
+
+  it('binds return and replacement evidence to each distinct lifecycle stage', () => {
+    expect(receiptInspectionResolutionActionKey(1, 1)).toBe('ReturnAuthorization');
+    expect(receiptInspectionResolutionActionKey(1, 2)).toBe('ReturnDispatch');
+    expect(receiptInspectionResolutionActionKey(2, 1)).toBe('ReplacementRequest');
+    expect(receiptInspectionResolutionActionKey(2, 4)).toBe('ReplacementReceipt');
+  });
+
+  it('exposes the supported replacement inspection after rejection', () => {
+    const rejected = {
+      ...overview,
+      canAcknowledge: false,
+      current: {
+        ...requireCurrentInspection(),
+        status: 3 as const,
+        qualityHold: false,
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <ReceiptInspectionControl
+        receiptId="receipt-0502"
+        initialOverview={rejected}
+      />
+    );
+
+    expect(markup).toContain('Reinitialize inspection');
+  });
+
+  it('lets a supplier acknowledge a disputed note without offering another dispute', () => {
+    const disputed = {
+      ...overview,
+      current: {
+        ...requireCurrentInspection(),
+        supplierAcknowledgementStatus: 3 as const,
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <ReceiptInspectionControl
+        receiptId="receipt-0502"
+        initialOverview={disputed}
+        external
+      />
+    );
+
+    expect(markup).toContain('Acknowledge after dispute');
+    expect(markup).not.toContain('>Dispute</button>');
   });
 });

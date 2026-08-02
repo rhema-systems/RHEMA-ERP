@@ -158,8 +158,8 @@ public sealed class ProcurementReceiptInspectionService :
                         current is not null &&
                         ProcurementReceiptInspectionRules.CanDecide(current.Status),
             CanAcknowledge = externalLinked && current is not null && current.QualityHold &&
-                             current.SupplierAcknowledgementStatus ==
-                             ProcurementReceiptSupplierAcknowledgementStatus.Pending,
+                             ProcurementReceiptInspectionRules.CanSupplierRespond(
+                                 current.SupplierAcknowledgementStatus, true),
             CanResolve = !externalLinked && manageAllowed && current is not null &&
                          (current.ResolutionStatus !=
                               ProcurementReceiptResolutionStatus.ReplacementRequested ||
@@ -290,8 +290,8 @@ public sealed class ProcurementReceiptInspectionService :
                 SupplierName = history[0].PurchaseOrderReceipt.PurchaseOrder.BusinessPartner?
                     .PartnerName ?? string.Empty,
                 CanAcknowledge = current is not null && current.QualityHold &&
-                                 current.SupplierAcknowledgementStatus ==
-                                 ProcurementReceiptSupplierAcknowledgementStatus.Pending,
+                                 ProcurementReceiptInspectionRules.CanSupplierRespond(
+                                     current.SupplierAcknowledgementStatus, true),
                 DecisionKeys = DecisionKeys,
                 EvidenceRequirementKeys = evidenceRequirementKeys,
                 Current = current is null ? null : Map(current),
@@ -569,6 +569,10 @@ public sealed class ProcurementReceiptInspectionService :
                     "Every rejected line requires a reason and quarantine location.");
 
             var before = Snapshot(inspection);
+            var configuredEvidenceRequirements = await LoadEvidenceRequirementKeysAsync(
+                inspection.ConfigurationProfileId, cancellationToken);
+            EnsureConfiguredEvidenceRequirements(
+                "SubmitReceiptInspection", configuredEvidenceRequirements, request.Evidence);
             var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
             foreach (var item in evidence)
             {
@@ -811,10 +815,11 @@ public sealed class ProcurementReceiptInspectionService :
                 inspection.PurchaseOrderReceipt.PurchaseOrder.BusinessPartnerId,
                 cancellationToken);
             EnsureRowVersion(inspection.RowVersion, request.RowVersion);
-            if (!inspection.QualityHold || inspection.SupplierAcknowledgementStatus !=
-                ProcurementReceiptSupplierAcknowledgementStatus.Pending)
+            if (!inspection.QualityHold ||
+                !ProcurementReceiptInspectionRules.CanSupplierRespond(
+                    inspection.SupplierAcknowledgementStatus, request.Acknowledged))
                 throw Conflict("RCV_SUPPLIER_ACK_NOT_AVAILABLE",
-                    "Supplier acknowledgement is available only for an active rejected-quantity quality hold.");
+                    "A supplier response is available only for a pending rejection note, or to acknowledge a previously disputed note.");
             var evidence = await ValidateEvidenceAsync(inspection, request.Evidence, cancellationToken);
             if (request.Acknowledged && evidence.Count == 0)
                 throw Validation("RCV_SUPPLIER_ACK_EVIDENCE_REQUIRED",
@@ -882,6 +887,9 @@ public sealed class ProcurementReceiptInspectionService :
                 inspection.ResolutionKind != request.ResolutionKind)
                 throw Conflict("RCV_RESOLUTION_KIND_IMMUTABLE",
                     "The selected return/replacement route cannot be changed after progression begins.");
+            var expectedEvidenceActionKey = ResolutionEvidenceActionKey(
+                request.ResolutionKind, inspection.ResolutionStatus);
+            EnsureEvidenceActionKey(expectedEvidenceActionKey, request.Evidence);
             if (request.ResolutionKind == ProcurementReceiptResolutionKind.Replacement &&
                 inspection.ResolutionStatus ==
                 ProcurementReceiptResolutionStatus.ReplacementRequested)
@@ -1820,6 +1828,59 @@ public sealed class ProcurementReceiptInspectionService :
             throw Validation("RCV_DEC013_EVIDENCE_MISSING",
                 "DEC-013 must define at least one receipt evidence requirement.");
         return requirements;
+    }
+
+    internal static void EnsureConfiguredEvidenceRequirements(
+        string expectedActionKey,
+        IEnumerable<string> configuredRequirementKeys,
+        IEnumerable<ProcurementReceiptInspectionEvidenceRequest> requests)
+    {
+        var expected = configuredRequirementKeys
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var rows = requests.ToList();
+        var actual = rows
+            .Where(item => !string.IsNullOrWhiteSpace(item.RequirementKey))
+            .Select(item => item.RequirementKey.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (rows.Count != expected.Count || !actual.SetEquals(expected) ||
+            rows.Any(item => !string.Equals(item.ActionKey?.Trim(), expectedActionKey,
+                StringComparison.OrdinalIgnoreCase)))
+            throw Validation("RCV_EVIDENCE_REQUIREMENTS_MISMATCH",
+                "Evidence must contain every configured DEC-013 requirement exactly once and must not contain unexpected requirements.");
+    }
+
+    internal static string ResolutionEvidenceActionKey(
+        ProcurementReceiptResolutionKind resolutionKind,
+        ProcurementReceiptResolutionStatus resolutionStatus) =>
+        (resolutionKind, resolutionStatus) switch
+        {
+            (ProcurementReceiptResolutionKind.Return,
+                ProcurementReceiptResolutionStatus.Required) => "ReturnAuthorization",
+            (ProcurementReceiptResolutionKind.Return,
+                ProcurementReceiptResolutionStatus.Authorized) => "ReturnDispatch",
+            (ProcurementReceiptResolutionKind.Replacement,
+                ProcurementReceiptResolutionStatus.Required) => "ReplacementRequest",
+            (ProcurementReceiptResolutionKind.Replacement,
+                ProcurementReceiptResolutionStatus.ReplacementRequested) => "ReplacementReceipt",
+            (ProcurementReceiptResolutionKind.None, _) =>
+                throw Validation("RCV_RESOLUTION_KIND_REQUIRED",
+                    "Return or Replacement must be selected."),
+            _ => throw Conflict("RCV_RESOLUTION_STAGE_INVALID",
+                "The return or replacement route is not at a stage that can be progressed.")
+        };
+
+    internal static void EnsureEvidenceActionKey(
+        string expectedActionKey,
+        IEnumerable<ProcurementReceiptInspectionEvidenceRequest> requests)
+    {
+        if (requests.Any(item => !string.Equals(
+                item.ActionKey?.Trim(), expectedActionKey,
+                StringComparison.OrdinalIgnoreCase)))
+            throw Validation("RCV_EVIDENCE_ACTION_MISMATCH",
+                $"Evidence for this resolution stage must use the action key {expectedActionKey}.");
     }
 
     private async Task<bool> CanUseCapabilityAsync(

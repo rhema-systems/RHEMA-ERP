@@ -19,6 +19,7 @@ import {
   type ProcurementReceiptInspectionEvidenceRequest,
   type ProcurementReceiptInspectionOverviewDto,
   type ProcurementReceiptResolutionKind,
+  type ProcurementReceiptResolutionStatus,
 } from '@/services/purchasingService';
 
 type LineDraft = {
@@ -82,6 +83,17 @@ export const buildReceiptInspectionEvidenceRequests = (
     evidenceReference: row.evidenceReference.trim(),
   };
 });
+
+export const receiptInspectionResolutionActionKey = (
+  resolutionKind: ProcurementReceiptResolutionKind,
+  resolutionStatus: ProcurementReceiptResolutionStatus
+) => {
+  if (resolutionKind === 1 && resolutionStatus === 1) return 'ReturnAuthorization';
+  if (resolutionKind === 1 && resolutionStatus === 2) return 'ReturnDispatch';
+  if (resolutionKind === 2 && resolutionStatus === 1) return 'ReplacementRequest';
+  if (resolutionKind === 2 && resolutionStatus === 4) return 'ReplacementReceipt';
+  throw new Error('The return or replacement route is not ready for progression.');
+};
 
 export function ReceiptInspectionControl({ receiptId, initialOverview, external = false, onChanged }: Props) {
   const [overview, setOverview] = useState<ProcurementReceiptInspectionOverviewDto | null>(initialOverview ?? null);
@@ -292,10 +304,13 @@ export function ReceiptInspectionControl({ receiptId, initialOverview, external 
           {(overview.canAcknowledge || overview.canResolve || overview.canClose) && <div><Label>Reference</Label><Input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Supplier reference, dispatch note, replacement receipt, or closure reference" /></div>}
           {overview.canResolve && <div className="max-w-xs"><Label>Resolution route</Label><Select value={String(resolutionKind)} onValueChange={(value) => setResolutionKind(Number(value) as ProcurementReceiptResolutionKind)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="1">Return</SelectItem><SelectItem value="2">Replacement</SelectItem></SelectContent></Select></div>}
           <div className="flex flex-wrap gap-2">
+            {!external && current.status === 3 && <Button disabled={busy} onClick={() => void run(() => purchasingService.initializeReceiptInspection(receiptId), 'Replacement inspection initialized.')}>
+              Reinitialize inspection
+            </Button>}
             {overview.canSubmit && <Button disabled={busy || !comment.trim()} onClick={() => void run(() => purchasingService.submitReceiptInspection(current.id, { comment: comment.trim(), rowVersion: current.rowVersion, evidence: controlledEvidence('SubmitReceiptInspection') }), 'Inspection submitted for independent approval.')}>Submit</Button>}
             {overview.canDecide && <><Button disabled={busy || !comment.trim()} onClick={() => void run(() => purchasingService.decideReceiptInspection(current.id, { approved: true, comment: comment.trim(), rowVersion: current.rowVersion }), 'Inspection approved and accepted stock posted.')}>Approve</Button><Button variant="destructive" disabled={busy || !comment.trim()} onClick={() => void run(() => purchasingService.decideReceiptInspection(current.id, { approved: false, comment: comment.trim(), rowVersion: current.rowVersion }), 'Inspection rejected by workflow.')}>Reject</Button></>}
-            {overview.canAcknowledge && <><Button disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.acknowledgeReceiptInspection(current.id, { acknowledged: true, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('supplier-ack'), rowVersion: current.rowVersion, evidence: controlledEvidence('SupplierAcknowledgement') }), 'Rejection note acknowledged.')}>Acknowledge rejection</Button><Button variant="destructive" disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.acknowledgeReceiptInspection(current.id, { acknowledged: false, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('supplier-dispute'), rowVersion: current.rowVersion, evidence: evidenceRows.some((row) => row.evidenceId.trim()) ? controlledEvidence('SupplierDispute') : [] }), 'Rejection note disputed.')}>Dispute</Button></>}
-            {overview.canResolve && <Button disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.resolveReceiptInspection(current.id, { resolutionKind, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('receipt-resolution'), rowVersion: current.rowVersion, evidence: controlledEvidence('ResolutionEvidence') }), 'Return or replacement progression recorded.')}>Progress {resolutionKind === 1 ? 'return' : 'replacement'}</Button>}
+            {overview.canAcknowledge && <><Button disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.acknowledgeReceiptInspection(current.id, { acknowledged: true, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('supplier-ack'), rowVersion: current.rowVersion, evidence: controlledEvidence('SupplierAcknowledgement') }), 'Rejection note acknowledged.')}>{current.supplierAcknowledgementStatus === 3 ? 'Acknowledge after dispute' : 'Acknowledge rejection'}</Button>{current.supplierAcknowledgementStatus === 1 && <Button variant="destructive" disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.acknowledgeReceiptInspection(current.id, { acknowledged: false, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('supplier-dispute'), rowVersion: current.rowVersion, evidence: evidenceRows.some((row) => row.evidenceId.trim()) ? controlledEvidence('SupplierDispute') : [] }), 'Rejection note disputed.')}>Dispute</Button>}</>}
+            {overview.canResolve && <Button disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.resolveReceiptInspection(current.id, { resolutionKind, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('receipt-resolution'), rowVersion: current.rowVersion, evidence: controlledEvidence(receiptInspectionResolutionActionKey(resolutionKind, current.resolutionStatus)) }), 'Return or replacement progression recorded.')}>Progress {resolutionKind === 1 ? 'return' : 'replacement'}</Button>}
             {overview.canClose && <Button disabled={busy || !comment.trim() || !reference.trim()} onClick={() => void run(() => purchasingService.closeReceiptInspection(current.id, { resolutionKind: current.resolutionKind, reference: reference.trim(), comment: comment.trim(), idempotencyKey: requestKey('receipt-closure'), rowVersion: current.rowVersion, evidence: controlledEvidence('ClosureEvidence') }), 'Inspection and quality hold closed.')}>Close case</Button>}
             {busy && <Loader2 className="h-5 w-5 animate-spin self-center" />}
           </div>

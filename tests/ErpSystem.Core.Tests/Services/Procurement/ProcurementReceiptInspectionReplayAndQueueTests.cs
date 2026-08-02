@@ -82,6 +82,69 @@ public sealed class ProcurementReceiptInspectionReplayAndQueueTests
     }
 
     [Fact]
+    public void Submission_requires_the_exact_configured_evidence_set()
+    {
+        var required = new[] { "INSPECTION_REPORT", "DELIVERY_NOTE" };
+        var valid = EvidenceRequests(
+            ("SubmitReceiptInspection", "INSPECTION_REPORT"),
+            ("SubmitReceiptInspection", "DELIVERY_NOTE"));
+
+        var accepted = () => ProcurementReceiptInspectionService
+            .EnsureConfiguredEvidenceRequirements(
+                "SubmitReceiptInspection", required, valid);
+        accepted.Should().NotThrow();
+
+        var missing = () => ProcurementReceiptInspectionService
+            .EnsureConfiguredEvidenceRequirements(
+                "SubmitReceiptInspection", required,
+                EvidenceRequests(("SubmitReceiptInspection", "INSPECTION_REPORT")));
+        missing.Should().Throw<ProcurementReceiptInspectionValidationException>()
+            .Where(exception => exception.Code == "RCV_EVIDENCE_REQUIREMENTS_MISMATCH");
+
+        var unexpected = () => ProcurementReceiptInspectionService
+            .EnsureConfiguredEvidenceRequirements(
+                "SubmitReceiptInspection", required,
+                EvidenceRequests(
+                    ("SubmitReceiptInspection", "INSPECTION_REPORT"),
+                    ("SubmitReceiptInspection", "PACKING_LIST")));
+        unexpected.Should().Throw<ProcurementReceiptInspectionValidationException>()
+            .Where(exception => exception.Code == "RCV_EVIDENCE_REQUIREMENTS_MISMATCH");
+
+        var wrongAction = () => ProcurementReceiptInspectionService
+            .EnsureConfiguredEvidenceRequirements(
+                "SubmitReceiptInspection", required,
+                EvidenceRequests(
+                    ("OtherAction", "INSPECTION_REPORT"),
+                    ("OtherAction", "DELIVERY_NOTE")));
+        wrongAction.Should().Throw<ProcurementReceiptInspectionValidationException>()
+            .Where(exception => exception.Code == "RCV_EVIDENCE_REQUIREMENTS_MISMATCH");
+    }
+
+    [Theory]
+    [InlineData(ProcurementReceiptResolutionKind.Return,
+        ProcurementReceiptResolutionStatus.Required, "ReturnAuthorization")]
+    [InlineData(ProcurementReceiptResolutionKind.Return,
+        ProcurementReceiptResolutionStatus.Authorized, "ReturnDispatch")]
+    [InlineData(ProcurementReceiptResolutionKind.Replacement,
+        ProcurementReceiptResolutionStatus.Required, "ReplacementRequest")]
+    [InlineData(ProcurementReceiptResolutionKind.Replacement,
+        ProcurementReceiptResolutionStatus.ReplacementRequested, "ReplacementReceipt")]
+    public void Resolution_evidence_action_key_is_bound_to_the_actual_stage(
+        ProcurementReceiptResolutionKind kind,
+        ProcurementReceiptResolutionStatus status,
+        string expected)
+    {
+        ProcurementReceiptInspectionService.ResolutionEvidenceActionKey(kind, status)
+            .Should().Be(expected);
+
+        var wrongAction = () => ProcurementReceiptInspectionService
+            .EnsureEvidenceActionKey(expected,
+                EvidenceRequests(("ResolutionEvidence", "INSPECTION_REPORT")));
+        wrongAction.Should().Throw<ProcurementReceiptInspectionValidationException>()
+            .Where(exception => exception.Code == "RCV_EVIDENCE_ACTION_MISMATCH");
+    }
+
+    [Fact]
     public void Supplier_queue_is_bounded_and_set_loaded_without_overview_n_plus_one()
     {
         var source = ReadRepositoryFile(
@@ -174,6 +237,18 @@ public sealed class ProcurementReceiptInspectionReplayAndQueueTests
             }
         ]
     };
+
+    private static List<ProcurementReceiptInspectionEvidenceRequest> EvidenceRequests(
+        params (string ActionKey, string RequirementKey)[] rows) => rows
+        .Select((row, index) => new ProcurementReceiptInspectionEvidenceRequest
+        {
+            ActionKey = row.ActionKey,
+            RequirementKey = row.RequirementKey,
+            ReferenceKind = ProcurementReceiptInspectionEvidenceKind.CentralDocumentUpload,
+            FileUploadRecordId = Guid.NewGuid(),
+            EvidenceReference = $"DMS-{index + 1}"
+        })
+        .ToList();
 
     private static string ReadRepositoryFile(params string[] parts)
     {

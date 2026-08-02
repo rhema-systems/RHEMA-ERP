@@ -58,6 +58,12 @@ public static class ProcurementReceiptInspectionRules
             or ProcurementReceiptInspectionStatus.ReturnPending
             or ProcurementReceiptInspectionStatus.ReplacementPending;
 
+    public static bool CanSupplierRespond(
+        ProcurementReceiptSupplierAcknowledgementStatus status,
+        bool acknowledged) =>
+        status == ProcurementReceiptSupplierAcknowledgementStatus.Pending ||
+        (acknowledged && status == ProcurementReceiptSupplierAcknowledgementStatus.Disputed);
+
     public static bool CanClose(
         ProcurementReceiptSupplierAcknowledgementStatus acknowledgement,
         ProcurementReceiptResolutionStatus resolution) =>
