@@ -1,10 +1,14 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Models;
+using ErpSystem.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR
 {
@@ -19,6 +23,9 @@ namespace ErpSystem.Api.Controllers.HR
         private readonly ILeaveService _leaveService;
         private readonly ILeaveBalanceRecalculationService _recalculationService;
         private readonly IFileStorageService _fileStorageService;
+        private readonly IHrControlledDocumentService _hrDocuments;
+        private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+        private readonly ApplicationDbContext _db;
         private readonly ICurrentUserService _currentUserService;
         private readonly ILogger<LeavesController> _logger;
 
@@ -26,12 +33,18 @@ namespace ErpSystem.Api.Controllers.HR
             ILeaveService leaveService,
             ILeaveBalanceRecalculationService recalculationService,
             IFileStorageService fileStorageService,
+            IHrControlledDocumentService hrDocuments,
+            ICentralDocumentRepositoryFileService centralDocuments,
+            ApplicationDbContext db,
             ICurrentUserService currentUserService,
             ILogger<LeavesController> logger)
         {
             _leaveService = leaveService;
             _recalculationService = recalculationService;
             _fileStorageService = fileStorageService;
+            _hrDocuments = hrDocuments;
+            _centralDocuments = centralDocuments;
+            _db = db;
             _currentUserService = currentUserService;
             _logger = logger;
         }
@@ -632,53 +645,124 @@ namespace ErpSystem.Api.Controllers.HR
         [HttpPost("{id:guid}/attachments")]
         [ProducesResponseType(typeof(LeaveRequestAttachmentDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> UploadAttachment(Guid id, IFormFile file)
+        public async Task<IActionResult> UploadAttachment(Guid id, IFormFile file, CancellationToken ct = default)
         {
+            if (file == null || file.Length == 0)
+                return BadRequest(new { message = "No file provided" });
+
+            var uploadedById = _currentUserService.EmployeeId ?? Guid.Empty;
+            if (uploadedById == Guid.Empty)
+                return Unauthorized(new { message = "User employee context not found" });
+
+            if (_currentUserService.TenantId is not Guid tenantId ||
+                !Guid.TryParse(_currentUserService.UserId, out var actorUserId))
+                return Unauthorized(new { message = "User context could not be resolved" });
+
+            // Confirms the leave request exists and belongs to this tenant before anything is
+            // stored, and gives the DMS registration a source record that definitely exists.
             try
             {
-                if (file == null || file.Length == 0)
-                    return BadRequest(new { message = "No file provided" });
-
-                var uploadedById = _currentUserService.EmployeeId ?? Guid.Empty;
-                if (uploadedById == Guid.Empty)
-                    return Unauthorized(new { message = "User employee context not found" });
-
-                await using var stream = file.OpenReadStream();
-                var uploadRequest = new FileUploadRequest
-                {
-                    FileStream  = stream,
-                    FileName    = file.FileName,
-                    ContentType = file.ContentType,
-                    FileSize    = file.Length,
-                    Category    = "leave-attachments",
-                    TenantId    = _currentUserService.TenantId?.ToString(),
-                };
-
-                var storageResult = await _fileStorageService.UploadFileAsync(uploadRequest);
-                if (!storageResult.Success)
-                    return StatusCode(500, storageResult.ErrorMessage ?? "File upload failed");
-
-                var dto = await _leaveService.UploadAttachmentAsync(
-                    id, uploadedById, file.FileName, storageResult.FilePath,
-                    file.ContentType, file.Length);
-
-                return Ok(dto);
+                await _leaveService.GetAttachmentsAsync(id);
             }
             catch (ArgumentException ex)
             {
                 return NotFound(new { message = ex.Message });
             }
+
+            HrControlledDocument document;
+            try
+            {
+                document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
+                {
+                    TenantId = tenantId,
+                    ActorUserId = actorUserId,
+                    ActorName = _currentUserService.UserName,
+                    Category = ControlledFileUploadCategories.HrLeaveAttachments,
+                    File = file,
+                    Registration = new HrDocumentDmsRegistration
+                    {
+                        SourceLabel = "Leave request attachment",
+                        SourceEntityType = "LeaveRequest",
+                        SourceRecordId = id,
+                        Title = Path.GetFileName(file.FileName),
+                        DocumentType = "LeaveAttachment",
+                        ChangeSummary = "Uploaded through the leave request screen."
+                    }
+                }, ct);
+            }
+            catch (ControlledFileUploadException ex)
+            {
+                return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
+            }
+
+            try
+            {
+                var dto = await _leaveService.UploadAttachmentAsync(
+                    id, uploadedById, document.OriginalFileName, string.Empty,
+                    document.ContentType, document.FileSize,
+                    document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId);
+
+                return Ok(dto);
+            }
             catch (Exception ex)
             {
+                // The file is stored and catalogued but nothing references it — take it back out.
+                await _hrDocuments.RollbackAsync(document, tenantId, actorUserId, ct);
+
+                if (ex is ArgumentException)
+                    return NotFound(new { message = ex.Message });
+
                 _logger.LogError(ex, "Error uploading attachment for leave request {LeaveRequestId}", id);
                 return StatusCode(500, "An error occurred while uploading the attachment");
             }
         }
 
+        /// <summary>
+        /// Streams a leave attachment to a caller entitled to see it.
+        /// </summary>
+        /// <remarks>
+        /// Attachments are frequently medical certificates, so they are stored privately and
+        /// are only reachable here. Neither this endpoint's helper nor the DMS performs the
+        /// entitlement check — that is the ownership test below.
+        /// </remarks>
+        [HttpGet("attachments/{attachmentId:guid}/download")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> DownloadAttachment(Guid attachmentId, CancellationToken ct = default)
+        {
+            if (_currentUserService.TenantId is not Guid tenantId)
+                return Unauthorized(new { message = "Tenant context could not be resolved" });
+
+            var attachment = await _db.Set<Core.Entities.HR.StaffLeave.LeaveRequestAttachment>()
+                .AsNoTracking()
+                .Include(item => item.LeaveRequest)
+                .SingleOrDefaultAsync(
+                    item => item.Id == attachmentId && item.TenantId == tenantId && !item.IsDeleted,
+                    ct);
+            if (attachment is null)
+                return NotFound(new { message = "Attachment not found" });
+
+            var isOwner = _currentUserService.EmployeeId is Guid employeeId &&
+                          attachment.LeaveRequest.EmployeeId == employeeId;
+            var isHr = _currentUserService.IsInRole("HR") ||
+                       _currentUserService.IsInRole("Admin") ||
+                       _currentUserService.IsInRole("SuperAdmin");
+            if (!isOwner && !isHr)
+                return Forbid();
+
+            return await HrDocumentDownload.ServeAsync(
+                this, _centralDocuments, _fileStorageService, _db, tenantId,
+                attachment.DocumentRecordId, attachment.DocumentVersionId,
+                attachment.FileUploadRecordId, attachment.FilePath,
+                attachment.FileName, attachment.ContentType,
+                inline: false, ct);
+        }
+
         [HttpDelete("attachments/{attachmentId:guid}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> DeleteAttachment(Guid attachmentId)
+        public async Task<IActionResult> DeleteAttachment(Guid attachmentId, CancellationToken ct = default)
         {
             try
             {
@@ -686,7 +770,32 @@ namespace ErpSystem.Api.Controllers.HR
                 if (attachment == null)
                     return NotFound(new { message = "Attachment not found" });
 
-                if (!string.IsNullOrWhiteSpace(attachment.FilePath))
+                // Controlled uploads and their DMS records are removed through the shared
+                // boundary, which soft-deletes and schedules the physical delete. Only
+                // pre-migration rows still carry a raw storage path to remove directly.
+                var stored = await _db.Set<Core.Entities.HR.StaffLeave.LeaveRequestAttachment>()
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.Id == attachmentId, ct);
+
+                if (stored is not null &&
+                    _currentUserService.TenantId is Guid tenantId &&
+                    Guid.TryParse(_currentUserService.UserId, out var actorUserId) &&
+                    stored.FileUploadRecordId is Guid uploadId)
+                {
+                    await _hrDocuments.RollbackAsync(
+                        new HrControlledDocument
+                        {
+                            FileUploadRecordId = uploadId,
+                            FilePath = stored.FilePath,
+                            OriginalFileName = stored.FileName,
+                            ContentType = stored.ContentType ?? "application/octet-stream",
+                            FileSize = stored.FileSizeBytes ?? 0,
+                            DocumentRecordId = stored.DocumentRecordId,
+                            DocumentVersionId = stored.DocumentVersionId
+                        },
+                        tenantId, actorUserId, ct);
+                }
+                else if (!string.IsNullOrWhiteSpace(attachment.FilePath))
                 {
                     try { await _fileStorageService.DeleteFileAsync(attachment.FilePath); }
                     catch (Exception ex) { _logger.LogWarning(ex, "Could not delete file {FilePath}", attachment.FilePath); }

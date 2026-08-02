@@ -9,7 +9,10 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/client-portal/auth")]
 [AllowAnonymous]
-[EnableRateLimiting("PublicPortalPolicy")]
+// AuthPolicy (10/min in production), not PublicPortalPolicy (60/min). The looser policy is a
+// vacancy-browsing budget and was never an appropriate allowance for credential endpoints —
+// the candidate portal's auth controller has always used AuthPolicy.
+[EnableRateLimiting("AuthPolicy")]
 public class ConsultantClientPortalAuthController : ControllerBase
 {
     private readonly IConsultantClientPortalAuthService _authService;
@@ -79,6 +82,29 @@ public class ConsultantClientPortalAuthController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Re-sends the account verification email. Always returns 204 to avoid email enumeration.
+    /// </summary>
+    /// <remarks>
+    /// Registration issues no session token and login refuses unverified accounts, so without a
+    /// resend path a lost verification email leaves the account permanently unusable. Cooled down
+    /// per-address in the service as well as rate-limited here, because this endpoint sends mail
+    /// to a third party on demand.
+    /// </remarks>
+    [HttpPost("resend-verification")]
+    [EnableRateLimiting("SensitivePolicy")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> ResendVerification(
+        [FromBody] ConsultantClientPortalForgotPasswordDto dto,
+        CancellationToken ct)
+    {
+        if (!TryGetTenantId(out var tenantId))
+            return BadRequest(new { message = "X-Tenant-Id header is required." });
+
+        await _authService.ResendVerificationEmailAsync(dto.Email, tenantId, ct);
+        return NoContent();
     }
 
     [HttpPost("forgot-password")]

@@ -45,13 +45,24 @@ public interface ICandidatePortalService
     /// <summary>Get all documents uploaded by this portal account.</summary>
     Task<List<JobCandidateDocumentDto>> GetDocumentsAsync(Guid accountId, Guid tenantId, CancellationToken ct = default);
 
-    /// <summary>Register a newly uploaded document file for this candidate.</summary>
+    /// <summary>
+    /// Resolves the candidate profile behind a portal account, throwing when the account has
+    /// not completed one yet. Used to name the source record for central-DMS registration.
+    /// </summary>
+    Task<Guid> RequireCandidateIdAsync(Guid accountId, Guid tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Registers a newly uploaded document for this candidate. The upload/DMS identifiers come
+    /// from <c>IHrControlledDocumentService</c>; <paramref name="filePath"/> stays empty for new
+    /// rows and is only populated on pre-migration data.
+    /// </summary>
     Task<JobCandidateDocumentDto> AddDocumentAsync(Guid accountId, JobCandidateDocumentType documentType,
-        string fileName, string filePath, Guid tenantId, CancellationToken ct = default);
+        string fileName, string filePath, Guid tenantId, CancellationToken ct = default,
+        Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null);
 
     /// <summary>Delete a document that belongs to this candidate.</summary>
     Task DeleteDocumentAsync(Guid accountId, Guid documentId, Guid tenantId, CancellationToken ct = default);
 
-    /// <summary>Update the profile photo URL for this candidate.</summary>
-    Task<string> UpdateProfilePhotoAsync(Guid accountId, string photoUrl, Guid tenantId, CancellationToken ct = default);
+    /// <summary>Points the candidate profile at a stored, scanned photo.</summary>
+    Task UpdateProfilePhotoAsync(Guid accountId, Guid fileUploadRecordId, Guid tenantId, CancellationToken ct = default);
 }

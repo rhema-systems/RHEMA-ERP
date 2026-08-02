@@ -431,13 +431,41 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseResponseCaching();
 
-// Legacy supplier evidence may still exist under the historical public upload
-// tree. Never let static-file middleware bypass DMS/application authorization.
+// Personal-data trees that may still exist under the historical public upload root.
+// Static files are served BEFORE UseAuthentication/UseAuthorization below, so nothing
+// downstream can gate them — this middleware is the only place that can. Every folder
+// listed here now has an authorizing download endpoint; the legacy files themselves are
+// relocated by the HR legacy-file migration utility.
+string[] blockedLegacyUploadPaths =
+[
+    "/uploads/supplier-registration-evidence",
+    "/uploads/cv-uploads",
+    "/uploads/candidate-documents",
+    "/uploads/candidate-photos",
+    "/uploads/leave-attachments",
+    "/uploads/pip-attachments",
+    "/uploads/staff-discipline",
+    "/uploads/movements",
+    "/uploads/offers",
+];
+
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments(
-            "/uploads/supplier-registration-evidence",
-            StringComparison.OrdinalIgnoreCase))
+    var path = context.Request.Path;
+
+    foreach (var blocked in blockedLegacyUploadPaths)
+    {
+        if (path.StartsWithSegments(blocked, StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+    }
+
+    // Belt and braces for every hr-* category, in case the private storage root is ever
+    // misconfigured onto the web root. StartsWithSegments compares whole path segments,
+    // so a bare prefix like "hr-" needs the raw string check.
+    if ((path.Value ?? string.Empty).StartsWith("/uploads/hr-", StringComparison.OrdinalIgnoreCase))
     {
         context.Response.StatusCode = StatusCodes.Status404NotFound;
         return;

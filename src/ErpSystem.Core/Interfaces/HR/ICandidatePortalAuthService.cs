@@ -26,6 +26,12 @@ public interface ICandidatePortalAuthService
     Task VerifyEmailAsync(string token, CancellationToken ct = default);
 
     /// <summary>Initiate password reset — sends a reset link to the candidate's email.</summary>
+    /// <summary>
+    /// Re-sends the verification email with a fresh token. Completes without indicating whether
+    /// the address exists, is already verified, or is deactivated.
+    /// </summary>
+    Task ResendVerificationEmailAsync(string email, Guid tenantId, CancellationToken ct = default);
+
     Task RequestPasswordResetAsync(string email, Guid tenantId, CancellationToken ct = default);
 
     /// <summary>Complete password reset using the token emailed to the candidate.</summary>

@@ -1,12 +1,15 @@
 using ErpSystem.Api.Models;
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Models;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +24,9 @@ public class PerformanceImprovementPlansController : ControllerBase
 {
     private readonly IPerformanceImprovementPlanService _improvementPlanService;
     private readonly IFileStorageService _fileStorageService;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly ILogger<PerformanceImprovementPlansController> _logger;
@@ -28,12 +34,18 @@ public class PerformanceImprovementPlansController : ControllerBase
     public PerformanceImprovementPlansController(
         IPerformanceImprovementPlanService improvementPlanService,
         IFileStorageService fileStorageService,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        ApplicationDbContext db,
         ICurrentUserService currentUserService,
         IGenericRepository<Employee> employeeRepository,
         ILogger<PerformanceImprovementPlansController> logger)
     {
         _improvementPlanService = improvementPlanService;
         _fileStorageService = fileStorageService;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _db = db;
         _currentUserService = currentUserService;
         _employeeRepository = employeeRepository;
         _logger = logger;
@@ -591,35 +603,52 @@ public class PerformanceImprovementPlansController : ControllerBase
     [HttpPost("{pipId:guid}/attachments")]
     [ProducesResponseType(typeof(PipAttachmentResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> UploadAttachment(Guid pipId, IFormFile file, [FromForm] string? description)
+    public async Task<IActionResult> UploadAttachment(
+        Guid pipId, IFormFile file, [FromForm] string? description, CancellationToken ct = default)
     {
+        if (file == null || file.Length == 0)
+            return BadRequest("No file provided");
+
+        var uploadedById = _currentUserService.EmployeeId ?? Guid.Empty;
+        if (uploadedById == Guid.Empty)
+            return Unauthorized("User employee context not found");
+
+        if (_currentUserService.TenantId is not Guid tenantId ||
+            !Guid.TryParse(_currentUserService.UserId, out var actorUserId))
+            return Unauthorized("User context could not be resolved");
+
+        HrControlledDocument document;
         try
         {
-            if (file == null || file.Length == 0)
-                return BadRequest("No file provided");
-
-            var uploadedById = _currentUserService.EmployeeId ?? Guid.Empty;
-            if (uploadedById == Guid.Empty)
-                return Unauthorized("User employee context not found");
-
-            await using var stream = file.OpenReadStream();
-            var uploadRequest = new FileUploadRequest
+            document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
             {
-                FileStream  = stream,
-                FileName    = file.FileName,
-                ContentType = file.ContentType,
-                FileSize    = file.Length,
-                Category    = "pip-attachments",
-                TenantId    = _currentUserService.TenantId?.ToString(),
-            };
+                TenantId = tenantId,
+                ActorUserId = actorUserId,
+                ActorName = _currentUserService.UserName,
+                Category = ControlledFileUploadCategories.HrPipAttachments,
+                File = file,
+                Registration = new HrDocumentDmsRegistration
+                {
+                    SourceLabel = "Performance improvement plan attachment",
+                    SourceEntityType = "PerformanceImprovementPlan",
+                    SourceRecordId = pipId,
+                    Title = Path.GetFileName(file.FileName),
+                    DocumentType = "PipAttachment",
+                    ChangeSummary = description
+                }
+            }, ct);
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
+        }
 
-            var storageResult = await _fileStorageService.UploadFileAsync(uploadRequest);
-            if (!storageResult.Success)
-                return StatusCode(500, storageResult.ErrorMessage ?? "File upload failed");
-
+        try
+        {
             var dto = await _improvementPlanService.CreatePipAttachmentAsync(
-                pipId, uploadedById, file.FileName, storageResult.FilePath,
-                storageResult.PublicUrl, file.Length, description);
+                pipId, uploadedById, document.OriginalFileName, string.Empty,
+                publicUrl: null, document.FileSize, description, ct,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId);
 
             return Ok(new PipAttachmentResponse
             {
@@ -629,18 +658,67 @@ public class PerformanceImprovementPlansController : ControllerBase
                 Description    = dto.Description,
                 UploadDate     = dto.UploadDate,
                 UploadedByName = dto.UploadedByName,
-                PublicUrl      = storageResult.PublicUrl,
+                // No public URL any more: the file lives outside the web root and is only
+                // reachable through the authorizing download endpoint below.
+                PublicUrl      = null,
             });
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
         }
         catch (Exception ex)
         {
+            await _hrDocuments.RollbackAsync(document, tenantId, actorUserId, ct);
+
+            if (ex is ArgumentException)
+                return NotFound(ex.Message);
+
             _logger.LogError(ex, "Error uploading attachment for PIP {PipId}", pipId);
             return StatusCode(500, "An error occurred while uploading the attachment");
         }
+    }
+
+    /// <summary>
+    /// Streams a PIP attachment to a caller entitled to see it.
+    /// </summary>
+    /// <remarks>
+    /// Improvement plans are sensitive employment records. Neither this endpoint's helper nor
+    /// the DMS performs the entitlement check — that is the ownership test below.
+    /// </remarks>
+    [HttpGet("attachments/{attachmentId:guid}/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadAttachment(Guid attachmentId, CancellationToken ct = default)
+    {
+        if (_currentUserService.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        var attachment = await _db.Set<AppraisalAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == attachmentId && item.TenantId == tenantId && !item.IsDeleted,
+                ct);
+        if (attachment?.PipId is not Guid pipId)
+            return NotFound("Attachment not found");
+
+        var plan = await _db.Set<PerformanceImprovementPlan>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == pipId && item.TenantId == tenantId, ct);
+        if (plan is null)
+            return NotFound("Attachment not found");
+
+        var employeeId = _currentUserService.EmployeeId;
+        var isSubject = employeeId is Guid id && plan.EmployeeId == id;
+        var isHr = _currentUserService.IsInRole("HR") ||
+                   _currentUserService.IsInRole("Admin") ||
+                   _currentUserService.IsInRole("SuperAdmin");
+        if (!isSubject && !isHr)
+            return Forbid();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorageService, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FilePath,
+            attachment.FileName, fallbackContentType: null,
+            inline: false, ct);
     }
 
     [HttpDelete("attachments/{attachmentId:guid}")]

@@ -511,6 +511,15 @@ public class LeaveRequestAttachment : TenantEntity
 
     public Guid UploadedBy { get; set; }
 
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     [ForeignKey(nameof(LeaveRequestId))]
     public virtual LeaveRequest LeaveRequest { get; set; } = null!;
 

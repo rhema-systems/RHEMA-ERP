@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,7 +10,10 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/medical-insurance")]
-[Authorize]
+// Medical records are special-category personal data. This controller previously carried a
+// bare [Authorize], so any authenticated employee could read them. Read is the class-level
+// floor; write and delete are tightened per action.
+[Authorize(Policy = HrPermissions.MedicalReadPolicy)]
 public class MedicalInsuranceController : MedicalControllerBase
 {
     private readonly IMedicalInsuranceService _service;
@@ -56,6 +60,7 @@ public class MedicalInsuranceController : MedicalControllerBase
     public async Task<ActionResult<MedicalInsuranceProviderDto?>> GetProviderByCode(string code, CancellationToken ct)
         => Ok(await _service.GetProviderByCodeAsync(code, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("providers")]
     public async Task<ActionResult<MedicalInsuranceProviderDto>> CreateProvider(
         [FromBody] CreateMedicalInsuranceProviderDto dto,
@@ -68,6 +73,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return CreatedAtAction(nameof(GetProvider), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("providers/{id:guid}")]
     public async Task<ActionResult<MedicalInsuranceProviderDto>> UpdateProvider(
         Guid id,
@@ -81,6 +87,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return Ok(await _service.UpdateProviderAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("providers/{id:guid}")]
     public async Task<IActionResult> DeleteProvider(Guid id, CancellationToken ct)
     {
@@ -102,6 +109,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetPlansByProviderAsync(providerId, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("plans")]
     public async Task<ActionResult<MedicalInsurancePlanDto>> CreatePlan(
         [FromBody] CreateMedicalInsurancePlanDto dto,
@@ -114,6 +122,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return CreatedAtAction(nameof(GetPlan), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("plans/{id:guid}")]
     public async Task<ActionResult<MedicalInsurancePlanDto>> UpdatePlan(
         Guid id,
@@ -127,6 +136,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return Ok(await _service.UpdatePlanAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("plans/{id:guid}")]
     public async Task<IActionResult> DeletePlan(Guid id, CancellationToken ct)
     {
@@ -168,6 +178,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         CancellationToken ct = default)
         => Ok(await _service.GetExpiringPoliciesAsync(daysAhead, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("policies")]
     public async Task<ActionResult<EmployeeMedicalInsurancePolicyDto>> CreatePolicy(
         [FromBody] CreateEmployeeMedicalInsurancePolicyDto dto,
@@ -180,6 +191,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return CreatedAtAction(nameof(GetPolicy), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("policies/{id:guid}")]
     public async Task<ActionResult<EmployeeMedicalInsurancePolicyDto>> UpdatePolicy(
         Guid id,
@@ -193,6 +205,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return Ok(await _service.UpdatePolicyAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("policies/{id:guid}/cancel")]
     public async Task<IActionResult> CancelPolicy(Guid id, [FromBody] CancelEmployeeMedicalInsurancePolicyDto dto, CancellationToken ct)
     {
@@ -201,6 +214,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return Ok(new { message = "Policy cancelled." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("policies/{id:guid}")]
     public async Task<IActionResult> DeletePolicy(Guid id, CancellationToken ct)
     {
@@ -218,6 +232,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetPolicyDependentsAsync(policyId, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("policies/{policyId:guid}/dependents")]
     public async Task<ActionResult<MedicalInsurancePolicyDependentDto>> AddPolicyDependent(
         Guid policyId,
@@ -231,6 +246,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return CreatedAtAction(nameof(GetPolicyDependents), new { policyId }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("dependents/{id:guid}")]
     public async Task<ActionResult<MedicalInsurancePolicyDependentDto>> UpdatePolicyDependent(
         Guid id,
@@ -243,6 +259,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return Ok(await _service.UpdatePolicyDependentAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("dependents/{id:guid}")]
     public async Task<IActionResult> DeletePolicyDependent(Guid id, CancellationToken ct)
     {
@@ -270,6 +287,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetInsuranceClaimsByExpenseClaimAsync(expenseClaimId, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("insurance-claims")]
     public async Task<ActionResult<MedicalInsuranceClaimDto>> CreateInsuranceClaim(
         [FromBody] CreateMedicalInsuranceClaimDto dto,
@@ -282,6 +300,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return CreatedAtAction(nameof(GetInsuranceClaim), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("insurance-claims/{id:guid}/status")]
     public async Task<ActionResult<MedicalInsuranceClaimDto>> UpdateInsuranceClaimStatus(
         Guid id,
@@ -292,6 +311,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return Ok(await _service.UpdateInsuranceClaimStatusAsync(dto, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("insurance-claims/{id:guid}/payment")]
     public async Task<ActionResult<MedicalInsuranceClaimDto>> RecordInsuranceClaimPayment(
         Guid id,
@@ -316,6 +336,7 @@ public class MedicalInsuranceController : MedicalControllerBase
     public async Task<ActionResult<bool>> IsFacilityInNetwork(Guid providerId, Guid facilityId, CancellationToken ct)
         => Ok(await _service.IsFacilityInNetworkAsync(providerId, facilityId, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("network-facilities")]
     public async Task<ActionResult<MedicalInsuranceProviderFacilityDto>> AddNetworkFacility(
         [FromBody] AddMedicalInsuranceProviderFacilityDto dto,
@@ -327,6 +348,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return Ok(created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("network-facilities/{id:guid}")]
     public async Task<ActionResult<MedicalInsuranceProviderFacilityDto>> UpdateNetworkFacility(
         Guid id,
@@ -339,6 +361,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return Ok(await _service.UpdateNetworkFacilityAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("network-facilities/{id:guid}")]
     public async Task<IActionResult> RemoveNetworkFacility(Guid id, CancellationToken ct)
     {
@@ -356,6 +379,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetProviderDocumentsAsync(providerId, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("provider-documents")]
     public async Task<ActionResult<MedicalInsuranceProviderDocumentDto>> AddProviderDocument(
         [FromBody] CreateMedicalInsuranceProviderDocumentDto dto,
@@ -367,6 +391,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return Ok(created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("provider-documents/{id:guid}")]
     public async Task<IActionResult> DeleteProviderDocument(Guid id, CancellationToken ct)
     {
@@ -392,6 +417,7 @@ public class MedicalInsuranceController : MedicalControllerBase
     public async Task<ActionResult<IEnumerable<MedicalInsurancePremiumRecordSummaryDto>>> GetOverduePremiums(CancellationToken ct)
         => Ok(await _service.GetOverduePremiumsAsync(ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("premium-records")]
     public async Task<ActionResult<MedicalInsurancePremiumRecordDto>> CreatePremiumRecord(
         [FromBody] CreateMedicalInsurancePremiumRecordDto dto,
@@ -403,6 +429,7 @@ public class MedicalInsuranceController : MedicalControllerBase
         return CreatedAtAction(nameof(GetPremiumRecord), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("premium-records/{id:guid}/payment")]
     public async Task<ActionResult<MedicalInsurancePremiumRecordDto>> RecordPremiumPayment(
         Guid id,

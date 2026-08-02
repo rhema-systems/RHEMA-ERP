@@ -1580,8 +1580,25 @@ public class CreateEmployeeMedicalExamDocumentDto : CreateDtoBase
     public Guid ExamId { get; set; }
     [Required][MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
-    [Required][MaxLength(500)]
+
+    /// <summary>
+    /// Legacy storage path. Set only by the migration utility for pre-existing rows — the
+    /// upload endpoint leaves it empty and uses <see cref="FileUploadRecordId"/>. This was
+    /// previously accepted straight from the API caller, which let anyone point a medical
+    /// document at arbitrary bytes on disk.
+    /// </summary>
+    [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     [MaxLength(500)]
     public string? Description { get; set; }
 }

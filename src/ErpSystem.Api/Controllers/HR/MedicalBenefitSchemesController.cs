@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,7 +9,10 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/medical-benefit-schemes")]
-[Authorize]
+// Medical records are special-category personal data. This controller previously carried a
+// bare [Authorize], so any authenticated employee could read them. Read is the class-level
+// floor; write and delete are tightened per action.
+[Authorize(Policy = HrPermissions.MedicalReadPolicy)]
 public class MedicalBenefitSchemesController : MedicalControllerBase
 {
     private readonly IMedicalBenefitSchemeService _service;
@@ -43,6 +47,7 @@ public class MedicalBenefitSchemesController : MedicalControllerBase
     public async Task<ActionResult<MedicalBenefitSchemeDto?>> GetByCode(string code, CancellationToken ct)
         => Ok(await _service.GetSchemeByCodeAsync(code, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<MedicalBenefitSchemeDto>> Create(
         [FromBody] CreateMedicalBenefitSchemeDto dto,
@@ -55,6 +60,7 @@ public class MedicalBenefitSchemesController : MedicalControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<MedicalBenefitSchemeDto>> Update(
         Guid id,
@@ -68,6 +74,7 @@ public class MedicalBenefitSchemesController : MedicalControllerBase
         return Ok(await _service.UpdateSchemeAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
@@ -89,6 +96,7 @@ public class MedicalBenefitSchemesController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetTiersBySchemeAsync(schemeId, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("tiers")]
     public async Task<ActionResult<MedicalBenefitTierDto>> CreateTier(
         [FromBody] CreateMedicalBenefitTierDto dto,
@@ -101,6 +109,7 @@ public class MedicalBenefitSchemesController : MedicalControllerBase
         return CreatedAtAction(nameof(GetTier), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("tiers/{id:guid}")]
     public async Task<ActionResult<MedicalBenefitTierDto>> UpdateTier(
         Guid id,
@@ -114,6 +123,7 @@ public class MedicalBenefitSchemesController : MedicalControllerBase
         return Ok(await _service.UpdateTierAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("tiers/{id:guid}")]
     public async Task<IActionResult> DeleteTier(Guid id, CancellationToken ct)
     {

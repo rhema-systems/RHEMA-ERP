@@ -1,9 +1,13 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -23,6 +27,10 @@ public class StaffDisciplineSupportController : ControllerBase
     private readonly IStaffDisciplineNoteService _noteService;
     private readonly IStaffDisciplineNotificationService _notificationService;
     private readonly IStaffDisciplineLegalReviewService _legalReviewService;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
 
     public StaffDisciplineSupportController(
@@ -32,6 +40,10 @@ public class StaffDisciplineSupportController : ControllerBase
         IStaffDisciplineNoteService noteService,
         IStaffDisciplineNotificationService notificationService,
         IStaffDisciplineLegalReviewService legalReviewService,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
         ICurrentUserService currentUser)
     {
         _actionStepService = actionStepService;
@@ -40,8 +52,20 @@ public class StaffDisciplineSupportController : ControllerBase
         _noteService = noteService;
         _notificationService = notificationService;
         _legalReviewService = legalReviewService;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
         _currentUser = currentUser;
     }
+
+    /// <summary>
+    /// True when the caller holds a role permitted to read disciplinary evidence.
+    /// </summary>
+    private bool CallerIsDisciplineReader()
+        => _currentUser.IsInRole("HR") ||
+           _currentUser.IsInRole("Admin") ||
+           _currentUser.IsInRole("SuperAdmin");
 
     // =========================================================================
     // ACTION STEPS
@@ -209,6 +233,21 @@ public class StaffDisciplineSupportController : ControllerBase
         if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
 
+        // A caller-supplied path would let anyone point a document row at arbitrary bytes on
+        // disk, including another tenant's. Files arrive through the upload endpoint below,
+        // which routes them past the malware scanner into private storage.
+        if (!string.IsNullOrWhiteSpace(dto.FilePath) ||
+            dto.FileUploadRecordId.HasValue ||
+            dto.DocumentRecordId.HasValue ||
+            dto.DocumentVersionId.HasValue)
+        {
+            return BadRequest(new
+            {
+                message = "File locations cannot be supplied directly. " +
+                          "Use POST cases/{caseId}/documents/upload to attach a file."
+            });
+        }
+
         dto.DisciplinaryActionId = caseId;
         var created = await _documentService.AddAsync(dto, tenantId.Value, employeeId.Value);
         return CreatedAtAction(nameof(GetDocumentById), new { id = created.Id }, created);
@@ -224,55 +263,129 @@ public class StaffDisciplineSupportController : ControllerBase
         [FromForm] DisciplinaryDocumentCategory category = DisciplinaryDocumentCategory.Evidence,
         [FromForm] Guid? actionStepId = null,
         [FromForm] Guid? appealId = null,
-        [FromForm] string? description = null)
+        [FromForm] string? description = null,
+        CancellationToken ct = default)
     {
         var tenantId = _currentUser.TenantId;
         var employeeId = _currentUser.EmployeeId;
         if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+        if (!Guid.TryParse(_currentUser.UserId, out var actorUserId))
+            return BadRequest("User context could not be resolved.");
 
         if (file is null || file.Length == 0)
             return BadRequest("No file was provided.");
 
+        // Fail an incoherent scope before any bytes are stored.
         try
         {
-            await using var stream = file.OpenReadStream();
-            var created = await _documentService.UploadAsync(
-                caseId,
-                stream,
-                file.FileName,
-                file.ContentType,
-                scope,
-                category,
-                actionStepId,
-                appealId,
-                description,
-                tenantId.Value,
-                employeeId.Value);
-
-            return CreatedAtAction(nameof(GetDocumentById), new { id = created.Id }, created);
+            await _documentService.ValidateDocumentScopeAsync(
+                caseId, scope, actionStepId, appealId, ct);
         }
         catch (ArgumentException ex)
         {
             return BadRequest(new { message = ex.Message });
         }
-    }
 
-    [HttpGet("documents/{id:guid}/download")]
-    public async Task<IActionResult> DownloadDocument(Guid id)
-    {
+        HrControlledDocument document;
         try
         {
-            var file = await _documentService.OpenFileAsync(id);
-            if (file is null)
-                return NotFound();
-
-            return File(file.Value.Stream, file.Value.ContentType, file.Value.FileName);
+            document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
+            {
+                TenantId = tenantId.Value,
+                ActorUserId = actorUserId,
+                ActorName = _currentUser.UserName,
+                Category = ControlledFileUploadCategories.HrDisciplineDocuments,
+                File = file,
+                Registration = new HrDocumentDmsRegistration
+                {
+                    SourceLabel = "Disciplinary case document",
+                    SourceEntityType = "StaffDisciplinaryAction",
+                    // The case id identifies the document in the DMS; it used to be baked into
+                    // the storage folder, which fragmented per-category quota accounting.
+                    SourceRecordId = caseId,
+                    Title = Path.GetFileName(file.FileName),
+                    DocumentType = category.ToString(),
+                    ChangeSummary = description
+                }
+            }, ct);
         }
-        catch (FileNotFoundException ex)
+        catch (ControlledFileUploadException ex)
         {
-            return NotFound(new { message = ex.Message });
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
         }
+
+        try
+        {
+            var created = await _documentService.AddAsync(
+                new CreateStaffDisciplineDocumentDto
+                {
+                    DisciplinaryActionId = caseId,
+                    Scope = scope,
+                    ActionStepId = scope == DisciplinaryDocumentScope.ActionStep ? actionStepId : null,
+                    AppealId = scope == DisciplinaryDocumentScope.Appeal ? appealId : null,
+                    FileName = document.OriginalFileName,
+                    FilePath = string.Empty,
+                    FileUploadRecordId = document.FileUploadRecordId,
+                    DocumentRecordId = document.DocumentRecordId,
+                    DocumentVersionId = document.DocumentVersionId,
+                    Category = category,
+                    Description = description,
+                    UploadedById = employeeId.Value,
+                    UploadDate = DateTime.UtcNow
+                },
+                tenantId.Value, employeeId.Value, ct);
+
+            return CreatedAtAction(nameof(GetDocumentById), new { id = created.Id }, created);
+        }
+        catch (Exception ex)
+        {
+            await _hrDocuments.RollbackAsync(document, tenantId.Value, actorUserId, ct);
+            if (ex is ArgumentException)
+                return BadRequest(new { message = ex.Message });
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Streams a disciplinary document to a caller entitled to see it.
+    /// </summary>
+    /// <remarks>
+    /// This endpoint previously checked only that the document belonged to the caller's tenant,
+    /// so any authenticated user could read another employee's disciplinary evidence. Access is
+    /// now limited to HR-equivalent roles and the employee the case concerns; confidential
+    /// categories stay HR-only.
+    /// </remarks>
+    [HttpGet("documents/{id:guid}/download")]
+    public async Task<IActionResult> DownloadDocument(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var document = await _db.Set<Core.Entities.HR.StaffDiscipline.StaffDisciplineDocument>()
+            .AsNoTracking()
+            .Include(item => item.DisciplinaryAction)
+            .SingleOrDefaultAsync(
+                item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, ct);
+        if (document is null)
+            return NotFound();
+
+        if (!CallerIsDisciplineReader())
+        {
+            // The subject may read their own case file — they need the notification and
+            // decision letters to respond — but not the employer's legal advice about them.
+            var isSubject = _currentUser.EmployeeId is Guid employeeId &&
+                            document.DisciplinaryAction.EmployeeId == employeeId;
+            if (!isSubject || document.Category == DisciplinaryDocumentCategory.LegalDocument)
+                return Forbid();
+        }
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            document.DocumentRecordId, document.DocumentVersionId,
+            document.FileUploadRecordId, document.FilePath,
+            document.FileName, fallbackContentType: null,
+            inline: false, ct);
     }
 
     [HttpDelete("documents/{id:guid}")]

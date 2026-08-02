@@ -21,12 +21,16 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
     private readonly IConsultantClientPortalJwtService _jwtService;
     private readonly IPasswordHasher<ConsultantClientPortalAccount> _hasher;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ITransactionalEmailQueue _emailQueue;
     private readonly ILogger<ConsultantClientPortalAuthService> _logger;
     private readonly string _portalUrl;
 
     private const int MaxFailedAttempts = 5;
     private const int LockoutMinutes = 15;
     private const int VerificationTokenExpiryHours = 24;
+
+    /// <summary>Minimum gap between verification emails to one address.</summary>
+    private static readonly TimeSpan VerificationResendCooldown = TimeSpan.FromMinutes(2);
     private const int ResetTokenExpiryHours = 1;
     private const int SetupTokenExpiryHours = 72;
 
@@ -38,6 +42,7 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         IConsultantClientPortalJwtService jwtService,
         IPasswordHasher<ConsultantClientPortalAccount> hasher,
         ICurrentUserProvider currentUserProvider,
+        ITransactionalEmailQueue emailQueue,
         ILogger<ConsultantClientPortalAuthService> logger,
         IOptions<CandidatePortalOptions> portalOptions)
     {
@@ -48,6 +53,7 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         _jwtService = jwtService;
         _hasher = hasher;
         _currentUserProvider = currentUserProvider;
+        _emailQueue = emailQueue;
         _logger = logger;
         _portalUrl = (portalOptions.Value.PortalUrl ?? string.Empty).TrimEnd('/');
         if (string.IsNullOrWhiteSpace(_portalUrl))
@@ -113,7 +119,11 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
 
         await SendVerificationEmailAsync(account, client, ct);
 
-        return BuildAuthResult(account, client, tenantId);
+        // No session token: registration only proves someone typed an email address. Issuing one
+        // here let anyone who knew a client code register with a contact's address and read that
+        // client's dashboard and timesheets — consultant names, dates, hours and entries — before
+        // proving they own the mailbox. Mirrors CandidatePortalAuthService.
+        return BuildUnverifiedResult(account, client);
     }
 
     public async Task<ConsultantClientPortalAuthResultDto> LoginAsync(
@@ -151,6 +161,20 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
 
         if (result == PasswordVerificationResult.SuccessRehashNeeded)
             account.PasswordHash = _hasher.HashPassword(account, dto.Password);
+
+        // The password is correct — but an unverified account must not receive a session token,
+        // otherwise registering with someone else's address is enough to reach their client's
+        // timesheets. Counters are cleared (the credentials were right) without stamping a login.
+        if (!account.IsEmailVerified)
+        {
+            account.FailedLoginAttempts = 0;
+            account.LockedOutUntil = null;
+            await _accountRepo.UpdateAsync(account);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            throw new UnauthorizedAccessException(
+                "Please verify your email address before signing in. Check your inbox for the verification link.");
+        }
 
         account.FailedLoginAttempts = 0;
         account.LockedOutUntil = null;
@@ -423,6 +447,67 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
         await _unitOfWork.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// Result for an account that exists but has not proven ownership of its email address.
+    /// Carries NO session token — the caller must verify their email, then sign in.
+    /// </summary>
+    private static ConsultantClientPortalAuthResultDto BuildUnverifiedResult(
+        ConsultantClientPortalAccount account,
+        ConsultantClient client) => new()
+    {
+        Token = string.Empty,
+        AccountId = account.Id,
+        Email = account.Email,
+        ContactName = account.ContactName,
+        ConsultantClientId = client.Id,
+        ClientName = client.ClientName,
+        ClientCode = client.ClientCode,
+        IsEmailVerified = false,
+    };
+
+    /// <summary>
+    /// Re-sends the verification email, minting a fresh token.
+    /// </summary>
+    /// <remarks>
+    /// <para>Without this an account is unrecoverable when the first verification email fails to
+    /// arrive: the duplicate-email guard blocks re-registration, and login now refuses unverified
+    /// accounts.</para>
+    ///
+    /// <para>Always completes without signalling whether the address exists, is already verified,
+    /// or is deactivated. A fresh token is minted every time so any previously leaked link stops
+    /// working.</para>
+    /// </remarks>
+    public async Task ResendVerificationEmailAsync(
+        string email, Guid tenantId, CancellationToken ct = default)
+    {
+        tenantId = RequireCurrentTenant(tenantId);
+        var normalised = email.Trim().ToLowerInvariant();
+        var account = await _accountRepo.FirstOrDefaultAsync(
+            a => a.TenantId == tenantId && a.Email == normalised);
+
+        if (account is not { IsActive: true, IsEmailVerified: false })
+            return;
+
+        // Cooldown. A 5/min endpoint that mails a third party on demand is a mailbox-bombing
+        // tool without it, and the rate limiter alone cannot help the victim.
+        if (account.LastVerificationEmailSentAtUtc is DateTime sentAt &&
+            DateTime.UtcNow - sentAt < VerificationResendCooldown)
+            return;
+
+        var client = await _clientRepo.FirstOrDefaultAsync(
+            c => c.Id == account.ConsultantClientId && c.TenantId == tenantId);
+        if (client is null)
+            return;
+
+        account.EmailVerificationToken = GenerateSecureToken();
+        account.EmailVerificationExpiry = DateTime.UtcNow.AddHours(VerificationTokenExpiryHours);
+        account.LastVerificationEmailSentAtUtc = DateTime.UtcNow;
+        await _accountRepo.UpdateAsync(account);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        await SendVerificationEmailAsync(account, client, ct);
+    }
+
     private ConsultantClientPortalAuthResultDto BuildAuthResult(
         ConsultantClientPortalAccount account,
         ConsultantClient client,
@@ -481,22 +566,19 @@ public sealed class ConsultantClientPortalAuthService : IConsultantClientPortalA
 </div>
 </body></html>";
 
-        // Best-effort: the account row is already committed by the time this runs, so a mail failure
-        // must not fail the request and leave a client unable to verify or re-register.
-        try
+        // Queued, not sent inline. This is the one email the account cannot function without:
+        // login refuses unverified accounts and the duplicate-email guard blocks re-registration,
+        // so a swallowed SMTP failure used to strand the contact permanently. The outbox retries
+        // with backoff and dead-letters visibly. Enqueue failures are NOT swallowed — that is a
+        // local database write, so a failure is real and the caller should see it.
+        await _emailQueue.EnqueueAsync(new()
         {
-            await _email.SendEmailAsync(new()
-            {
-                To = account.Email,
-                Subject = subject,
-                Body = body,
-                IsHtml = true,
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to send verification email to {Email}", account.Email);
-        }
+            TenantId = account.TenantId,
+            ToEmail = account.Email,
+            Subject = subject,
+            BodyHtml = body,
+            NotificationType = "ConsultantClientPortalVerification",
+        }, ct);
     }
 
     private async Task SendPasswordResetEmailAsync(ConsultantClientPortalAccount account, CancellationToken ct)

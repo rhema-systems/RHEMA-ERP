@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +11,10 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/medical-expense-claims")]
-[Authorize]
+// Medical records are special-category personal data. This controller previously carried a
+// bare [Authorize], so any authenticated employee could read them. Read is the class-level
+// floor; write and delete are tightened per action.
+[Authorize(Policy = HrPermissions.MedicalReadPolicy)]
 public class MedicalExpenseClaimsController : MedicalControllerBase
 {
     private readonly IMedicalExpenseClaimService _service;
@@ -59,6 +63,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
     public async Task<ActionResult<IEnumerable<MedicalExpenseClaimSummaryDto>>> GetFlagged(CancellationToken ct)
         => Ok(await _service.GetFlaggedClaimsAsync(ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<MedicalExpenseClaimDto>> Create(
         [FromBody] CreateMedicalExpenseClaimDto dto,
@@ -80,6 +85,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<MedicalExpenseClaimDto>> Update(
         Guid id,
@@ -93,6 +99,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         return Ok(await _service.UpdateClaimAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{id:guid}/approval")]
     public async Task<IActionResult> ProcessApproval(
         Guid id,
@@ -106,6 +113,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         return Ok(new { message = "Approval recorded." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{id:guid}/payment")]
     public async Task<IActionResult> ProcessPayment(
         Guid id,
@@ -117,6 +125,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         return Ok(new { message = "Payment processed." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{id:guid}/flag")]
     public async Task<IActionResult> Flag(
         Guid id,
@@ -128,6 +137,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         return Ok(new { message = "Claim flagged." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{id:guid}/unflag")]
     public async Task<IActionResult> Unflag(
         Guid id,
@@ -139,6 +149,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         return Ok(new { message = "Claim unflagged." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
@@ -156,6 +167,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetItemsAsync(claimId, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{claimId:guid}/items")]
     public async Task<ActionResult<MedicalExpenseItemDto>> AddItem(
         Guid claimId,
@@ -170,6 +182,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         return CreatedAtAction(nameof(GetById), new { id = claimId }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("items/{id:guid}")]
     public async Task<ActionResult<MedicalExpenseItemDto>> UpdateItem(
         Guid id,
@@ -182,6 +195,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         return Ok(await _service.UpdateItemAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("items/{id:guid}")]
     public async Task<IActionResult> DeleteItem(Guid id, CancellationToken ct)
     {
@@ -199,6 +213,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetDocumentsAsync(claimId, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{claimId:guid}/documents")]
     public async Task<ActionResult<MedicalExpenseDocumentDto>> AddDocument(
         Guid claimId,
@@ -213,6 +228,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         return CreatedAtAction(nameof(GetById), new { id = claimId }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("documents/{id:guid}")]
     public async Task<IActionResult> DeleteDocument(Guid id, CancellationToken ct)
     {
@@ -233,6 +249,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
             ? await _service.GetInternalNotesAsync(claimId, ct)
             : await _service.GetNotesAsync(claimId, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{claimId:guid}/notes")]
     public async Task<ActionResult<MedicalExpenseClaimNoteDto>> AddNote(
         Guid claimId,

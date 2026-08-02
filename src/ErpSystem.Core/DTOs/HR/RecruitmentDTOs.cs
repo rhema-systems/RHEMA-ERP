@@ -4949,11 +4949,17 @@ public class ExternalApplicationDto
     public ApplicationSource Source { get; set; } = ApplicationSource.CompanyWebsite;
 
     /// <summary>
-    /// Path to uploaded CV/résumé, populated by the API after the multipart upload.
-    /// Can also be sent as a URL when the client uploads separately.
+    /// Single-use token returned by <c>POST /api/public/cv-upload</c>, identifying the CV this
+    /// application should claim. Optional — an application may be submitted without a CV.
     /// </summary>
-    [MaxLength(500)]
-    public string? CvFilePath { get; set; }
+    /// <remarks>
+    /// This replaces the former <c>CvFilePath</c>, which was a free-text storage path supplied by
+    /// an anonymous caller. Even with shape validation, accepting a path meant the client chose
+    /// which stored file the candidate record pointed at. A token is unguessable, single-use, and
+    /// bound server-side to the tenant and vacancy it was minted for.
+    /// </remarks>
+    [MaxLength(64)]
+    public string? CvUploadToken { get; set; }
 
     /// <summary>
     /// Opt-in flag: candidate consents to being added to the talent pool for future vacancies.
@@ -4961,6 +4967,7 @@ public class ExternalApplicationDto
     public bool AddToTalentPool { get; set; }
 
     // ── Structured profile collections ────────────────────────────────────────
+
 
     public List<ExternalWorkHistoryDto>    WorkHistories  { get; set; } = new();
     public List<ExternalQualificationDto>  Qualifications { get; set; } = new();
@@ -5117,6 +5124,22 @@ public class ExternalApplicationConfirmationDto
     public string  JobTitle           { get; set; } = string.Empty;
     public string  VacancyNumber      { get; set; } = string.Empty;
     public DateTime SubmittedAt       { get; set; }
+}
+
+/// <summary>
+/// Handed back by <c>POST /api/public/cv-upload</c>. Carries a single-use token the applicant
+/// echoes on their application, never a storage path or record id.
+/// </summary>
+public class PublicCvUploadTicketDto
+{
+    /// <summary>Opaque single-use token. Send this back as <c>CvUploadToken</c> when applying.</summary>
+    public string UploadToken { get; set; } = string.Empty;
+
+    public string FileName { get; set; } = string.Empty;
+    public long FileSize { get; set; }
+
+    /// <summary>After this the upload is swept and the applicant must upload again.</summary>
+    public DateTime ExpiresAtUtc { get; set; }
 }
 
 /// <summary>

@@ -26,6 +26,7 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
     private readonly ICandidateJwtService _jwtService;
     private readonly IPasswordHasher<CandidatePortalAccount> _hasher;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ITransactionalEmailQueue _emailQueue;
     private readonly ILogger<CandidatePortalAuthService> _logger;
     private readonly string _portalUrl;
 
@@ -33,6 +34,9 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
     private const int LockoutMinutes = 15;
     private const int VerificationTokenExpiryHours = 24;
     private const int ResetTokenExpiryHours = 1;
+
+    /// <summary>Minimum gap between verification emails to one address.</summary>
+    private static readonly TimeSpan VerificationResendCooldown = TimeSpan.FromMinutes(2);
 
     public CandidatePortalAuthService(
         IGenericRepository<CandidatePortalAccount> accountRepo,
@@ -42,6 +46,7 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
         ICandidateJwtService jwtService,
         IPasswordHasher<CandidatePortalAccount> hasher,
         ICurrentUserProvider currentUserProvider,
+        ITransactionalEmailQueue emailQueue,
         ILogger<CandidatePortalAuthService> logger,
         IOptions<CandidatePortalOptions> portalOptions)
     {
@@ -52,6 +57,7 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
         _jwtService    = jwtService;
         _hasher        = hasher;
         _currentUserProvider = currentUserProvider;
+        _emailQueue    = emailQueue;
         _logger        = logger;
         _portalUrl     = portalOptions.Value.PortalUrl.TrimEnd('/');
     }
@@ -219,6 +225,46 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
         await SendAccountActivatedEmailAsync(account, ct);
     }
 
+    // ── Resend verification ────────────────────────────────────────────────────
+    /// <summary>
+    /// Re-sends the verification email, minting a fresh token.
+    /// </summary>
+    /// <remarks>
+    /// <para>Without this an account is unrecoverable when the first verification email fails to
+    /// arrive: the duplicate-email guard blocks re-registration, and login now refuses unverified
+    /// accounts. That combination silently stranded people.</para>
+    ///
+    /// <para>Always completes without signalling whether the address exists, is already verified,
+    /// or is deactivated — same anti-enumeration stance as
+    /// <see cref="RequestPasswordResetAsync"/>. A fresh token is minted every time so any
+    /// previously leaked link stops working and there is no ambiguity about which link is live.</para>
+    /// </remarks>
+    public async Task ResendVerificationEmailAsync(
+        string email, Guid tenantId, CancellationToken ct = default)
+    {
+        tenantId = RequireCurrentTenant(tenantId);
+        var normalised = email.Trim().ToLowerInvariant();
+        var account = await _accountRepo.FirstOrDefaultAsync(
+            a => a.TenantId == tenantId && a.Email == normalised);
+
+        if (account is not { IsActive: true, IsEmailVerified: false })
+            return;
+
+        // Cooldown. A 5/min endpoint that mails a third party on demand is a mailbox-bombing
+        // tool without it, and the rate limiter alone cannot help the victim.
+        if (account.LastVerificationEmailSentAtUtc is DateTime sentAt &&
+            DateTime.UtcNow - sentAt < VerificationResendCooldown)
+            return;
+
+        account.EmailVerificationToken = GenerateSecureToken();
+        account.EmailVerificationExpiry = DateTime.UtcNow.AddHours(VerificationTokenExpiryHours);
+        account.LastVerificationEmailSentAtUtc = DateTime.UtcNow;
+        await _accountRepo.UpdateAsync(account);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        await SendVerificationEmailAsync(account, ct);
+    }
+
     // ── Forgot password ────────────────────────────────────────────────────────
     public async Task RequestPasswordResetAsync(string email, Guid tenantId, CancellationToken ct = default)
     {
@@ -349,22 +395,19 @@ public sealed class CandidatePortalAuthService : ICandidatePortalAuthService
 </div>
 </body></html>";
 
-        // Best-effort: the account row is already committed by the time this runs. Failing the
-        // request here would leave the candidate with an account they cannot verify or re-register.
-        try
+        // Queued, not sent inline. This is the one email the account cannot function without:
+        // login refuses unverified accounts and the duplicate-email guard blocks re-registration,
+        // so a swallowed SMTP failure used to strand the candidate permanently. The outbox
+        // retries with backoff and dead-letters visibly. Enqueue failures are NOT swallowed —
+        // that is a local database write, so a failure is real and the caller should see it.
+        await _emailQueue.EnqueueAsync(new()
         {
-            await _email.SendEmailAsync(new()
-            {
-                To      = account.Email,
-                Subject = subject,
-                Body    = body,
-                IsHtml  = true,
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to send verification email to {Email}", account.Email);
-        }
+            TenantId = account.TenantId,
+            ToEmail = account.Email,
+            Subject = subject,
+            BodyHtml = body,
+            NotificationType = "CandidatePortalVerification",
+        }, ct);
     }
 
     private async Task SendPasswordResetEmailAsync(CandidatePortalAccount account, CancellationToken ct)

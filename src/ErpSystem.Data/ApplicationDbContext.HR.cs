@@ -260,6 +260,10 @@ public partial class ApplicationDbContext
     public DbSet<JobCandidateInterest> JobCandidateInterests { get; set; } = null!;
     public DbSet<JobCandidateDocument> JobCandidateDocuments { get; set; } = null!;
     public DbSet<JobCandidateNote> JobCandidateNotes { get; set; } = null!;
+
+    // HR controlled-document intake — see ConfigureHrDocumentIntake.
+    public DbSet<PublicCvUploadTicket> PublicCvUploadTickets { get; set; } = null!;
+    public DbSet<HrLegacyFileMigrationEntry> HrLegacyFileMigrationEntries { get; set; } = null!;
     public DbSet<CandidateTalentSegment> CandidateTalentSegments { get; set; } = null!;
     public DbSet<CandidateSegmentMembership> CandidateSegmentMemberships { get; set; } = null!;
     public DbSet<CandidateEngagementEvent> CandidateEngagementEvents { get; set; } = null!;
@@ -518,6 +522,72 @@ public partial class ApplicationDbContext
         ConfigureOrientationEntities(builder);
         ConfigureSuccessionPlanningEntities(builder);
         ConfigureStaffTravelEntities(builder);
+        ConfigureHrDocumentIntake(builder);
+    }
+
+    /// <summary>
+    /// Indexes linking HR domain rows to their controlled uploads and central-DMS
+    /// documents, plus the two intake tables backing public CV uploads and the
+    /// legacy-file migration.
+    /// </summary>
+    /// <remarks>
+    /// Indexes only — deliberately no foreign keys to FileUploadRecords or the DMS
+    /// tables. Controlled uploads are removed by soft-delete, FileUploadRecords carries
+    /// a delete-guard trigger, and the database here is rebuilt from the model rather
+    /// than from migrations, so a dozen extra Restrict relationships would be a dozen
+    /// new ways for that rebuild to fail while buying integrity the soft-delete contract
+    /// already provides. This mirrors how FileUploadRecord.UploadedByUserId is treated.
+    /// </remarks>
+    private void ConfigureHrDocumentIntake(ModelBuilder builder)
+    {
+        builder.Entity<JobCandidate>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.CvFileUploadRecordId });
+            entity.HasIndex(item => new { item.TenantId, item.ProfilePhotoFileUploadRecordId });
+        });
+
+        builder.Entity<JobCandidateDocument>(entity =>
+            entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId }));
+
+        builder.Entity<LeaveRequestAttachment>(entity =>
+            entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId }));
+
+        builder.Entity<AppraisalAttachment>(entity =>
+            entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId }));
+
+        builder.Entity<StaffDisciplineDocument>(entity =>
+            entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId }));
+
+        builder.Entity<StaffMovementAttachment>(entity =>
+            entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId }));
+
+        builder.Entity<EmployeeMedicalExamDocument>(entity =>
+            entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId }));
+
+        builder.Entity<JobOffer>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.OfferLetterFileUploadRecordId });
+            entity.HasIndex(item => new { item.TenantId, item.SignedOfferLetterFileUploadRecordId });
+        });
+
+        builder.Entity<PublicCvUploadTicket>(entity =>
+        {
+            // Claiming looks a ticket up by tenant + hash; uniqueness makes a replayed
+            // token a lookup miss rather than an ambiguous match.
+            entity.HasIndex(item => new { item.TenantId, item.TokenHash }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId });
+            // Drives the sweeper's "unclaimed and expired" scan.
+            entity.HasIndex(item => new { item.ClaimedAtUtc, item.ExpiresAtUtc });
+            entity.Property(item => item.TokenHash).IsUnicode(false).IsFixedLength();
+        });
+
+        builder.Entity<HrLegacyFileMigrationEntry>(entity =>
+        {
+            // One ledger row per owning record keeps re-runs idempotent.
+            entity.HasIndex(item => new { item.TenantId, item.EntityType, item.EntityId })
+                .IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.Status });
+        });
     }
 
 private void ConfigureHREntities(ModelBuilder builder)

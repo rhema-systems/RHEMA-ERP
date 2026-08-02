@@ -1,10 +1,14 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -14,11 +18,25 @@ namespace ErpSystem.Api.Controllers.HR;
 public class StaffMovementsController : ControllerBase
 {
     private readonly IStaffMovementService _service;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
 
-    public StaffMovementsController(IStaffMovementService service, ICurrentUserService currentUser)
+    public StaffMovementsController(
+        IStaffMovementService service,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ICurrentUserService currentUser)
     {
         _service     = service;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db          = db;
         _currentUser = currentUser;
     }
 
@@ -367,6 +385,18 @@ public class StaffMovementsController : ControllerBase
         if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        // A caller-supplied path would let anyone point an attachment row at arbitrary bytes
+        // on disk, including another tenant's. Files arrive through the upload endpoint below.
+        if (!string.IsNullOrWhiteSpace(dto.FilePath) ||
+            dto.FileUploadRecordId.HasValue ||
+            dto.DocumentRecordId.HasValue ||
+            dto.DocumentVersionId.HasValue)
+        {
+            return BadRequest(
+                "File locations cannot be supplied directly. " +
+                "Use POST {id}/attachments/upload to attach a file.");
+        }
+
         dto.MovementId = id;
         var created = await _service.AddAttachmentAsync(dto, tenantId.Value, employeeId.Value);
         return CreatedAtAction(nameof(GetAttachments), new { id }, created);
@@ -379,42 +409,103 @@ public class StaffMovementsController : ControllerBase
         Guid id,
         [FromForm] IFormFile file,
         [FromForm] StaffMovementAttachmentType attachmentType = StaffMovementAttachmentType.Other,
-        [FromForm] string? description = null)
+        [FromForm] string? description = null,
+        CancellationToken ct = default)
     {
         var tenantId   = _currentUser.TenantId;
         var employeeId = _currentUser.EmployeeId;
 
         if (tenantId   == null) return BadRequest("Tenant context could not be resolved.");
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+        if (!Guid.TryParse(_currentUser.UserId, out var actorUserId))
+            return BadRequest("User context could not be resolved.");
 
         if (file is null || file.Length == 0)
             return BadRequest("No file was provided.");
 
-        var allowedExtensions = new[] { ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png", ".txt" };
-        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!allowedExtensions.Contains(ext))
-            return BadRequest($"File type '{ext}' is not permitted.");
-
-        var storageDir = Path.Combine("uploads", "movements", id.ToString());
-        Directory.CreateDirectory(storageDir);
-
-        var safeFileName = $"{Guid.NewGuid():N}_{Path.GetFileName(file.FileName)}";
-        var filePath     = Path.Combine(storageDir, safeFileName);
-
-        await using (var stream = System.IO.File.Create(filePath))
-            await file.CopyToAsync(stream);
-
-        var dto = new CreateStaffMovementAttachmentDto
+        // Extension, MIME, size, quota and malware checks all live in the shared upload gate;
+        // this used to write the file straight to disk with System.IO.File.Create.
+        HrControlledDocument document;
+        try
         {
-            MovementId  = id,
-            FileName    = file.FileName,
-            FilePath    = filePath,
-            Type        = attachmentType,
-            Description = description
-        };
+            document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
+            {
+                TenantId = tenantId.Value,
+                ActorUserId = actorUserId,
+                ActorName = _currentUser.UserName,
+                Category = ControlledFileUploadCategories.HrStaffMovementAttachments,
+                File = file,
+                Registration = new HrDocumentDmsRegistration
+                {
+                    SourceLabel = "Staff movement attachment",
+                    SourceEntityType = "StaffMovement",
+                    SourceRecordId = id,
+                    Title = Path.GetFileName(file.FileName),
+                    DocumentType = attachmentType.ToString(),
+                    ChangeSummary = description
+                }
+            }, ct);
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
+        }
 
-        var created = await _service.AddAttachmentAsync(dto, tenantId.Value, employeeId.Value);
-        return CreatedAtAction(nameof(GetAttachments), new { id }, created);
+        try
+        {
+            var dto = new CreateStaffMovementAttachmentDto
+            {
+                MovementId  = id,
+                FileName    = document.OriginalFileName,
+                FilePath    = string.Empty,
+                FileUploadRecordId = document.FileUploadRecordId,
+                DocumentRecordId   = document.DocumentRecordId,
+                DocumentVersionId  = document.DocumentVersionId,
+                Type        = attachmentType,
+                Description = description
+            };
+
+            var created = await _service.AddAttachmentAsync(dto, tenantId.Value, employeeId.Value);
+            return CreatedAtAction(nameof(GetAttachments), new { id }, created);
+        }
+        catch
+        {
+            await _hrDocuments.RollbackAsync(document, tenantId.Value, actorUserId, ct);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Streams a staff movement attachment to a caller entitled to see it.
+    /// </summary>
+    [HttpGet("attachments/{attachmentId:guid}/download")]
+    public async Task<IActionResult> DownloadAttachment(Guid attachmentId, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var attachment = await _db.Set<Core.Entities.HR.PromotionTransfer.StaffMovementAttachment>()
+            .AsNoTracking()
+            .Include(item => item.Movement)
+            .SingleOrDefaultAsync(
+                item => item.Id == attachmentId && item.TenantId == tenantId && !item.IsDeleted, ct);
+        if (attachment is null)
+            return NotFound();
+
+        var isSubject = _currentUser.EmployeeId is Guid employeeId &&
+                        attachment.Movement.EmployeeId == employeeId;
+        var isHr = _currentUser.IsInRole("HR") ||
+                   _currentUser.IsInRole("Admin") ||
+                   _currentUser.IsInRole("SuperAdmin");
+        if (!isSubject && !isHr)
+            return Forbid();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FilePath,
+            attachment.FileName, fallbackContentType: null,
+            inline: false, ct);
     }
 
     [HttpDelete("attachments/{attachmentId:guid}")]

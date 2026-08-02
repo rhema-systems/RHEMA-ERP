@@ -30,7 +30,6 @@ public class JobOfferService : IJobOfferService
     private readonly ILogger<JobOfferService> _logger;
     private readonly IEmailService _email;
     private readonly ITemplatedEmailService _templatedEmail;
-    private readonly IFileUploadService _fileUpload;
     private readonly string _portalBaseUrl;
 
     public JobOfferService(
@@ -44,7 +43,6 @@ public class JobOfferService : IJobOfferService
         ILogger<JobOfferService> logger,
         IEmailService email,
         ITemplatedEmailService templatedEmail,
-        IFileUploadService fileUpload,
         IConfiguration configuration)
     {
         _offerRepository         = offerRepository;
@@ -57,7 +55,6 @@ public class JobOfferService : IJobOfferService
         _logger                  = logger;
         _email                   = email;
         _templatedEmail          = templatedEmail;
-        _fileUpload              = fileUpload;
         // No localhost fallback: this URL goes into offer emails sent to real candidates. A missing
         // config value must fail at startup, not silently mail every candidate a link to localhost.
         _portalBaseUrl           = configuration["CandidatePortal:PortalUrl"]
@@ -753,39 +750,38 @@ public class JobOfferService : IJobOfferService
 
     // ── File uploads ──────────────────────────────────────────────────────────
 
-    private static readonly string[] AllowedDocExtensions = [".pdf", ".doc", ".docx"];
-    private const long MaxDocSizeBytes = 10 * 1024 * 1024; // 10 MB
-
-    public async Task<string> UploadOfferLetterAsync(Guid offerId, Stream fileStream, string fileName, CancellationToken cancellationToken = default)
+    public async Task RecordOfferLetterAsync(
+        Guid offerId, Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedOfferAsync(offerId);
 
-        if (!_fileUpload.ValidateFile(fileName, fileStream.Length, AllowedDocExtensions, MaxDocSizeBytes))
-            throw new InvalidOperationException("Invalid file. Allowed types: PDF, DOC, DOCX. Maximum size: 10 MB.");
-
-        var result = await _fileUpload.UploadFileAsync(fileStream, fileName, "offers", "letters");
-        entity.OfferLetterPath = result.FilePath;
+        entity.OfferLetterFileUploadRecordId = fileUploadRecordId;
+        entity.OfferLetterDocumentRecordId = documentRecordId;
+        entity.OfferLetterDocumentVersionId = documentVersionId;
         await _offerRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Offer letter uploaded for offer {OfferNumber}: {Path}", entity.OfferNumber, result.FilePath);
-        return _fileUpload.GetFileUrl(result.FilePath);
+        _logger.LogInformation(
+            "Offer letter recorded for offer {OfferNumber} (upload {UploadId}).",
+            entity.OfferNumber, fileUploadRecordId);
     }
 
-    public async Task<string> UploadSignedLetterAsync(Guid offerId, Stream fileStream, string fileName, CancellationToken cancellationToken = default)
+    public async Task RecordSignedLetterAsync(
+        Guid offerId, Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedOfferAsync(offerId);
 
-        if (!_fileUpload.ValidateFile(fileName, fileStream.Length, AllowedDocExtensions, MaxDocSizeBytes))
-            throw new InvalidOperationException("Invalid file. Allowed types: PDF, DOC, DOCX. Maximum size: 10 MB.");
-
-        var result = await _fileUpload.UploadFileAsync(fileStream, fileName, "offers", "signed");
-        entity.SignedOfferLetterPath = result.FilePath;
+        entity.SignedOfferLetterFileUploadRecordId = fileUploadRecordId;
+        entity.SignedOfferLetterDocumentRecordId = documentRecordId;
+        entity.SignedOfferLetterDocumentVersionId = documentVersionId;
         await _offerRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Signed offer letter uploaded for offer {OfferNumber}: {Path}", entity.OfferNumber, result.FilePath);
-        return _fileUpload.GetFileUrl(result.FilePath);
+        _logger.LogInformation(
+            "Signed offer letter recorded for offer {OfferNumber} (upload {UploadId}).",
+            entity.OfferNumber, fileUploadRecordId);
     }
 
     // ── Public candidate response (token-based) ───────────────────────────────

@@ -833,9 +833,23 @@ public class CreateStaffDisciplineDocumentDto : CreateDtoBase
     [MaxLength(500)]
     public string FileName { get; set; } = string.Empty;
 
-    [Required]
+    /// <summary>
+    /// Legacy storage path. Set only by the migration utility for pre-existing rows — the
+    /// upload endpoint leaves it empty and uses <see cref="FileUploadRecordId"/>. An API
+    /// caller supplying this would be choosing which bytes on disk a document points at,
+    /// so the controller rejects it.
+    /// </summary>
     [MaxLength(1000)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     [Required]
     public DisciplinaryDocumentCategory Category { get; set; }

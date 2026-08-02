@@ -482,7 +482,10 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<PipAttachmentDto> CreatePipAttachmentAsync(
         Guid pipId, Guid uploadedById, string fileName, string filePath,
         string? publicUrl, long? fileSizeBytes, string? description,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null)
     {
         await GetOwnedPipAsync(pipId, cancellationToken);
 
@@ -498,6 +501,9 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
             Description = description,
             UploadDate = DateTime.UtcNow,
             UploadedById = uploadedById,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
         };
 
         await _attachmentRepository.AddAsync(entity);

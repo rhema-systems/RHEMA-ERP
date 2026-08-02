@@ -43,6 +43,21 @@ public sealed class ConsultantClientPortalService : IConsultantClientPortalServi
         return tenantId;
     }
 
+    /// <summary>
+    /// Refuses portal data to an account that has not proven ownership of its email address.
+    /// </summary>
+    /// <remarks>
+    /// Login no longer issues tokens to unverified accounts, so this is defence in depth: the
+    /// database stays authoritative even if a token asserts otherwise. Timesheet data names
+    /// consultants and their hours, so it should not be reachable on an unproven mailbox.
+    /// </remarks>
+    private static void RequireVerifiedEmail(ConsultantClientPortalAccount account)
+    {
+        if (!account.IsEmailVerified)
+            throw new UnauthorizedAccessException(
+                "Please verify your email address before using the client portal.");
+    }
+
     public async Task<ConsultantClientPortalDashboardDto> GetDashboardAsync(
         Guid accountId,
         Guid tenantId,
@@ -50,6 +65,7 @@ public sealed class ConsultantClientPortalService : IConsultantClientPortalServi
     {
         tenantId = RequireCurrentTenant(tenantId);
         var account = await GetAccountAsync(accountId, tenantId);
+        RequireVerifiedEmail(account);
         var client = await _clientRepo.FirstOrDefaultAsync(
             c => c.Id == account.ConsultantClientId && c.TenantId == tenantId)
             ?? throw new InvalidOperationException("Client organisation not found.");
@@ -79,6 +95,7 @@ public sealed class ConsultantClientPortalService : IConsultantClientPortalServi
     {
         tenantId = RequireCurrentTenant(tenantId);
         var account = await GetAccountAsync(accountId, tenantId);
+        RequireVerifiedEmail(account);
         var timesheet = await _timesheetRepo.GetWithFullDetailsAsync(timesheetId);
 
         if (timesheet == null || timesheet.TenantId != tenantId)

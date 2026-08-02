@@ -164,7 +164,13 @@ public interface IPerformanceImprovementPlanService
     // PipAttachment operations
     Task<IEnumerable<PipAttachmentDto>> GetPipAttachmentsAsync(Guid pipId, CancellationToken cancellationToken = default);
     Task<PipAttachmentDto?> GetAttachmentByIdAsync(Guid attachmentId, CancellationToken cancellationToken = default);
-    Task<PipAttachmentDto> CreatePipAttachmentAsync(Guid pipId, Guid uploadedById, string fileName, string filePath, string? publicUrl, long? fileSizeBytes, string? description, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Records an attachment against a PIP. The upload/DMS identifiers come from
+    /// <c>IHrControlledDocumentService</c>; <paramref name="filePath"/> and
+    /// <paramref name="publicUrl"/> stay empty for new rows — the file is private and is
+    /// served only through the authorizing download endpoint.
+    /// </summary>
+    Task<PipAttachmentDto> CreatePipAttachmentAsync(Guid pipId, Guid uploadedById, string fileName, string filePath, string? publicUrl, long? fileSizeBytes, string? description, CancellationToken cancellationToken = default, Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null);
     Task<bool> DeletePipAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default);
 }
 

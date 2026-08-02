@@ -695,6 +695,12 @@ public class CandidatePortalAccount : TenantEntity
     public int FailedLoginAttempts { get; set; }
     public DateTime? LockedOutUntil { get; set; }
 
+    /// <summary>
+    /// When the last verification email was dispatched. Backs the resend cooldown —
+    /// without it, a resend endpoint is a mailbox-bombing tool aimed at a third party.
+    /// </summary>
+    public DateTime? LastVerificationEmailSentAtUtc { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     /// <summary>Linked candidate profile — null until the candidate completes their profile.</summary>
@@ -851,13 +857,36 @@ public class JobCandidate : TenantEntity
 
     // ── Documents ──────────────────────────────────────────────────────────────
 
-    /// <summary>Path or URL to the candidate's most recently uploaded CV/résumé.</summary>
+    /// <summary>
+    /// Legacy path to the candidate's CV, written before uploads moved behind the
+    /// controlled boundary. Retained so pre-migration rows stay readable; new rows
+    /// leave it null and use <see cref="CvFileUploadRecordId"/> instead.
+    /// </summary>
     [MaxLength(500)]
     public string? CvFilePath { get; set; }
 
-    /// <summary>Path or URL to the candidate's profile photo/avatar.</summary>
+    /// <summary>
+    /// Legacy public URL for the candidate's photo. Null on new rows — photos are now
+    /// private and served through an authorizing endpoint, so there is no public URL.
+    /// </summary>
     [MaxLength(500)]
     public string? ProfilePhotoUrl { get; set; }
+
+    /// <summary>Scanned controlled upload holding the current CV.</summary>
+    public Guid? CvFileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record for the current CV, once registered.</summary>
+    public Guid? CvDocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version for the current CV, once registered.</summary>
+    public Guid? CvDocumentVersionId { get; set; }
+
+    /// <summary>
+    /// Scanned controlled upload holding the profile photo. Photos are deliberately not
+    /// registered in the central DMS — an avatar carries no retention value and one
+    /// document record per photo is repository noise.
+    /// </summary>
+    public Guid? ProfilePhotoFileUploadRecordId { get; set; }
 
     // Relations
     public virtual ICollection<JobCandidateQualification> Qualifications { get; set; } = new List<JobCandidateQualification>();
@@ -1038,10 +1067,23 @@ public class JobCandidateDocument : TenantEntity
     [MaxLength(200)]
     public string FileName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Legacy storage path. Empty on rows created after uploads moved behind the
+    /// controlled boundary; use <see cref="FileUploadRecordId"/> and the DMS ids instead.
+    /// </summary>
     [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
 
     public DateTime UploadDate { get; set; }
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 }
 
 public class JobCandidateNote : TenantEntity
@@ -2107,11 +2149,35 @@ public class JobOffer : TenantEntity
     public DateTime? OfferDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
 
+    /// <summary>
+    /// Legacy offer-letter path. Historically written by a stub upload service that never
+    /// actually persisted the file, so pre-migration values may point at nothing. New rows
+    /// use <see cref="OfferLetterFileUploadRecordId"/>.
+    /// </summary>
     [MaxLength(500)]
     public string? OfferLetterPath { get; set; }
-	
+
+	/// <summary>Legacy signed offer-letter path. See <see cref="OfferLetterPath"/>.</summary>
 	[MaxLength(500)]
     public string? SignedOfferLetterPath { get; set; }
+
+    /// <summary>Scanned controlled upload holding the issued offer letter.</summary>
+    public Guid? OfferLetterFileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record for the issued offer letter.</summary>
+    public Guid? OfferLetterDocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version for the issued offer letter.</summary>
+    public Guid? OfferLetterDocumentVersionId { get; set; }
+
+    /// <summary>Scanned controlled upload holding the countersigned offer letter.</summary>
+    public Guid? SignedOfferLetterFileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record for the countersigned offer letter.</summary>
+    public Guid? SignedOfferLetterDocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version for the countersigned offer letter.</summary>
+    public Guid? SignedOfferLetterDocumentVersionId { get; set; }
 	
     // Response
 	public DateTime? AcceptedDate { get; set; }

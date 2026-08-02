@@ -1151,14 +1151,22 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 // External portal policies. These run ONLY on the dedicated PortalBearer scheme (portal
                 // tokens use a distinct signing key + audience, see PortalAuth) and require the matching
                 // user_type claim, so an internal staff token can never satisfy them and vice-versa.
+                //
+                // email_verified is required as defence in depth. Both portal JWT services already emit
+                // the claim as literal "true"/"false" but nothing enforced it, so a token minted before
+                // verification stayed valid for its full seven days. Requiring it here invalidates any
+                // such token immediately — which is the point — so portal clients must treat a 403 on a
+                // portal route as "sign in again", not as a permanent refusal.
                 .AddPolicy("CandidatePortal", policy =>
                     policy.AddAuthenticationSchemes(ErpSystem.Api.Security.PortalAuth.Scheme)
                           .RequireAuthenticatedUser()
-                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.CandidateUserType))
+                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.CandidateUserType)
+                          .RequireClaim("email_verified", "true"))
                 .AddPolicy("ConsultantClientPortal", policy =>
                     policy.AddAuthenticationSchemes(ErpSystem.Api.Security.PortalAuth.Scheme)
                           .RequireAuthenticatedUser()
-                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.ClientUserType));
+                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.ClientUserType)
+                          .RequireClaim("email_verified", "true"));
 
             authorizationBuilder
                 .AddPolicy(FinancePermissions.ConfigureChartOfAccountsPolicy, policy =>
@@ -1179,6 +1187,35 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 authorizationBuilder.AddPolicy(permission.Name, policy =>
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
             }
+
+            // HR occupational-health policies. The medical controllers previously carried a bare
+            // [Authorize], so every authenticated employee could read and delete medical records.
+            // Administer implies Write implies Read, so an admin does not need all three granted.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.MedicalReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewMedicalRecords,
+                        HrPermissions.MaintainMedicalRecords,
+                        HrPermissions.AdministerMedical)))
+                .AddPolicy(HrPermissions.MedicalWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainMedicalRecords,
+                        HrPermissions.AdministerMedical)))
+                .AddPolicy(HrPermissions.MedicalAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerMedical)));
+
+            foreach (var permission in HrPermissions.All)
+            {
+                authorizationBuilder.AddPolicy(permission.Name, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(permission.Name)));
+            }
+
+            // Second handler for PermissionRequirement: keeps existing HR roles working on tenants
+            // provisioned before the HR permission seed. Handlers are OR-ed, so this widens nothing
+            // that the database-backed handler already decides.
+            services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
+                HrPermissionRoleFallbackAuthorizationHandler>();
 
             return services;
         }
@@ -1577,6 +1614,21 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddHostedService<
                 ErpSystem.Api.Services.FileStorageCleanupBackgroundService>();
 
+            // Single entry point every HR upload site goes through, so the
+            // upload -> DMS-register -> compensate-on-failure sequence is written once.
+            services.AddScoped<ErpSystem.Api.Services.HR.IHrControlledDocumentService,
+                ErpSystem.Api.Services.HR.HrControlledDocumentService>();
+
+            // Reclaims public CV uploads that were never attached to an application.
+            services.AddHostedService<ErpSystem.Api.Services.HR.PublicCvUploadTicketSweeper>();
+
+            // Durable delivery for emails an account is unusable without (portal verification).
+            services.AddScoped<ErpSystem.Core.Interfaces.Common.ITransactionalEmailQueue,
+                ErpSystem.Api.Services.TransactionalEmailQueue>();
+
+            // One-off adoption of pre-boundary HR files; driven by the SuperAdmin-only endpoint.
+            services.AddScoped<ErpSystem.Api.Services.HR.HrLegacyFileMigrationService>();
+
             // Configure multipart body length limit for file uploads
             services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
             {
@@ -1749,6 +1801,20 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                         factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                         {
                             PermitLimit = 5,
+                            Window = TimeSpan.FromMinutes(10),
+                            QueueLimit = 0
+                        }));
+
+                // Public career portal — CV upload. Separate from PublicApplyPolicy on purpose:
+                // sharing one budget meant an applicant who re-uploaded their CV twice had spent
+                // the allowance they needed to actually submit. Tighter than apply because each
+                // request costs a malware scan and storage quota against an anonymous caller.
+                rateLimiterOptions.AddPolicy("PublicUploadPolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 3,
                             Window = TimeSpan.FromMinutes(10),
                             QueueLimit = 0
                         }));

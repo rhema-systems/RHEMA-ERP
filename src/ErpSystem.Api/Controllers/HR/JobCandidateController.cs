@@ -1,9 +1,13 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -13,13 +17,107 @@ namespace ErpSystem.Api.Controllers.HR;
 public class JobCandidateController : ControllerBase
 {
     private readonly IJobCandidateService _service;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
 
-    public JobCandidateController(IJobCandidateService service, ICurrentUserService currentUser)
+    public JobCandidateController(
+        IJobCandidateService service,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ICurrentUserService currentUser)
     {
         _service = service;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
         _currentUser = currentUser;
     }
+
+    // =========================================================================
+    // DOCUMENT DOWNLOADS (HR-side)
+    // =========================================================================
+    // Candidate files live in private storage and have no public URL. These are the
+    // HR-facing counterparts of the candidate portal's own download endpoints.
+
+    /// <summary>Streams a candidate's CV.</summary>
+    [HttpGet("{id:guid}/cv")]
+    public async Task<IActionResult> DownloadCv(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var candidate = await LoadCandidateAsync(id, tenantId, ct);
+        if (candidate is null)
+            return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            candidate.CvDocumentRecordId, candidate.CvDocumentVersionId,
+            candidate.CvFileUploadRecordId, candidate.CvFilePath,
+            fallbackFileName: $"cv-{candidate.CandidateNumber}",
+            fallbackContentType: null,
+            inline: false, ct);
+    }
+
+    /// <summary>Streams a candidate's profile photo.</summary>
+    [HttpGet("{id:guid}/photo")]
+    public async Task<IActionResult> DownloadPhoto(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var candidate = await LoadCandidateAsync(id, tenantId, ct);
+        if (candidate is null)
+            return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            documentRecordId: null, documentVersionId: null,
+            candidate.ProfilePhotoFileUploadRecordId,
+            legacyPath: null,
+            fallbackFileName: "profile-photo",
+            fallbackContentType: null,
+            inline: true, ct);
+    }
+
+    /// <summary>Streams one of a candidate's uploaded documents.</summary>
+    [HttpGet("{id:guid}/documents/{documentId:guid}/download")]
+    public async Task<IActionResult> DownloadDocument(
+        Guid id, Guid documentId, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        // Scoped to the candidate named in the route, so a document id from another
+        // candidate is a lookup miss rather than a disclosure.
+        var document = await _db.Set<JobCandidateDocument>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == documentId &&
+                        item.JobCandidateId == id &&
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted,
+                ct);
+        if (document is null)
+            return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            document.DocumentRecordId, document.DocumentVersionId,
+            document.FileUploadRecordId, document.FilePath,
+            document.FileName, fallbackContentType: null,
+            inline: false, ct);
+    }
+
+    private Task<JobCandidate?> LoadCandidateAsync(
+        Guid id, Guid tenantId, CancellationToken ct)
+        => _db.Set<JobCandidate>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, ct);
 
     // =========================================================================
     // QUERIES

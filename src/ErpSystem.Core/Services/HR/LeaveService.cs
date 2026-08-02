@@ -1276,7 +1276,10 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveRequestAttachmentDto> UploadAttachmentAsync(
         Guid leaveRequestId, Guid uploadedBy, string fileName, string filePath,
-        string? contentType, long? fileSizeBytes)
+        string? contentType, long? fileSizeBytes,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null)
     {
         var request = await GetOwnedLeaveRequestAsync(leaveRequestId);
 
@@ -1289,7 +1292,10 @@ public class LeaveService : ILeaveService
             FileSizeBytes  = fileSizeBytes,
             UploadedDate   = _clock.UtcNow,
             UploadedBy     = uploadedBy,
-            TenantId       = request.TenantId
+            TenantId       = request.TenantId,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId   = documentRecordId,
+            DocumentVersionId  = documentVersionId
         };
 
         await _attachmentRepository.AddAsync(attachment);

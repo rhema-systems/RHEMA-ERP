@@ -159,6 +159,24 @@ public interface IJobApplicationService
     // ── External self-service portal ─────────────────────────────────────────
 
     /// <summary>
+    /// Issues a single-use ticket for a CV that has already passed the controlled-upload gate,
+    /// so a later application can claim it.
+    /// </summary>
+    /// <remarks>
+    /// The returned token is the only copy — the ticket row stores just its hash. The upload is
+    /// bound to <paramref name="tenantId"/> and <paramref name="vacancyId"/>, and an unclaimed
+    /// ticket is swept once it expires.
+    /// </remarks>
+    Task<PublicCvUploadTicketDto> MintCvUploadTicketAsync(
+        Guid tenantId,
+        Guid vacancyId,
+        Guid fileUploadRecordId,
+        string originalFileName,
+        string? contentType,
+        long fileSize,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Submits an external candidate application from the public career portal.
     /// Resolves or creates a JobCandidate record keyed by email, creates a JobApplication
     /// with Source set per the DTO, and generates a unique ExternalTrackingToken

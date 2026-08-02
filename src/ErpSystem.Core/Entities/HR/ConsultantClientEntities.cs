@@ -131,6 +131,12 @@ public class ConsultantClientPortalAccount : TenantEntity
     public int FailedLoginAttempts { get; set; }
     public DateTime? LockedOutUntil { get; set; }
 
+    /// <summary>
+    /// When the last verification email was dispatched. Backs the resend cooldown —
+    /// without it, a resend endpoint is a mailbox-bombing tool aimed at a third party.
+    /// </summary>
+    public DateTime? LastVerificationEmailSentAtUtc { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     [Required]

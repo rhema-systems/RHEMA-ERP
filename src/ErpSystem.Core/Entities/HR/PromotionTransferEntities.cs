@@ -422,7 +422,16 @@ public class StaffMovementAttachment : TenantEntity
     public string FilePath { get; set; } = string.Empty;
  
     public StaffMovementAttachmentType Type { get; set; }
- 
+
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     [MaxLength(1000)]
     public string? Description { get; set; }
  

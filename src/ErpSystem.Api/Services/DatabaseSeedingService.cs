@@ -6913,6 +6913,13 @@ namespace ErpSystem.Web.Services
                 permission.Description,
                 permission.Category
             }))
+            .Concat(HrPermissions.All.Select(permission => new
+            {
+                permission.Name,
+                permission.DisplayName,
+                permission.Description,
+                permission.Category
+            }))
             .GroupBy(permission => permission.Name, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.Last())
             .ToArray();
@@ -6954,8 +6961,10 @@ namespace ErpSystem.Web.Services
 
             var rolePermissionMap = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
-                [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames,
-                [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames,
+                [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
+                    .Concat(HrPermissions.AllNames).ToArray(),
+                [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
+                    .Concat(HrPermissions.AllNames).ToArray(),
                 [Constants.Roles.HelpdeskAgent] = new[]
                 {
                     "enquiry.internal.access",
@@ -7133,6 +7142,16 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
                     "Finance.BudgetReturns.Submit"
+                },
+                // "HR User" is the role this seeder actually creates; note the HR controllers'
+                // [Authorize(Roles = "HR")] attributes reference a bare "HR" that is not seeded
+                // here. Both names are covered by HrPermissions.MedicalFallbackRoles.
+                // HR staff maintain occupational-health records but do not administer them:
+                // deleting a medical record stays with tenant administrators.
+                ["HR User"] = new[]
+                {
+                    HrPermissions.ViewMedicalRecords,
+                    HrPermissions.MaintainMedicalRecords
                 }
             };
 

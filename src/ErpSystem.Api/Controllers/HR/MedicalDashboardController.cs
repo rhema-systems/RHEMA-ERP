@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -7,7 +8,10 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/medical/dashboard")]
-[Authorize]
+// Medical records are special-category personal data. This controller previously carried a
+// bare [Authorize], so any authenticated employee could read them. Read is the class-level
+// floor; write and delete are tightened per action.
+[Authorize(Policy = HrPermissions.MedicalReadPolicy)]
 public class MedicalDashboardController : ControllerBase
 {
     private readonly IMedicalDashboardService _service;

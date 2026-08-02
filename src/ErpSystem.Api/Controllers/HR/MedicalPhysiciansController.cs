@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,7 +9,10 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/medical-physicians")]
-[Authorize]
+// Medical records are special-category personal data. This controller previously carried a
+// bare [Authorize], so any authenticated employee could read them. Read is the class-level
+// floor; write and delete are tightened per action.
+[Authorize(Policy = HrPermissions.MedicalReadPolicy)]
 public class MedicalPhysiciansController : MedicalControllerBase
 {
     private readonly IHealthcareFacilityService _service;
@@ -35,6 +39,7 @@ public class MedicalPhysiciansController : MedicalControllerBase
     public async Task<ActionResult<IEnumerable<PhysicianSummaryDto>>> Search([FromQuery] string term, CancellationToken ct)
         => Ok(await _service.SearchPhysiciansAsync(term, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<PhysicianDto>> Create([FromBody] CreatePhysicianDto dto, CancellationToken ct)
     {
@@ -45,6 +50,7 @@ public class MedicalPhysiciansController : MedicalControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<PhysicianDto>> Update(Guid id, [FromBody] UpdatePhysicianDto dto, CancellationToken ct)
     {
@@ -55,6 +61,7 @@ public class MedicalPhysiciansController : MedicalControllerBase
         return Ok(await _service.UpdatePhysicianAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{id:guid}/verify")]
     public async Task<IActionResult> Verify(Guid id, [FromBody] VerifyPhysicianDto dto, CancellationToken ct)
     {
@@ -63,6 +70,7 @@ public class MedicalPhysiciansController : MedicalControllerBase
         return Ok(new { message = "Physician verified." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {

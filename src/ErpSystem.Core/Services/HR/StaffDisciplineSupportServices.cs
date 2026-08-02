@@ -454,50 +454,17 @@ public class StaffDisciplineDocumentService : IStaffDisciplineDocumentService
         return entity.ToDto();
     }
 
-    public async Task<StaffDisciplineDocumentDto> UploadAsync(
+    /// <summary>
+    /// Validates that the given scope/step/appeal combination is coherent for a case, so the
+    /// controller can fail an upload before any bytes are stored.
+    /// </summary>
+    public Task ValidateDocumentScopeAsync(
         Guid caseId,
-        Stream fileStream,
-        string fileName,
-        string contentType,
         DisciplinaryDocumentScope scope,
-        DisciplinaryDocumentCategory category,
         Guid? actionStepId,
         Guid? appealId,
-        string? description,
-        Guid tenantId,
-        Guid userId,
         CancellationToken cancellationToken = default)
-    {
-        tenantId = RequireCurrentTenant(tenantId);
-
-        if (fileStream is null || !fileStream.CanRead)
-            throw new ArgumentException("A readable file stream is required.");
-
-        var ext = Path.GetExtension(fileName).ToLowerInvariant();
-        if (string.IsNullOrEmpty(ext) || !AllowedExtensions.Contains(ext))
-            throw new ArgumentException($"File type '{ext}' is not permitted.");
-
-        await ValidateScopeAsync(caseId, scope, actionStepId, appealId, cancellationToken);
-
-        var folderPath = $"staff-discipline/{caseId:N}";
-        var storedPath = await _fileStorage.UploadFileAsync(fileStream, fileName, folderPath);
-
-        var dto = new CreateStaffDisciplineDocumentDto
-        {
-            DisciplinaryActionId = caseId,
-            Scope = scope,
-            ActionStepId = scope == DisciplinaryDocumentScope.ActionStep ? actionStepId : null,
-            AppealId = scope == DisciplinaryDocumentScope.Appeal ? appealId : null,
-            FileName = fileName,
-            FilePath = storedPath,
-            Category = category,
-            Description = description,
-            UploadedById = userId,
-            UploadDate = DateTime.UtcNow
-        };
-
-        return await AddAsync(dto, tenantId, userId, cancellationToken);
-    }
+        => ValidateScopeAsync(caseId, scope, actionStepId, appealId, cancellationToken);
 
     public async Task<(Stream Stream, string FileName, string ContentType)?> OpenFileAsync(
         Guid id,

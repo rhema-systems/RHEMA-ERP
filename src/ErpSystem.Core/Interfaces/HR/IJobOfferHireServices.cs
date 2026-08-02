@@ -73,10 +73,22 @@ public interface IJobOfferService
     Task<bool> RecordPortalCandidateResponseAsync(Guid applicationId, CandidatePortalOfferResponseDto dto, CancellationToken cancellationToken = default);
 
     // File uploads
-    /// <summary>Stores the offer letter file and updates <c>OfferLetterPath</c> on the offer.</summary>
-    Task<string> UploadOfferLetterAsync(Guid offerId, Stream fileStream, string fileName, CancellationToken cancellationToken = default);
-    /// <summary>Stores the signed offer letter returned by the candidate and updates <c>SignedOfferLetterPath</c>.</summary>
-    Task<string> UploadSignedLetterAsync(Guid offerId, Stream fileStream, string fileName, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Points the offer at an already-stored, already-scanned offer letter.
+    /// </summary>
+    /// <remarks>
+    /// This replaces the previous stream-based <c>UploadOfferLetterAsync</c>, which called
+    /// <c>IFileUploadService</c> — registered as a stub whose <c>ValidateFile</c> always
+    /// returned true and which never actually wrote the file, so the stored path pointed at
+    /// nothing. Uploading is now the controller's job via <c>IHrControlledDocumentService</c>.
+    /// </remarks>
+    Task RecordOfferLetterAsync(Guid offerId, Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Points the offer at an already-stored, already-scanned countersigned letter.
+    /// See <see cref="RecordOfferLetterAsync"/>.
+    /// </summary>
+    Task RecordSignedLetterAsync(Guid offerId, Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId, CancellationToken cancellationToken = default);
 
     // Offer versioning
     /// <summary>

@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,7 +9,10 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/medical-clinical")]
-[Authorize]
+// Medical records are special-category personal data. This controller previously carried a
+// bare [Authorize], so any authenticated employee could read them. Read is the class-level
+// floor; write and delete are tightened per action.
+[Authorize(Policy = HrPermissions.MedicalReadPolicy)]
 public class MedicalClinicalController : MedicalControllerBase
 {
     private readonly IMedicalClinicalService _service;
@@ -48,6 +52,7 @@ public class MedicalClinicalController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetPendingPreAuthorizationsAsync(ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("pre-authorizations")]
     public async Task<ActionResult<MedicalClaimPreAuthorizationDto>> CreatePreAuthorization(
         [FromBody] CreateMedicalClaimPreAuthorizationDto dto,
@@ -60,6 +65,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return CreatedAtAction(nameof(GetPreAuthorization), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("pre-authorizations/{id:guid}")]
     public async Task<ActionResult<MedicalClaimPreAuthorizationDto>> UpdatePreAuthorization(
         Guid id,
@@ -73,6 +79,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return Ok(await _service.UpdatePreAuthorizationAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("pre-authorizations/{id:guid}/approve")]
     public async Task<IActionResult> ApprovePreAuthorization(
         Guid id,
@@ -86,6 +93,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return Ok(new { message = "Pre-authorization approved." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("pre-authorizations/{id:guid}/reject")]
     public async Task<IActionResult> RejectPreAuthorization(
         Guid id,
@@ -97,6 +105,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return Ok(new { message = "Pre-authorization rejected." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("pre-authorizations/{id:guid}")]
     public async Task<IActionResult> DeletePreAuthorization(Guid id, CancellationToken ct)
     {
@@ -130,6 +139,7 @@ public class MedicalClinicalController : MedicalControllerBase
     public async Task<ActionResult<IEnumerable<MedicalReferralSummaryDto>>> GetPendingReferrals(CancellationToken ct)
         => Ok(await _service.GetPendingReferralsAsync(ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("referrals")]
     public async Task<ActionResult<MedicalReferralDto>> CreateReferral(
         [FromBody] CreateMedicalReferralDto dto,
@@ -142,6 +152,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return CreatedAtAction(nameof(GetReferral), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("referrals/{id:guid}")]
     public async Task<ActionResult<MedicalReferralDto>> UpdateReferral(
         Guid id,
@@ -155,6 +166,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return Ok(await _service.UpdateReferralAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("referrals/{id:guid}/status")]
     public async Task<IActionResult> UpdateReferralStatus(
         Guid id,
@@ -166,6 +178,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return Ok(new { message = "Referral status updated." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("referrals/{id:guid}/complete")]
     public async Task<IActionResult> CompleteReferral(
         Guid id,
@@ -177,6 +190,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return Ok(new { message = "Referral completed." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("referrals/{id:guid}")]
     public async Task<IActionResult> DeleteReferral(Guid id, CancellationToken ct)
     {
@@ -214,6 +228,7 @@ public class MedicalClinicalController : MedicalControllerBase
         CancellationToken ct = default)
         => Ok(await _service.GetUpcomingAppointmentsAsync(daysAhead, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("appointments")]
     public async Task<ActionResult<MedicalAppointmentDto>> CreateAppointment(
         [FromBody] CreateMedicalAppointmentDto dto,
@@ -226,6 +241,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return CreatedAtAction(nameof(GetAppointment), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("appointments/{id:guid}")]
     public async Task<ActionResult<MedicalAppointmentDto>> UpdateAppointment(
         Guid id,
@@ -239,6 +255,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return Ok(await _service.UpdateAppointmentAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("appointments/{id:guid}/status")]
     public async Task<IActionResult> UpdateAppointmentStatus(
         Guid id,
@@ -250,6 +267,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return Ok(new { message = "Appointment status updated." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("appointments/{id:guid}/cancel")]
     public async Task<IActionResult> CancelAppointment(
         Guid id,
@@ -261,6 +279,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return Ok(new { message = "Appointment cancelled." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("appointments/{id:guid}/check-in")]
     public async Task<IActionResult> CheckInAppointment(
         Guid id,
@@ -272,6 +291,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return Ok(new { message = "Appointment checked in." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("appointments/{id:guid}/check-out")]
     public async Task<IActionResult> CheckOutAppointment(
         Guid id,
@@ -283,6 +303,7 @@ public class MedicalClinicalController : MedicalControllerBase
         return Ok(new { message = "Appointment checked out." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("appointments/{id:guid}")]
     public async Task<IActionResult> DeleteAppointment(Guid id, CancellationToken ct)
     {

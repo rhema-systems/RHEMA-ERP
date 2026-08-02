@@ -541,7 +541,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
         // Bump the vacancy's counter separately, with a reload-and-retry on conflict. JobVacancy carries
         // a RowVersion, so incrementing it inside the save above would make two simultaneous submissions
         // fail the whole application over a counter clash.
-        await IncrementVacancyApplicationCountAsync(vacancy.Id, ct);
+        await AdjustVacancyApplicationCountAsync(vacancy.Id, +1, tenantId, ct);
 
         _logger.LogInformation(
             "Draft application {AppNumber} submitted by account {AccountId} for vacancy {VacancyId}",
@@ -557,10 +557,20 @@ public sealed class CandidatePortalService : ICandidatePortalService
     }
 
     /// <summary>
-    /// Increments the vacancy's application counter, reloading and retrying on an optimistic-concurrency
-    /// clash. Mirrors <c>JobApplicationService.UpdateVacancyCounterAsync</c>.
+    /// Adjusts the vacancy's denormalised application counter by <paramref name="delta"/>,
+    /// reloading and retrying on an optimistic-concurrency clash. Mirrors
+    /// <c>JobApplicationService.UpdateVacancyCounterAsync</c>.
     /// </summary>
-    private async Task IncrementVacancyApplicationCountAsync(Guid vacancyId, CancellationToken ct)
+    /// <remarks>
+    /// Callers have ALREADY committed the owning application change before this runs, so a
+    /// conflict on the final attempt is logged and swallowed here rather than thrown. The
+    /// previous <c>when (attempt &lt; maxRetries)</c> filter let the exception escape on the
+    /// last attempt, so the portal reported a failure for a submission that had in fact
+    /// succeeded — and the candidate's retry then hit the duplicate-application guard. The
+    /// swallow lives inside this method so no future caller can reintroduce that.
+    /// </remarks>
+    private async Task AdjustVacancyApplicationCountAsync(
+        Guid vacancyId, int delta, Guid tenantId, CancellationToken ct)
     {
         const int maxRetries = 3;
         for (var attempt = 0; attempt <= maxRetries; attempt++)
@@ -568,23 +578,39 @@ public sealed class CandidatePortalService : ICandidatePortalService
             try
             {
                 var vacancy = await _vacancyRepo.GetByIdAsync(vacancyId);
-                if (vacancy is null) return;
+                if (vacancy is null || vacancy.TenantId != tenantId) return;
 
-                vacancy.ApplicationCount++;
+                vacancy.ApplicationCount = Math.Max(0, vacancy.ApplicationCount + delta);
                 await _vacancyRepo.UpdateAsync(vacancy);
                 await _unitOfWork.SaveChangesAsync(ct);
                 return;
             }
-            catch (DbUpdateConcurrencyException ex) when (attempt < maxRetries)
+            catch (DbUpdateConcurrencyException ex)
             {
-                foreach (var entry in ex.Entries.Where(e => e.Entity is JobVacancy))
-                    await entry.ReloadAsync(ct);
+                if (attempt == maxRetries)
+                {
+                    _logger.LogError(ex,
+                        "Application-count adjustment ({Delta}) for vacancy {VacancyId} failed after {Max} retries.",
+                        delta, vacancyId, maxRetries);
+                    return;
+                }
+
+                // A reload can itself throw when the row was deleted concurrently; that must
+                // not escape and mask this loop's own error handling.
+                try
+                {
+                    foreach (var entry in ex.Entries.Where(e => e.Entity is JobVacancy))
+                        await entry.ReloadAsync(ct);
+                }
+                catch (Exception reloadEx)
+                {
+                    _logger.LogWarning(reloadEx,
+                        "Reload failed while adjusting the counter for vacancy {VacancyId}.",
+                        vacancyId);
+                    return;
+                }
             }
         }
-
-        _logger.LogError(
-            "Application-count update for vacancy {VacancyId} failed after {Max} retries.",
-            vacancyId, maxRetries);
     }
 
     // ── Withdraw Application ───────────────────────────────────────────────────
@@ -609,13 +635,14 @@ public sealed class CandidatePortalService : ICandidatePortalService
         application.WithdrawnDate   = DateTime.UtcNow;
         application.WithdrawalReason = dto.Reason;
         await _applicationRepo.UpdateAsync(application);
-        var withdrawVacancy = await _vacancyRepo.GetByIdAsync(application.JobVacancyId);
-        if (withdrawVacancy is not null && withdrawVacancy.TenantId == tenantId)
-        {
-            withdrawVacancy.ApplicationCount = Math.Max(0, withdrawVacancy.ApplicationCount - 1);
-            await _vacancyRepo.UpdateAsync(withdrawVacancy);
-        }
         await _unitOfWork.SaveChangesAsync(ct);
+
+        // Denormalised counter only, and deliberately NOT part of the save above: JobVacancy
+        // carries a RowVersion, so a concurrent vacancy edit would make that save throw and
+        // lose the candidate's withdrawal entirely. Same retry-then-swallow contract as
+        // submission — the withdrawal is already durable.
+        await AdjustVacancyApplicationCountAsync(
+            application.JobVacancyId, -1, tenantId, ct);
     }
 
     // ── Get Applications ───────────────────────────────────────────────────────
@@ -683,9 +710,27 @@ public sealed class CandidatePortalService : ICandidatePortalService
         }).ToList();
     }
 
+    /// <summary>
+    /// Resolves the candidate profile behind a portal account, so the caller can name it as the
+    /// source record when registering a document in the central DMS.
+    /// </summary>
+    public async Task<Guid> RequireCandidateIdAsync(
+        Guid accountId, Guid tenantId, CancellationToken ct = default)
+    {
+        tenantId = RequireCurrentTenant(tenantId);
+        var account = await GetOwnedAccountAsync(accountId, tenantId);
+
+        return account.JobCandidateId
+            ?? throw new InvalidOperationException(
+                "You must save your profile before uploading documents.");
+    }
+
     public async Task<JobCandidateDocumentDto> AddDocumentAsync(
         Guid accountId, JobCandidateDocumentType documentType, string fileName, string filePath,
-        Guid tenantId, CancellationToken ct = default)
+        Guid tenantId, CancellationToken ct = default,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null)
     {
         tenantId = RequireCurrentTenant(tenantId);
         var account = await GetOwnedAccountAsync(accountId, tenantId);
@@ -701,6 +746,9 @@ public sealed class CandidatePortalService : ICandidatePortalService
             FileName       = fileName,
             FilePath       = filePath,
             UploadDate     = DateTime.UtcNow,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId   = documentRecordId,
+            DocumentVersionId  = documentVersionId,
         };
 
         await _documentRepo.AddAsync(doc);
@@ -738,8 +786,17 @@ public sealed class CandidatePortalService : ICandidatePortalService
         await _unitOfWork.SaveChangesAsync(ct);
     }
 
-    public async Task<string> UpdateProfilePhotoAsync(
-        Guid accountId, string photoUrl, Guid tenantId, CancellationToken ct = default)
+    /// <summary>
+    /// Points the candidate profile at a stored, scanned photo.
+    /// </summary>
+    /// <remarks>
+    /// Photos used to be written to the public web root and the resulting URL saved on the
+    /// profile. A photograph of a named job applicant is personal data, so it now lives in
+    /// private storage and is only reachable through the authorizing photo endpoint —
+    /// <c>ProfilePhotoUrl</c> stays null on new rows because there is no public URL to store.
+    /// </remarks>
+    public async Task UpdateProfilePhotoAsync(
+        Guid accountId, Guid fileUploadRecordId, Guid tenantId, CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         var account = await GetOwnedAccountAsync(accountId, tenantId);
@@ -751,11 +808,10 @@ public sealed class CandidatePortalService : ICandidatePortalService
         if (candidate == null || candidate.TenantId != tenantId)
             throw new InvalidOperationException("Candidate not found.");
 
-        candidate.ProfilePhotoUrl = photoUrl;
+        candidate.ProfilePhotoFileUploadRecordId = fileUploadRecordId;
+        candidate.ProfilePhotoUrl = null;
         await _candidateRepo.UpdateAsync(candidate);
         await _unitOfWork.SaveChangesAsync(ct);
-
-        return photoUrl;
     }
 
     private static void MapDtoToCandidate(UpdateCandidatePortalProfileDto dto, JobCandidate c)

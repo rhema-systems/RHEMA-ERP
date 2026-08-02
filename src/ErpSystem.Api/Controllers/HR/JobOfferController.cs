@@ -1,9 +1,14 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -14,12 +19,27 @@ public class JobOfferController : ControllerBase
 {
     private readonly IJobOfferService _service;
     private readonly IOfferLetterService _offerLetter;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
 
-    public JobOfferController(IJobOfferService service, IOfferLetterService offerLetter, ICurrentUserService currentUser)
+    public JobOfferController(
+        IJobOfferService service,
+        IOfferLetterService offerLetter,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ICurrentUserService currentUser)
     {
         _service = service;
         _offerLetter = offerLetter;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
         _currentUser = currentUser;
     }
 
@@ -283,26 +303,123 @@ public class JobOfferController : ControllerBase
     /// <summary>Upload or replace the offer letter PDF/DOCX.</summary>
     [HttpPost("{id:guid}/upload-letter")]
     [RequestSizeLimit(10 * 1024 * 1024)]
-    public async Task<IActionResult> UploadLetter(Guid id, IFormFile file, CancellationToken ct)
-    {
-        if (file == null || file.Length == 0)
-            return BadRequest(new { message = "No file provided." });
-
-        await using var stream = file.OpenReadStream();
-        var url = await _service.UploadOfferLetterAsync(id, stream, file.FileName, ct);
-        return Ok(new { url });
-    }
+    public Task<IActionResult> UploadLetter(Guid id, IFormFile file, CancellationToken ct)
+        => UploadLetterAsync(id, file, signed: false, ct);
 
     /// <summary>Upload the signed offer letter returned by the candidate.</summary>
     [HttpPost("{id:guid}/upload-signed-letter")]
     [RequestSizeLimit(10 * 1024 * 1024)]
-    public async Task<IActionResult> UploadSignedLetter(Guid id, IFormFile file, CancellationToken ct)
+    public Task<IActionResult> UploadSignedLetter(Guid id, IFormFile file, CancellationToken ct)
+        => UploadLetterAsync(id, file, signed: true, ct);
+
+    private async Task<IActionResult> UploadLetterAsync(
+        Guid id, IFormFile file, bool signed, CancellationToken ct)
     {
         if (file == null || file.Length == 0)
             return BadRequest(new { message = "No file provided." });
 
-        await using var stream = file.OpenReadStream();
-        var url = await _service.UploadSignedLetterAsync(id, stream, file.FileName, ct);
-        return Ok(new { url });
+        if (_currentUser.TenantId is not Guid tenantId ||
+            !Guid.TryParse(_currentUser.UserId, out var actorUserId))
+            return BadRequest(new { message = "User context could not be resolved." });
+
+        HrControlledDocument document;
+        try
+        {
+            document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
+            {
+                TenantId = tenantId,
+                ActorUserId = actorUserId,
+                ActorName = _currentUser.UserName,
+                Category = ControlledFileUploadCategories.HrOfferLetters,
+                File = file,
+                Registration = new HrDocumentDmsRegistration
+                {
+                    SourceLabel = signed
+                        ? "Countersigned offer letter"
+                        : "Issued offer letter",
+                    SourceEntityType = "JobOffer",
+                    SourceRecordId = id,
+                    Title = Path.GetFileName(file.FileName),
+                    DocumentType = signed ? "SignedOfferLetter" : "OfferLetter"
+                }
+            }, ct);
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
+        }
+
+        try
+        {
+            if (signed)
+            {
+                await _service.RecordSignedLetterAsync(
+                    id, document.FileUploadRecordId,
+                    document.DocumentRecordId, document.DocumentVersionId, ct);
+            }
+            else
+            {
+                await _service.RecordOfferLetterAsync(
+                    id, document.FileUploadRecordId,
+                    document.DocumentRecordId, document.DocumentVersionId, ct);
+            }
+        }
+        catch
+        {
+            await _hrDocuments.RollbackAsync(document, tenantId, actorUserId, ct);
+            throw;
+        }
+
+        // Offer letters are private: the response carries the download route, not a public URL.
+        return Ok(new
+        {
+            downloadUrl = Url.Action(
+                signed ? nameof(DownloadSignedLetter) : nameof(DownloadLetter),
+                new { id })
+        });
+    }
+
+    /// <summary>Streams the issued offer letter.</summary>
+    [HttpGet("{id:guid}/letter")]
+    public Task<IActionResult> DownloadLetter(Guid id, CancellationToken ct = default)
+        => DownloadLetterAsync(id, signed: false, ct);
+
+    /// <summary>Streams the countersigned offer letter.</summary>
+    [HttpGet("{id:guid}/signed-letter")]
+    public Task<IActionResult> DownloadSignedLetter(Guid id, CancellationToken ct = default)
+        => DownloadLetterAsync(id, signed: true, ct);
+
+    private async Task<IActionResult> DownloadLetterAsync(
+        Guid id, bool signed, CancellationToken ct)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest(new { message = "Tenant context could not be resolved." });
+
+        var offer = await _db.Set<JobOffer>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, ct);
+        if (offer is null)
+            return NotFound();
+
+        var uploadId = signed
+            ? offer.SignedOfferLetterFileUploadRecordId
+            : offer.OfferLetterFileUploadRecordId;
+        var recordId = signed
+            ? offer.SignedOfferLetterDocumentRecordId
+            : offer.OfferLetterDocumentRecordId;
+        var versionId = signed
+            ? offer.SignedOfferLetterDocumentVersionId
+            : offer.OfferLetterDocumentVersionId;
+        var legacyPath = signed ? offer.SignedOfferLetterPath : offer.OfferLetterPath;
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            recordId, versionId, uploadId, legacyPath,
+            fallbackFileName: signed
+                ? $"signed-offer-{offer.OfferNumber}.pdf"
+                : $"offer-{offer.OfferNumber}.pdf",
+            fallbackContentType: "application/pdf",
+            inline: false, ct);
     }
 }

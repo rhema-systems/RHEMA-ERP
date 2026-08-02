@@ -136,3 +136,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260726181817_MergeFinanceModule")] partial class MergeFinanceModule { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260730222806_MergeEstateAndProcurementPhase3")] partial class MergeEstateAndProcurementPhase3 { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260731143111_MergeProcurementPhase4AndEstateReadiness")] partial class MergeProcurementPhase4AndEstateReadiness { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260801224538_HrControlledDocumentLinks")] partial class HrControlledDocumentLinks { }

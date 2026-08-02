@@ -1,10 +1,15 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Api.Security;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 namespace ErpSystem.Api.Controllers.HR;
@@ -21,24 +26,28 @@ public class CandidatePortalController : ControllerBase
     private readonly ICandidatePortalService _portalService;
     private readonly ICandidatePortalAuthService _authService;
     private readonly IFileStorageService _fileStorage;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly ApplicationDbContext _db;
     private readonly IJobOfferService _offerService;
     private readonly IOfferLetterService _offerLetter;
-
-    private static readonly string[] AllowedImageExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
-    private static readonly string[] AllowedDocExtensions   = { ".pdf", ".doc", ".docx" };
-    private const long MaxPhotoSizeBytes = 5  * 1024 * 1024; // 5 MB
-    private const long MaxDocSizeBytes   = 10 * 1024 * 1024; // 10 MB
 
     public CandidatePortalController(
         ICandidatePortalService portalService,
         ICandidatePortalAuthService authService,
         IFileStorageService fileStorage,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        ApplicationDbContext db,
         IJobOfferService offerService,
         IOfferLetterService offerLetter)
     {
         _portalService = portalService;
         _authService   = authService;
         _fileStorage   = fileStorage;
+        _hrDocuments   = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _db            = db;
         _offerService  = offerService;
         _offerLetter   = offerLetter;
     }
@@ -167,7 +176,15 @@ public class CandidatePortalController : ControllerBase
     }
 
     // ── Profile Photo ──────────────────────────────────────────────────────────
-    /// <summary>Upload and set the candidate profile photo. Returns the public URL.</summary>
+    /// <summary>
+    /// Upload and set the candidate profile photo.
+    /// </summary>
+    /// <remarks>
+    /// Returns the route to fetch the photo, not a public URL. A photograph of a named job
+    /// applicant is personal data, so it is stored privately and served only through the
+    /// authorizing endpoint below — callers must fetch it with their bearer token rather than
+    /// putting the value straight into an <c>img src</c>.
+    /// </remarks>
     [HttpPost("profile/photo")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -176,20 +193,87 @@ public class CandidatePortalController : ControllerBase
         if (file == null || file.Length == 0)
             return BadRequest(new { message = "No file provided." });
 
-        if (file.Length > MaxPhotoSizeBytes)
-            return BadRequest(new { message = "Photo must not exceed 5 MB." });
+        var tenantId = GetTenantId();
+        var accountId = GetAccountId();
 
-        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!AllowedImageExtensions.Contains(ext))
-            return BadRequest(new { message = "Only JPG, PNG and WebP photos are accepted." });
+        HrControlledDocument document;
+        try
+        {
+            document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
+            {
+                TenantId = tenantId,
+                // The portal session is the candidate's own; there is no internal user behind it.
+                ActorUserId = ControlledFileUploadActors.PublicPortalAnonymous,
+                ActorName = "candidate-portal",
+                Category = ControlledFileUploadCategories.HrCandidatePhotos,
+                File = file,
+                // Avatars carry no retention value; a DMS record per photo is repository noise.
+                Registration = null
+            }, ct);
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
+        }
 
-        await using var stream = file.OpenReadStream();
-        var safeFileName = $"{Guid.NewGuid():N}{ext}";
-        var filePath = await _fileStorage.UploadFileAsync(stream, safeFileName, "candidate-photos");
-        var publicUrl = await _fileStorage.GetPublicUrlAsync(filePath);
+        try
+        {
+            await _portalService.UpdateProfilePhotoAsync(
+                accountId, document.FileUploadRecordId, tenantId, ct);
+        }
+        catch (Exception ex)
+        {
+            await _hrDocuments.RollbackAsync(
+                document, tenantId, ControlledFileUploadActors.PublicPortalAnonymous, ct);
+            if (ex is InvalidOperationException)
+                return BadRequest(new { message = ex.Message });
+            throw;
+        }
 
-        var url = await _portalService.UpdateProfilePhotoAsync(GetAccountId(), publicUrl, GetTenantId(), ct);
-        return Ok(new { url });
+        return Ok(new { url = Url.Action(nameof(GetProfilePhoto)) });
+    }
+
+    /// <summary>Streams the authenticated candidate's own profile photo.</summary>
+    [HttpGet("profile/photo")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetProfilePhoto(CancellationToken ct)
+    {
+        var tenantId = GetTenantId();
+        var candidate = await LoadOwnCandidateAsync(tenantId, ct);
+        if (candidate is null)
+            return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            documentRecordId: null, documentVersionId: null,
+            candidate.ProfilePhotoFileUploadRecordId,
+            legacyPath: null,
+            fallbackFileName: "profile-photo",
+            fallbackContentType: null,
+            inline: true, ct);
+    }
+
+    /// <summary>
+    /// Loads the candidate profile owned by the authenticated portal account, or null when the
+    /// account has not completed one. Scoping every lookup through the account's own
+    /// <c>JobCandidateId</c> is what stops one candidate reading another's files.
+    /// </summary>
+    private async Task<JobCandidate?> LoadOwnCandidateAsync(Guid tenantId, CancellationToken ct)
+    {
+        var accountId = GetAccountId();
+        var candidateId = await _db.Set<CandidatePortalAccount>()
+            .AsNoTracking()
+            .Where(item => item.Id == accountId && item.TenantId == tenantId && !item.IsDeleted)
+            .Select(item => item.JobCandidateId)
+            .SingleOrDefaultAsync(ct);
+        if (candidateId is not Guid id)
+            return null;
+
+        return await _db.Set<JobCandidate>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, ct);
     }
 
     // ── Documents ──────────────────────────────────────────────────────────────
@@ -214,23 +298,117 @@ public class CandidatePortalController : ControllerBase
         if (file == null || file.Length == 0)
             return BadRequest(new { message = "No file provided." });
 
-        if (file.Length > MaxDocSizeBytes)
-            return BadRequest(new { message = "Document must not exceed 10 MB." });
-
-        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!AllowedDocExtensions.Contains(ext))
-            return BadRequest(new { message = "Only PDF, DOC and DOCX files are accepted." });
-
         if (!Enum.IsDefined(typeof(JobCandidateDocumentType), documentType))
             return BadRequest(new { message = "Invalid document type." });
 
-        await using var stream = file.OpenReadStream();
-        var safeFileName = $"{Guid.NewGuid():N}{ext}";
-        var filePath = await _fileStorage.UploadFileAsync(stream, safeFileName, "candidate-documents");
+        var tenantId = GetTenantId();
+        var accountId = GetAccountId();
 
-        var result = await _portalService.AddDocumentAsync(
-            GetAccountId(), documentType, file.FileName, filePath, GetTenantId(), ct);
-        return Ok(result);
+        // The DMS needs a source record, and it also means an account without a saved profile
+        // is rejected before any bytes are stored.
+        Guid candidateId;
+        try
+        {
+            candidateId = await _portalService.RequireCandidateIdAsync(accountId, tenantId, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
+        HrControlledDocument document;
+        try
+        {
+            document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
+            {
+                TenantId = tenantId,
+                ActorUserId = ControlledFileUploadActors.PublicPortalAnonymous,
+                ActorName = "candidate-portal",
+                Category = ControlledFileUploadCategories.HrCandidateDocuments,
+                File = file,
+                Registration = new HrDocumentDmsRegistration
+                {
+                    SourceLabel = "Candidate document",
+                    SourceEntityType = nameof(JobCandidate),
+                    SourceRecordId = candidateId,
+                    Title = Path.GetFileName(file.FileName),
+                    DocumentType = documentType.ToString(),
+                    ChangeSummary = "Uploaded by the candidate through the careers portal."
+                }
+            }, ct);
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
+        }
+
+        try
+        {
+            var result = await _portalService.AddDocumentAsync(
+                accountId, documentType, document.OriginalFileName, string.Empty, tenantId, ct,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            await _hrDocuments.RollbackAsync(
+                document, tenantId, ControlledFileUploadActors.PublicPortalAnonymous, ct);
+            if (ex is InvalidOperationException)
+                return BadRequest(new { message = ex.Message });
+            throw;
+        }
+    }
+
+    /// <summary>Streams a document belonging to the authenticated candidate.</summary>
+    [HttpGet("documents/{documentId:guid}/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadDocument(Guid documentId, CancellationToken ct)
+    {
+        var tenantId = GetTenantId();
+        var candidate = await LoadOwnCandidateAsync(tenantId, ct);
+        if (candidate is null)
+            return NotFound();
+
+        // Scoped to the caller's own candidate id, so a guessed document id from another
+        // candidate is a lookup miss rather than a disclosure.
+        var document = await _db.Set<JobCandidateDocument>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == documentId &&
+                        item.TenantId == tenantId &&
+                        item.JobCandidateId == candidate.Id &&
+                        !item.IsDeleted,
+                ct);
+        if (document is null)
+            return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            document.DocumentRecordId, document.DocumentVersionId,
+            document.FileUploadRecordId, document.FilePath,
+            document.FileName, fallbackContentType: null,
+            inline: false, ct);
+    }
+
+    /// <summary>Streams the authenticated candidate's own CV.</summary>
+    [HttpGet("cv")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadCv(CancellationToken ct)
+    {
+        var tenantId = GetTenantId();
+        var candidate = await LoadOwnCandidateAsync(tenantId, ct);
+        if (candidate is null)
+            return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            candidate.CvDocumentRecordId, candidate.CvDocumentVersionId,
+            candidate.CvFileUploadRecordId, candidate.CvFilePath,
+            fallbackFileName: $"cv-{candidate.CandidateNumber}",
+            fallbackContentType: null,
+            inline: false, ct);
     }
 
     /// <summary>Delete a document belonging to this candidate.</summary>

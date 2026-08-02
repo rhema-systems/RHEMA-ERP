@@ -2541,6 +2541,15 @@ public class AppraisalAttachment : TenantEntity
 	[Required]
 	public Guid UploadedById { get; set; }
 
+	/// <summary>Scanned controlled upload backing this attachment.</summary>
+	public Guid? FileUploadRecordId { get; set; }
+
+	/// <summary>Central-DMS record, once registered.</summary>
+	public Guid? DocumentRecordId { get; set; }
+
+	/// <summary>Central-DMS version, once registered.</summary>
+	public Guid? DocumentVersionId { get; set; }
+
 	/// <summary>Discriminator for polymorphic attachment linking.</summary>
 	public AppraisalAttachmentEntityType EntityType { get; set; }
 

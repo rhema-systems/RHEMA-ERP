@@ -22,7 +22,7 @@ public class PublicRecruitmentController : ControllerBase
     private readonly IJobVacancyService    _vacancyService;
     private readonly IJobApplicationService _applicationService;
     private readonly ICountryService       _countryService;
-    private readonly IFileStorageService   _fileStorage;
+    private readonly IControlledFileUploadService _controlledFiles;
     private readonly ISkillService         _skillService;
     private readonly IQualificationCatalogueService _qualificationCatalogueService;
     private readonly ILogger<PublicRecruitmentController> _logger;
@@ -31,7 +31,7 @@ public class PublicRecruitmentController : ControllerBase
         IJobVacancyService vacancyService,
         IJobApplicationService applicationService,
         ICountryService countryService,
-        IFileStorageService fileStorage,
+        IControlledFileUploadService controlledFiles,
         ISkillService skillService,
         IQualificationCatalogueService qualificationCatalogueService,
         ILogger<PublicRecruitmentController> logger)
@@ -39,7 +39,7 @@ public class PublicRecruitmentController : ControllerBase
         _vacancyService              = vacancyService;
         _applicationService          = applicationService;
         _countryService              = countryService;
-        _fileStorage                 = fileStorage;
+        _controlledFiles             = controlledFiles;
         _skillService                = skillService;
         _qualificationCatalogueService = qualificationCatalogueService;
         _logger                      = logger;
@@ -272,37 +272,71 @@ public class PublicRecruitmentController : ControllerBase
     // CV UPLOAD
     // =========================================================================
 
-    private static readonly string[] AllowedCvExtensions = { ".pdf", ".doc", ".docx" };
-    private const long MaxCvSizeBytes = 5 * 1024 * 1024; // 5 MB
-
     /// <summary>
-    /// Accepts a CV/résumé file upload and stores it, returning the file path.
-    /// The caller should include the returned path in the subsequent apply payload.
+    /// Accepts a CV/résumé for a specific vacancy and returns a single-use token.
     /// </summary>
+    /// <remarks>
+    /// <para>The applicant echoes the token back as <c>CvUploadToken</c> when they apply. The
+    /// response deliberately contains no storage path and no record id: previously this returned
+    /// the path and the apply endpoint accepted whatever path it was given, so the client chose
+    /// which stored file a candidate record pointed at.</para>
+    ///
+    /// <para><paramref name="vacancyId"/> is required and must resolve to a published vacancy in
+    /// the header's tenant. That is not decoration — <c>FileUploadRecord.TenantId</c> is a real
+    /// foreign key, so an invented header would otherwise fail deep in the insert, and without it
+    /// this endpoint is free anonymous file storage for anyone who can guess a GUID.</para>
+    ///
+    /// <para>Size, extension, MIME and malware checks all belong to the shared upload gate now,
+    /// which is why the local allowlist and size constant are gone.</para>
+    /// </remarks>
     [HttpPost("cv-upload")]
-    [EnableRateLimiting("PublicApplyPolicy")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [EnableRateLimiting("PublicUploadPolicy")]
+    [ProducesResponseType(typeof(PublicCvUploadTicketDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> UploadCv(
         IFormFile file,
+        [FromForm] Guid vacancyId,
         CancellationToken ct = default)
     {
+        if (!TryGetTenantId(out var tenantId))
+            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
+
         if (file == null || file.Length == 0)
             return BadRequest(new { message = "No file provided." });
 
-        if (file.Length > MaxCvSizeBytes)
-            return BadRequest(new { message = "File size must not exceed 5 MB." });
-
-        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!AllowedCvExtensions.Contains(ext))
-            return BadRequest(new { message = "Only PDF, DOC, and DOCX files are accepted." });
+        var vacancy = await _vacancyService.GetPublicVacancyByIdAsync(tenantId, vacancyId, ct);
+        if (vacancy == null)
+            return NotFound(new { message = "Vacancy not found or no longer available." });
 
         try
         {
-            await using var stream = file.OpenReadStream();
-            var safeFileName = $"{Guid.NewGuid():N}{ext}";
-            var filePath = await _fileStorage.UploadFileAsync(stream, safeFileName, "cv-uploads");
-            return Ok(new { filePath });
+            var upload = await _controlledFiles.UploadAsync(new ControlledFileUploadRequest
+            {
+                TenantId = tenantId,
+                // No authenticated user exists on this path; the gate rejects an empty actor.
+                ActorUserId = ControlledFileUploadActors.PublicPortalAnonymous,
+                ActorName = "public-career-portal",
+                Category = ControlledFileUploadCategories.HrCandidateCv,
+                FileName = Path.GetFileName(file.FileName),
+                ContentType = string.IsNullOrWhiteSpace(file.ContentType)
+                    ? "application/octet-stream"
+                    : file.ContentType,
+                FileSize = file.Length,
+                OpenReadStream = file.OpenReadStream
+            }, ct);
+
+            var ticket = await _applicationService.MintCvUploadTicketAsync(
+                tenantId, vacancyId, upload.Record.Id,
+                upload.Record.OriginalFileName, upload.Record.ContentType,
+                upload.Record.FileSize, ct);
+
+            return Ok(ticket);
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
         }
         catch (Exception ex)
         {

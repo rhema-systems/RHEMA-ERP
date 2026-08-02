@@ -71,18 +71,21 @@ public interface IStaffDisciplineDocumentService
 
     Task<StaffDisciplineDocumentDto> AddAsync(CreateStaffDisciplineDocumentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
 
-    Task<StaffDisciplineDocumentDto> UploadAsync(
+    /// <summary>
+    /// Validates a scope/step/appeal combination against a case, so an upload can be rejected
+    /// before any bytes are stored.
+    /// </summary>
+    /// <remarks>
+    /// This replaces the previous stream-based <c>UploadAsync</c>. That method wrote straight to
+    /// storage, bypassing the shared controlled-upload gate — no malware scan, no upload record,
+    /// and into the publicly served web root. Uploading is now the controller's job via
+    /// <c>IHrControlledDocumentService</c>, and removing the old method keeps that the only route.
+    /// </remarks>
+    Task ValidateDocumentScopeAsync(
         Guid caseId,
-        Stream fileStream,
-        string fileName,
-        string contentType,
         DisciplinaryDocumentScope scope,
-        DisciplinaryDocumentCategory category,
         Guid? actionStepId,
         Guid? appealId,
-        string? description,
-        Guid tenantId,
-        Guid userId,
         CancellationToken cancellationToken = default);
 
     Task<(Stream Stream, string FileName, string ContentType)?> OpenFileAsync(Guid id, CancellationToken cancellationToken = default);

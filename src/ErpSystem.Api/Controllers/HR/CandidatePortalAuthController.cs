@@ -93,6 +93,31 @@ public class CandidatePortalAuthController : ControllerBase
         }
     }
 
+    // ── Resend Verification ────────────────────────────────────────────────────
+    /// <summary>
+    /// Re-sends the account verification email. Always returns 204 to avoid email enumeration.
+    /// </summary>
+    /// <remarks>
+    /// Registration issues no session token and login refuses unverified accounts, so without a
+    /// resend path a lost verification email leaves the account permanently unusable — the
+    /// duplicate-email guard also blocks simply registering again. Rate-limited by the strictest
+    /// existing policy and additionally cooled down per-address in the service, because this
+    /// endpoint sends mail to a third party on demand.
+    /// </remarks>
+    [HttpPost("resend-verification")]
+    [EnableRateLimiting("SensitivePolicy")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> ResendVerification(
+        [FromBody] CandidatePortalForgotPasswordDto dto,
+        CancellationToken ct)
+    {
+        if (!TryGetTenantId(out var tenantId))
+            return BadRequest(new { message = "X-Tenant-Id header is required." });
+
+        await _authService.ResendVerificationEmailAsync(dto.Email, tenantId, ct);
+        return NoContent();
+    }
+
     // ── Forgot Password ────────────────────────────────────────────────────────
     /// <summary>
     /// Sends a password reset email. Always returns 204 to avoid email enumeration.

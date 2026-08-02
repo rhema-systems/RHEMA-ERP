@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.Recruitment;
 using Microsoft.EntityFrameworkCore;
@@ -37,6 +38,7 @@ public class JobApplicationService : IJobApplicationService
     private readonly ILogger<JobApplicationService> _logger;
     private readonly IEmailService _email;
     private readonly ITemplatedEmailService _templatedEmail;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
 
     public JobApplicationService(
         IJobApplicationRepository applicationRepository,
@@ -59,8 +61,10 @@ public class JobApplicationService : IJobApplicationService
         IUnitOfWork unitOfWork,
         ILogger<JobApplicationService> logger,
         IEmailService email,
-        ITemplatedEmailService templatedEmail)
+        ITemplatedEmailService templatedEmail,
+        ICentralDocumentRepositoryFileService centralDocuments)
     {
+        _centralDocuments = centralDocuments;
         _applicationRepository = applicationRepository;
         _stageHistoryRepository = stageHistoryRepository;
         _testResultRepository = testResultRepository;
@@ -1082,50 +1086,154 @@ public class JobApplicationService : IJobApplicationService
         return (passed, rawScore, notes);
     }
 
-    // ── Public-upload path validation ────────────────────────────────────────
+    // ── Public CV upload tickets ─────────────────────────────────────────────
 
-    /// <summary>Folder that <c>POST /api/public/cv-upload</c> writes into.</summary>
-    private const string CvUploadFolder = "cv-uploads/";
-
-    private static readonly string[] AllowedCvExtensions = { ".pdf", ".doc", ".docx" };
+    /// <summary>How long an unclaimed CV upload stays claimable.</summary>
+    private static readonly TimeSpan CvUploadTicketLifetime = TimeSpan.FromHours(2);
 
     /// <summary>
-    /// Validates a CV path supplied on the anonymous apply payload.
-    ///
-    /// <para>The apply endpoint takes <c>CvFilePath</c> as a free string and previously persisted it
-    /// verbatim, with nothing tying it to a file actually returned by <c>/api/public/cv-upload</c>. An
-    /// applicant could therefore point a candidate record at any path on disk. We accept only the shape
-    /// the upload endpoint produces: a file directly inside <see cref="CvUploadFolder"/>, with an allowed
-    /// extension and no traversal segments.</para>
+    /// Issues a single-use ticket for a CV that has already passed the controlled-upload gate.
     /// </summary>
-    private static string? ValidateUploadedCvPath(string? cvFilePath)
+    /// <remarks>
+    /// The caller receives an opaque random token; only its SHA-256 hash is stored. The ticket
+    /// table is readable by anything with database access, and a raw token is a bearer credential
+    /// — storing it would mean anyone who could read the table could attach a stranger's CV to
+    /// their own application.
+    /// </remarks>
+    public async Task<PublicCvUploadTicketDto> MintCvUploadTicketAsync(
+        Guid tenantId,
+        Guid vacancyId,
+        Guid fileUploadRecordId,
+        string originalFileName,
+        string? contentType,
+        long fileSize,
+        CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(cvFilePath))
+        var token = GenerateUploadToken();
+        var ticket = new PublicCvUploadTicket
+        {
+            // Explicit: this flow is anonymous, so there is no tenant claim to stamp from.
+            TenantId = tenantId,
+            FileUploadRecordId = fileUploadRecordId,
+            JobVacancyId = vacancyId,
+            TokenHash = HashUploadToken(token),
+            OriginalFileName = originalFileName,
+            ContentType = contentType,
+            FileSize = fileSize,
+            ExpiresAtUtc = DateTime.UtcNow.Add(CvUploadTicketLifetime),
+            CreatedBy = "external-portal"
+        };
+
+        await _unitOfWork.Repository<PublicCvUploadTicket>().AddAsync(ticket);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return new PublicCvUploadTicketDto
+        {
+            UploadToken = token,
+            FileName = ticket.OriginalFileName,
+            FileSize = ticket.FileSize,
+            ExpiresAtUtc = ticket.ExpiresAtUtc
+        };
+    }
+
+    /// <summary>
+    /// Resolves an unclaimed ticket for this tenant and vacancy, or null when no token was supplied.
+    /// </summary>
+    /// <remarks>
+    /// A stale, replayed, cross-tenant or cross-vacancy token is indistinguishable from a wrong one
+    /// to the caller — all produce the same message. The tenant and vacancy predicates are the
+    /// binding that stops a token minted against one advert being spent on another.
+    /// </remarks>
+    private async Task<PublicCvUploadTicket?> ResolveCvUploadTicketAsync(
+        string? token,
+        Guid tenantId,
+        Guid vacancyId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(token))
             return null;
 
-        var path = cvFilePath.Trim().Replace('\\', '/');
+        var hash = HashUploadToken(token.Trim());
+        var now = DateTime.UtcNow;
 
-        if (!path.StartsWith(CvUploadFolder, StringComparison.OrdinalIgnoreCase)
-            || path.Contains("..", StringComparison.Ordinal)
-            || Path.IsPathRooted(path))
-        {
-            throw new InvalidOperationException(
-                "The CV file reference is not valid. Please upload your CV again.");
-        }
+        var ticket = await _unitOfWork.Repository<PublicCvUploadTicket>()
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId &&
+                item.JobVacancyId == vacancyId &&
+                item.TokenHash == hash &&
+                item.ClaimedAtUtc == null &&
+                item.ExpiresAtUtc > now &&
+                !item.IsDeleted);
 
-        // Exactly one segment after the folder — no nested paths.
-        var fileName = path[CvUploadFolder.Length..];
-        if (string.IsNullOrWhiteSpace(fileName) || fileName.Contains('/'))
-            throw new InvalidOperationException(
-                "The CV file reference is not valid. Please upload your CV again.");
-
-        var extension = Path.GetExtension(fileName);
-        if (!AllowedCvExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
-            throw new InvalidOperationException(
-                "Only PDF, DOC, and DOCX CVs are accepted.");
-
-        return path;
+        return ticket ?? throw new InvalidOperationException(
+            "Your CV upload has expired or was already used. Please upload your CV again.");
     }
+
+    /// <summary>
+    /// Catalogues a claimed CV in the central DMS and records the link on the candidate.
+    /// </summary>
+    /// <remarks>
+    /// Best-effort by design. The application and the candidate's
+    /// <c>CvFileUploadRecordId</c> are already committed, so the file is downloadable through
+    /// the authorizing endpoints whether or not this succeeds; failing the request here would
+    /// cost the candidate a submission over a catalogue entry.
+    /// </remarks>
+    private async Task RegisterCandidateCvAsync(
+        Guid candidateId,
+        PublicCvUploadTicket cvTicket,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var candidate = await _candidateRepository.GetByIdAsync(candidateId);
+            if (candidate is null || candidate.TenantId != tenantId)
+                return;
+
+            var link = await _centralDocuments.RegisterAsync(
+                new CentralDocumentRepositoryRegistration
+                {
+                    TenantId = tenantId,
+                    ActorUserId = ControlledFileUploadActors.PublicPortalAnonymous,
+                    ActorName = "public-career-portal",
+                    FileUploadRecordId = cvTicket.FileUploadRecordId,
+                    SourceModule = "HR",
+                    SourceLabel = "Recruitment candidate CV",
+                    SourceEntityType = nameof(JobCandidate),
+                    SourceRecordId = candidateId,
+                    SourceRecordReference = candidate.CandidateNumber,
+                    Title = cvTicket.OriginalFileName,
+                    DocumentType = "CV",
+                    AccessProfile = "HR restricted",
+                    ChangeSummary = "CV submitted through the public careers portal."
+                },
+                cancellationToken);
+
+            candidate.CvDocumentRecordId = link.DocumentRecordId;
+            candidate.CvDocumentVersionId = link.DocumentVersionId;
+            await _candidateRepository.UpdateAsync(candidate);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception,
+                "Could not register the CV for candidate {CandidateId} in the central DMS. " +
+                "The file remains available through the candidate's upload record.",
+                candidateId);
+        }
+    }
+
+    private static string GenerateUploadToken()
+        => Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+            .Replace('+', '-')
+            .Replace('/', '_')
+            .TrimEnd('=');
+
+    private static string HashUploadToken(string token)
+        => Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(token)))
+            .ToLowerInvariant();
 
     // ── Concurrency-safe vacancy counter update ─────────────────────────────
 
@@ -1134,6 +1242,12 @@ public class JobApplicationService : IJobApplicationService
     /// Retries up to 3 times on <see cref="DbUpdateConcurrencyException"/> caused by the
     /// RowVersion optimistic concurrency token, reloading the fresh row before each retry.
     /// </summary>
+    /// <remarks>
+    /// This only ever maintains a denormalised counter, and every caller has already
+    /// committed the owning application change before calling in. A conflict that survives
+    /// the retries is therefore logged and swallowed here rather than thrown: letting it
+    /// escape would report failure for work that actually succeeded.
+    /// </remarks>
     private async Task UpdateVacancyCounterAsync(
         Guid vacancyId,
         Action<JobVacancy> mutate,
@@ -1151,18 +1265,36 @@ public class JobApplicationService : IJobApplicationService
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 return;
             }
-            catch (DbUpdateConcurrencyException ex) when (attempt < maxRetries)
+            catch (DbUpdateConcurrencyException ex)
             {
+                if (attempt == maxRetries)
+                {
+                    _logger.LogError(ex,
+                        "Vacancy counter update for {VacancyId} failed after {Max} retries.",
+                        vacancyId, maxRetries);
+                    return;
+                }
+
                 _logger.LogWarning(
                     "Concurrency conflict updating vacancy counter for {VacancyId}. Attempt {Attempt}/{Max}.",
                     vacancyId, attempt + 1, maxRetries);
-                foreach (var entry in ex.Entries.Where(e => e.Entity is JobVacancy))
-                    await entry.ReloadAsync(cancellationToken);
+
+                // A reload can itself throw when the row was deleted concurrently; that must
+                // not escape and mask this loop's own error handling.
+                try
+                {
+                    foreach (var entry in ex.Entries.Where(e => e.Entity is JobVacancy))
+                        await entry.ReloadAsync(cancellationToken);
+                }
+                catch (Exception reloadEx)
+                {
+                    _logger.LogWarning(reloadEx,
+                        "Reload failed while updating the counter for vacancy {VacancyId}.",
+                        vacancyId);
+                    return;
+                }
             }
         }
-        _logger.LogError(
-            "Vacancy counter update for {VacancyId} failed after {Max} retries.",
-            vacancyId, maxRetries);
     }
 
     private static List<string> SplitValues(string? raw) =>
@@ -2376,9 +2508,10 @@ public class JobApplicationService : IJobApplicationService
         if (vacancy.ApplicationDeadline.HasValue && DateTime.UtcNow > vacancy.ApplicationDeadline.Value)
             throw new InvalidOperationException("The application deadline for this vacancy has passed.");
 
-        // The CV path is supplied by the (anonymous) client, so it must be one WE issued from
-        // POST /api/public/cv-upload — not an arbitrary string pointing anywhere on disk.
-        var cvFilePath = ValidateUploadedCvPath(dto.CvFilePath);
+        // The client sends back a token we issued from POST /api/public/cv-upload, never a path.
+        // Resolving it here also binds the upload to this tenant and this vacancy.
+        var cvTicket = await ResolveCvUploadTicketAsync(
+            dto.CvUploadToken, tenantId, dto.VacancyId, cancellationToken);
 
         // JobCandidate.CountryId is a non-nullable FK. A missing or cross-tenant country id would
         // otherwise reach the database as an invalid key and surface as an opaque 500, so reject it
@@ -2405,7 +2538,7 @@ public class JobApplicationService : IJobApplicationService
             async ct =>
             {
                 application = await PersistExternalApplicationAsync(
-                    dto, vacancy, tenantId, cvFilePath, trackingToken, ct);
+                    dto, vacancy, tenantId, cvTicket, trackingToken, ct);
             },
             cancellationToken);
 
@@ -2415,6 +2548,14 @@ public class JobApplicationService : IJobApplicationService
             application.ApplicationNumber, dto.Email, dto.VacancyId,
             dto.WorkHistories.Count, dto.Qualifications.Count,
             dto.Referees.Count, dto.Skills.Count, dto.Languages.Count);
+
+        // Catalogue the CV in the central DMS. Deliberately AFTER the transaction, for the same
+        // reason as the counter below: RegisterAsync saves on its own unit of work and would
+        // contend with rows this transaction held. The application is already durable, and the
+        // candidate keeps CvFileUploadRecordId either way, so a DMS hiccup costs a catalogue
+        // entry that can be reconciled later — never the submission itself.
+        if (cvTicket is not null)
+            await RegisterCandidateCvAsync(application.JobCandidateId, cvTicket, tenantId, cancellationToken);
 
         // The vacancy counter is a denormalised statistic, not part of the application's integrity.
         // It stays OUT of the transaction: UpdateVacancyCounterAsync retries concurrency conflicts by
@@ -2457,7 +2598,7 @@ public class JobApplicationService : IJobApplicationService
         ExternalApplicationDto dto,
         JobVacancy vacancy,
         Guid tenantId,
-        string? cvFilePath,
+        PublicCvUploadTicket? cvTicket,
         string trackingToken,
         CancellationToken cancellationToken = default)
     {
@@ -2479,7 +2620,7 @@ public class JobApplicationService : IJobApplicationService
                 CountryId       = dto.CountryId!.Value,   // validated above
                 LinkedInProfile = dto.LinkedInProfile,
                 PortfolioUrl    = dto.PortfolioUrl,
-                CvFilePath      = cvFilePath,
+                CvFileUploadRecordId = cvTicket?.FileUploadRecordId,
                 AvailableFrom   = dto.AvailableFrom,
                 IsInTalentPool  = dto.AddToTalentPool,
                 TalentPoolAddedDate = dto.AddToTalentPool ? DateTime.UtcNow : null,
@@ -2492,7 +2633,7 @@ public class JobApplicationService : IJobApplicationService
         }
         else
         {
-            // Update opt-in if newly consented; refresh CV path if provided
+            // Update opt-in if newly consented; point at the new CV if one was supplied
             bool candidateUpdated = false;
             if (dto.AddToTalentPool && !candidate.IsInTalentPool)
             {
@@ -2500,9 +2641,14 @@ public class JobApplicationService : IJobApplicationService
                 candidate.TalentPoolAddedDate = DateTime.UtcNow;
                 candidateUpdated = true;
             }
-            if (!string.IsNullOrWhiteSpace(cvFilePath))
+            if (cvTicket is not null)
             {
-                candidate.CvFilePath = cvFilePath;
+                // A repeat applicant gets a second CV document. The previous one is left in
+                // place: deleting a superseded CV would destroy evidence for an application
+                // that may still be under review.
+                candidate.CvFileUploadRecordId = cvTicket.FileUploadRecordId;
+                candidate.CvDocumentRecordId = null;
+                candidate.CvDocumentVersionId = null;
                 candidateUpdated = true;
             }
             if (dto.AvailableFrom.HasValue)
@@ -2702,6 +2848,15 @@ public class JobApplicationService : IJobApplicationService
                 application.ApplicationNumber);
         }
 
+        // Burn the CV ticket inside the same transaction as the application, so a rolled-back
+        // submission leaves the upload claimable and the applicant can simply retry.
+        if (cvTicket is not null)
+        {
+            cvTicket.ClaimedAtUtc = DateTime.UtcNow;
+            cvTicket.ClaimedByCandidateId = candidate.Id;
+            await _unitOfWork.Repository<PublicCvUploadTicket>().UpdateAsync(cvTicket);
+        }
+
         // Flush the application, its child rows and the snapshot so the pipeline placement below can
         // read the application back by id. This is a save, not a commit — the caller's transaction
         // still owns the commit, so everything here rolls back together on failure.
@@ -2764,6 +2919,14 @@ public class JobApplicationService : IJobApplicationService
 
         await _applicationRepository.UpdateAsync(application);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // The counter was previously never decremented on this path, so every public-portal
+        // withdrawal inflated ApplicationCount permanently. Kept outside the save above for
+        // the usual reason: JobVacancy's RowVersion must not be able to fail the withdrawal.
+        await UpdateVacancyCounterAsync(
+            application.JobVacancyId,
+            vacancy => vacancy.ApplicationCount = Math.Max(0, vacancy.ApplicationCount - 1),
+            cancellationToken);
 
         _logger.LogInformation(
             "External application {AppNumber} withdrawn via tracking token.",

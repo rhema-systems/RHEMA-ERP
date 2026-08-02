@@ -17,6 +17,12 @@ public interface IConsultantClientPortalAuthService
     // Token flows resolve tenant from the globally-unique token; no X-Tenant-Id header (emailed link).
     Task VerifyEmailAsync(string token, CancellationToken ct = default);
 
+    /// <summary>
+    /// Re-sends the verification email with a fresh token. Completes without indicating whether
+    /// the address exists, is already verified, or is deactivated.
+    /// </summary>
+    Task ResendVerificationEmailAsync(string email, Guid tenantId, CancellationToken ct = default);
+
     Task RequestPasswordResetAsync(string email, Guid tenantId, CancellationToken ct = default);
 
     Task ResetPasswordAsync(ConsultantClientPortalResetPasswordDto dto, CancellationToken ct = default);

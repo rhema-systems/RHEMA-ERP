@@ -440,6 +440,15 @@ public class StaffDisciplineDocument : TenantEntity
 
     public DisciplinaryDocumentCategory Category { get; set; } = DisciplinaryDocumentCategory.Evidence;
 
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     [MaxLength(500)]
     public string? Description { get; set; }
 
