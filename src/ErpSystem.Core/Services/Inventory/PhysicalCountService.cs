@@ -219,10 +219,12 @@ public partial class PhysicalCountService : IPhysicalCountService
             count.WarehouseId,
             item.LocationId ?? count.LocationId,
             count.CountNumber);
+        var lotNumber = Normalize(dto.LotNumber, 100);
+        var serialNumber = Normalize(dto.SerialNumber, 100);
 
         if (await ReplayCountActionAsync(count.Id, PhysicalCountActionType.CountRecorded,
                 dto.IdempotencyKey, userId, "Counter", dto.Notes,
-                new { Id = dto.PhysicalCountItemId, dto.CountedQuantity }))
+                new { Id = dto.PhysicalCountItemId, dto.CountedQuantity, LotNumber = lotNumber, SerialNumber = serialNumber }))
             return true;
         if (count.Status != "InProgress")
             throw new InvalidOperationException("First-count quantities can only be recorded while the count is In Progress.");
@@ -235,14 +237,15 @@ public partial class PhysicalCountService : IPhysicalCountService
         item.IsCounted = true;
         item.CountedAt = DateTime.UtcNow;
         item.CountedById = userId;
-        item.LotNumber = dto.LotNumber;
-        item.SerialNumber = dto.SerialNumber;
+        item.LotNumber = lotNumber;
+        item.SerialNumber = serialNumber;
         item.Notes = dto.Notes;
         item.CountAttempts++;
 
         await _countItemRepository.UpdateAsync(item);
         await AddCountActionAsync(count, PhysicalCountActionType.CountRecorded, userId,
-            dto.IdempotencyKey, dto.Notes, new { item.Id, dto.CountedQuantity }, "Counter");
+            dto.IdempotencyKey, dto.Notes,
+            new { item.Id, dto.CountedQuantity, LotNumber = lotNumber, SerialNumber = serialNumber }, "Counter");
         await _unitOfWork.SaveChangesAsync();
 
         // Update count summary

@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -51,6 +52,47 @@ public sealed class InventoryValuationReconciliationServiceTests
     }
 
     [Fact, Trait("Batch", "TDC-0613")]
+    public async Task Accepted_non_stock_receipt_does_not_require_an_inventory_valuation_movement()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var purchaseOrderId = Guid.NewGuid();
+        var purchaseOrderItem = new PurchaseOrderItem
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, PurchaseOrderId = purchaseOrderId,
+            InventoryItemId = null, ItemDescription = "Professional services",
+            OrderedQuantity = 1m, ReceivedQuantity = 1m, RemainingQuantity = 0m,
+            UnitOfMeasure = "SERVICE", UnitPrice = 250m, LineTotal = 250m
+        };
+        var receipt = new PurchaseOrderReceipt
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, PurchaseOrderId = purchaseOrderId,
+            ReceiptNumber = "POR-SERVICE-001", ReceiptDate = new DateTime(2026, 12, 10),
+            Status = "Accepted"
+        };
+        receipt.Items.Add(new PurchaseOrderReceiptItem
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, ReceiptId = receipt.Id,
+            PurchaseOrderItemId = purchaseOrderItem.Id, PurchaseOrderItem = purchaseOrderItem,
+            ReceivedQuantity = 1m, AcceptedQuantity = 1m, UnitOfMeasure = "SERVICE"
+        });
+        fixture.Db.PurchaseOrderItems.Add(purchaseOrderItem);
+        fixture.Db.PurchaseOrderReceipts.Add(receipt);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.GenerateAsync(new GenerateInventoryValuationReconciliationRequest
+        {
+            FiscalPeriodId = fixture.PeriodId,
+            ToleranceAmount = 0m,
+            IdempotencyKey = "tdc0613-non-stock-receipt",
+            CorrelationId = "tdc0613-non-stock-receipt"
+        });
+
+        result.Exceptions.Should().NotContain(value =>
+            value.Code == "INV_RECEIPT_VALUATION_MISSING" && value.Reference == receipt.ReceiptNumber);
+        result.Status.Should().Be(InventoryValuationReconciliationStatus.Reconciled);
+    }
+
+    [Fact, Trait("Batch", "TDC-0613")]
     public async Task Generator_cannot_freeze_own_reconciliation()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -81,17 +123,19 @@ public sealed class InventoryValuationReconciliationServiceTests
 
     private sealed class Fixture : IAsyncDisposable
     {
-        private Fixture(ApplicationDbContext db, Guid periodId,
+        private Fixture(ApplicationDbContext db, Guid tenantId, Guid periodId,
             InventoryValuationReconciliationService service,
             Mock<IProcurementControlEventService> controlEvents)
         {
             Db = db;
+            TenantId = tenantId;
             PeriodId = periodId;
             Service = service;
             ControlEvents = controlEvents;
         }
 
         public ApplicationDbContext Db { get; }
+        public Guid TenantId { get; }
         public Guid PeriodId { get; }
         public InventoryValuationReconciliationService Service { get; }
         public Mock<IProcurementControlEventService> ControlEvents { get; }
@@ -142,7 +186,7 @@ public sealed class InventoryValuationReconciliationServiceTests
                 .ReturnsAsync(new ProcurementControlEventDto());
             var service = new InventoryValuationReconciliationService(
                 db, user, Mock.Of<IFiscalPeriodService>(), events.Object);
-            return new Fixture(db, period.Id, service, events);
+            return new Fixture(db, tenantId, period.Id, service, events);
         }
 
         public ValueTask DisposeAsync() => Db.DisposeAsync();

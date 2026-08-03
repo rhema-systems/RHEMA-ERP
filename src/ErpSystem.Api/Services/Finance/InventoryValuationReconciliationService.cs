@@ -299,7 +299,9 @@ public sealed class InventoryValuationReconciliationService : IInventoryValuatio
 
         var acceptedReceipts = await _db.PurchaseOrderReceipts.AsNoTracking()
             .Where(value => value.TenantId == period.TenantId && value.ReceiptDate <= cutoff && !value.IsDeleted &&
-                            value.Items.Any(line => !line.IsDeleted && line.AcceptedQuantity > 0m))
+                            value.Items.Any(line => !line.IsDeleted && line.AcceptedQuantity > 0m &&
+                                !line.PurchaseOrderItem.IsDeleted &&
+                                line.PurchaseOrderItem.InventoryItemId.HasValue))
             .Select(value => new { value.Id, value.ReceiptNumber }).ToListAsync(cancellationToken);
         var movementReceiptIds = receiptIds.ToHashSet();
         foreach (var receipt in acceptedReceipts.Where(value => !movementReceiptIds.Contains(value.Id)))

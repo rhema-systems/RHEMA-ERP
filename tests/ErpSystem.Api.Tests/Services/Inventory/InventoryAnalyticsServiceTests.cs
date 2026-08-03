@@ -41,6 +41,45 @@ public sealed class InventoryAnalyticsServiceTests
         stockout.RecommendedActionCode.Should().Be("FOLLOW_REPLENISHMENT");
     }
 
+    [Fact, Trait("Batch", "TDC-0614")]
+    public async Task Analytics_uses_traceability_balances_for_non_fifo_expiry_exposure()
+    {
+        await using var fixture = await Fixture.CreateAsync(allowAccess: true);
+        var tenantId = fixture.Db.InventoryBalances.Select(value => value.TenantId).First();
+        var categoryId = fixture.Db.InventoryCategories.Select(value => value.Id).First();
+        var warehouse = await fixture.Db.Warehouses.SingleAsync();
+        var location = await fixture.Db.WarehouseLocations.SingleAsync();
+        var item = new InventoryItem
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CategoryId = categoryId,
+            ItemCode = "WA-EXP-001", Name = "Weighted tracked item", UnitOfMeasure = "EA",
+            Status = ItemStatus.Active, ValuationMethod = ValuationMethod.WeightedAverage
+        };
+        fixture.Db.InventoryItems.Add(item);
+        fixture.Db.InventoryBalances.Add(new InventoryBalance
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, InventoryItemId = item.Id,
+            WarehouseId = warehouse.Id, LocationId = location.Id, QuantityOnHand = 6m,
+            QuantityAvailable = 6m, TotalValue = 30m, AverageUnitCost = 5m,
+            LastReceiptDate = DateTime.UtcNow.AddDays(-30), InventoryItem = item,
+            Warehouse = warehouse, Location = location
+        });
+        fixture.Db.InventoryTraceabilityEvents.AddRange(
+            Fixture.TraceEvent(tenantId, item.Id, warehouse.Id, location.Id,
+                InventoryTrackingDirection.Receipt, 10m, "WA-LOT-001", DateTime.UtcNow.AddDays(-2), "wa-receipt"),
+            Fixture.TraceEvent(tenantId, item.Id, warehouse.Id, location.Id,
+                InventoryTrackingDirection.Issue, 4m, "wa-lot-001", null, "wa-issue"));
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.GetAsync(null, null, 90, 180, 90, 500);
+
+        var row = result.Items.Single(value => value.ItemCode == item.ItemCode);
+        row.ExpiredQuantity.Should().Be(6m);
+        row.ExpiredValue.Should().Be(30m);
+        row.DisposalCandidate.Should().BeTrue();
+        row.RecommendedActionCode.Should().Be("DISPOSAL_REVIEW");
+    }
+
     [Fact, Trait("Batch", "E2E-023")]
     public async Task Stockout_report_updates_to_the_draft_pr_created_from_the_governed_recommendation()
     {
@@ -196,6 +235,25 @@ public sealed class InventoryAnalyticsServiceTests
             Id = Guid.NewGuid(), TenantId = tenantId, CategoryId = categoryId,
             ItemCode = code, Name = code, UnitOfMeasure = "EA", Status = ItemStatus.Active,
             ReorderLevel = reorder
+        };
+
+        internal static InventoryTraceabilityEvent TraceEvent(
+            Guid tenantId,
+            Guid inventoryItemId,
+            Guid warehouseId,
+            Guid locationId,
+            InventoryTrackingDirection direction,
+            decimal quantity,
+            string lotNumber,
+            DateTime? expiryDate,
+            string eventKey) => new()
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, InventoryItemId = inventoryItemId,
+            WarehouseId = warehouseId, LocationId = locationId, Direction = direction,
+            Quantity = quantity, ReferenceType = "AnalyticsTest", ReferenceNumber = eventKey,
+            ReferenceId = Guid.NewGuid(), EventKey = eventKey, LotNumber = lotNumber,
+            ExpiryDate = expiryDate, ActorUserId = Guid.NewGuid(), OccurredAtUtc = DateTime.UtcNow,
+            CorrelationId = eventKey, PayloadHash = new string('A', 64)
         };
 
         public ValueTask DisposeAsync() => Db.DisposeAsync();

@@ -1,9 +1,13 @@
+using System.Reflection;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Services.Inventory;
 using ErpSystem.Data;
+using ErpSystem.Data.Migrations;
 using ErpSystem.Data.Repositories;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Inventory;
@@ -136,6 +140,23 @@ public sealed class InventoryItemIdentifierServiceTests : IAsyncLifetime
             .FindAnnotation("SqlServer:UseSqlOutputClause")!.Value.Should().Be(false);
         sqlServerContext.Model.FindEntityType(typeof(ItemUnitOfMeasure))!
             .FindAnnotation("SqlServer:UseSqlOutputClause")!.Value.Should().Be(false);
+    }
+
+    [Fact]
+    public void Migration_rollback_keeps_item_codes_tenant_scoped()
+    {
+        var migration = new TDC0601InventoryItemIdentifiers();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Down", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { builder });
+
+        var rollbackIndex = builder.Operations.OfType<CreateIndexOperation>().Should().ContainSingle(operation =>
+            operation.Name == "IX_InventoryItems_ItemCode").Which;
+        rollbackIndex.Columns.Should().Equal("TenantId", "ItemCode");
+        rollbackIndex.IsUnique.Should().BeTrue();
+        rollbackIndex.Filter.Should().Be("[IsDeleted] = 0");
+        builder.Operations.OfType<CreateIndexOperation>().Should().NotContain(operation =>
+            operation.Columns.SequenceEqual(new[] { "ItemCode" }));
     }
 
     private async Task<InventoryItem> AddItemAsync(

@@ -99,6 +99,16 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
                 !value.IsFullyConsumed && value.RemainingQuantity > 0m &&
                 warehouseIds.Contains(value.WarehouseId) && itemIds.Contains(value.InventoryItemId))
             .ToListAsync(cancellationToken);
+        var traceabilityEvents = await _db.InventoryTraceabilityEvents.AsNoTracking().Where(value =>
+                value.TenantId == _currentUser.TenantId && !value.IsDeleted &&
+                warehouseIds.Contains(value.WarehouseId) && itemIds.Contains(value.InventoryItemId) &&
+                (value.ExpiryDate.HasValue || value.LotNumber != null || value.BatchNumber != null ||
+                 value.SerialNumber != null))
+            .Select(value => new TraceabilityExpiryEvent(
+                value.InventoryItemId, value.WarehouseId, value.LocationId, value.Direction,
+                value.Quantity, value.LotNumber, value.BatchNumber, value.SerialNumber,
+                value.ExpiryDate, value.OccurredAtUtc))
+            .ToListAsync(cancellationToken);
         var demandFrom = now.Date.AddDays(-DemandWindowDays);
         var movements = await _db.InventoryMovements.AsNoTracking().Where(value =>
                 value.TenantId == _currentUser.TenantId && !value.IsDeleted && value.IsPosted &&
@@ -121,6 +131,8 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
         {
             var key = new ScopeItemKey(balance.InventoryItemId, balance.WarehouseId, balance.LocationId);
             var rowLayers = layers.Where(value => Key(value) == key).ToList();
+            var expiryExposures = BuildExpiryExposures(balance, rowLayers,
+                traceabilityEvents.Where(value => Key(value) == key).ToList());
             var fragments = BuildFragments(balance, rowLayers, now);
             var rowBands = BuildBands(fragments);
             var outbound = movements.Where(value => value.InventoryItemId == key.InventoryItemId &&
@@ -140,9 +152,9 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
                         ? InventoryActivityClassification.SlowMoving
                         : InventoryActivityClassification.Active;
             var expiryCutoff = now.Date.AddDays(expiryWarningDays + 1).AddTicks(-1);
-            var expired = rowLayers.Where(value => value.ExpirationDate.HasValue && value.ExpirationDate.Value < now.Date).ToList();
-            var expiring = rowLayers.Where(value => value.ExpirationDate.HasValue &&
-                value.ExpirationDate.Value >= now.Date && value.ExpirationDate.Value <= expiryCutoff).ToList();
+            var expired = expiryExposures.Where(value => value.ExpiryDate < now.Date).ToList();
+            var expiring = expiryExposures.Where(value => value.ExpiryDate >= now.Date &&
+                value.ExpiryDate <= expiryCutoff).ToList();
             var recommendation = replenishments.FirstOrDefault(value =>
                 value.InventoryItemId == key.InventoryItemId && value.WarehouseId == key.WarehouseId);
             var disposal = expired.Count != 0 ||
@@ -169,10 +181,10 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
                 EstimatedDaysOfCover = averageDailyDemand > 0m && balance.QuantityAvailable > 0m
                     ? Round(balance.QuantityAvailable / averageDailyDemand) : null,
                 OldestStockAgeDays = oldestAge, OldestAgeingBand = Band(oldestAge).Label,
-                ExpiredQuantity = Round(expired.Sum(value => value.RemainingQuantity)),
-                ExpiredValue = Round(expired.Sum(value => value.RemainingValue)),
-                ExpiringQuantity = Round(expiring.Sum(value => value.RemainingQuantity)),
-                ExpiringValue = Round(expiring.Sum(value => value.RemainingValue)),
+                ExpiredQuantity = Round(expired.Sum(value => value.Quantity)),
+                ExpiredValue = Round(expired.Sum(value => value.Value)),
+                ExpiringQuantity = Round(expiring.Sum(value => value.Quantity)),
+                ExpiringValue = Round(expiring.Sum(value => value.Value)),
                 DisposalCandidate = disposal, ReplenishmentCandidate = replenishment,
                 ReplenishmentRecommendationId = recommendation?.Id,
                 ReplenishmentRecommendationNumber = recommendation?.RecommendationNumber,
@@ -263,6 +275,63 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
             };
         }).ToList();
 
+    private static IReadOnlyList<ExpiryExposure> BuildExpiryExposures(
+        InventoryBalance balance,
+        IReadOnlyList<InventoryLayer> layers,
+        IReadOnlyList<TraceabilityExpiryEvent> events)
+    {
+        var tracked = events
+            .GroupBy(value => new TraceabilityKey(
+                NormalizeTracking(value.LotNumber),
+                NormalizeTracking(value.BatchNumber),
+                NormalizeTracking(value.SerialNumber),
+                HasTrackingIdentity(value) ? null : value.ExpiryDate?.Date))
+            .Select(group => new
+            {
+                ExpiryDate = group.Where(value => value.ExpiryDate.HasValue)
+                    .OrderByDescending(value => value.OccurredAtUtc)
+                    .Select(value => value.ExpiryDate!.Value.Date)
+                    .FirstOrDefault(),
+                Quantity = group.Sum(value => SignedTrackingQuantity(value.Direction, value.Quantity))
+            })
+            .Where(value => value.ExpiryDate != default && value.Quantity > 0m)
+            .ToList();
+
+        if (tracked.Count != 0)
+        {
+            var trackedQuantity = tracked.Sum(value => value.Quantity);
+            var quantityFactor = balance.QuantityOnHand > 0m && trackedQuantity > balance.QuantityOnHand
+                ? balance.QuantityOnHand / trackedQuantity
+                : 1m;
+            var unitValue = balance.QuantityOnHand > 0m
+                ? balance.TotalValue / balance.QuantityOnHand
+                : balance.AverageUnitCost;
+            return tracked.Select(value => new ExpiryExposure(
+                value.ExpiryDate,
+                value.Quantity * quantityFactor,
+                value.Quantity * quantityFactor * unitValue)).ToList();
+        }
+
+        return layers.Where(value => value.ExpirationDate.HasValue && value.RemainingQuantity > 0m)
+            .Select(value => new ExpiryExposure(
+                value.ExpirationDate!.Value.Date,
+                value.RemainingQuantity,
+                value.RemainingValue)).ToList();
+    }
+
+    private static decimal SignedTrackingQuantity(InventoryTrackingDirection direction, decimal quantity) =>
+        direction is InventoryTrackingDirection.Receipt or InventoryTrackingDirection.Return or
+            InventoryTrackingDirection.TransferIn or InventoryTrackingDirection.AdjustmentIn
+            ? Math.Abs(quantity)
+            : -Math.Abs(quantity);
+
+    private static bool HasTrackingIdentity(TraceabilityExpiryEvent value) =>
+        !string.IsNullOrWhiteSpace(value.LotNumber) || !string.IsNullOrWhiteSpace(value.BatchNumber) ||
+        !string.IsNullOrWhiteSpace(value.SerialNumber);
+
+    private static string? NormalizeTracking(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToUpperInvariant();
+
     private static (string Code, string Text) Action(InventoryActivityClassification classification,
         bool expired, bool expiring, InventoryReplenishmentRecommendation? recommendation)
     {
@@ -286,6 +355,8 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
 
     private static ScopeItemKey Key(InventoryLayer value) =>
         new(value.InventoryItemId, value.WarehouseId, value.LocationId);
+    private static ScopeItemKey Key(TraceabilityExpiryEvent value) =>
+        new(value.InventoryItemId, value.WarehouseId, value.LocationId);
     private static BandDefinition Band(int ageDays) => Bands.First(value => value.Includes(ageDays));
     private static int Days(DateTime now, DateTime value) => Math.Max(0, (now.Date - value.Date).Days);
     private static decimal Round(decimal value) => Math.Round(value, 4, MidpointRounding.AwayFromZero);
@@ -306,6 +377,23 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
 
     private readonly record struct ScopeKey(Guid WarehouseId, Guid? LocationId);
     private readonly record struct ScopeItemKey(Guid InventoryItemId, Guid WarehouseId, Guid? LocationId);
+    private readonly record struct TraceabilityKey(
+        string? LotNumber,
+        string? BatchNumber,
+        string? SerialNumber,
+        DateTime? UnidentifiedExpiryDate);
+    private sealed record TraceabilityExpiryEvent(
+        Guid InventoryItemId,
+        Guid WarehouseId,
+        Guid? LocationId,
+        InventoryTrackingDirection Direction,
+        decimal Quantity,
+        string? LotNumber,
+        string? BatchNumber,
+        string? SerialNumber,
+        DateTime? ExpiryDate,
+        DateTime OccurredAtUtc);
+    private sealed record ExpiryExposure(DateTime ExpiryDate, decimal Quantity, decimal Value);
     private sealed record BandDefinition(string Key, string Label, int FromDays, int? ToDays)
     {
         public bool Includes(int ageDays) => ageDays >= FromDays && (!ToDays.HasValue || ageDays <= ToDays.Value);

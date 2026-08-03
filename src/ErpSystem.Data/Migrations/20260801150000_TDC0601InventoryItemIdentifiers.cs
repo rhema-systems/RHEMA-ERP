@@ -133,11 +133,14 @@ public sealed class TDC0601InventoryItemIdentifiers : Migration
         migrationBuilder.DropColumn(name: "Barcode", table: "InventoryItems");
         migrationBuilder.DropColumn(name: "AlternateBarcode", table: "InventoryItems");
 
+        // Keep item-code uniqueness tenant-scoped on rollback. The legacy index name is
+        // retained so a later re-apply can drop it through the normal Up path.
         migrationBuilder.CreateIndex(
             name: "IX_InventoryItems_ItemCode",
             table: "InventoryItems",
-            column: "ItemCode",
-            unique: true);
+            columns: new[] { "TenantId", "ItemCode" },
+            unique: true,
+            filter: "[IsDeleted] = 0");
     }
 
     private const string CreateInventoryItemTrigger =

@@ -167,6 +167,53 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
 
     [Fact]
     [Trait("Batch", "E2E-012")]
+    public async Task First_count_replay_hash_covers_lot_and_serial_metadata()
+    {
+        var created = await _counts.CreateAsync(new CreatePhysicalCountDto
+        {
+            WarehouseId = _warehouseId,
+            LocationId = _locationId,
+            CountType = CountType.CycleCount,
+            ABCClass = "A",
+            Notes = "Tracking replay boundary."
+        }, _initiatorId);
+        await SetRowVersionsAsync(created.Id);
+        _currentUser.Switch(_counterId, "cycle.counter");
+        await _counts.StartCountAsync(created.Id, _counterId);
+        var line = (await LoadCountAsync(created.Id)).Items.Single();
+        var request = new RecordCountItemDto
+        {
+            PhysicalCountItemId = line.Id,
+            CountedQuantity = 7m,
+            LotNumber = " lot-a ",
+            SerialNumber = " serial-a ",
+            RowVersion = Convert.ToBase64String(_lineRowVersion),
+            IdempotencyKey = "e2e-012-tracking-replay",
+            Notes = "Tracked first count."
+        };
+
+        (await _counts.RecordCountItemAsync(request, _counterId)).Should().BeTrue();
+        (await _counts.RecordCountItemAsync(request, _counterId)).Should().BeTrue();
+        var changedReplay = async () => await _counts.RecordCountItemAsync(new RecordCountItemDto
+        {
+            PhysicalCountItemId = request.PhysicalCountItemId,
+            CountedQuantity = request.CountedQuantity,
+            LotNumber = "LOT-B",
+            SerialNumber = request.SerialNumber,
+            RowVersion = request.RowVersion,
+            IdempotencyKey = request.IdempotencyKey,
+            Notes = request.Notes
+        }, _counterId);
+
+        await changedReplay.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*different action payload or actor*");
+        var saved = (await LoadCountAsync(created.Id)).Items.Single();
+        saved.LotNumber.Should().Be("lot-a");
+        saved.SerialNumber.Should().Be("serial-a");
+    }
+
+    [Fact]
+    [Trait("Batch", "E2E-012")]
     public async Task Abc_blind_count_recount_dual_approval_and_audit_attestation_reconcile_to_finance_posting()
     {
         var created = await _counts.CreateAsync(new CreatePhysicalCountDto
