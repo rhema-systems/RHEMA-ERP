@@ -147,6 +147,36 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Label_candidate_search_requires_inventory_read_or_an_operating_capability()
+    {
+        await _context.Set<Warehouse>().AddAsync(new Warehouse
+        {
+            TenantId = _tenantId, Code = "WH-LABEL-SEARCH", Name = "Label search warehouse", IsActive = true
+        });
+        await _context.Set<InventoryItem>().AddAsync(new InventoryItem
+        {
+            TenantId = _tenantId, ItemCode = "SECRET-LABEL", Name = "Restricted label item",
+            Barcode = "SECRET-BARCODE"
+        });
+        await _context.SaveChangesAsync();
+        _access.Setup(item => item.CheckCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = false });
+        _access.Setup(item => item.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = false, Message = "No inventory assignment." });
+
+        var search = () => _service.SearchLabelCandidatesAsync(null);
+
+        await search.Should().ThrowAsync<InventoryScanningAuthorizationException>();
+        _access.Verify(item => item.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.inventory.read" &&
+                request.SourceType == "InventoryLabelCandidate"),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task External_actor_cannot_read_internal_scanning_controls()
     {
         _currentUser.SetupGet(item => item.IsExternalUser).Returns(true);

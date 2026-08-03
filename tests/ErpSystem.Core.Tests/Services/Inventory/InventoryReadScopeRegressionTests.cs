@@ -126,6 +126,45 @@ public sealed class InventoryReadScopeRegressionTests
     }
 
     [Fact]
+    public async Task Project_reservation_reads_page_past_denied_history_to_fill_the_authorized_limit()
+    {
+        await using var context = Context();
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var actor = User(tenantId, userId);
+        var allowedWarehouse = Warehouse(tenantId, "PROJECT-PAGED-A");
+        var deniedWarehouse = Warehouse(tenantId, "PROJECT-PAGED-B");
+        var allowedLocation = Location(tenantId, allowedWarehouse, "PA-01");
+        var deniedLocation = Location(tenantId, deniedWarehouse, "PB-01");
+        var allowedItem = Item(tenantId, "PROJECT-PAGED-ITEM-A");
+        var deniedItem = Item(tenantId, "PROJECT-PAGED-ITEM-B");
+        var now = DateTime.UtcNow;
+        var denied = Enumerable.Range(1, 50).Select(index =>
+        {
+            var value = Allocation(tenantId, actor, deniedWarehouse, deniedLocation, deniedItem, $"RES-DENIED-{index:000}");
+            value.AllocationDate = now.AddMinutes(-index);
+            return value;
+        }).ToList();
+        var allowed = Allocation(tenantId, actor, allowedWarehouse, allowedLocation, allowedItem, "RES-ALLOWED-OLDER");
+        allowed.AllocationDate = now.AddDays(-2);
+        context.AddRange(actor, allowedWarehouse, deniedWarehouse, allowedLocation, deniedLocation, allowedItem, deniedItem);
+        context.AddRange(denied);
+        context.Add(allowed);
+        await context.SaveChangesAsync();
+        using var unitOfWork = new UnitOfWork(context);
+        var current = CurrentUser(tenantId, userId);
+        var access = ScopedAccess(allowedWarehouse.Id, allowedLocation.Id);
+        var userManager = UserManager(context);
+        var service = new InventoryProjectReservationService(unitOfWork, current.Object, access.Object,
+            Mock.Of<IProcurementControlEventService>(), Mock.Of<INotificationService>(), userManager.Object,
+            NullLogger<InventoryProjectReservationService>.Instance);
+
+        var visible = await service.GetAsync(take: 1);
+
+        visible.Should().ContainSingle().Which.Id.Should().Be(allowed.Id);
+    }
+
+    [Fact]
     public async Task Negative_stock_history_is_visible_only_to_read_or_override_actors_in_scope()
     {
         await using var context = Context();

@@ -900,7 +900,8 @@ public class StockAdjustmentService : IStockAdjustmentService
 
     private async Task BuildLinesAsync(StockAdjustment adjustment, IReadOnlyCollection<CreateStockAdjustmentItemDto> requests)
     {
-        if (requests.Select(x => Math.Sign(x.AdjustmentQuantity)).Distinct().Count() > 1)
+        if (requests.Select(x => Math.Sign(x.AdjustmentQuantity)).Distinct().Count() > 1 &&
+            adjustment.ReasonCode is not (StockAdjustmentReasonCodes.CycleCount or StockAdjustmentReasonCodes.PhysicalCount))
             throw new InvalidOperationException("One stock adjustment cannot mix increases and decreases.");
         var warehouse = await _warehouseRepository.GetByIdAsync(adjustment.WarehouseId)
             ?? throw new ArgumentException("The selected warehouse was not found.");

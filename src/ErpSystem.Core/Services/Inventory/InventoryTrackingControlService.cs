@@ -237,6 +237,16 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
             if (currentSerial > 0)
                 throw new InventoryTrackingControlException("INV_TRACKING_SERIAL_DUPLICATE", "The serial number is already on hand in this tenant.");
         }
+        if (requirements.RequiresSerial && request.Direction == InventoryTrackingDirection.Return)
+        {
+            var currentSerial = Balance(allEvents.Where(value => Same(value.SerialNumber, request.SerialNumber)));
+            if (currentSerial != 0)
+                throw new InventoryTrackingControlException(
+                    "INV_TRACKING_SERIAL_RETURN_INVALID",
+                    currentSerial > 0
+                        ? "The serial number is already on hand in this tenant and cannot be returned again."
+                        : "The serial number has an invalid negative on-hand balance and cannot be returned until its trace history is reconciled.");
+        }
 
         // Historical, genuinely untracked stock predates the canonical trace ledger. Do not
         // make ordinary (non lot/batch/serial/FIFO) stock unusable merely because TDC-0603

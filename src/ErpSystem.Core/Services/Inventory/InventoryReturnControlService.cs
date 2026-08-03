@@ -517,18 +517,28 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
 
     private async Task<IReadOnlyList<InventoryReturnVoucherDto>> GetListAsync(Guid? requisitionId, CancellationToken cancellationToken)
     {
-        var items = await Query().AsNoTracking()
-            .Where(x => !requisitionId.HasValue || x.InventoryRequisitionId == requisitionId)
-            .OrderByDescending(x => x.CreatedAt).Take(200).ToListAsync(cancellationToken);
-        var allowed = new List<InventoryReturnVoucherDto>();
-        foreach (var item in items)
+        const int take = 200;
+        const int pageSize = 200;
+        var query = Query().AsNoTracking()
+            .Where(x => !requisitionId.HasValue || x.InventoryRequisitionId == requisitionId);
+        var allowed = new List<InventoryReturnVoucherDto>(take);
+        var offset = 0;
+        while (allowed.Count < take)
         {
-            try
+            var candidates = await query.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id)
+                .Skip(offset).Take(pageSize).ToListAsync(cancellationToken);
+            foreach (var item in candidates)
             {
-                await RequireAccessAsync("procurement.inventory.read", item.WarehouseId, item.Lines.Select(x => x.LocationId), item.VoucherNumber, cancellationToken);
-                allowed.Add(Map(item));
+                try
+                {
+                    await RequireAccessAsync("procurement.inventory.read", item.WarehouseId, item.Lines.Select(x => x.LocationId), item.VoucherNumber, cancellationToken);
+                    allowed.Add(Map(item));
+                }
+                catch (InventoryReturnAuthorizationException) { }
+                if (allowed.Count == take) break;
             }
-            catch (InventoryReturnAuthorizationException) { }
+            offset += candidates.Count;
+            if (candidates.Count < pageSize) break;
         }
         return allowed;
     }

@@ -120,6 +120,31 @@ public sealed class InventoryDisposalServiceTests
     }
 
     [Fact, Trait("Batch", "TDC-0615")]
+    public async Task Identification_reserves_the_exact_lot_across_active_disposal_cases()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var firstRequest = fixture.Request("identify-exact-lot-first");
+        firstRequest.Lines.Single().LotNumber = "LOT-RESERVED";
+        await fixture.Service.CreateAsync(firstRequest);
+        fixture.TrackingControls.Setup(value => value.ValidateAvailabilityAsync(
+                fixture.Item.Id, fixture.Warehouse.Id, fixture.Location.Id, 8m,
+                " lot-reserved ", null, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InventoryTrackingControlException(
+                "INV_TRACKING_LOT_INSUFFICIENT", "The exact lot has only four units."));
+        var secondRequest = fixture.Request("identify-exact-lot-second");
+        secondRequest.Lines.Single().LotNumber = " lot-reserved ";
+
+        var action = () => fixture.Service.CreateAsync(secondRequest);
+
+        await action.Should().ThrowAsync<InventoryTrackingControlException>()
+            .Where(value => value.Code == "INV_TRACKING_LOT_INSUFFICIENT");
+        fixture.TrackingControls.Verify(value => value.ValidateAvailabilityAsync(
+            fixture.Item.Id, fixture.Warehouse.Id, fixture.Location.Id, 8m,
+            " lot-reserved ", null, null, It.IsAny<CancellationToken>()), Times.Once);
+        (await fixture.Db.InventoryDisposalCases.CountAsync()).Should().Be(1);
+    }
+
+    [Fact, Trait("Batch", "TDC-0615")]
     public async Task Committee_schedule_requires_three_independent_active_users_with_the_disposal_role()
     {
         await using var fixture = await Fixture.CreateAsync();

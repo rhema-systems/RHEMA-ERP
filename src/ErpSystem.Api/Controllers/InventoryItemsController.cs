@@ -3,6 +3,7 @@ using System.Text.Json;
 using AutoMapper;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
@@ -43,6 +44,7 @@ public class InventoryItemsController : ControllerBase
     private readonly IProcurementMasterDataChangeService? _masterDataChanges;
     private readonly IInventoryItemIdentifierService? _identifierService;
     private readonly IInventoryItemProfileService? _profileService;
+    private readonly IProcurementAccessControlService _access;
     private readonly IAuditLogService? _auditLog;
     private readonly IUnitOfWork? _unitOfWork;
 
@@ -59,6 +61,7 @@ public class InventoryItemsController : ControllerBase
         IInventoryBalanceRepository inventoryBalanceRepository,
         IItemUnitOfMeasureRepository itemUnitOfMeasureRepository,
         IUnitOfMeasureScheduleRepository uomScheduleRepository,
+        IProcurementAccessControlService access,
         IMapper mapper,
         ILogger<InventoryItemsController> logger,
         IProcurementMasterDataChangeService? masterDataChanges = null,
@@ -79,6 +82,7 @@ public class InventoryItemsController : ControllerBase
         _inventoryBalanceRepository = inventoryBalanceRepository;
         _itemUnitOfMeasureRepository = itemUnitOfMeasureRepository;
         _uomScheduleRepository = uomScheduleRepository;
+        _access = access;
         _mapper = mapper;
         _logger = logger;
         _masterDataChanges = masterDataChanges;
@@ -472,6 +476,9 @@ public class InventoryItemsController : ControllerBase
     public async Task<ActionResult<InventoryItemImportResultDto>> ImportInventoryItems(
         [FromBody] ImportInventoryItemsDto request)
     {
+        if (!await HasInventoryCapabilityAsync(
+                ["procurement.inventory.master-data.manage"], "inventory-item-import"))
+            return Forbid();
         var protection = await GuardDirectMutationAsync(null, "InventoryItem.Import");
         if (protection is not null) return protection;
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -571,6 +578,10 @@ public class InventoryItemsController : ControllerBase
     [HttpGet("{id:guid}/history")]
     public async Task<ActionResult<IReadOnlyList<InventoryItemChangeAuditDto>>> GetInventoryItemHistory(Guid id)
     {
+        if (!await HasInventoryCapabilityAsync(
+                ["procurement.inventory.read", "procurement.inventory.master-data.manage"],
+                $"inventory-item-history:{id:N}"))
+            return Forbid();
         if (_unitOfWork is null) return StatusCode(StatusCodes.Status503ServiceUnavailable);
         var tenantId = GetTenantId();
         var itemExists = await _unitOfWork.Repository<InventoryItem>()
@@ -1286,6 +1297,50 @@ public class InventoryItemsController : ControllerBase
             Instance = HttpContext.Request.Path,
             Extensions = { ["code"] = decision.Code, ["correlationId"] = decision.CorrelationId, ["policyId"] = decision.PolicyId }
         });
+    }
+
+    private async Task<bool> HasInventoryCapabilityAsync(
+        IReadOnlyCollection<string> permissions,
+        string sourceReference)
+    {
+        Guid? denialWarehouseId = null;
+        foreach (var permission in permissions)
+        {
+            var warehouseIds = permission == "procurement.inventory.read" && _unitOfWork is not null
+                ? await _unitOfWork.Repository<Warehouse>().GetQueryable(value =>
+                        value.TenantId == GetTenantId() && value.IsActive && !value.IsDeleted)
+                    .AsNoTracking().Select(value => (Guid?)value.Id).ToListAsync(HttpContext.RequestAborted)
+                : new List<Guid?> { null };
+            if (permission == "procurement.inventory.read")
+                denialWarehouseId = warehouseIds.FirstOrDefault();
+            foreach (var warehouseId in warehouseIds)
+            {
+                var decision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+                {
+                    PermissionCode = permission,
+                    WarehouseId = warehouseId,
+                    SourceType = "InventoryItem",
+                    SourceReference = sourceReference
+                }, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+                if (decision.Allowed) return true;
+            }
+        }
+
+        try
+        {
+            var denial = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = permissions.First(),
+                WarehouseId = permissions.First() == "procurement.inventory.read" ? denialWarehouseId : null,
+                SourceType = "InventoryItem",
+                SourceReference = sourceReference
+            }, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+            return denial.Allowed;
+        }
+        catch (Exception exception) when (exception is ProcurementAccessAuthorizationException or ProcurementAccessValidationException)
+        {
+            return false;
+        }
     }
 
     private Guid GetTenantId()

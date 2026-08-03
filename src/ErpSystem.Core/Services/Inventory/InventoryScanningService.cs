@@ -145,6 +145,7 @@ public sealed class InventoryScanningService : IInventoryScanningService
         CancellationToken cancellationToken = default)
     {
         EnsureActor();
+        await RequireLabelCandidateReadCapabilityAsync(cancellationToken);
         take = Math.Clamp(take, 1, 100);
         var term = Clean(query);
         var items = Items.Where(item => item.TenantId == TenantId && !item.IsDeleted);
@@ -812,6 +813,54 @@ public sealed class InventoryScanningService : IInventoryScanningService
         }
         throw new InventoryScanningAuthorizationException(
             "An active receive, issue, transfer, or count responsibility assignment is required to change label profiles.");
+    }
+
+    private async Task RequireLabelCandidateReadCapabilityAsync(CancellationToken cancellationToken)
+    {
+        const string sourceReference = "label-candidate-search";
+        var warehouseIds = await _unitOfWork.Repository<Warehouse>().GetQueryable(item =>
+                item.TenantId == TenantId && item.IsActive && !item.IsDeleted)
+            .AsNoTracking().Select(item => item.Id).ToListAsync(cancellationToken);
+        var permissions = new[]
+        {
+            "procurement.inventory.read",
+            "procurement.inventory.receive",
+            "procurement.inventory.issue",
+            "procurement.inventory.transfer",
+            "procurement.inventory.count"
+        };
+        foreach (var warehouseId in warehouseIds)
+        {
+            foreach (var permission in permissions)
+            {
+                var decision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+                {
+                    PermissionCode = permission,
+                    WarehouseId = warehouseId,
+                    SourceType = "InventoryLabelCandidate",
+                    SourceReference = sourceReference
+                }, sourceReference, cancellationToken);
+                if (decision.Allowed) return;
+            }
+        }
+
+        try
+        {
+            var denial = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = "procurement.inventory.read",
+                WarehouseId = warehouseIds.Count > 0 ? warehouseIds[0] : null,
+                SourceType = "InventoryLabelCandidate",
+                SourceReference = sourceReference
+            }, sourceReference, cancellationToken);
+            if (denial.Allowed) return;
+        }
+        catch (Exception exception) when (exception is ProcurementAccessAuthorizationException or ProcurementAccessValidationException)
+        {
+            // Map the shared authorization boundary to the scanning API's structured 403 contract.
+        }
+        throw new InventoryScanningAuthorizationException(
+            "Inventory-read authority or an active receive, issue, transfer, or count responsibility is required to search label candidates.");
     }
 
     private async Task<bool> HasCapabilityAsync(

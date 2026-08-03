@@ -37,4 +37,39 @@ public sealed class InventoryItemsProfileControllerSecurityTests
         items.GetCustomAttributes(typeof(MinLengthAttribute), true).Cast<MinLengthAttribute>().Single().Length.Should().Be(1);
         items.GetCustomAttributes(typeof(MaxLengthAttribute), true).Cast<MaxLengthAttribute>().Single().Length.Should().Be(500);
     }
+
+    [Fact]
+    [Trait("Batch", "TDC-0616")]
+    public void Import_and_history_enforce_inventory_permissions_before_data_access()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "ErpSystem.Api", "Controllers", "InventoryItemsController.cs"));
+        var importStart = source.IndexOf("ImportInventoryItems(", StringComparison.Ordinal);
+        var importEnd = source.IndexOf("GetInventoryItemHistory", importStart, StringComparison.Ordinal);
+        var import = source[importStart..importEnd];
+        var historyStart = importEnd;
+        var historyEnd = source.IndexOf("DeleteInventoryItem", historyStart, StringComparison.Ordinal);
+        var history = source[historyStart..historyEnd];
+
+        import.Should().Contain("procurement.inventory.master-data.manage");
+        import.IndexOf("HasInventoryCapabilityAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(import.IndexOf("GuardDirectMutationAsync", StringComparison.Ordinal));
+        history.Should().Contain("procurement.inventory.read");
+        history.Should().Contain("procurement.inventory.master-data.manage");
+        history.IndexOf("HasInventoryCapabilityAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(history.IndexOf("Repository<InventoryItem>", StringComparison.Ordinal));
+    }
+
+    private static string FindRepositoryRoot([System.Runtime.CompilerServices.CallerFilePath] string sourcePath = "")
+    {
+        var directory = new DirectoryInfo(Path.GetDirectoryName(sourcePath) ?? AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (Directory.Exists(Path.Combine(directory.FullName, "src")) &&
+                File.Exists(Path.Combine(directory.FullName, "ErpSystem.sln")))
+                return directory.FullName;
+            directory = directory.Parent;
+        }
+        throw new InvalidOperationException("Could not locate the repository root.");
+    }
 }

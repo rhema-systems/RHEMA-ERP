@@ -78,20 +78,27 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             var statuses = AllocationStatuses(status.Value);
             query = query.Where(value => statuses.Contains(value.Status));
         }
-        var values = await query.OrderByDescending(value => value.AllocationDate).ThenBy(value => value.Id)
-            .AsNoTracking().ToListAsync(cancellationToken);
         var accessByScope = new Dictionary<(Guid WarehouseId, Guid? LocationId), bool>();
-        var result = new List<InventoryProjectReservationDto>(Math.Min(values.Count, take));
-        foreach (var value in values)
+        var result = new List<InventoryProjectReservationDto>(take);
+        var offset = 0;
+        var pageSize = Math.Max(take, 50);
+        while (result.Count < take)
         {
-            var scope = (value.WarehouseId, value.LocationId);
-            if (!accessByScope.TryGetValue(scope, out var allowed))
+            var candidates = await query.OrderByDescending(value => value.AllocationDate).ThenBy(value => value.Id)
+                .Skip(offset).Take(pageSize).AsNoTracking().ToListAsync(cancellationToken);
+            foreach (var value in candidates)
             {
-                allowed = await CanReadAsync(value, cancellationToken);
-                accessByScope[scope] = allowed;
+                var scope = (value.WarehouseId, value.LocationId);
+                if (!accessByScope.TryGetValue(scope, out var allowed))
+                {
+                    allowed = await CanReadAsync(value, cancellationToken);
+                    accessByScope[scope] = allowed;
+                }
+                if (allowed) result.Add(await MapAsync(value, includeNotifications: false, cancellationToken));
+                if (result.Count == take) break;
             }
-            if (allowed) result.Add(await MapAsync(value, includeNotifications: false, cancellationToken));
-            if (result.Count == take) break;
+            offset += candidates.Count;
+            if (candidates.Count < pageSize) break;
         }
         return result;
     }

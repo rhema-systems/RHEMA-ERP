@@ -173,15 +173,26 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
                     value.LocationId == input.LocationId && !value.IsDeleted, cancellationToken);
                 if (balance is null || balance.QuantityAvailable < input.Quantity)
                     throw Error("INV_DISPOSAL_STOCK_UNAVAILABLE", $"Exact-location available stock is insufficient for {inventoryItem.ItemCode}.");
-                await _trackingControls.ValidateAvailabilityAsync(input.InventoryItemId, inventoryWarehouseId,
-                    input.LocationId, input.Quantity, input.LotNumber, null, input.SerialNumber, cancellationToken);
-                var activeQuantity = await _db.InventoryDisposalLines.AsNoTracking().Where(value => value.TenantId == item.TenantId &&
+                var activeLines = _db.InventoryDisposalLines.AsNoTracking().Where(value => value.TenantId == item.TenantId &&
                         value.InventoryItemId == input.InventoryItemId && value.LocationId == input.LocationId && !value.IsDeleted &&
                         value.InventoryDisposalCase.Status != InventoryDisposalStatus.Completed &&
                         value.InventoryDisposalCase.Status != InventoryDisposalStatus.Rejected &&
                         value.InventoryDisposalCase.Status != InventoryDisposalStatus.Cancelled &&
-                        !value.InventoryDisposalCase.IsDeleted)
-                    .SumAsync(value => (decimal?)value.Quantity, cancellationToken) ?? 0m;
+                        !value.InventoryDisposalCase.IsDeleted);
+                var activeQuantity = await activeLines.SumAsync(value => (decimal?)value.Quantity, cancellationToken) ?? 0m;
+                var lotKey = TrackingKey(input.LotNumber);
+                var serialKey = TrackingKey(input.SerialNumber);
+                var exactReservedQuantity = lotKey.Length == 0 && serialKey.Length == 0
+                    ? 0m
+                    : await activeLines.Where(value =>
+                            (lotKey.Length == 0 || (value.LotNumber != null && value.LotNumber.Trim().ToUpper() == lotKey)) &&
+                            (serialKey.Length == 0 || (value.SerialNumber != null && value.SerialNumber.Trim().ToUpper() == serialKey)))
+                        .SumAsync(value => (decimal?)value.Quantity, cancellationToken) ?? 0m;
+                if (serialKey.Length != 0 && exactReservedQuantity > 0m)
+                    throw Error("INV_DISPOSAL_STOCK_RESERVED", $"Serial {serialKey} is already identified by another active disposal case.");
+                await _trackingControls.ValidateAvailabilityAsync(input.InventoryItemId, inventoryWarehouseId,
+                    input.LocationId, input.Quantity + (serialKey.Length == 0 ? exactReservedQuantity : 0m),
+                    input.LotNumber, null, input.SerialNumber, cancellationToken);
                 if (balance.QuantityAvailable - activeQuantity < input.Quantity)
                     throw Error("INV_DISPOSAL_STOCK_RESERVED", $"Stock already identified by another active disposal case leaves insufficient quantity for {inventoryItem.ItemCode}.");
                 var unitCost = balance.AverageUnitCost > 0m ? balance.AverageUnitCost :

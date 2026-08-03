@@ -306,10 +306,27 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
         var draftLineBuilder = source[buildStart..buildEnd];
 
         draftLineBuilder.Should().Contain("location.InventoryWarehouseId != adjustment.WarehouseId");
+        draftLineBuilder.Should().Contain(
+            "adjustment.ReasonCode is not (StockAdjustmentReasonCodes.CycleCount or StockAdjustmentReasonCodes.PhysicalCount)",
+            "controlled counts must preserve one governed adjustment when line variances have opposite signs");
         draftLineBuilder.Should().NotContain("AvailableStock < Math.Abs",
             "negative-stock authority is bound to the saved adjustment and exact posting line");
         source.Should().Contain("PrepareDecreaseAsync(new InventoryStockDecreaseRequest");
         source.Should().Contain("NegativeStockOverrideId = negativeStockOverrideIds.GetValueOrDefault(item.Id)");
+    }
+
+    [Fact]
+    public void Return_voucher_lists_page_until_the_authorized_limit_is_filled()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
+            "InventoryReturnControlService.cs"));
+        var start = source.IndexOf("private async Task<IReadOnlyList<InventoryReturnVoucherDto>> GetListAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("private IQueryable<InventoryReturnVoucher> Query", start, StringComparison.Ordinal);
+        var list = source[start..end];
+
+        list.Should().Contain("while (allowed.Count < take)");
+        list.Should().Contain(".Skip(offset).Take(pageSize)");
+        list.Should().Contain("offset += candidates.Count");
     }
 
     [Fact]

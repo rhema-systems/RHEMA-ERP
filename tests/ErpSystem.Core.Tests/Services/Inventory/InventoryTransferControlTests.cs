@@ -130,6 +130,27 @@ public sealed class InventoryTransferControlTests : IDisposable
         resolution.Should().NotContain("GetByWarehouseAndItemAsync(warehouseId, item.InventoryItemId)");
     }
 
+    [Fact]
+    public void Transfer_receipt_revalidates_destination_capacity_inside_the_controlled_transaction()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory", "InventoryTransferService.cs"));
+        var receiveStart = source.IndexOf("public async Task<bool> ReceiveAsync", StringComparison.Ordinal);
+        var receiveEnd = source.IndexOf("private async Task<bool> ReceiveCoreAsync", receiveStart, StringComparison.Ordinal);
+        var receive = source[receiveStart..receiveEnd];
+        var capacityStart = source.IndexOf("private async Task RevalidateDestinationCapacityAsync", StringComparison.Ordinal);
+        var capacityEnd = source.IndexOf("private async Task<string> GenerateTransferNumberAsync", capacityStart, StringComparison.Ordinal);
+        var capacity = source[capacityStart..capacityEnd];
+
+        receive.Should().Contain("await RevalidateDestinationCapacityAsync(transfer, normalizedLines);");
+        receive.IndexOf("RevalidateDestinationCapacityAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(receive.IndexOf("ReceiveCoreAsync", StringComparison.Ordinal));
+        capacity.Should().Contain("location.DedicatedItemId");
+        capacity.Should().Contain("location.MaxWeight");
+        capacity.Should().Contain("location.MaxVolume");
+        capacity.Should().Contain("location.MaxItems");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

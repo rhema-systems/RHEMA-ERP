@@ -1075,6 +1075,8 @@ public class InventoryTransferService : IInventoryTransferService
                 }
             }
 
+            await RevalidateDestinationCapacityAsync(transfer, normalizedLines);
+
             var correlationId = Normalize(control?.CorrelationId, 100) ?? $"transfer-receipt:{transfer.Id:N}:{Guid.NewGuid():N}";
             var action = await AddActionAsync(
                 transfer,
@@ -2147,6 +2149,81 @@ public class InventoryTransferService : IInventoryTransferService
         existing.LastModifiedById = _currentUserProvider.UserId;
 
         await _inventoryLocationRepository.UpdateAsync(existing);
+    }
+
+    private async Task RevalidateDestinationCapacityAsync(
+        InventoryTransfer transfer,
+        IReadOnlyCollection<InventoryTransferItemDto> receivedLines)
+    {
+        var incomingByLocation = receivedLines
+            .Where(line => line.ReceivedQuantity > 0)
+            .Select(line =>
+            {
+                var transferItem = transfer.Items.Single(item => item.Id == line.Id);
+                return new
+                {
+                    LocationId = line.DestinationLocationId ?? transferItem.DestinationLocationId,
+                    transferItem.InventoryItemId,
+                    Quantity = line.ReceivedQuantity
+                };
+            })
+            .Where(value => value.LocationId.HasValue && value.LocationId.Value != Guid.Empty)
+            .GroupBy(value => value.LocationId!.Value)
+            .ToList();
+
+        foreach (var locationGroup in incomingByLocation)
+        {
+            var location = await EnsureLocationBelongsToWarehouseAsync(
+                locationGroup.Key, transfer.DestinationWarehouseId, "DestinationLocationId");
+            if (!location.IsActive)
+                throw new InvalidOperationException("The destination location is inactive and cannot receive stock.");
+
+            var incoming = locationGroup.GroupBy(value => value.InventoryItemId)
+                .Select(group => new { InventoryItemId = group.Key, Quantity = group.Sum(value => value.Quantity) })
+                .ToList();
+            if (location.DedicatedItemId.HasValue && incoming.Any(value => value.InventoryItemId != location.DedicatedItemId.Value))
+                throw new InvalidOperationException("The destination location is dedicated to another inventory item.");
+
+            var balances = await _unitOfWork.Repository<InventoryLocation>().GetQueryable(value =>
+                    value.TenantId == transfer.TenantId && value.LocationId == location.Id &&
+                    value.Quantity > 0 && !value.IsDeleted && !value.InventoryItem.IsDeleted)
+                .AsNoTracking()
+                .Select(value => new
+                {
+                    value.InventoryItemId,
+                    value.Quantity,
+                    Weight = value.InventoryItem.Weight ?? value.InventoryItem.ShippingWeight,
+                    Volume = value.InventoryItem.Volume ?? 0m
+                })
+                .ToListAsync();
+            var incomingIds = incoming.Select(value => value.InventoryItemId).ToList();
+            var incomingItems = await _unitOfWork.Repository<InventoryItem>().GetQueryable(value =>
+                    value.TenantId == transfer.TenantId && incomingIds.Contains(value.Id) && !value.IsDeleted)
+                .AsNoTracking()
+                .Select(value => new
+                {
+                    value.Id,
+                    Weight = value.Weight ?? value.ShippingWeight,
+                    Volume = value.Volume ?? 0m
+                })
+                .ToListAsync();
+            if (incomingItems.Count != incoming.Count)
+                throw new InvalidOperationException("A transfer item no longer exists in the current tenant.");
+
+            var usedWeight = balances.Sum(value => value.Quantity * value.Weight);
+            var usedVolume = balances.Sum(value => value.Quantity * value.Volume);
+            var incomingWeight = incoming.Sum(value => value.Quantity * incomingItems.Single(item => item.Id == value.InventoryItemId).Weight);
+            var incomingVolume = incoming.Sum(value => value.Quantity * incomingItems.Single(item => item.Id == value.InventoryItemId).Volume);
+            var stockedItemIds = balances.Select(value => value.InventoryItemId).ToHashSet();
+            var incomingSlots = incoming.Count(value => !stockedItemIds.Contains(value.InventoryItemId));
+
+            if (location.MaxWeight.HasValue && usedWeight + incomingWeight > location.MaxWeight.Value)
+                throw new InvalidOperationException("The destination maximum weight would be exceeded at receipt.");
+            if (location.MaxVolume.HasValue && usedVolume + incomingVolume > location.MaxVolume.Value)
+                throw new InvalidOperationException("The destination maximum volume would be exceeded at receipt.");
+            if (location.MaxItems.HasValue && stockedItemIds.Count + incomingSlots > location.MaxItems.Value)
+                throw new InvalidOperationException("The destination maximum distinct-item capacity would be exceeded at receipt.");
+        }
     }
 
     private async Task<string> GenerateTransferNumberAsync()

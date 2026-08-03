@@ -169,6 +169,27 @@ public sealed class InventoryTrackingControlServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Return_of_a_serial_that_is_still_on_hand_is_rejected()
+    {
+        var category = Category("SERIAL-RETURN", configure: value => value.DefaultSerialTracking = true);
+        var item = Item(category.Id);
+        var warehouse = Warehouse();
+        var receipt = Event(item.Id, warehouse.Id, InventoryTrackingDirection.Receipt,
+            "serial-return-receipt", null, null, 1m);
+        receipt.SerialNumber = "SER-RETURN-001";
+        await _context.AddRangeAsync(category, item, warehouse, receipt);
+        await _context.SaveChangesAsync();
+
+        var action = () => _service.StageEventAsync(Request(
+            item.Id, warehouse.Id, InventoryTrackingDirection.Return,
+            eventKey: "serial-return-duplicate", serial: "SER-RETURN-001"));
+
+        await action.Should().ThrowAsync<InventoryTrackingControlException>()
+            .Where(value => value.Code == "INV_TRACKING_SERIAL_RETURN_INVALID");
+        _context.Set<InventoryTraceabilityEvent>().Local.Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task Legacy_untracked_stock_can_issue_without_synthetic_inbound_history()
     {
         var category = Category("LEGACY-UNTRACKED");
