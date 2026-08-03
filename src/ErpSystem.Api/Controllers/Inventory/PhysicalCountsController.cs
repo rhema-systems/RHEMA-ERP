@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,17 +13,20 @@ namespace ErpSystem.Api.Controllers.Inventory;
 /// </summary>
 [ApiController]
 [Route("api/inventory/physical-counts")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class PhysicalCountsController : ControllerBase
 {
     private readonly IPhysicalCountService _countService;
+    private readonly ICurrentUserService _currentUser;
     private readonly ILogger<PhysicalCountsController> _logger;
 
     public PhysicalCountsController(
         IPhysicalCountService countService,
+        ICurrentUserService currentUser,
         ILogger<PhysicalCountsController> logger)
     {
         _countService = countService;
+        _currentUser = currentUser;
         _logger = logger;
     }
 
@@ -44,7 +49,7 @@ public class PhysicalCountsController : ControllerBase
             var counts = await _countService.GetAllAsync(fromDate, toDate);
             return Ok(counts);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving physical counts");
             return StatusCode(500, "An error occurred while retrieving physical counts");
@@ -62,7 +67,7 @@ public class PhysicalCountsController : ControllerBase
             var counts = await _countService.GetFilteredAsync(filter);
             return Ok(counts);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving filtered physical counts");
             return StatusCode(500, "An error occurred while retrieving physical counts");
@@ -83,7 +88,7 @@ public class PhysicalCountsController : ControllerBase
 
             return Ok(count);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving physical count {Id}", id);
             return StatusCode(500, "An error occurred while retrieving the physical count");
@@ -104,7 +109,7 @@ public class PhysicalCountsController : ControllerBase
 
             return Ok(count);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving physical count {CountNumber}", countNumber);
             return StatusCode(500, "An error occurred while retrieving the physical count");
@@ -122,7 +127,7 @@ public class PhysicalCountsController : ControllerBase
             var counts = await _countService.GetByWarehouseAsync(warehouseId);
             return Ok(counts);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving physical counts for warehouse {WarehouseId}", warehouseId);
             return StatusCode(500, "An error occurred while retrieving physical counts");
@@ -140,7 +145,7 @@ public class PhysicalCountsController : ControllerBase
             var counts = await _countService.GetInProgressAsync();
             return Ok(counts);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving in-progress physical counts");
             return StatusCode(500, "An error occurred while retrieving in-progress physical counts");
@@ -158,7 +163,7 @@ public class PhysicalCountsController : ControllerBase
             var items = await _countService.GetItemsWithVarianceAsync(id);
             return Ok(items);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving items with variance for count {Id}", id);
             return StatusCode(500, "An error occurred while retrieving items with variance");
@@ -181,7 +186,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error creating physical count");
             return StatusCode(500, "An error occurred while creating the physical count");
@@ -211,7 +216,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error starting physical count {Id}", id);
             return StatusCode(500, "An error occurred while starting the physical count");
@@ -226,6 +231,9 @@ public class PhysicalCountsController : ControllerBase
     {
         try
         {
+            var count = await _countService.GetByIdAsync(id);
+            if (count is null || count.Items.All(item => item.Id != dto.PhysicalCountItemId))
+                return NotFound("The count line does not belong to the requested tenant-safe physical count.");
             var userId = GetCurrentUserId();
             var result = await _countService.RecordCountItemAsync(dto, userId);
             if (!result)
@@ -241,7 +249,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error recording count item for count {Id}", id);
             return StatusCode(500, "An error occurred while recording the count item");
@@ -271,11 +279,106 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error recording count items for count {Id}", id);
             return StatusCode(500, "An error occurred while recording the count items");
         }
+    }
+
+    [HttpPost("{id}/recount")]
+    public async Task<ActionResult> RecordRecount(Guid id, [FromBody] RecordPhysicalCountRecountRequest request)
+    {
+        try
+        {
+            await _countService.RecordRecountAsync(id, GetCurrentUserId(), request);
+            return Ok(new { message = "Independent recount and investigation recorded." });
+        }
+        catch (Exception ex) { return ControlledError(ex, "record recount", id); }
+    }
+
+    [HttpPost("{id}/stores-decision")]
+    public async Task<ActionResult> DecideStores(Guid id, [FromBody] PhysicalCountDecisionRequest request)
+    {
+        try
+        {
+            await _countService.ApproveStoresAsync(id, GetCurrentUserId(), request);
+            return Ok(new { message = request.Approved ? "Stores approval recorded." : "Count returned for recount." });
+        }
+        catch (Exception ex) { return ControlledError(ex, "record Stores decision", id); }
+    }
+
+    [HttpPost("{id}/finance-decision")]
+    public async Task<ActionResult> DecideFinance(Guid id, [FromBody] PhysicalCountDecisionRequest request)
+    {
+        try
+        {
+            await _countService.ApproveFinanceAsync(id, GetCurrentUserId(), request);
+            return Ok(new { message = request.Approved ? "Finance approval recorded." : "Count returned for recount." });
+        }
+        catch (Exception ex) { return ControlledError(ex, "record Finance decision", id); }
+    }
+
+    [HttpPost("{id}/audit-attestation")]
+    public async Task<ActionResult> AttestAudit(Guid id, [FromBody] PhysicalCountDecisionRequest request)
+    {
+        try
+        {
+            await _countService.AttestAuditAsync(id, GetCurrentUserId(), request);
+            return Ok(new { message = request.Approved ? "Internal Audit attestation recorded." : "Audit exception returned for recount." });
+        }
+        catch (Exception ex) { return ControlledError(ex, "record Internal Audit attestation", id); }
+    }
+
+    [HttpPost("{id}/controlled-post")]
+    public async Task<ActionResult> ControlledPost(Guid id, [FromBody] PhysicalCountMutationRequest request)
+    {
+        try
+        {
+            await _countService.PostControlledAdjustmentsAsync(id, GetCurrentUserId(), request);
+            return Ok(new { message = "Count posted through the authoritative stock-adjustment and Finance owners." });
+        }
+        catch (Exception ex) { return ControlledError(ex, "post controlled variance", id); }
+    }
+
+    [HttpGet("cycle-schedules")]
+    public async Task<ActionResult<IReadOnlyList<InventoryCycleCountScheduleDto>>> GetCycleSchedules()
+    {
+        try { return Ok(await _countService.GetCycleCountSchedulesAsync()); }
+        catch (Exception ex) { return ControlledError(ex, "read cycle-count schedules", Guid.Empty); }
+    }
+
+    [HttpPost("cycle-schedules")]
+    public async Task<ActionResult<InventoryCycleCountScheduleDto>> CreateCycleSchedule(
+        [FromBody] SaveInventoryCycleCountScheduleRequest request)
+    {
+        try
+        {
+            var saved = await _countService.SaveCycleCountScheduleAsync(null, request, GetCurrentUserId());
+            return CreatedAtAction(nameof(GetCycleSchedules), new { }, saved);
+        }
+        catch (Exception ex) { return ControlledError(ex, "create cycle-count schedule", Guid.Empty); }
+    }
+
+    [HttpPut("cycle-schedules/{scheduleId:guid}")]
+    public async Task<ActionResult<InventoryCycleCountScheduleDto>> UpdateCycleSchedule(
+        Guid scheduleId,
+        [FromBody] SaveInventoryCycleCountScheduleRequest request)
+    {
+        try { return Ok(await _countService.SaveCycleCountScheduleAsync(scheduleId, request, GetCurrentUserId())); }
+        catch (Exception ex) { return ControlledError(ex, "update cycle-count schedule", scheduleId); }
+    }
+
+    [HttpPost("cycle-schedules/generate")]
+    public async Task<ActionResult<CycleCountGenerationResultDto>> GenerateCycleCounts()
+    {
+        try
+        {
+            if (_currentUser.TenantId is not { } tenantId || tenantId == Guid.Empty)
+                return Forbid();
+            return Ok(await _countService.GenerateDueCycleCountsAsync(tenantId, DateTime.UtcNow, GetCurrentUserId()));
+        }
+        catch (Exception ex) { return ControlledError(ex, "generate due cycle counts", Guid.Empty); }
     }
 
     /// <summary>
@@ -301,7 +404,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error completing physical count {Id}", id);
             return StatusCode(500, "An error occurred while completing the physical count");
@@ -331,7 +434,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error approving variances for count {Id}", id);
             return StatusCode(500, "An error occurred while approving variances");
@@ -361,7 +464,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error posting adjustments for count {Id}", id);
             return StatusCode(500, "An error occurred while posting adjustments");
@@ -391,7 +494,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error cancelling physical count {Id}", id);
             return StatusCode(500, "An error occurred while cancelling the physical count");
@@ -418,7 +521,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error updating physical count {Id}", id);
             return StatusCode(500, "An error occurred while updating the physical count");
@@ -445,7 +548,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error adding item to physical count {Id}", id);
             return StatusCode(500, "An error occurred while adding the item");
@@ -475,7 +578,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error removing item {ItemId} from physical count {Id}", itemId, id);
             return StatusCode(500, "An error occurred while removing the item");
@@ -505,7 +608,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error rejecting variances for count {Id}", id);
             return StatusCode(500, "An error occurred while rejecting variances");
@@ -527,7 +630,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return NotFound(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error exporting count sheet {Id}", id);
             return StatusCode(500, "An error occurred while exporting the count sheet");
@@ -554,7 +657,7 @@ public class PhysicalCountsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error importing count sheet {Id}", id);
             return StatusCode(500, "An error occurred while importing the count sheet");
@@ -576,11 +679,24 @@ public class PhysicalCountsController : ControllerBase
         {
             return NotFound(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error generating variance report for count {Id}", id);
             return StatusCode(500, "An error occurred while generating the variance report");
         }
+    }
+
+    private ActionResult ControlledError(Exception exception, string action, Guid id)
+    {
+        if (exception is ProcurementAccessAuthorizationException or UnauthorizedAccessException)
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "PHYSICAL_COUNT_FORBIDDEN", message = exception.Message });
+        if (exception is ArgumentException)
+            return NotFound(new { code = "PHYSICAL_COUNT_NOT_FOUND", message = exception.Message });
+        if (exception is InvalidOperationException)
+            return Conflict(new { code = "PHYSICAL_COUNT_CONTROL_REJECTED", message = exception.Message });
+        _logger.LogError(exception, "Failed to {Action} for physical-count target {Id}", action, id);
+        return StatusCode(StatusCodes.Status500InternalServerError,
+            new { code = "PHYSICAL_COUNT_FAILED", message = $"Failed to {action}." });
     }
 }
 

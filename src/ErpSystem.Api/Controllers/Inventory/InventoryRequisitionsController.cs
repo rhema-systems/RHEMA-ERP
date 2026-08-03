@@ -1,7 +1,10 @@
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.DTOs.Documents;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Documents;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -13,20 +16,26 @@ namespace ErpSystem.Api.Controllers.Inventory;
 /// </summary>
 [ApiController]
 [Route("api/inventory/requisitions")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class InventoryRequisitionsController : ControllerBase
 {
     private readonly IInventoryRequisitionService _requisitionService;
     private readonly IWorkflowService _workflowService;
+    private readonly IDocumentOutputService _documentOutputService;
+    private readonly IInventoryReturnControlService _returnControls;
     private readonly ILogger<InventoryRequisitionsController> _logger;
 
     public InventoryRequisitionsController(
         IInventoryRequisitionService requisitionService,
         IWorkflowService workflowService,
+        IDocumentOutputService documentOutputService,
+        IInventoryReturnControlService returnControls,
         ILogger<InventoryRequisitionsController> logger)
     {
         _requisitionService = requisitionService;
         _workflowService = workflowService;
+        _documentOutputService = documentOutputService;
+        _returnControls = returnControls;
         _logger = logger;
     }
 
@@ -343,12 +352,46 @@ public class InventoryRequisitionsController : ControllerBase
     {
         try
         {
+            dto.CorrelationId = HttpContext.TraceIdentifier;
             await _requisitionService.IssueAsync(id, dto);
-            return Ok(new { message = "Items issued successfully" });
+            var vouchers = await _requisitionService.GetIssueVouchersAsync(id, HttpContext.RequestAborted);
+            return Ok(new { message = "Items issued successfully", voucher = vouchers.FirstOrDefault() });
+        }
+        catch (InventoryIssueNotFoundException ex)
+        {
+            return NotFound(new { code = "INV_ISSUE_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryIssueAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_ISSUE_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (ProcurementAccessAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_ISSUE_ACCESS_DENIED", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (ProcurementAccessValidationException ex)
+        {
+            return UnprocessableEntity(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryIssueControlException ex)
+        {
+            var status = ex.Code.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Code.Contains("CONCURRENCY", StringComparison.OrdinalIgnoreCase)
+                ? StatusCodes.Status409Conflict
+                : StatusCodes.Status422UnprocessableEntity;
+            return StatusCode(status, new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (InventoryTrackingAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRACKING_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryTrackingControlException ex)
+        {
+            return UnprocessableEntity(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
         catch (InvalidOperationException ex)
         {
@@ -361,20 +404,139 @@ public class InventoryRequisitionsController : ControllerBase
         }
     }
 
+    [HttpGet("issue-receivers")]
+    public async Task<ActionResult<IReadOnlyList<InventoryIssueReceiverDto>>> GetIssueReceivers()
+    {
+        try
+        {
+            return Ok(await _requisitionService.GetIssueReceiversAsync(HttpContext.RequestAborted));
+        }
+        catch (InventoryIssueAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_ISSUE_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+    }
+
+    [HttpGet("{id}/issue-vouchers")]
+    public async Task<ActionResult<IReadOnlyList<InventoryIssueVoucherDto>>> GetIssueVouchers(Guid id)
+    {
+        try
+        {
+            return Ok(await _requisitionService.GetIssueVouchersAsync(id, HttpContext.RequestAborted));
+        }
+        catch (InventoryIssueNotFoundException ex)
+        {
+            return NotFound(new { code = "INV_ISSUE_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryIssueAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_ISSUE_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+    }
+
+    [HttpGet("issue-vouchers/{voucherId}")]
+    public async Task<ActionResult<InventoryIssueVoucherDto>> GetIssueVoucher(Guid voucherId)
+    {
+        try
+        {
+            var voucher = await _requisitionService.GetIssueVoucherAsync(voucherId, HttpContext.RequestAborted);
+            return voucher is null
+                ? NotFound(new { code = "INV_ISSUE_VOUCHER_NOT_FOUND", message = "The Store Issue Voucher was not found in the current tenant.", correlationId = HttpContext.TraceIdentifier })
+                : Ok(voucher);
+        }
+        catch (InventoryIssueAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_ISSUE_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+    }
+
+    [HttpPost("issue-vouchers/{voucherId}/acknowledge")]
+    public async Task<ActionResult<InventoryIssueVoucherDto>> AcknowledgeIssueVoucher(
+        Guid voucherId,
+        [FromBody] AcknowledgeInventoryIssueVoucherRequest request)
+    {
+        try
+        {
+            return Ok(await _requisitionService.AcknowledgeIssueVoucherAsync(
+                voucherId, request, HttpContext.TraceIdentifier, HttpContext.RequestAborted));
+        }
+        catch (InventoryIssueNotFoundException ex)
+        {
+            return NotFound(new { code = "INV_ISSUE_VOUCHER_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryIssueAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_ISSUE_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryIssueControlException ex)
+        {
+            var status = ex.Code.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Code.Contains("CONCURRENCY", StringComparison.OrdinalIgnoreCase)
+                ? StatusCodes.Status409Conflict
+                : StatusCodes.Status422UnprocessableEntity;
+            return StatusCode(status, new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+    }
+
+    [HttpGet("issue-vouchers/{voucherId}/download")]
+    public async Task<IActionResult> DownloadIssueVoucher(Guid voucherId)
+    {
+        try
+        {
+            var voucher = await _requisitionService.GetIssueVoucherAsync(voucherId, HttpContext.RequestAborted);
+            if (voucher is null)
+                return NotFound(new { code = "INV_ISSUE_VOUCHER_NOT_FOUND", message = "The Store Issue Voucher was not found in the current tenant.", correlationId = HttpContext.TraceIdentifier });
+            var rendered = await _documentOutputService.RenderAsync(new DocumentRenderRequestDto
+            {
+                DocumentType = DocumentTypes.InventoryStoreIssueVoucher,
+                EntityId = voucherId,
+                Format = "pdf",
+                CopyType = "Original"
+            }, HttpContext.RequestAborted);
+            return File(rendered.Content, rendered.ContentType, rendered.FileName);
+        }
+        catch (InventoryIssueAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_ISSUE_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { code = "INV_ISSUE_VOUCHER_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+    }
+
     /// <summary>
     /// Returns previously issued items back to stock
     /// </summary>
     [HttpPost("{id}/return")]
-    public async Task<ActionResult> Return(Guid id, [FromBody] ReturnRequisitionDto dto)
+    public async Task<ActionResult<InventoryReturnVoucherDto>> Return(Guid id, [FromBody] ReturnRequisitionDto dto)
     {
         try
         {
-            await _requisitionService.ReturnAsync(id, dto);
-            return Ok(new { message = "Items returned successfully" });
+            return Ok(await _returnControls.RequestAsync(id, dto, HttpContext.RequestAborted));
         }
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (InventoryTrackingAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRACKING_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryTrackingControlException ex)
+        {
+            return UnprocessableEntity(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryReturnAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_RETURN_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryReturnControlException ex)
+        {
+            var status = ex.Code.Contains("NOT_FOUND", StringComparison.Ordinal) ? StatusCodes.Status404NotFound
+                : ex.Code.Contains("STALE", StringComparison.Ordinal) || ex.Code.Contains("CONFLICT", StringComparison.Ordinal) || ex.Code.Contains("STATE", StringComparison.Ordinal)
+                    ? StatusCodes.Status409Conflict : StatusCodes.Status422UnprocessableEntity;
+            return StatusCode(status, new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
         catch (InvalidOperationException ex)
         {
@@ -384,6 +546,81 @@ public class InventoryRequisitionsController : ControllerBase
         {
             _logger.LogError(ex, "Error returning items for requisition {Id}", id);
             return StatusCode(500, "An error occurred while returning items");
+        }
+    }
+
+    [HttpGet("return-reasons")]
+    public ActionResult<IReadOnlyDictionary<string, string>> GetReturnReasons() => Ok(InventoryReturnReasonCodes.All);
+
+    [HttpGet("return-vouchers")]
+    public async Task<ActionResult<IReadOnlyList<InventoryReturnVoucherDto>>> GetReturnVouchers([FromQuery] Guid? requisitionId = null)
+    {
+        try { return Ok(await _returnControls.GetAsync(requisitionId, HttpContext.RequestAborted)); }
+        catch (InventoryReturnAuthorizationException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_RETURN_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+    }
+
+    [HttpGet("return-vouchers/{voucherId:guid}")]
+    public async Task<ActionResult<InventoryReturnVoucherDto>> GetReturnVoucher(Guid voucherId)
+    {
+        try
+        {
+            var voucher = await _returnControls.GetAsync(voucherId, HttpContext.RequestAborted);
+            return voucher is null ? NotFound(new { code = "INV_RETURN_VOUCHER_NOT_FOUND", message = "The Store Return Voucher was not found in the current tenant.", correlationId = HttpContext.TraceIdentifier }) : Ok(voucher);
+        }
+        catch (InventoryReturnAuthorizationException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_RETURN_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+    }
+
+    [HttpGet("return-vouchers/{voucherId:guid}/download")]
+    public async Task<IActionResult> DownloadReturnVoucher(Guid voucherId)
+    {
+        try
+        {
+            var voucher = await _returnControls.GetAsync(voucherId, HttpContext.RequestAborted);
+            if (voucher is null)
+                return NotFound(new { code = "INV_RETURN_VOUCHER_NOT_FOUND", message = "The Store Return Voucher was not found in the current tenant.", correlationId = HttpContext.TraceIdentifier });
+            var rendered = await _documentOutputService.RenderAsync(new DocumentRenderRequestDto
+            {
+                DocumentType = DocumentTypes.InventoryStoreReturnVoucher,
+                EntityId = voucherId,
+                Format = "pdf",
+                CopyType = "Original"
+            }, HttpContext.RequestAborted);
+            return File(rendered.Content, rendered.ContentType, rendered.FileName);
+        }
+        catch (InventoryReturnAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_RETURN_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { code = "INV_RETURN_VOUCHER_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+    }
+
+    [HttpPost("return-vouchers/{voucherId:guid}/decision")]
+    public async Task<ActionResult<InventoryReturnVoucherDto>> DecideReturnVoucher(Guid voucherId, [FromBody] DecideInventoryReturnVoucherRequest request) =>
+        await ExecuteReturnActionAsync(() => _returnControls.DecideAsync(voucherId, request, HttpContext.RequestAborted));
+
+    [HttpPost("return-vouchers/{voucherId:guid}/post")]
+    public async Task<ActionResult<InventoryReturnVoucherDto>> PostReturnVoucher(Guid voucherId, [FromBody] PostInventoryReturnVoucherRequest request) =>
+        await ExecuteReturnActionAsync(() => _returnControls.PostAsync(voucherId, request, HttpContext.RequestAborted));
+
+    [HttpPost("return-vouchers/{voucherId:guid}/reverse")]
+    public async Task<ActionResult<InventoryReturnVoucherDto>> ReverseReturnVoucher(Guid voucherId, [FromBody] ReverseInventoryReturnVoucherRequest request) =>
+        await ExecuteReturnActionAsync(() => _returnControls.ReverseAsync(voucherId, request, HttpContext.RequestAborted));
+
+    private async Task<ActionResult<InventoryReturnVoucherDto>> ExecuteReturnActionAsync(Func<Task<InventoryReturnVoucherDto>> action)
+    {
+        try { return Ok(await action()); }
+        catch (InventoryReturnAuthorizationException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_RETURN_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InventoryTrackingAuthorizationException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRACKING_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InventoryTrackingControlException ex) { return UnprocessableEntity(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InventoryReturnControlException ex)
+        {
+            var status = ex.Code.Contains("NOT_FOUND", StringComparison.Ordinal) ? StatusCodes.Status404NotFound
+                : ex.Code.Contains("STALE", StringComparison.Ordinal) || ex.Code.Contains("CONFLICT", StringComparison.Ordinal) || ex.Code.Contains("STATE", StringComparison.Ordinal)
+                    ? StatusCodes.Status409Conflict : StatusCodes.Status422UnprocessableEntity;
+            return StatusCode(status, new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
     }
 

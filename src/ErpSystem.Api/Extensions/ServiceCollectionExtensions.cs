@@ -562,6 +562,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.CashFlowStatementDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.MultiCurrencyDetailDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.DetailedLedgerDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Inventory.StoreIssueVoucherDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Inventory.StoreReturnVoucherDocumentBuilder>();
 
             // Data source service
             services.AddScoped<IDataSourceService, EnterpriseDataSourceService>();
@@ -639,6 +641,14 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Inventory services
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryManagementService, ErpSystem.Core.Services.Inventory.InventoryManagementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryItemIdentifierService, ErpSystem.Core.Services.Inventory.InventoryItemIdentifierService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryItemProfileService, ErpSystem.Core.Services.Inventory.InventoryItemProfileService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryScanningService, ErpSystem.Core.Services.Inventory.InventoryScanningService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryTrackingControlService, ErpSystem.Core.Services.Inventory.InventoryTrackingControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryNegativeStockControlService, ErpSystem.Core.Services.Inventory.InventoryNegativeStockControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryNegativeStockMutationStore, ErpSystem.Data.Repositories.Inventory.InventoryNegativeStockMutationStore>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryProjectReservationService, ErpSystem.Core.Services.Inventory.InventoryProjectReservationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryReplenishmentService, ErpSystem.Core.Services.Inventory.InventoryReplenishmentService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryDirectedOperationService, ErpSystem.Core.Services.Inventory.InventoryDirectedOperationService>();
 
             // Enhanced Inventory services
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IGoodsReceiptNoteService, ErpSystem.Core.Services.Inventory.GoodsReceiptNoteService>();
@@ -646,8 +656,15 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryTransferService, ErpSystem.Core.Services.Inventory.InventoryTransferService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IItemSupplierService, ErpSystem.Core.Services.Inventory.ItemSupplierService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IPhysicalCountService, ErpSystem.Core.Services.Inventory.PhysicalCountService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryReturnControlService, ErpSystem.Core.Services.Inventory.InventoryReturnControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryRequisitionService, ErpSystem.Core.Services.Inventory.InventoryRequisitionService>();
             services.AddScoped<ErpSystem.Core.Services.Inventory.IStockAdjustmentService, ErpSystem.Core.Services.Inventory.StockAdjustmentService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryAdjustmentFinancePostingService, ErpSystem.Api.Services.Finance.InventoryAdjustmentFinancePostingService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryReceiptFinancePostingService, ErpSystem.Api.Services.Finance.InventoryReceiptFinancePostingService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryLandedCostFinancePostingService, ErpSystem.Api.Services.Finance.InventoryLandedCostFinancePostingService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationReconciliationService, ErpSystem.Api.Services.Finance.InventoryValuationReconciliationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryAnalyticsService, ErpSystem.Api.Services.Inventory.InventoryAnalyticsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryDisposalService, ErpSystem.Api.Services.Inventory.InventoryDisposalService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService, ErpSystem.Core.Services.Inventory.InventoryValuationService>();
 
             // Price List repositories

@@ -1,9 +1,18 @@
+using System.Data;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.DocumentManagement;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Inventory;
@@ -22,6 +31,14 @@ public class StockAdjustmentService : IStockAdjustmentService
     private readonly IWarehouseRepository _warehouseRepository;
     private readonly IConsignmentSettlementService _consignmentSettlementService;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IInventoryTrackingControlService _trackingControls;
+    private readonly IInventoryNegativeStockControlService _negativeStockControls;
+    private readonly IProcurementAccessControlService _accessControl;
+    private readonly IProcurementSodGuardService _sodGuard;
+    private readonly IWorkflowIntegrationService _workflow;
+    private readonly IProcurementControlEventService _controlEvents;
+    private readonly IInventoryAdjustmentFinancePostingService _financePosting;
     private readonly ILogger<StockAdjustmentService> _logger;
 
     public StockAdjustmentService(
@@ -33,6 +50,14 @@ public class StockAdjustmentService : IStockAdjustmentService
         IWarehouseRepository warehouseRepository,
         IConsignmentSettlementService consignmentSettlementService,
         ICurrentUserProvider currentUserProvider,
+        IUnitOfWork unitOfWork,
+        IInventoryTrackingControlService trackingControls,
+        IInventoryNegativeStockControlService negativeStockControls,
+        IProcurementAccessControlService accessControl,
+        IProcurementSodGuardService sodGuard,
+        IWorkflowIntegrationService workflow,
+        IProcurementControlEventService controlEvents,
+        IInventoryAdjustmentFinancePostingService financePosting,
         ILogger<StockAdjustmentService> logger)
     {
         _adjustmentRepository = adjustmentRepository;
@@ -43,6 +68,14 @@ public class StockAdjustmentService : IStockAdjustmentService
         _warehouseRepository = warehouseRepository;
         _consignmentSettlementService = consignmentSettlementService;
         _currentUserProvider = currentUserProvider;
+        _unitOfWork = unitOfWork;
+        _trackingControls = trackingControls;
+        _negativeStockControls = negativeStockControls;
+        _accessControl = accessControl;
+        _sodGuard = sodGuard;
+        _workflow = workflow;
+        _controlEvents = controlEvents;
+        _financePosting = financePosting;
         _logger = logger;
     }
 
@@ -100,7 +133,7 @@ public class StockAdjustmentService : IStockAdjustmentService
     {
         try
         {
-            var adjustment = await _adjustmentRepository.GetWithItemsAsync(id);
+            var adjustment = await LoadAsync(id);
             if (adjustment == null)
             {
                 return null;
@@ -122,7 +155,7 @@ public class StockAdjustmentService : IStockAdjustmentService
     {
         try
         {
-            var adjustment = await _adjustmentRepository.GetByAdjustmentNumberAsync(adjustmentNumber);
+            var adjustment = await Adjustments.FirstOrDefaultAsync(x => x.AdjustmentNumber == adjustmentNumber);
             if (adjustment == null)
             {
                 return null;
@@ -163,76 +196,40 @@ public class StockAdjustmentService : IStockAdjustmentService
     /// </summary>
     public async Task<StockAdjustmentDetailDto> CreateAsync(CreateStockAdjustmentDto dto, Guid userId)
     {
-        try
+        EnsureActor(userId);
+        if (dto.Items.Count == 0 || dto.Items.Any(x => x.AdjustmentQuantity == 0))
+            throw new InvalidOperationException("At least one non-zero stock adjustment line is required.");
+        var key = Required(dto.IdempotencyKey, "An idempotency key is required.", 100);
+        var existing = await Adjustments.FirstOrDefaultAsync(x => x.IdempotencyKey == key);
+        if (existing is not null)
+            return await GetByIdAsync(existing.Id) ?? throw new InvalidOperationException("The existing stock adjustment could not be loaded.");
+        var reasonCode = ValidateReasonCode(dto.ReasonCode);
+        var adjustment = new StockAdjustment
         {
-            // Get TenantId from current user
-            var tenantId = _currentUserProvider.TenantId;
-            if (tenantId == Guid.Empty)
-            {
-                throw new InvalidOperationException("TenantId is required to create a stock adjustment");
-            }
-
-            // Generate adjustment number
-            var adjustmentNumber = await _adjustmentRepository.GenerateAdjustmentNumberAsync();
-
-            var adjustment = new StockAdjustment
-            {
-                TenantId = tenantId,
-                AdjustmentNumber = adjustmentNumber,
-                AdjustmentDate = dto.AdjustmentDate ?? DateTime.UtcNow,
-                WarehouseId = dto.WarehouseId,
-                ReasonCode = dto.ReasonCode,
-                Description = dto.Description,
-                Reference = dto.Reference,
-                Status = "Draft",
-                TotalAdjustmentValue = 0
-            };
-
-            // Add items
-            foreach (var itemDto in dto.Items)
-            {
-                var inventoryItem = await _itemRepository.GetByIdAsync(itemDto.InventoryItemId);
-                if (inventoryItem == null)
-                {
-                    throw new ArgumentException($"Inventory item {itemDto.InventoryItemId} not found");
-                }
-
-                var unitCost = itemDto.UnitCost ?? inventoryItem.AverageCost;
-                var adjustmentValue = itemDto.AdjustmentQuantity * unitCost;
-
-                var adjustmentItem = new StockAdjustmentItem
-                {
-                    TenantId = tenantId,
-                    InventoryItemId = itemDto.InventoryItemId,
-                    LocationId = itemDto.LocationId,
-                    SerialNumber = itemDto.SerialNumber,
-                    LotNumber = itemDto.LotNumber,
-                    SystemQuantity = inventoryItem.CurrentStock,
-                    PhysicalQuantity = inventoryItem.CurrentStock + itemDto.AdjustmentQuantity,
-                    AdjustmentQuantity = itemDto.AdjustmentQuantity,
-                    UnitCost = unitCost,
-                    AdjustmentValue = adjustmentValue,
-                    Reason = itemDto.Reason,
-                    Notes = itemDto.Notes
-                };
-
-                adjustment.Items.Add(adjustmentItem);
-                adjustment.TotalAdjustmentValue += adjustmentValue;
-            }
-
-            var created = await _adjustmentRepository.AddAsync(adjustment);
-            await _adjustmentRepository.SaveChangesAsync();
-            
-            _logger.LogInformation("Created stock adjustment {AdjustmentNumber} with {ItemCount} items for tenant {TenantId}",
-                adjustmentNumber, dto.Items.Count, tenantId);
-
-            return await GetByIdAsync(created.Id) ?? throw new InvalidOperationException("Failed to retrieve created adjustment");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating stock adjustment");
-            throw;
-        }
+            TenantId = _currentUserProvider.TenantId,
+            AdjustmentNumber = await _adjustmentRepository.GenerateAdjustmentNumberAsync(),
+            AdjustmentDate = dto.AdjustmentDate ?? DateTime.UtcNow,
+            WarehouseId = dto.WarehouseId,
+            ReasonCode = reasonCode,
+            Description = Required(dto.Description, "A detailed adjustment reason is required.", 1000),
+            Reference = Normalize(dto.Reference, 100) ?? string.Empty,
+            Status = "Draft",
+            RequestedById = userId,
+            RelatedIssueVoucherId = dto.RelatedIssueVoucherId,
+            IdempotencyKey = key,
+            CorrelationId = Normalize(dto.CorrelationId, 100) ?? $"stock-adjustment:{Guid.NewGuid():N}"
+        };
+        await BuildLinesAsync(adjustment, dto.Items);
+        adjustment.PayloadHash = AdjustmentPayloadHash(adjustment);
+        adjustment.IntegrityHash = AdjustmentIntegrityHash(adjustment);
+        await RequireAccessAsync("procurement.inventory.adjust.request", adjustment, adjustment.AdjustmentNumber);
+        await AddEvidenceAsync(adjustment, dto.Evidence, EvidenceRequired(reasonCode));
+        await _adjustmentRepository.AddAsync(adjustment);
+        await _unitOfWork.SaveChangesAsync();
+        await AddActionAsync(adjustment, "Created", key, adjustment.Description);
+        await AddAuditAsync("Create", adjustment, null, Snapshot(adjustment));
+        await _unitOfWork.SaveChangesAsync();
+        return await GetByIdAsync(adjustment.Id) ?? throw new InvalidOperationException("Failed to retrieve created adjustment.");
     }
 
     /// <summary>
@@ -240,77 +237,42 @@ public class StockAdjustmentService : IStockAdjustmentService
     /// </summary>
     public async Task<StockAdjustmentDetailDto> UpdateAsync(Guid id, UpdateStockAdjustmentDto dto, Guid userId)
     {
-        try
+        EnsureActor(userId);
+        var adjustment = await LoadAsync(id) ?? throw new ArgumentException($"Stock adjustment {id} not found");
+        if (adjustment.Status != "Draft") throw new InvalidOperationException($"Cannot update adjustment with status {adjustment.Status}");
+        EnsureRowVersion(adjustment.RowVersion, dto.RowVersion);
+        await RequireAccessAsync("procurement.inventory.adjust.request", adjustment, adjustment.AdjustmentNumber);
+        var before = Snapshot(adjustment);
+        adjustment.ReasonCode = ValidateReasonCode(dto.ReasonCode);
+        adjustment.Description = Required(dto.Description, "A detailed adjustment reason is required.", 1000);
+        adjustment.Reference = Normalize(dto.Reference, 100) ?? string.Empty;
+        if (dto.AdjustmentDate.HasValue) adjustment.AdjustmentDate = dto.AdjustmentDate.Value;
+        if (dto.Items is { Count: > 0 })
         {
-            var adjustment = await _adjustmentRepository.GetWithItemsAsync(id)
-                ?? throw new ArgumentException($"Stock adjustment {id} not found");
-
-            if (adjustment.Status != "Draft")
-            {
-                throw new InvalidOperationException($"Cannot update adjustment with status {adjustment.Status}");
-            }
-
-            // Update header
-            adjustment.ReasonCode = dto.ReasonCode;
-            adjustment.Description = dto.Description;
-            adjustment.Reference = dto.Reference;
-            if (dto.AdjustmentDate.HasValue)
-            {
-                adjustment.AdjustmentDate = dto.AdjustmentDate.Value;
-            }
-
-            // Only update items if provided
-            if (dto.Items != null && dto.Items.Count > 0)
-            {
-                // Clear existing items and add new ones
-                adjustment.Items.Clear();
-                adjustment.TotalAdjustmentValue = 0;
-
-                foreach (var itemDto in dto.Items)
-                {
-                    var inventoryItem = await _itemRepository.GetByIdAsync(itemDto.InventoryItemId);
-                    if (inventoryItem == null)
-                    {
-                        throw new ArgumentException($"Inventory item {itemDto.InventoryItemId} not found");
-                    }
-
-                    var unitCost = itemDto.UnitCost ?? inventoryItem.AverageCost;
-                    var adjustmentValue = itemDto.AdjustmentQuantity * unitCost;
-
-                    var adjustmentItem = new StockAdjustmentItem
-                    {
-                        TenantId = adjustment.TenantId, // Inherit TenantId from parent adjustment
-                        AdjustmentId = adjustment.Id,
-                        InventoryItemId = itemDto.InventoryItemId,
-                        LocationId = itemDto.LocationId,
-                        SerialNumber = itemDto.SerialNumber,
-                        LotNumber = itemDto.LotNumber,
-                        SystemQuantity = inventoryItem.CurrentStock,
-                        PhysicalQuantity = inventoryItem.CurrentStock + itemDto.AdjustmentQuantity,
-                        AdjustmentQuantity = itemDto.AdjustmentQuantity,
-                        UnitCost = unitCost,
-                        AdjustmentValue = adjustmentValue,
-                        Reason = itemDto.Reason,
-                        Notes = itemDto.Notes
-                    };
-
-                    adjustment.Items.Add(adjustmentItem);
-                    adjustment.TotalAdjustmentValue += adjustmentValue;
-                }
-            }
-
-            await _adjustmentRepository.UpdateAsync(adjustment);
-            await _adjustmentRepository.SaveChangesAsync();
-            
-            _logger.LogInformation("Updated stock adjustment {AdjustmentNumber}", adjustment.AdjustmentNumber);
-
-            return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve updated adjustment");
+            if (dto.Items.Any(x => x.AdjustmentQuantity == 0)) throw new InvalidOperationException("Adjustment quantities cannot be zero.");
+            adjustment.Items.Clear();
+            adjustment.TotalAdjustmentValue = 0;
+            await BuildLinesAsync(adjustment, dto.Items);
         }
-        catch (Exception ex)
+        if (dto.Evidence is not null)
         {
-            _logger.LogError(ex, "Error updating stock adjustment {AdjustmentId}", id);
-            throw;
+            var requestedVersionIds = dto.Evidence.Select(x => x.CentralDocumentVersionId).ToHashSet();
+            if (adjustment.Evidence.Any(x => !requestedVersionIds.Contains(x.CentralDocumentVersionId)))
+                throw new InvalidOperationException("Linked central-DMS evidence is append-only; create a new adjustment instead of removing evidence.");
+            var additions = dto.Evidence.Where(x => adjustment.Evidence.All(existing => existing.CentralDocumentVersionId != x.CentralDocumentVersionId)).ToList();
+            await AddEvidenceAsync(adjustment, additions, EvidenceRequired(adjustment.ReasonCode) && adjustment.Evidence.Count == 0);
         }
+        else if (EvidenceRequired(adjustment.ReasonCode) && adjustment.Evidence.Count == 0)
+        {
+            throw new InvalidOperationException("Current published central-DMS evidence is required for this adjustment reason.");
+        }
+        adjustment.PayloadHash = AdjustmentPayloadHash(adjustment);
+        adjustment.IntegrityHash = AdjustmentIntegrityHash(adjustment);
+        await _adjustmentRepository.UpdateAsync(adjustment);
+        await AddActionAsync(adjustment, "Updated", $"update:{Guid.NewGuid():N}", adjustment.Description);
+        await AddAuditAsync("Update", adjustment, before, Snapshot(adjustment));
+        await _unitOfWork.SaveChangesAsync();
+        return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve updated adjustment.");
     }
 
     /// <summary>
@@ -320,7 +282,8 @@ public class StockAdjustmentService : IStockAdjustmentService
     {
         try
         {
-            var adjustment = await _adjustmentRepository.GetByIdAsync(id)
+            EnsureActor(userId);
+            var adjustment = await LoadAsync(id)
                 ?? throw new ArgumentException($"Stock adjustment {id} not found");
 
             if (adjustment.Status != "Draft")
@@ -328,8 +291,11 @@ public class StockAdjustmentService : IStockAdjustmentService
                 throw new InvalidOperationException($"Cannot delete adjustment with status {adjustment.Status}");
             }
 
+            await RequireAccessAsync("procurement.inventory.adjust.request", adjustment, adjustment.AdjustmentNumber);
+            await AddAuditAsync("Delete", adjustment, Snapshot(adjustment), new { adjustment.Id, adjustment.AdjustmentNumber, Status = "Deleted" });
+            await _unitOfWork.SaveChangesAsync();
             await _adjustmentRepository.DeleteAsync(id);
-            await _adjustmentRepository.SaveChangesAsync();
+            await _unitOfWork.SaveChangesAsync();
             
             _logger.LogInformation("Deleted stock adjustment {AdjustmentNumber}", adjustment.AdjustmentNumber);
 
@@ -349,7 +315,8 @@ public class StockAdjustmentService : IStockAdjustmentService
     {
         try
         {
-            var adjustment = await _adjustmentRepository.GetWithItemsAsync(adjustmentId)
+            EnsureActor(userId);
+            var adjustment = await LoadAsync(adjustmentId)
                 ?? throw new ArgumentException($"Stock adjustment {adjustmentId} not found");
 
             if (adjustment.Status != "Draft")
@@ -363,14 +330,20 @@ public class StockAdjustmentService : IStockAdjustmentService
                 throw new ArgumentException($"Item {itemId} not found in adjustment {adjustmentId}");
             }
 
+            await RequireAccessAsync("procurement.inventory.adjust.request", adjustment, adjustment.AdjustmentNumber);
+
             // Remove the item
             adjustment.Items.Remove(item);
             
             // Recalculate total value
             adjustment.TotalAdjustmentValue = adjustment.Items.Sum(i => i.AdjustmentValue);
+            adjustment.PayloadHash = AdjustmentPayloadHash(adjustment);
+            adjustment.IntegrityHash = AdjustmentIntegrityHash(adjustment);
 
             await _adjustmentRepository.UpdateAsync(adjustment);
-            await _adjustmentRepository.SaveChangesAsync();
+            await AddActionAsync(adjustment, "LineDeleted", $"delete-line:{Guid.NewGuid():N}", $"Removed adjustment line {itemId:N}.");
+            await AddAuditAsync("DeleteLine", adjustment, new { adjustment.Id, ItemId = itemId }, Snapshot(adjustment));
+            await _unitOfWork.SaveChangesAsync();
             
             _logger.LogInformation("Deleted item {ItemId} from stock adjustment {AdjustmentNumber}",
                 itemId, adjustment.AdjustmentNumber);
@@ -388,50 +361,109 @@ public class StockAdjustmentService : IStockAdjustmentService
 
     #region Workflow Methods
 
-    /// <summary>
-    /// Approves a stock adjustment (changes status from Draft to Approved)
-    /// </summary>
-    public async Task<StockAdjustmentDetailDto> ApproveAsync(Guid id, Guid userId)
+    public async Task<StockAdjustmentDetailDto> SubmitAsync(Guid id, Guid userId, StockAdjustmentActionRequest request)
     {
-        try
+        EnsureActor(userId);
+        var key = Required(request.IdempotencyKey, "An idempotency key is required.", 100);
+        return await ExecuteControlledMutationAsync(id, async adjustment =>
         {
-            var adjustment = await _adjustmentRepository.GetWithItemsAsync(id)
-                ?? throw new ArgumentException($"Stock adjustment {id} not found");
-
             if (adjustment.Status != "Draft")
             {
-                throw new InvalidOperationException($"Cannot approve adjustment with status {adjustment.Status}");
+                if (await HasActionAsync(adjustment.Id, "Submitted", key)) return adjustment;
+                throw new InvalidOperationException($"Cannot submit adjustment with status {adjustment.Status}.");
             }
+            EnsureRowVersion(adjustment.RowVersion, request.RowVersion);
+            if (adjustment.Items.Count == 0) throw new InvalidOperationException("The adjustment has no lines.");
+            await RequireAccessAsync("procurement.inventory.adjust.request", adjustment, adjustment.AdjustmentNumber);
+            await RevalidateEvidenceAsync(adjustment);
+            var before = Snapshot(adjustment);
+            var workflow = await _workflow.SubmitAsync("StockAdjustment", adjustment.Id);
+            if (!workflow.ExecutionResult.Success || workflow.Outcome != WorkflowOutcome.Pending || !workflow.ExecutionResult.WorkflowInstanceId.HasValue)
+                throw new InvalidOperationException("The stock-adjustment workflow must start with an independent pending approval step.");
+            adjustment.Status = "PendingApproval";
+            adjustment.SubmittedById = userId;
+            adjustment.SubmittedAtUtc = DateTime.UtcNow;
+            adjustment.WorkflowInstanceId = workflow.ExecutionResult.WorkflowInstanceId;
+            adjustment.IntegrityHash = AdjustmentIntegrityHash(adjustment);
+            await AddActionAsync(adjustment, "Submitted", key, request.Comment);
+            await AddAuditAsync("Submit", adjustment, before, Snapshot(adjustment));
+            await RecordEventAsync(adjustment, "Submit", ProcurementControlEventResult.Allowed, before, Snapshot(adjustment));
+            return adjustment;
+        });
+    }
 
-            adjustment.Status = "Approved";
-            adjustment.ApprovedById = userId;
-            adjustment.ApprovedAt = DateTime.UtcNow;
-
-            await _adjustmentRepository.UpdateAsync(adjustment);
-            await _adjustmentRepository.SaveChangesAsync();
-            
-            _logger.LogInformation("Approved stock adjustment {AdjustmentNumber}", adjustment.AdjustmentNumber);
-
-            return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve approved adjustment");
-        }
-        catch (Exception ex)
+    public async Task<StockAdjustmentDetailDto> DecideAsync(Guid id, Guid userId, DecideStockAdjustmentRequest request)
+    {
+        EnsureActor(userId);
+        var key = Required(request.IdempotencyKey, "An idempotency key is required.", 100);
+        return await ExecuteControlledMutationAsync(id, async adjustment =>
         {
-            _logger.LogError(ex, "Error approving stock adjustment {AdjustmentId}", id);
-            throw;
-        }
+            var action = request.Approved ? "Approved" : "Rejected";
+            if (adjustment.Status != "PendingApproval")
+            {
+                if (await HasActionAsync(adjustment.Id, action, key)) return adjustment;
+                throw new InvalidOperationException($"Cannot decide adjustment with status {adjustment.Status}.");
+            }
+            EnsureRowVersion(adjustment.RowVersion, request.RowVersion);
+            if (adjustment.RequestedById == userId) throw new InvalidOperationException("The adjustment requester cannot approve the same adjustment.");
+            await RequireAccessAsync("procurement.inventory.adjust.approve", adjustment, adjustment.AdjustmentNumber);
+            var prohibited = new List<Guid> { adjustment.RequestedById };
+            if (adjustment.RelatedIssueVoucherId.HasValue)
+            {
+                var issuer = await _unitOfWork.Repository<InventoryIssueVoucher>().GetQueryable().AsNoTracking()
+                    .Where(x => x.Id == adjustment.RelatedIssueVoucherId && x.TenantId == adjustment.TenantId)
+                    .Select(x => (Guid?)x.IssuedById).SingleOrDefaultAsync();
+                if (issuer.HasValue) prohibited.Add(issuer.Value);
+            }
+            await _sodGuard.EnforceAsync(new ProcurementSodGuardRequest
+            {
+                ControlCode = "SOD-STOCK-ISSUER-ADJUSTMENT",
+                SourceType = "StockAdjustment",
+                SourceReference = adjustment.AdjustmentNumber,
+                ProhibitedActorUserIds = prohibited.Distinct().ToList()
+            }, adjustment.CorrelationId ?? Guid.NewGuid().ToString("N"));
+            if (!await _workflow.CanUserApproveAsync("StockAdjustment", adjustment.Id, userId))
+                throw new InvalidOperationException("The current actor is not eligible for the active adjustment workflow step.");
+            await RevalidateEvidenceAsync(adjustment);
+            var before = Snapshot(adjustment);
+            var workflow = await _workflow.ProcessApprovalAsync("StockAdjustment", adjustment.Id, userId,
+                request.Approved ? "Approve" : "Reject", request.Comment);
+            if (!workflow.ExecutionResult.Success) throw new InvalidOperationException(workflow.ExecutionResult.Message ?? "The workflow decision failed.");
+            if (workflow.Outcome == WorkflowOutcome.Pending) return adjustment;
+            if (request.Approved && workflow.Outcome != WorkflowOutcome.Approved) throw new InvalidOperationException("The shared workflow rejected the adjustment.");
+            if (!request.Approved && workflow.Outcome == WorkflowOutcome.Approved) throw new InvalidOperationException("An approved workflow cannot be recorded as rejected.");
+            adjustment.Status = request.Approved ? "Approved" : "Rejected";
+            if (request.Approved)
+            {
+                adjustment.ApprovedById = userId;
+                adjustment.ApprovedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                adjustment.RejectedById = userId;
+                adjustment.RejectedAtUtc = DateTime.UtcNow;
+                adjustment.RejectionReason = Required(request.Comment, "A rejection reason is required.", 1000);
+            }
+            adjustment.IntegrityHash = AdjustmentIntegrityHash(adjustment);
+            await AddActionAsync(adjustment, action, key, request.Comment);
+            await AddAuditAsync(request.Approved ? "Approve" : "Reject", adjustment, before, Snapshot(adjustment));
+            await RecordEventAsync(adjustment, request.Approved ? "Approve" : "Reject",
+                request.Approved ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.Rejected, before, Snapshot(adjustment));
+            return adjustment;
+        });
     }
 
     /// <summary>
     /// Posts a stock adjustment (applies the adjustment to inventory and creates stock movements)
     /// </summary>
-    public async Task<StockAdjustmentDetailDto> PostAsync(Guid id, Guid userId)
+    private async Task<StockAdjustmentDetailDto> LegacyPostAsync(Guid id, Guid userId)
     {
         try
         {
             var adjustment = await _adjustmentRepository.GetWithItemsAsync(id)
                 ?? throw new ArgumentException($"Stock adjustment {id} not found");
 
-            if (adjustment.Status != "Approved" && adjustment.Status != "Draft")
+            if (adjustment.Status != "Approved")
             {
                 throw new InvalidOperationException($"Cannot post adjustment with status {adjustment.Status}");
             }
@@ -546,6 +578,114 @@ public class StockAdjustmentService : IStockAdjustmentService
         }
     }
 
+    public async Task<StockAdjustmentDetailDto> PostAsync(Guid id, Guid userId, StockAdjustmentActionRequest request)
+    {
+        EnsureActor(userId);
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync($"stock-adjustment:{_currentUserProvider.TenantId:N}:{id:N}");
+                var adjustment = await LoadAsync(id) ?? throw new ArgumentException($"Stock adjustment {id} not found");
+                var key = Required(request.IdempotencyKey, "An idempotency key is required.", 100);
+                if (adjustment.Status != "Approved")
+                {
+                    if (await HasActionAsync(adjustment.Id, "Posted", key))
+                    {
+                        await _unitOfWork.CommitAsync();
+                        return await GetByIdAsync(id) ?? throw new InvalidOperationException("Adjustment not found.");
+                    }
+                    throw new InvalidOperationException($"Only an independently approved adjustment can post; current status is {adjustment.Status}.");
+                }
+                EnsureRowVersion(adjustment.RowVersion, request.RowVersion);
+                if (adjustment.RequestedById == userId) throw new InvalidOperationException("The adjustment requester cannot post the same adjustment.");
+                await RequireAccessAsync("procurement.inventory.adjust.approve", adjustment, adjustment.AdjustmentNumber);
+                await RevalidateEvidenceAsync(adjustment);
+                var before = Snapshot(adjustment);
+                var finance = await _financePosting.PostAsync(adjustment);
+                adjustment.Status = "Posted";
+                adjustment.PostedById = userId;
+                adjustment.PostedAtUtc = DateTime.UtcNow;
+                adjustment.FinancePostingEventId = finance.PostingEventId;
+                adjustment.FinanceJournalEntryId = finance.JournalEntryId;
+                adjustment.IntegrityHash = AdjustmentIntegrityHash(adjustment);
+                await AddActionAsync(adjustment, "Posted", key, request.Comment);
+                await AddAuditAsync("Post", adjustment, before, Snapshot(adjustment));
+                await RecordEventAsync(adjustment, "Post", ProcurementControlEventResult.Allowed, before, Snapshot(adjustment));
+                await _adjustmentRepository.UpdateAsync(adjustment);
+                // Persist the governed parent state inside the same uncommitted
+                // transaction before movement inserts so SQL lineage guards can
+                // reject any movement without a posted parent and Finance IDs.
+                await _unitOfWork.SaveChangesAsync();
+                foreach (var item in adjustment.Items.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id))
+                    await ApplyAdjustmentLineAsync(adjustment, item, reverse: false, userId, request.NegativeStockOverrideIds);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitAsync();
+                return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve posted adjustment.");
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        });
+    }
+
+    public async Task<StockAdjustmentDetailDto> ReverseAsync(Guid id, Guid userId, ReverseStockAdjustmentRequest request)
+    {
+        EnsureActor(userId);
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync($"stock-adjustment:{_currentUserProvider.TenantId:N}:{id:N}");
+                var adjustment = await LoadAsync(id) ?? throw new ArgumentException($"Stock adjustment {id} not found");
+                var key = Required(request.IdempotencyKey, "An idempotency key is required.", 100);
+                if (adjustment.Status != "Posted")
+                {
+                    if (await HasActionAsync(adjustment.Id, "Reversed", key))
+                    {
+                        await _unitOfWork.CommitAsync();
+                        return await GetByIdAsync(id) ?? throw new InvalidOperationException("Adjustment not found.");
+                    }
+                    throw new InvalidOperationException($"Only a posted adjustment can be reversed; current status is {adjustment.Status}.");
+                }
+                EnsureRowVersion(adjustment.RowVersion, request.RowVersion);
+                var reason = Required(request.Reason, "A reversal reason is required.", 1000);
+                if (adjustment.RequestedById == userId) throw new InvalidOperationException("The adjustment requester cannot reverse the same adjustment.");
+                await RequireAccessAsync("procurement.inventory.adjust.approve", adjustment, adjustment.AdjustmentNumber);
+                var before = Snapshot(adjustment);
+                var finance = await _financePosting.ReverseAsync(adjustment, reason);
+                adjustment.Status = "Reversed";
+                adjustment.ReversedById = userId;
+                adjustment.ReversedAtUtc = DateTime.UtcNow;
+                adjustment.ReversalReason = reason;
+                adjustment.ReversalFinancePostingEventId = finance.PostingEventId;
+                adjustment.ReversalFinanceJournalEntryId = finance.JournalEntryId;
+                adjustment.IntegrityHash = AdjustmentIntegrityHash(adjustment);
+                await AddActionAsync(adjustment, "Reversed", key, reason);
+                await AddAuditAsync("Reverse", adjustment, before, Snapshot(adjustment));
+                await RecordEventAsync(adjustment, "Reverse", ProcurementControlEventResult.Allowed, before, Snapshot(adjustment));
+                await _adjustmentRepository.UpdateAsync(adjustment);
+                await _unitOfWork.SaveChangesAsync();
+                foreach (var item in adjustment.Items.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id))
+                    await ApplyAdjustmentLineAsync(adjustment, item, reverse: true, userId, request.NegativeStockOverrideIds);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitAsync();
+                return await GetByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve reversed adjustment.");
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        });
+    }
+
     /// <summary>
     /// Cancels a stock adjustment (only if not yet posted)
     /// </summary>
@@ -553,17 +693,24 @@ public class StockAdjustmentService : IStockAdjustmentService
     {
         try
         {
-            var adjustment = await _adjustmentRepository.GetByIdAsync(id)
+            EnsureActor(userId);
+            var adjustment = await LoadAsync(id)
                 ?? throw new ArgumentException($"Stock adjustment {id} not found");
 
-            if (adjustment.Status == "Posted")
+            if (adjustment.Status != "Draft")
             {
-                throw new InvalidOperationException("Cannot cancel a posted adjustment");
+                throw new InvalidOperationException($"Only Draft adjustments can be cancelled; current status is {adjustment.Status}.");
             }
 
+            await RequireAccessAsync("procurement.inventory.adjust.request", adjustment, adjustment.AdjustmentNumber);
+            var before = Snapshot(adjustment);
             adjustment.Status = "Cancelled";
+            adjustment.IntegrityHash = AdjustmentIntegrityHash(adjustment);
+            await AddActionAsync(adjustment, "Cancelled", $"cancel:{Guid.NewGuid():N}", "Draft adjustment cancelled.");
+            await AddAuditAsync("Cancel", adjustment, before, Snapshot(adjustment));
+            await RecordEventAsync(adjustment, "Cancel", ProcurementControlEventResult.Allowed, before, Snapshot(adjustment));
             await _adjustmentRepository.UpdateAsync(adjustment);
-            await _adjustmentRepository.SaveChangesAsync();
+            await _unitOfWork.SaveChangesAsync();
             
             _logger.LogInformation("Cancelled stock adjustment {AdjustmentNumber}", adjustment.AdjustmentNumber);
 
@@ -579,6 +726,34 @@ public class StockAdjustmentService : IStockAdjustmentService
     #endregion
 
     #region Helper Methods
+
+    private async Task<StockAdjustmentDetailDto> ExecuteControlledMutationAsync(
+        Guid adjustmentId,
+        Func<StockAdjustment, Task<StockAdjustment>> mutation)
+    {
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync($"stock-adjustment:{_currentUserProvider.TenantId:N}:{adjustmentId:N}");
+                var adjustment = await LoadAsync(adjustmentId)
+                    ?? throw new ArgumentException($"Stock adjustment {adjustmentId} not found");
+                adjustment = await mutation(adjustment);
+                await _adjustmentRepository.UpdateAsync(adjustment);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitAsync();
+                return await GetByIdAsync(adjustmentId)
+                    ?? throw new InvalidOperationException("Failed to retrieve the controlled stock adjustment.");
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        });
+    }
 
     private static StockAdjustmentDto MapToDto(StockAdjustment adjustment)
     {
@@ -597,7 +772,20 @@ public class StockAdjustmentService : IStockAdjustmentService
             ItemCount = adjustment.Items?.Count ?? 0,
             ApprovedByName = adjustment.ApprovedBy?.FullName,
             ApprovedAt = adjustment.ApprovedAt,
-            CreatedAt = adjustment.CreatedAt
+            CreatedAt = adjustment.CreatedAt,
+            RequestedById = adjustment.RequestedById,
+            SubmittedById = adjustment.SubmittedById,
+            SubmittedAtUtc = adjustment.SubmittedAtUtc,
+            PostedById = adjustment.PostedById,
+            PostedAtUtc = adjustment.PostedAtUtc,
+            ReversedById = adjustment.ReversedById,
+            ReversedAtUtc = adjustment.ReversedAtUtc,
+            ReversalReason = adjustment.ReversalReason,
+            FinancePostingEventId = adjustment.FinancePostingEventId,
+            FinanceJournalEntryId = adjustment.FinanceJournalEntryId,
+            ReversalFinancePostingEventId = adjustment.ReversalFinancePostingEventId,
+            ReversalFinanceJournalEntryId = adjustment.ReversalFinanceJournalEntryId,
+            RowVersion = Convert.ToBase64String(adjustment.RowVersion)
         };
     }
 
@@ -619,6 +807,19 @@ public class StockAdjustmentService : IStockAdjustmentService
             ApprovedByName = adjustment.ApprovedBy?.FullName,
             ApprovedAt = adjustment.ApprovedAt,
             CreatedAt = adjustment.CreatedAt,
+            RequestedById = adjustment.RequestedById,
+            SubmittedById = adjustment.SubmittedById,
+            SubmittedAtUtc = adjustment.SubmittedAtUtc,
+            PostedById = adjustment.PostedById,
+            PostedAtUtc = adjustment.PostedAtUtc,
+            ReversedById = adjustment.ReversedById,
+            ReversedAtUtc = adjustment.ReversedAtUtc,
+            ReversalReason = adjustment.ReversalReason,
+            FinancePostingEventId = adjustment.FinancePostingEventId,
+            FinanceJournalEntryId = adjustment.FinanceJournalEntryId,
+            ReversalFinancePostingEventId = adjustment.ReversalFinancePostingEventId,
+            ReversalFinanceJournalEntryId = adjustment.ReversalFinanceJournalEntryId,
+            RowVersion = Convert.ToBase64String(adjustment.RowVersion),
             Items = adjustment.Items?.Select(item => new StockAdjustmentItemDto
             {
                 Id = item.Id,
@@ -643,10 +844,386 @@ public class StockAdjustmentService : IStockAdjustmentService
                 NewQuantity = item.SystemQuantity + item.AdjustmentQuantity,
                 Reason = item.Reason,
                 Notes = item.Notes
-            }).ToList() ?? new List<StockAdjustmentItemDto>()
+            }).ToList() ?? new List<StockAdjustmentItemDto>(),
+            Evidence = adjustment.Evidence?.OrderBy(x => x.CreatedAt).Select(x => new InventoryControlEvidenceDto
+            {
+                Id = x.Id,
+                CentralDocumentVersionId = x.CentralDocumentVersionId,
+                FileUploadRecordId = x.FileUploadRecordId,
+                EvidenceReference = x.EvidenceReference,
+                DocumentReference = x.CentralDocumentVersion?.DocumentRecord?.DocumentReference ?? string.Empty,
+                VersionNumber = x.CentralDocumentVersion?.VersionNumber ?? string.Empty
+            }).ToList() ?? new List<InventoryControlEvidenceDto>(),
+            Actions = adjustment.Actions?.OrderBy(x => x.Sequence).Select(x => new StockAdjustmentActionDto
+            {
+                Sequence = x.Sequence,
+                ActionType = x.ActionType,
+                ActorUserId = x.ActorUserId,
+                OccurredAtUtc = x.OccurredAtUtc,
+                Comment = x.Comment
+            }).ToList() ?? new List<StockAdjustmentActionDto>()
         };
 
         return dto;
+    }
+
+    private IQueryable<StockAdjustment> Adjustments => _unitOfWork.Repository<StockAdjustment>().GetQueryable()
+        .Where(x => x.TenantId == _currentUserProvider.TenantId && !x.IsDeleted)
+        .Include(x => x.Warehouse)
+        .Include(x => x.ApprovedBy)
+        .Include(x => x.Items).ThenInclude(x => x.InventoryItem).ThenInclude(x => x.Category)
+        .Include(x => x.Items).ThenInclude(x => x.Location).ThenInclude(x => x!.Warehouse)
+        .Include(x => x.Evidence).ThenInclude(x => x.CentralDocumentVersion).ThenInclude(x => x.DocumentRecord)
+        .Include(x => x.Actions)
+        .AsSplitQuery();
+
+    private Task<StockAdjustment?> LoadAsync(Guid id) => Adjustments.FirstOrDefaultAsync(x => x.Id == id);
+
+    private async Task BuildLinesAsync(StockAdjustment adjustment, IReadOnlyCollection<CreateStockAdjustmentItemDto> requests)
+    {
+        if (requests.Select(x => Math.Sign(x.AdjustmentQuantity)).Distinct().Count() > 1)
+            throw new InvalidOperationException("One stock adjustment cannot mix increases and decreases.");
+        var warehouse = await _warehouseRepository.GetByIdAsync(adjustment.WarehouseId)
+            ?? throw new ArgumentException("The selected warehouse was not found.");
+        if (!warehouse.IsActive) throw new InvalidOperationException("The selected warehouse is inactive.");
+        foreach (var input in requests)
+        {
+            if (!input.LocationId.HasValue || input.LocationId == Guid.Empty)
+                throw new InvalidOperationException("Every controlled stock-adjustment line requires an exact warehouse location.");
+            var location = await _locationRepository.GetByIdAsync(input.LocationId.Value)
+                ?? throw new ArgumentException("A selected stock-adjustment location was not found.");
+            if (location.WarehouseId != adjustment.WarehouseId || !location.IsActive)
+                throw new InvalidOperationException("Every adjustment location must be active and belong to the selected warehouse.");
+            var inventoryItem = await _itemRepository.GetByIdAsync(input.InventoryItemId)
+                ?? throw new ArgumentException($"Inventory item {input.InventoryItemId} not found.");
+            if (inventoryItem.TenantId != adjustment.TenantId)
+                throw new ArgumentException($"Inventory item {input.InventoryItemId} not found.");
+            var quantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(location.InventoryWarehouseId, input.InventoryItemId);
+            var systemQuantity = quantity?.CurrentStock ?? 0m;
+            if (input.AdjustmentQuantity < 0 && (quantity is null || quantity.AvailableStock < Math.Abs(input.AdjustmentQuantity)))
+                throw new InvalidOperationException($"Available stock is insufficient for {inventoryItem.ItemCode}.");
+            var unitCost = inventoryItem.AverageCost > 0 ? inventoryItem.AverageCost
+                : inventoryItem.StandardCost > 0 ? inventoryItem.StandardCost : inventoryItem.LastPurchaseCost;
+            if (unitCost <= 0) throw new InvalidOperationException($"A server-derived inventory cost is required for {inventoryItem.ItemCode}.");
+            var line = new StockAdjustmentItem
+            {
+                TenantId = adjustment.TenantId,
+                AdjustmentId = adjustment.Id,
+                InventoryItemId = input.InventoryItemId,
+                LocationId = input.LocationId,
+                SerialNumber = Normalize(input.SerialNumber, 100),
+                LotNumber = Normalize(input.LotNumber, 100),
+                SystemQuantity = systemQuantity,
+                PhysicalQuantity = systemQuantity + input.AdjustmentQuantity,
+                AdjustmentQuantity = input.AdjustmentQuantity,
+                UnitCost = unitCost,
+                AdjustmentValue = decimal.Round(input.AdjustmentQuantity * unitCost, 2),
+                Reason = Normalize(input.Reason, 500),
+                Notes = Normalize(input.Notes, 1000),
+                InventoryItem = inventoryItem,
+                Location = location
+            };
+            adjustment.Items.Add(line);
+            adjustment.TotalAdjustmentValue += line.AdjustmentValue;
+        }
+    }
+
+    private async Task RequireAccessAsync(string permission, StockAdjustment adjustment, string reference)
+    {
+        var locations = adjustment.Items.Select(x => x.LocationId).Distinct().ToList();
+        if (locations.Count == 0) locations.Add(null);
+        foreach (var locationId in locations)
+        {
+            var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = permission,
+                WarehouseId = adjustment.WarehouseId,
+                LocationId = locationId,
+                RequireLocationScope = true,
+                SourceType = "StockAdjustment",
+                SourceReference = reference
+            }, adjustment.CorrelationId ?? Guid.NewGuid().ToString("N"));
+            if (!decision.Allowed) throw new InvalidOperationException(decision.Message);
+        }
+    }
+
+    private async Task AddEvidenceAsync(StockAdjustment adjustment, IReadOnlyCollection<InventoryControlEvidenceRequest> requests, bool required)
+    {
+        if (required && requests.Count == 0)
+            throw new InvalidOperationException("Current published central-DMS evidence is required for this adjustment reason.");
+        if (requests.GroupBy(x => x.CentralDocumentVersionId).Any(x => x.Count() > 1))
+            throw new InvalidOperationException("The same central-DMS version cannot be linked twice.");
+        foreach (var request in requests)
+        {
+            var version = await _unitOfWork.Repository<CentralDocumentVersion>().GetQueryable()
+                .Include(x => x.DocumentRecord)
+                .FirstOrDefaultAsync(x => x.Id == request.CentralDocumentVersionId && x.TenantId == adjustment.TenantId &&
+                    !x.IsDeleted && !x.DocumentRecord.IsDeleted &&
+                    x.DocumentRecord.LifecycleStatus == CentralDocumentEvidenceRules.ActiveLifecycleStatus &&
+                    x.DocumentRecord.VersionStatus == CentralDocumentEvidenceRules.PublishedVersionStatus &&
+                    x.DocumentRecord.CurrentVersion == x.VersionNumber && x.Status == CentralDocumentEvidenceRules.PublishedVersionStatus &&
+                    x.PublishedAt.HasValue && x.FileUploadRecordId.HasValue)
+                ?? throw new InvalidOperationException("Evidence must reference the current published version in central DMS.");
+            var evidence = new StockAdjustmentEvidence
+            {
+                TenantId = adjustment.TenantId,
+                StockAdjustmentId = adjustment.Id,
+                CentralDocumentVersionId = version.Id,
+                FileUploadRecordId = version.FileUploadRecordId.Value,
+                EvidenceReference = Required(request.EvidenceReference, "An evidence reference is required.", 500)
+            };
+            evidence.IntegrityHash = Hash($"{adjustment.Id:N}|{version.Id:N}|{evidence.FileUploadRecordId:N}|{evidence.EvidenceReference}");
+            adjustment.Evidence.Add(evidence);
+        }
+    }
+
+    private async Task RevalidateEvidenceAsync(StockAdjustment adjustment)
+    {
+        if (EvidenceRequired(adjustment.ReasonCode) && adjustment.Evidence.Count == 0)
+            throw new InvalidOperationException("Current published central-DMS evidence is required for this adjustment reason.");
+        foreach (var evidence in adjustment.Evidence)
+        {
+            var current = await _unitOfWork.Repository<CentralDocumentVersion>().GetQueryable()
+                .Include(x => x.DocumentRecord)
+                .AnyAsync(x => x.Id == evidence.CentralDocumentVersionId && x.FileUploadRecordId == evidence.FileUploadRecordId &&
+                    x.TenantId == adjustment.TenantId && !x.IsDeleted && !x.DocumentRecord.IsDeleted &&
+                    x.DocumentRecord.LifecycleStatus == CentralDocumentEvidenceRules.ActiveLifecycleStatus &&
+                    x.DocumentRecord.VersionStatus == CentralDocumentEvidenceRules.PublishedVersionStatus &&
+                    x.DocumentRecord.CurrentVersion == x.VersionNumber && x.Status == CentralDocumentEvidenceRules.PublishedVersionStatus && x.PublishedAt.HasValue);
+            if (!current) throw new InvalidOperationException("Linked central-DMS evidence is no longer current and published.");
+        }
+    }
+
+    private async Task ApplyAdjustmentLineAsync(
+        StockAdjustment adjustment,
+        StockAdjustmentItem item,
+        bool reverse,
+        Guid userId,
+        IReadOnlyDictionary<Guid, Guid> negativeStockOverrideIds)
+    {
+        var location = (item.LocationId.HasValue ? await _locationRepository.GetByIdAsync(item.LocationId.Value) : null)
+            ?? throw new InvalidOperationException("The exact adjustment location no longer exists.");
+        if (location.WarehouseId != adjustment.WarehouseId || !location.IsActive)
+            throw new InvalidOperationException("The adjustment location is inactive or outside the selected warehouse.");
+        var warehouseId = location.InventoryWarehouseId;
+        var warehouse = await _warehouseRepository.GetByIdAsync(warehouseId)
+            ?? throw new InvalidOperationException("The effective adjustment warehouse no longer exists.");
+        var inventoryItem = await _itemRepository.GetByIdAsync(item.InventoryItemId)
+            ?? throw new InvalidOperationException("An adjustment item no longer exists.");
+        var delta = reverse ? -item.AdjustmentQuantity : item.AdjustmentQuantity;
+        InventoryStockDecreaseAuthorization? decreaseAuthorization = null;
+        if (delta < 0)
+        {
+            decreaseAuthorization = await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
+            {
+                InventoryItemId = item.InventoryItemId,
+                WarehouseId = warehouseId,
+                LocationId = item.LocationId,
+                Quantity = Math.Abs(delta),
+                ReferenceType = reverse ? "StockAdjustmentReversal" : "StockAdjustment",
+                ReferenceNumber = adjustment.AdjustmentNumber,
+                ReferenceId = adjustment.Id,
+                ReferenceLineId = item.Id,
+                NegativeStockOverrideId = negativeStockOverrideIds.GetValueOrDefault(item.Id),
+                CheckInventoryItemBalance = !warehouse.IsConsignmentWarehouse,
+                CorrelationId = adjustment.CorrelationId ?? $"stock-adjustment:{adjustment.Id:N}"
+            });
+        }
+        var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(warehouseId, item.InventoryItemId);
+        if (warehouseQuantity is null)
+        {
+            if (delta < 0) throw new InvalidOperationException($"Warehouse stock is unavailable for {inventoryItem.ItemCode}.");
+            warehouseQuantity = new WarehouseQuantity
+            {
+                TenantId = adjustment.TenantId,
+                InventoryItemId = item.InventoryItemId,
+                WarehouseId = warehouseId,
+                AverageCost = item.UnitCost,
+                CreatedById = userId
+            };
+            await _warehouseQuantityRepository.AddAsync(warehouseQuantity);
+        }
+        if (delta < 0 && warehouseQuantity.AvailableStock < Math.Abs(delta) &&
+            decreaseAuthorization?.EmergencyOverrideApplied != true)
+            throw new InvalidOperationException($"Available warehouse stock is insufficient for {inventoryItem.ItemCode}.");
+        if (!warehouse.IsConsignmentWarehouse && delta < 0 && inventoryItem.AvailableStock < Math.Abs(delta) &&
+            decreaseAuthorization?.EmergencyOverrideApplied != true)
+            throw new InvalidOperationException($"Available item stock is insufficient for {inventoryItem.ItemCode}.");
+
+        await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+        {
+            InventoryItemId = item.InventoryItemId,
+            WarehouseId = warehouseId,
+            LocationId = item.LocationId,
+            Direction = delta > 0 ? InventoryTrackingDirection.AdjustmentIn : InventoryTrackingDirection.AdjustmentOut,
+            Quantity = Math.Abs(delta),
+            ReferenceType = reverse ? "StockAdjustmentReversal" : "StockAdjustment",
+            ReferenceNumber = adjustment.AdjustmentNumber,
+            ReferenceId = adjustment.Id,
+            ReferenceLineId = item.Id,
+            EventKey = $"stock-adjustment:{adjustment.Id:N}:{item.Id:N}:{(reverse ? "reverse" : "post")}",
+            LotNumber = item.LotNumber,
+            SerialNumber = item.SerialNumber,
+            CorrelationId = adjustment.CorrelationId ?? $"stock-adjustment:{adjustment.Id:N}"
+        });
+        warehouseQuantity.CurrentStock += delta;
+        warehouseQuantity.AvailableStock = warehouseQuantity.CurrentStock - warehouseQuantity.AllocatedStock;
+        warehouseQuantity.LastMovementDate = DateTime.UtcNow;
+        await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
+        if (!warehouse.IsConsignmentWarehouse)
+        {
+            inventoryItem.CurrentStock += delta;
+            inventoryItem.AvailableStock = inventoryItem.CurrentStock - inventoryItem.AllocatedStock;
+            inventoryItem.LastStockDate = DateTime.UtcNow;
+            await _itemRepository.UpdateAsync(inventoryItem);
+        }
+        if (decreaseAuthorization?.EmergencyOverrideApplied == true)
+        {
+            await _unitOfWork.SaveChangesAsync();
+            await _negativeStockControls.ClearMutationContextAsync();
+        }
+        var movement = new StockMovement
+        {
+            TenantId = adjustment.TenantId,
+            InventoryItemId = item.InventoryItemId,
+            MovementType = reverse ? "AdjustmentReversal" : delta > 0 ? "Adjustment+" : "Adjustment-",
+            Quantity = delta,
+            UnitCost = item.UnitCost,
+            TotalValue = reverse ? -item.AdjustmentValue : item.AdjustmentValue,
+            MovementDate = DateTime.UtcNow,
+            ReferenceType = ReferenceType.Adjustment,
+            ReferenceNumber = adjustment.AdjustmentNumber,
+            ReferenceId = adjustment.Id,
+            WarehouseId = warehouseId,
+            LocationId = item.LocationId,
+            Notes = $"{adjustment.ReasonCode}: {item.Notes ?? adjustment.Description}",
+            SerialNumber = item.SerialNumber,
+            LotNumber = item.LotNumber,
+            RunningBalance = warehouse.IsConsignmentWarehouse ? warehouseQuantity.CurrentStock : inventoryItem.CurrentStock,
+            ProcessedById = userId
+        };
+        await _movementRepository.AddAsync(movement);
+        await _consignmentSettlementService.TryCreateFromStockMovementAsync(movement);
+    }
+
+    private async Task AddActionAsync(StockAdjustment adjustment, string type, string key, string? comment)
+    {
+        var sequence = await _unitOfWork.Repository<StockAdjustmentAction>().GetQueryable().AsNoTracking()
+            .CountAsync(x => x.StockAdjustmentId == adjustment.Id) + 1;
+        var action = new StockAdjustmentAction
+        {
+            TenantId = adjustment.TenantId,
+            StockAdjustmentId = adjustment.Id,
+            Sequence = sequence,
+            ActionType = type,
+            ActorUserId = _currentUserProvider.UserId,
+            OccurredAtUtc = DateTime.UtcNow,
+            IdempotencyKey = key,
+            CorrelationId = adjustment.CorrelationId ?? $"stock-adjustment:{adjustment.Id:N}",
+            Comment = Normalize(comment, 1000),
+            SnapshotJson = JsonSerializer.Serialize(Snapshot(adjustment))
+        };
+        action.IntegrityHash = Hash($"{action.StockAdjustmentId:N}|{action.Sequence}|{action.ActionType}|{action.ActorUserId:N}|{action.OccurredAtUtc:O}|{action.IdempotencyKey}|{action.SnapshotJson}");
+        await _unitOfWork.Repository<StockAdjustmentAction>().AddAsync(action);
+    }
+
+    private Task<bool> HasActionAsync(Guid adjustmentId, string type, string key) =>
+        _unitOfWork.Repository<StockAdjustmentAction>().GetQueryable().AsNoTracking()
+            .AnyAsync(x => x.StockAdjustmentId == adjustmentId && x.ActionType == type && x.IdempotencyKey == key);
+
+    private Task AddAuditAsync(string action, StockAdjustment adjustment, object? before, object after) =>
+        _unitOfWork.Repository<AuditLog>().AddAsync(new AuditLog
+        {
+            TenantId = adjustment.TenantId,
+            UserId = _currentUserProvider.UserId,
+            Username = _currentUserProvider.Username,
+            Action = action,
+            Resource = "StockAdjustment",
+            ResourceId = adjustment.Id.ToString(),
+            OldValues = before is null ? null : JsonSerializer.Serialize(before),
+            NewValues = JsonSerializer.Serialize(after),
+            IpAddress = "system",
+            Timestamp = DateTime.UtcNow
+        });
+
+    private Task RecordEventAsync(StockAdjustment adjustment, string action, ProcurementControlEventResult result, object? before, object after) =>
+        _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
+        {
+            EventKey = $"stock-adjustment:{adjustment.Id:N}:{action.ToLowerInvariant()}:{adjustment.Actions.Count + 1}",
+            EventType = "StockAdjustmentControl",
+            Action = action,
+            Result = result,
+            RuleCode = "INV-011",
+            DecisionKeys = Enumerable.Range(1, 14).Select(x => $"DEC-{x:000}").ToList(),
+            SourceType = "StockAdjustment",
+            SourceId = adjustment.Id,
+            SourceReference = adjustment.AdjustmentNumber,
+            Before = before,
+            After = after,
+            CorrelationId = adjustment.CorrelationId ?? $"stock-adjustment:{adjustment.Id:N}",
+            OccurredAtUtc = DateTime.UtcNow,
+            Evidence = adjustment.Evidence.Select(x => new ProcurementControlEventEvidenceReference
+            {
+                ReferenceKind = ProcurementControlEvidenceReferenceKind.FileUploadRecord,
+                ReferenceId = x.FileUploadRecordId,
+                Reference = x.EvidenceReference,
+                Label = "Central DMS adjustment evidence",
+                RequirementKey = "INV-011"
+            }).ToList()
+        });
+
+    private static object Snapshot(StockAdjustment item) => new
+    {
+        item.Id, item.AdjustmentNumber, item.WarehouseId, item.ReasonCode, item.Status, item.TotalAdjustmentValue,
+        item.RequestedById, item.SubmittedById, item.ApprovedById, item.PostedById, item.ReversedById,
+        item.FinancePostingEventId, item.FinanceJournalEntryId, item.IntegrityHash
+    };
+
+    private static string ValidateReasonCode(string value)
+    {
+        var normalized = Required(value, "A stock-adjustment reason code is required.", 50).ToUpperInvariant();
+        if (!StockAdjustmentReasonCodes.ReasonCodeDescriptions.ContainsKey(normalized))
+            throw new InvalidOperationException("The stock-adjustment reason code is not supported.");
+        return normalized;
+    }
+
+    private static bool EvidenceRequired(string reasonCode) => reasonCode is
+        StockAdjustmentReasonCodes.Damage or StockAdjustmentReasonCodes.Loss or StockAdjustmentReasonCodes.Theft or
+        StockAdjustmentReasonCodes.Expired or StockAdjustmentReasonCodes.QualityIssue or StockAdjustmentReasonCodes.Donation or
+        StockAdjustmentReasonCodes.WriteOff or StockAdjustmentReasonCodes.Other;
+
+    private static string AdjustmentPayloadHash(StockAdjustment item) => Hash(JsonSerializer.Serialize(new
+    {
+        item.WarehouseId, item.ReasonCode, item.Description, item.Reference, item.RelatedIssueVoucherId,
+        Lines = item.Items.OrderBy(x => x.InventoryItemId).ThenBy(x => x.LocationId)
+            .Select(x => new { x.InventoryItemId, x.LocationId, x.AdjustmentQuantity, x.UnitCost, x.LotNumber, x.SerialNumber, x.Reason, x.Notes })
+    }));
+
+    private static string AdjustmentIntegrityHash(StockAdjustment item) => Hash($"{item.Id:N}|{item.TenantId:N}|{item.AdjustmentNumber}|{item.WarehouseId:N}|{item.ReasonCode}|{item.Status}|{item.TotalAdjustmentValue}|{item.RequestedById:N}|{item.ApprovedById:N}|{item.PostedById:N}|{item.ReversedById:N}|{item.PayloadHash}");
+    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private void EnsureActor(Guid userId)
+    {
+        if (!_currentUserProvider.IsAuthenticated || userId == Guid.Empty || userId != _currentUserProvider.UserId || _currentUserProvider.TenantId == Guid.Empty)
+            throw new InvalidOperationException("An authenticated tenant user is required.");
+    }
+
+    private static void EnsureRowVersion(byte[] current, string value)
+    {
+        byte[] supplied;
+        try { supplied = Convert.FromBase64String(value); }
+        catch { throw new InvalidOperationException("The row version is invalid. Reload and retry."); }
+        if (!current.SequenceEqual(supplied)) throw new InvalidOperationException("The stock adjustment changed. Reload and retry.");
+    }
+
+    private static string Required(string? value, string message, int max) =>
+        Normalize(value, max) ?? throw new InvalidOperationException(message);
+
+    private static string? Normalize(string? value, int max)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        return trimmed.Length <= max ? trimmed : trimmed[..max];
     }
 
     #endregion
@@ -665,7 +1242,9 @@ public interface IStockAdjustmentService
     Task<StockAdjustmentDetailDto> UpdateAsync(Guid id, UpdateStockAdjustmentDto dto, Guid userId);
     Task<bool> DeleteAsync(Guid id, Guid userId);
     Task<bool> DeleteItemAsync(Guid adjustmentId, Guid itemId, Guid userId);
-    Task<StockAdjustmentDetailDto> ApproveAsync(Guid id, Guid userId);
-    Task<StockAdjustmentDetailDto> PostAsync(Guid id, Guid userId);
+    Task<StockAdjustmentDetailDto> SubmitAsync(Guid id, Guid userId, StockAdjustmentActionRequest request);
+    Task<StockAdjustmentDetailDto> DecideAsync(Guid id, Guid userId, DecideStockAdjustmentRequest request);
+    Task<StockAdjustmentDetailDto> PostAsync(Guid id, Guid userId, StockAdjustmentActionRequest request);
+    Task<StockAdjustmentDetailDto> ReverseAsync(Guid id, Guid userId, ReverseStockAdjustmentRequest request);
     Task<StockAdjustmentDetailDto> CancelAsync(Guid id, Guid userId);
 }

@@ -23,7 +23,7 @@ public sealed class ProcurementAccessControlServiceTests
     public void RegistryContainsTheCompleteTdcLeastPrivilegeBaseline()
     {
         ProcurementAccessControlRegistry.Roles.Should().HaveCount(19).And.OnlyHaveUniqueItems(item => item.Code);
-        ProcurementAccessControlRegistry.Permissions.Should().HaveCount(36).And.OnlyHaveUniqueItems(item => item.Code);
+        ProcurementAccessControlRegistry.Permissions.Should().HaveCount(37).And.OnlyHaveUniqueItems(item => item.Code);
         ProcurementAccessControlRegistry.Committees.Should().HaveCount(4).And.OnlyHaveUniqueItems(item => item.Code);
         ProcurementAccessControlRegistry.Workflows.Should().HaveCount(13).And.OnlyHaveUniqueItems(item => item.Code);
 
@@ -42,7 +42,7 @@ public sealed class ProcurementAccessControlServiceTests
         await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
 
         (await fixture.Context.Roles.CountAsync(item => item.Name!.StartsWith("TDC_"))).Should().Be(19);
-        (await fixture.Context.Permissions.CountAsync(item => item.Category == ProcurementAccessControlRegistry.Category)).Should().Be(36);
+        (await fixture.Context.Permissions.CountAsync(item => item.Category == ProcurementAccessControlRegistry.Category)).Should().Be(37);
         (await fixture.Context.ProcurementCommittees.CountAsync(item => item.TenantId == fixture.TenantId)).Should().Be(4);
         var workflows = await fixture.Context.WorkflowDefinitions.Where(item => item.TenantId == fixture.TenantId).ToListAsync();
         workflows.Should().HaveCount(13).And.OnlyContain(item =>
@@ -70,6 +70,93 @@ public sealed class ProcurementAccessControlServiceTests
     }
 
     [Fact]
+    public async Task RestrictedLocationDutyAllowsOnlyTheAssignedLocationInsideTheWarehouse()
+    {
+        await using var fixture = new Fixture();
+        await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        await fixture.AssignStoresOfficerAsync(fixture.WarehouseId, fixture.LocationId);
+
+        var allowed = await fixture.Service.CheckCapabilityAsync(
+            Request(fixture.WarehouseId, fixture.LocationId), "trace-location-allowed");
+        var denied = await fixture.Service.EnforceCapabilityAsync(
+            Request(fixture.WarehouseId, fixture.OtherLocationId), "trace-location-denied");
+
+        allowed.Allowed.Should().BeTrue();
+        allowed.LocationId.Should().Be(fixture.LocationId);
+        denied.Allowed.Should().BeFalse();
+        denied.Code.Should().Be("ACCESS_LOCATION_DENIED");
+        (await fixture.Context.AuditLogs.SingleAsync(item => item.Action == "PROCUREMENT_ACCESS_DENIED"))
+            .NewValues.Should().Contain(fixture.OtherLocationId.ToString());
+    }
+
+    [Fact]
+    public async Task RestrictedLocationDutyRequiresAnExplicitLocationForStoreTransactions()
+    {
+        await using var fixture = new Fixture();
+        await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        await fixture.AssignStoresOfficerAsync(fixture.WarehouseId, fixture.LocationId);
+        var request = Request(fixture.WarehouseId);
+        request.RequireLocationScope = true;
+
+        var denied = await fixture.Service.EnforceCapabilityAsync(request, "trace-location-required");
+
+        denied.Allowed.Should().BeFalse();
+        denied.Code.Should().Be("ACCESS_LOCATION_REQUIRED");
+    }
+
+    [Fact]
+    public async Task CrossStoreTransferAuthorityRequiresBothAssignedWarehousesAndLocations()
+    {
+        await using var fixture = new Fixture();
+        await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        await fixture.Service.SaveAssignmentAsync(null, new SaveProcurementResponsibilityAssignmentRequest
+        {
+            UserId = fixture.UserId,
+            RoleName = "TDC_STORES_OFFICER",
+            WarehouseScopeMode = ProcurementWarehouseScopeMode.Restricted,
+            WarehouseIds = new() { fixture.WarehouseId, fixture.OtherWarehouseId },
+            LocationScopeMode = ProcurementLocationScopeMode.Restricted,
+            LocationIds = new() { fixture.LocationId, fixture.DestinationLocationId },
+            EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
+            Reason = "Cross-store acceptance fixture"
+        }, "trace-cross-store-assignment");
+
+        var source = await fixture.Service.CheckCapabilityAsync(
+            Request(fixture.WarehouseId, fixture.LocationId), "trace-cross-store-source");
+        var destination = await fixture.Service.CheckCapabilityAsync(
+            Request(fixture.OtherWarehouseId, fixture.DestinationLocationId), "trace-cross-store-destination");
+        var unassigned = await fixture.Service.EnforceCapabilityAsync(
+            Request(fixture.WarehouseId, fixture.OtherLocationId), "trace-cross-store-unassigned");
+
+        source.Allowed.Should().BeTrue();
+        destination.Allowed.Should().BeTrue();
+        unassigned.Allowed.Should().BeFalse();
+        unassigned.Code.Should().Be("ACCESS_LOCATION_DENIED");
+    }
+
+    [Fact]
+    public async Task LocationAssignmentModelHasTenantWarehouseAndLocationRelationships()
+    {
+        await using var fixture = new Fixture();
+        var entity = fixture.Context.Model.FindEntityType(typeof(ProcurementResponsibilityLocation));
+
+        entity.Should().NotBeNull();
+        var principals = entity!.GetForeignKeys().Select(key => key.PrincipalEntityType.ClrType).ToList();
+        principals.Should().Contain(typeof(ProcurementResponsibilityAssignment));
+        principals.Should().Contain(typeof(Warehouse));
+        principals.Should().Contain(typeof(WarehouseLocation));
+        principals.Should().Contain(typeof(Tenant));
+        entity.GetIndexes().Should().Contain(index =>
+            index.IsUnique &&
+            index.Properties.Select(property => property.Name).SequenceEqual(new[]
+            {
+                nameof(ProcurementResponsibilityLocation.TenantId),
+                nameof(ProcurementResponsibilityLocation.AssignmentId),
+                nameof(ProcurementResponsibilityLocation.WarehouseLocationId)
+            }));
+    }
+
+    [Fact]
     public async Task ForeignTenantWarehouseAndAssignmentCannotBeUsed()
     {
         await using var fixture = new Fixture();
@@ -80,6 +167,7 @@ public sealed class ProcurementAccessControlServiceTests
         {
             TenantId = fixture.ForeignTenantId, UserId = fixture.UserId, RoleId = role.Id, RoleName = role.Name!,
             WarehouseScopeMode = ProcurementWarehouseScopeMode.All, EffectiveFrom = DateTime.UtcNow.AddDays(-1),
+            LocationScopeMode = ProcurementLocationScopeMode.All,
             IsActive = true, Reason = "Foreign tenant fixture"
         });
         await fixture.Context.SaveChangesAsync();
@@ -103,9 +191,31 @@ public sealed class ProcurementAccessControlServiceTests
             RoleName = "TDC_STORES_OFFICER",
             WarehouseScopeMode = ProcurementWarehouseScopeMode.Restricted,
             WarehouseIds = new() { fixture.ForeignWarehouseId },
+            LocationScopeMode = ProcurementLocationScopeMode.All,
             EffectiveFrom = DateTime.UtcNow.Date,
             Reason = "Cross tenant attempt"
         }, "trace-cross-tenant");
+
+        await action.Should().ThrowAsync<ProcurementAccessNotFoundException>();
+        (await fixture.Context.ProcurementResponsibilityAssignments.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AssignmentRejectsLocationFromAnotherTenant()
+    {
+        await using var fixture = new Fixture();
+        await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+
+        var action = () => fixture.Service.SaveAssignmentAsync(null, new SaveProcurementResponsibilityAssignmentRequest
+        {
+            UserId = fixture.UserId,
+            RoleName = "TDC_STORES_OFFICER",
+            WarehouseScopeMode = ProcurementWarehouseScopeMode.All,
+            LocationScopeMode = ProcurementLocationScopeMode.Restricted,
+            LocationIds = new() { fixture.ForeignLocationId },
+            EffectiveFrom = DateTime.UtcNow.Date,
+            Reason = "Cross tenant location attempt"
+        }, "trace-cross-tenant-location");
 
         await action.Should().ThrowAsync<ProcurementAccessNotFoundException>();
         (await fixture.Context.ProcurementResponsibilityAssignments.CountAsync()).Should().Be(0);
@@ -127,6 +237,7 @@ public sealed class ProcurementAccessControlServiceTests
             UserId = fixture.UserId,
             RoleName = "TDC_STORES_MANAGER",
             WarehouseScopeMode = ProcurementWarehouseScopeMode.All,
+            LocationScopeMode = ProcurementLocationScopeMode.All,
             EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
             Reason = "Stale update acceptance check",
             RowVersion = Convert.ToBase64String(new byte[] { 9, 9, 9, 9 })
@@ -137,10 +248,11 @@ public sealed class ProcurementAccessControlServiceTests
         (await fixture.Context.AuditLogs.CountAsync()).Should().Be(auditCount);
     }
 
-    private static ProcurementAccessCapabilityRequest Request(Guid warehouseId) => new()
+    private static ProcurementAccessCapabilityRequest Request(Guid warehouseId, Guid? locationId = null) => new()
     {
         PermissionCode = "procurement.inventory.read",
         WarehouseId = warehouseId,
+        LocationId = locationId,
         SourceType = "Warehouse",
         SourceReference = $"WH-{warehouseId:N}"
     };
@@ -158,6 +270,10 @@ public sealed class ProcurementAccessControlServiceTests
             WarehouseId = Guid.NewGuid();
             OtherWarehouseId = Guid.NewGuid();
             ForeignWarehouseId = Guid.NewGuid();
+            LocationId = Guid.NewGuid();
+            OtherLocationId = Guid.NewGuid();
+            DestinationLocationId = Guid.NewGuid();
+            ForeignLocationId = Guid.NewGuid();
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options;
             Context = new ApplicationDbContext(options);
@@ -175,6 +291,11 @@ public sealed class ProcurementAccessControlServiceTests
                 new Warehouse { Id = WarehouseId, TenantId = TenantId, Code = "MAIN", Name = "Main Stores", IsActive = true },
                 new Warehouse { Id = OtherWarehouseId, TenantId = TenantId, Code = "SPARES", Name = "Spares", IsActive = true },
                 new Warehouse { Id = ForeignWarehouseId, TenantId = ForeignTenantId, Code = "FOREIGN", Name = "Foreign", IsActive = true });
+            Context.WarehouseLocations.AddRange(
+                new WarehouseLocation { Id = LocationId, TenantId = TenantId, WarehouseId = WarehouseId, LocationCode = "MAIN-A", Name = "Main A", IsActive = true },
+                new WarehouseLocation { Id = OtherLocationId, TenantId = TenantId, WarehouseId = WarehouseId, LocationCode = "MAIN-B", Name = "Main B", IsActive = true },
+                new WarehouseLocation { Id = DestinationLocationId, TenantId = TenantId, WarehouseId = OtherWarehouseId, LocationCode = "SPARES-A", Name = "Spares A", IsActive = true },
+                new WarehouseLocation { Id = ForeignLocationId, TenantId = ForeignTenantId, WarehouseId = ForeignWarehouseId, LocationCode = "FOREIGN-A", Name = "Foreign A", IsActive = true });
             Context.SaveChanges();
             _currentUser.SetupGet(item => item.TenantId).Returns(TenantId);
             _currentUser.SetupGet(item => item.UserId).Returns(UserId);
@@ -197,17 +318,23 @@ public sealed class ProcurementAccessControlServiceTests
         public Guid WarehouseId { get; }
         public Guid OtherWarehouseId { get; }
         public Guid ForeignWarehouseId { get; }
+        public Guid LocationId { get; }
+        public Guid OtherLocationId { get; }
+        public Guid DestinationLocationId { get; }
+        public Guid ForeignLocationId { get; }
         public ApplicationDbContext Context { get; }
         public ProcurementAccessControlService Service { get; }
         public ProcurementAccessControlSeeder Seeder { get; }
 
-        public Task<ProcurementResponsibilityAssignmentDto> AssignStoresOfficerAsync(Guid warehouseId) =>
+        public Task<ProcurementResponsibilityAssignmentDto> AssignStoresOfficerAsync(Guid warehouseId, Guid? locationId = null) =>
             Service.SaveAssignmentAsync(null, new SaveProcurementResponsibilityAssignmentRequest
             {
                 UserId = UserId,
                 RoleName = "TDC_STORES_OFFICER",
                 WarehouseScopeMode = ProcurementWarehouseScopeMode.Restricted,
                 WarehouseIds = new() { warehouseId },
+                LocationScopeMode = locationId.HasValue ? ProcurementLocationScopeMode.Restricted : ProcurementLocationScopeMode.All,
+                LocationIds = locationId.HasValue ? new() { locationId.Value } : new(),
                 EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
                 Reason = "Acceptance fixture"
             }, "trace-assign");

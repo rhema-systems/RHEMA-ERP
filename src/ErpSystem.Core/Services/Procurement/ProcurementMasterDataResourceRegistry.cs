@@ -90,9 +90,9 @@ public static class ProcurementMasterDataResourceRegistry
             One(ProcurementMasterDataTargetKind.InventoryItem, Fields(
                 "ItemCode", "Name", "Description", "CategoryId", "Brand", "Manufacturer", "Model", "UnitOfMeasure", "UnitOfMeasureScheduleId",
                 "Barcode", "AlternateBarcode", "QRCode",
-                "ValuationMethod", "IsValuationLocked", "DailyRentalRate", "StandardCost", "SalePrice", "MinimumLevel", "MaximumLevel", "ReorderLevel",
+                "ValuationMethod", "IsValuationLocked", "IsProjectApplicable", "IsCostCentreApplicable", "DailyRentalRate", "StandardCost", "SalePrice", "MinimumLevel", "MaximumLevel", "ReorderLevel",
                 "ReorderQuantity", "SafetyStock", "LeadTimeDays", "SafetyLeadTimeDays", "ItemType", "ABCClass", "Status", "DefaultTaxGroupId",
-                "ShippingWeight", "Weight", "Length", "Width", "Height", "Volume", "IsSerialTracked", "IsLotTracked", "IsExpirationTracked",
+                "ShippingWeight", "Weight", "Length", "Width", "Height", "Volume", "IsSerialTracked", "IsLotTracked", "IsBatchTracked", "IsManufactureDateTracked", "IsExpirationTracked",
                 "IsLocationTracked", "RequiresInspection", "ShelfLifeDays", "PrimarySupplier", "SupplierItemCode", "CustomFields"))),
         Define(
             ProcurementMasterDataResourceType.InventoryCategory,
@@ -101,7 +101,8 @@ public static class ProcurementMasterDataResourceRegistry
             "Controlled inventory classification and category defaults.",
             One(ProcurementMasterDataTargetKind.InventoryCategory, Fields(
                 "Name", "Code", "Description", "ParentCategoryId", "Color", "Icon", "IsActive", "DefaultUnitOfMeasure",
-                "DefaultSerialTracking", "DefaultLotTracking", "DefaultRequiresInspection", "DefaultTaxGroupId"))),
+                "DefaultSerialTracking", "DefaultLotTracking", "DefaultBatchTracking", "DefaultManufactureDateTracking", "DefaultExpirationTracking",
+                "EnforceFifoIssue", "MinimumShelfLifeDays", "DefaultRequiresInspection", "DefaultTaxGroupId"))),
         Define(
             ProcurementMasterDataResourceType.UnitOfMeasure,
             "UNIT_OF_MEASURE",

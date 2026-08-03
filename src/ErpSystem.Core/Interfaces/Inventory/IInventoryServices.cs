@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.Entities.Inventory;
 
 namespace ErpSystem.Core.Interfaces.Inventory;
 
@@ -131,6 +132,7 @@ public interface IGoodsReceiptNoteService
     Task<bool> UpdateInspectionResultAsync(Guid grnId, UpdateGRNInspectionDto dto, Guid userId);
     Task<bool> CompleteInspectionAsync(Guid grnId, Guid userId);
     Task<bool> PostToInventoryAsync(Guid grnId, Guid userId);
+    Task ApplyScanMetadataAsync(Guid grnId, IReadOnlyList<InventoryTransactionScanLineDto> lines, Guid userId);
     Task<bool> CancelAsync(Guid grnId, string reason, Guid userId);
     Task<IEnumerable<GoodsReceiptNoteDto>> GetPendingInspectionAsync();
 }
@@ -151,7 +153,7 @@ public interface IInventoryTransferService
     Task<bool> SubmitForApprovalAsync(Guid transferId, Guid userId);
     Task<bool> ApproveAsync(Guid transferId, Guid userId, string? comments = null);
     Task<bool> RejectAsync(Guid transferId, string reason, Guid userId, string? comments = null);
-    Task<bool> ShipAsync(Guid transferId, Guid userId, string? trackingNumber = null, Dictionary<Guid, decimal>? shippedItems = null);
+    Task<bool> ShipAsync(Guid transferId, Guid userId, string? trackingNumber = null, Dictionary<Guid, decimal>? shippedItems = null, InventoryTransferMutationContext? control = null);
     
     /// <summary>
     /// Ships a transfer with shipping costs and cost allocation options.
@@ -172,14 +174,17 @@ public interface IInventoryTransferService
     /// <returns>True if successful</returns>
     Task<bool> SaveShippingCostsAsync(Guid transferId, Guid userId, ShipTransferWithCostsDto costsDto);
     
-    Task<bool> ReceiveAsync(Guid transferId, Guid userId, List<InventoryTransferItemDto>? receivedItems = null);
-    Task<bool> CancelAsync(Guid transferId, string reason, Guid userId);
+    Task<bool> ReceiveAsync(Guid transferId, Guid userId, List<InventoryTransferItemDto>? receivedItems = null, InventoryTransferMutationContext? control = null);
+    Task<bool> ResolveDiscrepanciesAsync(Guid transferId, Guid userId, ResolveInventoryTransferDiscrepancyRequest request);
+    Task<bool> CloseAsync(Guid transferId, Guid userId, CloseInventoryTransferRequest request);
+    Task ApplyScanMetadataAsync(Guid transferId, InventoryScanOperation operation, IReadOnlyList<InventoryTransactionScanLineDto> lines, Guid userId);
+    Task<bool> CancelAsync(Guid transferId, string reason, Guid userId, InventoryTransferMutationContext? control = null);
     
     /// <summary>
     /// Reverses a shipment that is in transit (not yet received).
     /// Reinstates quantities to the source warehouse and resets shipped quantities.
     /// </summary>
-    Task<bool> ReverseShipmentAsync(Guid transferId, string reason, Guid userId);
+    Task<bool> ReverseShipmentAsync(Guid transferId, string reason, Guid userId, InventoryTransferMutationContext? control = null);
 
     // Item management methods
     Task<InventoryTransferItemDto> AddItemAsync(Guid transferId, AddTransferItemDto dto, Guid userId);
@@ -218,6 +223,16 @@ public interface IPhysicalCountService
     Task<bool> ApproveVariancesAsync(Guid countId, Guid userId);
     Task<bool> RejectVariancesAsync(Guid countId, string reason, Guid userId);
     Task<bool> PostAdjustmentsAsync(Guid countId, Guid userId);
+    Task<bool> RecordRecountAsync(Guid countId, Guid userId, RecordPhysicalCountRecountRequest request);
+    Task<bool> ApproveStoresAsync(Guid countId, Guid userId, PhysicalCountDecisionRequest request);
+    Task<bool> ApproveFinanceAsync(Guid countId, Guid userId, PhysicalCountDecisionRequest request);
+    Task<bool> AttestAuditAsync(Guid countId, Guid userId, PhysicalCountDecisionRequest request);
+    Task<bool> PostControlledAdjustmentsAsync(Guid countId, Guid userId, PhysicalCountMutationRequest request);
+
+    // ABC scheduling composes the existing procurement-calendar occurrence owner.
+    Task<IReadOnlyList<InventoryCycleCountScheduleDto>> GetCycleCountSchedulesAsync();
+    Task<InventoryCycleCountScheduleDto> SaveCycleCountScheduleAsync(Guid? scheduleId, SaveInventoryCycleCountScheduleRequest request, Guid userId);
+    Task<CycleCountGenerationResultDto> GenerateDueCycleCountsAsync(Guid tenantId, DateTime nowUtc, Guid? requestedById = null);
 
     // Export/Import operations
     Task<PhysicalCountExportDto> ExportCountSheetAsync(Guid countId);
@@ -346,6 +361,10 @@ public interface IInventoryRequisitionService
     Task<bool> ApproveAsync(Guid id, string? notes = null);
     Task<bool> RejectAsync(Guid id, string reason);
     Task<bool> IssueAsync(Guid id, IssueRequisitionDto dto);
+    Task<IReadOnlyList<InventoryIssueReceiverDto>> GetIssueReceiversAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InventoryIssueVoucherDto>> GetIssueVouchersAsync(Guid requisitionId, CancellationToken cancellationToken = default);
+    Task<InventoryIssueVoucherDto?> GetIssueVoucherAsync(Guid voucherId, CancellationToken cancellationToken = default);
+    Task<InventoryIssueVoucherDto> AcknowledgeIssueVoucherAsync(Guid voucherId, AcknowledgeInventoryIssueVoucherRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<bool> ReturnAsync(Guid id, ReturnRequisitionDto dto);
     Task<bool> CompleteAsync(Guid id);
     Task<bool> CancelAsync(Guid id, string reason);
@@ -353,3 +372,34 @@ public interface IInventoryRequisitionService
     Task<InventoryRequisitionItemDto> UpdateItemAsync(Guid requisitionId, Guid itemId, UpdateRequisitionItemDto dto);
     Task<bool> RemoveItemAsync(Guid requisitionId, Guid itemId);
 }
+
+/// <summary>
+/// Reusable TDC item-master normalization and validation boundary used by direct
+/// create/edit, bulk import, and staged maker-checker application.
+/// </summary>
+public interface IInventoryItemProfileService
+{
+    Task NormalizeAndValidateAsync(
+        InventoryItem item,
+        Guid? existingItemId,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class InventoryItemProfileValidationException : InvalidOperationException
+{
+    public InventoryItemProfileValidationException(string code, string message) : base(message)
+    {
+        Code = code;
+    }
+
+    public string Code { get; }
+}
+
+public sealed class InventoryIssueControlException(string code, string message) : Exception(message)
+{
+    public string Code { get; } = code;
+}
+
+public sealed class InventoryIssueAuthorizationException(string message) : Exception(message);
+
+public sealed class InventoryIssueNotFoundException(string message) : Exception(message);

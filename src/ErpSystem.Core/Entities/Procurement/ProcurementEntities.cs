@@ -643,7 +643,12 @@ public class PurchaseOrderReceiptItem : TenantEntity
     [MaxLength(100)]
     public string? LotNumber { get; set; }
 
+    [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
     public DateTime? ExpirationDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
 
     [MaxLength(1000)]
     public string? Notes { get; set; }

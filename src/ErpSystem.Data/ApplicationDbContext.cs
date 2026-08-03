@@ -547,6 +547,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<StockMovement> StockMovements { get; set; }
     public DbSet<StockAdjustment> StockAdjustments { get; set; }
     public DbSet<StockAdjustmentItem> StockAdjustmentItems { get; set; }
+    public DbSet<StockAdjustmentEvidence> StockAdjustmentEvidence { get; set; }
+    public DbSet<StockAdjustmentAction> StockAdjustmentActions { get; set; }
     public DbSet<Warehouse> Warehouses { get; set; }
     public DbSet<WarehouseLocation> WarehouseLocations { get; set; }
     public DbSet<InventoryLocation> InventoryLocations { get; set; }
@@ -562,8 +564,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<GoodsReceiptNoteItem> GoodsReceiptNoteItems { get; set; }
     public DbSet<InventoryTransfer> InventoryTransfers { get; set; }
     public DbSet<InventoryTransferItem> InventoryTransferItems { get; set; }
+    public DbSet<InventoryTransferAction> InventoryTransferActions { get; set; }
+    public DbSet<InventoryTransferActionLine> InventoryTransferActionLines { get; set; }
+    public DbSet<InventoryTransferDiscrepancy> InventoryTransferDiscrepancies { get; set; }
+    public DbSet<InventoryTransferDiscrepancyEvidence> InventoryTransferDiscrepancyEvidence { get; set; }
     public DbSet<PhysicalCount> PhysicalCounts { get; set; }
     public DbSet<PhysicalCountItem> PhysicalCountItems { get; set; }
+    public DbSet<InventoryCycleCountSchedule> InventoryCycleCountSchedules { get; set; }
+    public DbSet<PhysicalCountAction> PhysicalCountActions { get; set; }
     public DbSet<InventoryCostLayer> InventoryCostLayers { get; set; }
     public DbSet<LandedCost> LandedCosts { get; set; }
     public DbSet<LandedCostItem> LandedCostItems { get; set; }
@@ -572,6 +580,32 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<PurchaseReturnItem> PurchaseReturnItems { get; set; }
     public DbSet<InventoryRequisition> InventoryRequisitions { get; set; }
     public DbSet<InventoryRequisitionItem> InventoryRequisitionItems { get; set; }
+    public DbSet<InventoryLabelProfile> InventoryLabelProfiles { get; set; }
+    public DbSet<InventoryLabelPrintEvent> InventoryLabelPrintEvents { get; set; }
+    public DbSet<InventoryScanBatch> InventoryScanBatches { get; set; }
+    public DbSet<InventoryScanLine> InventoryScanLines { get; set; }
+    public DbSet<InventoryTrackingException> InventoryTrackingExceptions { get; set; }
+    public DbSet<InventoryTraceabilityEvent> InventoryTraceabilityEvents { get; set; }
+    public DbSet<InventoryNegativeStockOverride> InventoryNegativeStockOverrides { get; set; }
+    public DbSet<InventoryProjectReservationAction> InventoryProjectReservationActions { get; set; }
+    public DbSet<InventoryReplenishmentRecommendation> InventoryReplenishmentRecommendations { get; set; }
+    public DbSet<InventoryReplenishmentAction> InventoryReplenishmentActions { get; set; }
+    public DbSet<InventoryValuationReconciliation> InventoryValuationReconciliations { get; set; }
+    public DbSet<InventoryValuationReconciliationAction> InventoryValuationReconciliationActions { get; set; }
+    public DbSet<InventoryDisposalCase> InventoryDisposalCases { get; set; }
+    public DbSet<InventoryDisposalLine> InventoryDisposalLines { get; set; }
+    public DbSet<InventoryDisposalEvidence> InventoryDisposalEvidence { get; set; }
+    public DbSet<InventoryDisposalCommitteeMember> InventoryDisposalCommitteeMembers { get; set; }
+    public DbSet<InventoryDisposalAction> InventoryDisposalActions { get; set; }
+    public DbSet<InventoryDirectedTask> InventoryDirectedTasks { get; set; }
+    public DbSet<InventoryDirectedTaskAction> InventoryDirectedTaskActions { get; set; }
+    public DbSet<InventoryIssueVoucher> InventoryIssueVouchers { get; set; }
+    public DbSet<InventoryIssueVoucherLine> InventoryIssueVoucherLines { get; set; }
+    public DbSet<InventoryIssueVoucherAction> InventoryIssueVoucherActions { get; set; }
+    public DbSet<InventoryReturnVoucher> InventoryReturnVouchers { get; set; }
+    public DbSet<InventoryReturnVoucherLine> InventoryReturnVoucherLines { get; set; }
+    public DbSet<InventoryReturnVoucherEvidence> InventoryReturnVoucherEvidence { get; set; }
+    public DbSet<InventoryReturnVoucherAction> InventoryReturnVoucherActions { get; set; }
 
     // Inventory Valuation entities
     public DbSet<InventoryMovement> InventoryMovements { get; set; }
@@ -814,6 +848,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<ProcurementPolicyRevision> ProcurementPolicyRevisions { get; set; }
     public DbSet<ProcurementResponsibilityAssignment> ProcurementResponsibilityAssignments { get; set; }
     public DbSet<ProcurementResponsibilityWarehouse> ProcurementResponsibilityWarehouses { get; set; }
+    public DbSet<ProcurementResponsibilityLocation> ProcurementResponsibilityLocations { get; set; }
     public DbSet<ProcurementCommittee> ProcurementCommittees { get; set; }
     public DbSet<ProcurementCommitteeMember> ProcurementCommitteeMembers { get; set; }
     public DbSet<ProcurementControlEvent> ProcurementControlEvents { get; set; }
@@ -1029,6 +1064,50 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.ApplyConfiguration(new ApplicationUserConfiguration());
         builder.ApplyConfiguration(new TenantConfiguration());
         builder.ApplyConfiguration(new UserTenantConfiguration());
+        builder.ApplyConfiguration(new InventoryLabelProfileConfiguration());
+        builder.ApplyConfiguration(new InventoryLabelPrintEventConfiguration());
+        builder.ApplyConfiguration(new InventoryScanBatchConfiguration());
+        builder.ApplyConfiguration(new InventoryScanLineConfiguration());
+        builder.ApplyConfiguration(new InventoryTrackingExceptionConfiguration());
+        builder.ApplyConfiguration(new InventoryTraceabilityEventConfiguration());
+        builder.ApplyConfiguration(new InventoryNegativeStockOverrideConfiguration());
+        builder.ApplyConfiguration(new InventoryNegativeStockWarehouseQuantityConfiguration());
+        builder.ApplyConfiguration(new InventoryNegativeStockItemConfiguration());
+        builder.ApplyConfiguration(new InventoryProjectReservationConfiguration());
+        builder.ApplyConfiguration(new InventoryProjectReservationActionConfiguration());
+        builder.ApplyConfiguration(new InventoryReplenishmentRecommendationConfiguration());
+        builder.ApplyConfiguration(new InventoryReplenishmentActionConfiguration());
+        builder.ApplyConfiguration(new InventoryValuationReconciliationConfiguration());
+        builder.ApplyConfiguration(new InventoryValuationReconciliationActionConfiguration());
+        builder.ApplyConfiguration(new InventoryDisposalCaseConfiguration());
+        builder.ApplyConfiguration(new InventoryDisposalLineConfiguration());
+        builder.ApplyConfiguration(new InventoryDisposalEvidenceConfiguration());
+        builder.ApplyConfiguration(new InventoryDisposalCommitteeMemberConfiguration());
+        builder.ApplyConfiguration(new InventoryDisposalActionConfiguration());
+        builder.ApplyConfiguration(new InventoryDirectedTaskConfiguration());
+        builder.ApplyConfiguration(new InventoryDirectedTaskActionConfiguration());
+        builder.ApplyConfiguration(new InventoryIssueVoucherConfiguration());
+        builder.ApplyConfiguration(new InventoryIssueVoucherLineConfiguration());
+        builder.ApplyConfiguration(new InventoryIssueVoucherActionConfiguration());
+        builder.ApplyConfiguration(new InventoryReturnVoucherConfiguration());
+        builder.ApplyConfiguration(new InventoryReturnVoucherLineConfiguration());
+        builder.ApplyConfiguration(new InventoryReturnVoucherEvidenceConfiguration());
+        builder.ApplyConfiguration(new InventoryReturnVoucherActionConfiguration());
+        builder.ApplyConfiguration(new StockAdjustmentEvidenceConfiguration());
+        builder.ApplyConfiguration(new StockAdjustmentActionConfiguration());
+        builder.ApplyConfiguration(new InventoryTransferActionConfiguration());
+        builder.ApplyConfiguration(new InventoryTransferActionLineConfiguration());
+        builder.ApplyConfiguration(new InventoryTransferDiscrepancyConfiguration());
+        builder.ApplyConfiguration(new InventoryTransferDiscrepancyEvidenceConfiguration());
+        builder.ApplyConfiguration(new InventoryTransferControlRootConfiguration());
+        builder.ApplyConfiguration(new InventoryTransferControlItemConfiguration());
+        builder.ApplyConfiguration(new InventoryCycleCountScheduleConfiguration());
+        builder.ApplyConfiguration(new PhysicalCountControlConfiguration());
+        builder.ApplyConfiguration(new PhysicalCountItemControlConfiguration());
+        builder.ApplyConfiguration(new PhysicalCountActionConfiguration());
+        builder.ApplyConfiguration(new PhysicalCountWarehouseQuantityConfiguration());
+        builder.ApplyConfiguration(new PhysicalCountInventoryItemConfiguration());
+        builder.ApplyConfiguration(new PhysicalCountStockMovementConfiguration());
         builder.Entity<WorkflowEscalationExecution>()
             .HasIndex(item => new { item.ApprovalId, item.RuleIndex })
             .IsUnique();
@@ -3931,6 +4010,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
 
         // Configure Inventory Management entities
         ConfigureInventoryEntities(builder);
+        // These controlled voucher costs require four-decimal source precision.
+        // Keep this after the global decimal convention so later migrations do
+        // not silently narrow the TDC-0606/TDC-0607 audit values.
+        builder.Entity<InventoryIssueVoucherLine>().Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
+        builder.Entity<InventoryReturnVoucherLine>().Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
+        builder.Entity<GoodsReceiptNoteItem>().Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
 
         // Configure Workflow Engine entities
         ConfigureWorkflowEntities(builder);
@@ -9427,13 +9512,29 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.ToTable("InventoryItems", table =>
             {
                 table.HasTrigger("TR_TDC0601_InventoryItems_IdentifierIntegrity");
+                table.HasTrigger("TR_TDC0616_InventoryItems_ProfileIntegrity");
                 table.HasCheckConstraint(
                     "CK_InventoryItems_Identifiers_Normalized",
                     "([Barcode] IS NULL OR [Barcode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([Barcode]))) COLLATE Latin1_General_100_BIN2) AND ([AlternateBarcode] IS NULL OR [AlternateBarcode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AlternateBarcode]))) COLLATE Latin1_General_100_BIN2) AND ([QRCode] IS NULL OR [QRCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([QRCode]))) COLLATE Latin1_General_100_BIN2)");
+                table.HasCheckConstraint(
+                    "CK_InventoryItems_ProfileRequired",
+                    "LEN(LTRIM(RTRIM([ItemCode]))) > 0 AND LEN(LTRIM(RTRIM([Name]))) > 0 AND LEN(LTRIM(RTRIM([UnitOfMeasure]))) > 0");
+                table.HasCheckConstraint(
+                    "CK_InventoryItems_ProfileLevels",
+                    "[MinimumLevel] >= 0 AND [MaximumLevel] >= 0 AND [ReorderLevel] >= 0 AND [ReorderQuantity] >= 0 AND [SafetyStock] >= 0 AND ([MaximumLevel] = 0 OR ([MinimumLevel] <= [MaximumLevel] AND [ReorderLevel] <= [MaximumLevel]))");
+                table.HasCheckConstraint(
+                    "CK_InventoryItems_ProfileEnums",
+                    "[ValuationMethod] BETWEEN 1 AND 5 AND [Status] BETWEEN 1 AND 4 AND [ItemType] BETWEEN 1 AND 4");
+                table.HasCheckConstraint(
+                    "CK_InventoryItems_ProfileTracking",
+                    "[IsExpirationTracked] = 0 OR [ShelfLifeDays] > 0");
             });
+            entity.Property(i => i.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.Property(i => i.ValuationMethod).HasDefaultValue(ValuationMethod.WeightedAverage);
             entity.HasIndex(i => new { i.TenantId, i.ItemCode })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(i => i.TenantId);
             entity.HasIndex(i => new { i.TenantId, i.Barcode })
                 .IsUnique()
                 .HasFilter("[Barcode] IS NOT NULL AND [IsDeleted] = 0");
@@ -9448,6 +9549,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasIndex(i => i.ABCClass);
             entity.HasIndex(i => i.IsSerialTracked);
             entity.HasIndex(i => i.IsLotTracked);
+            entity.HasIndex(i => new { i.TenantId, i.IsProjectApplicable, i.IsCostCentreApplicable, i.Status });
             // TODO: Uncomment when GP-style inventory entities are implemented
             // entity.HasIndex(i => i.ItemClassId);
             // entity.HasIndex(i => i.PriceGroupId);
@@ -9637,13 +9739,18 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         builder.Entity<StockMovement>(entity =>
         {
             entity.ToTable("StockMovements", table =>
-                table.HasTrigger("TR_StockMovements_GovernedPurchaseReceipt"));
+            {
+                table.HasTrigger("TR_StockMovements_GovernedPurchaseReceipt");
+                table.HasTrigger("TR_StockMovements_GovernedRequisitionIssue");
+            });
             entity.HasIndex(sm => sm.InventoryItemId);
             entity.HasIndex(sm => sm.LocationId);
             entity.HasIndex(sm => sm.MovementType);
             entity.HasIndex(sm => sm.MovementDate);
             entity.HasIndex(sm => sm.ReferenceType);
             entity.HasIndex(sm => sm.ReferenceNumber);
+            entity.HasIndex(sm => sm.InventoryIssueVoucherId);
+            entity.HasIndex(sm => sm.InventoryReturnVoucherId);
 
             entity.HasOne(sm => sm.InventoryItem)
                 .WithMany(ii => ii.StockMovements)
@@ -9663,6 +9770,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.HasOne(sm => sm.ApprovedBy)
                 .WithMany()
                 .HasForeignKey(sm => sm.ApprovedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(sm => sm.InventoryIssueVoucher)
+                .WithMany()
+                .HasForeignKey(sm => sm.InventoryIssueVoucherId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(sm => sm.InventoryReturnVoucher)
+                .WithMany()
+                .HasForeignKey(sm => sm.InventoryReturnVoucherId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
 
@@ -9929,7 +10046,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // StockAdjustment entity
         builder.Entity<StockAdjustment>(entity =>
         {
+            entity.ToTable("StockAdjustments", table => table.HasTrigger("TR_StockAdjustments_ControlledLifecycle"));
             entity.HasIndex(sa => sa.AdjustmentNumber).IsUnique();
+            entity.HasIndex(sa => new { sa.TenantId, sa.IdempotencyKey }).IsUnique().HasFilter("[IdempotencyKey] IS NOT NULL");
             entity.HasIndex(sa => sa.AdjustmentDate);
             entity.HasIndex(sa => sa.Status);
             entity.HasIndex(sa => sa.ReasonCode);
@@ -9939,11 +10058,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .WithMany()
                 .HasForeignKey(sa => sa.ApprovedById)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            entity.Property(sa => sa.RowVersion).IsRowVersion();
         });
 
         // StockAdjustmentItem entity
         builder.Entity<StockAdjustmentItem>(entity =>
         {
+            entity.ToTable("StockAdjustmentItems", table => table.HasTrigger("TR_StockAdjustmentItems_ControlledMutation"));
             entity.HasIndex(sai => sai.AdjustmentId);
             entity.HasIndex(sai => sai.InventoryItemId);
             entity.HasIndex(sai => sai.LocationId);
@@ -10006,6 +10128,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             });
             entity.HasIndex(iu => new { iu.InventoryItemId, iu.UnitOfMeasureId }).IsUnique();
             entity.HasIndex(iu => iu.IsActive);
+            entity.HasIndex(iu => iu.TenantId);
             entity.HasIndex(iu => new { iu.TenantId, iu.Barcode })
                 .IsUnique()
                 .HasFilter("[Barcode] IS NOT NULL AND [IsDeleted] = 0");
@@ -10106,6 +10229,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         // InventoryRequisition entity - department requisitions for internal issues
         builder.Entity<InventoryRequisition>(entity =>
         {
+            entity.Property(item => item.RowVersion).IsRowVersion();
             entity.HasIndex(ir => ir.RequisitionNumber).IsUnique();
             entity.HasIndex(ir => ir.WarehouseId);
             entity.HasIndex(ir => ir.DepartmentId);
@@ -11598,6 +11722,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
             entity.ToTable(table =>
             {
                 table.HasCheckConstraint("CK_ProcurementResponsibilityAssignments_WarehouseScope", "[WarehouseScopeMode] IN (0, 1, 2)");
+                table.HasCheckConstraint("CK_ProcurementResponsibilityAssignments_LocationScope", "[LocationScopeMode] IN (0, 1, 2)");
                 table.HasCheckConstraint("CK_ProcurementResponsibilityAssignments_EffectivePeriod", "[EffectiveTo] IS NULL OR [EffectiveTo] >= [EffectiveFrom]");
             });
             entity.HasOne(item => item.User).WithMany().HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.Restrict);
@@ -11614,6 +11739,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
                 .HasForeignKey(item => item.AssignmentId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(item => item.Warehouse).WithMany()
                 .HasForeignKey(item => item.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProcurementResponsibilityLocation>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.AssignmentId, item.WarehouseLocationId })
+                .IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(item => new { item.TenantId, item.WarehouseId, item.WarehouseLocationId });
+            entity.HasOne(item => item.Assignment).WithMany(item => item.Locations)
+                .HasForeignKey(item => item.AssignmentId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.Warehouse).WithMany()
+                .HasForeignKey(item => item.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.WarehouseLocation).WithMany()
+                .HasForeignKey(item => item.WarehouseLocationId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 

@@ -67,7 +67,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return ReceiptSourceForbidden(ex);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt notes");
             return StatusCode(500, "An error occurred while retrieving goods receipt notes");
@@ -92,7 +92,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return ReceiptSourceForbidden(ex);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt note {Id}", id);
             return StatusCode(500, "An error occurred while retrieving the goods receipt note");
@@ -117,7 +117,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return ReceiptSourceForbidden(ex);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt note {GRNNumber}", grnNumber);
             return StatusCode(500, "An error occurred while retrieving the goods receipt note");
@@ -139,7 +139,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return ReceiptSourceForbidden(ex);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt notes for warehouse {WarehouseId}", warehouseId);
             return StatusCode(500, "An error occurred while retrieving goods receipt notes");
@@ -161,7 +161,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return ReceiptSourceForbidden(ex);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt notes for supplier {SupplierId}", supplierId);
             return StatusCode(500, "An error occurred while retrieving goods receipt notes");
@@ -183,7 +183,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return ReceiptSourceForbidden(ex);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt notes for PO {PurchaseOrderId}", purchaseOrderId);
             return StatusCode(500, "An error occurred while retrieving goods receipt notes");
@@ -205,7 +205,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return ReceiptSourceForbidden(ex);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving pending inspection GRNs");
             return StatusCode(500, "An error occurred while retrieving pending inspection GRNs");
@@ -277,7 +277,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error creating goods receipt note");
             return StatusCode(500, "An error occurred while creating the goods receipt note");
@@ -315,7 +315,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error submitting GRN {Id} for inspection", id);
             return StatusCode(500, "An error occurred while submitting the GRN for inspection");
@@ -353,7 +353,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error updating inspection for GRN {Id}", id);
             return StatusCode(500, "An error occurred while updating the inspection result");
@@ -391,7 +391,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error completing inspection for GRN {Id}", id);
             return StatusCode(500, "An error occurred while completing the inspection");
@@ -464,11 +464,29 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return NotFound(ex.Message);
         }
+        catch (InventoryTrackingAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "INV_TRACKING_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (InventoryTrackingControlException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error posting GRN {Id} to inventory", id);
             return StatusCode(500, "An error occurred while posting the GRN to inventory");
@@ -506,7 +524,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error cancelling GRN {Id}", id);
             return StatusCode(500, "An error occurred while cancelling the GRN");

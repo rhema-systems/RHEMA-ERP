@@ -26,6 +26,9 @@ public class InventoryItemDto
     public decimal ListPrice { get; set; }
     public bool IsSerialTracked { get; set; }
     public bool IsLotTracked { get; set; }
+    public bool IsBatchTracked { get; set; }
+    public bool IsManufactureDateTracked { get; set; }
+    public bool IsExpirationTracked { get; set; }
     public ItemType ItemType { get; set; }
     public ItemStatus Status { get; set; }
     public Guid CategoryId { get; set; }
@@ -40,6 +43,16 @@ public class InventoryItemDto
     // Valuation
     public ValuationMethod ValuationMethod { get; set; } = ValuationMethod.WeightedAverage;
     public bool IsValuationLocked { get; set; }
+    public bool IsProjectApplicable { get; set; }
+    public bool IsCostCentreApplicable { get; set; }
+    public decimal MinimumLevel { get; set; }
+    public decimal MaximumLevel { get; set; }
+    public decimal ReorderLevel { get; set; }
+    public decimal ReorderQuantity { get; set; }
+    public decimal SafetyStock { get; set; }
+    public int LeadTimeDays { get; set; }
+    public int MinimumShelfLifeDays { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
 
     // Media
     public string? ImageUrl { get; set; }
@@ -54,13 +67,8 @@ public class InventoryItemDetailDto : InventoryItemDto
     // Stock Information
     public decimal AllocatedStock { get; set; }
     public decimal OnOrderStock { get; set; }
-    public decimal MinimumLevel { get; set; }
-    public decimal MaximumLevel { get; set; }
-    public decimal ReorderLevel { get; set; }
-    public decimal ReorderQuantity { get; set; }
     public decimal LastPurchaseCost { get; set; }
     public string? PrimarySupplier { get; set; }
-    public int LeadTimeDays { get; set; }
     public DateTime? LastStockDate { get; set; }
     public DateTime? LastPurchaseDate { get; set; }
 
@@ -91,7 +99,6 @@ public class InventoryItemDetailDto : InventoryItemDto
 
     // Lot Tracking Options
     public string? LotCategory { get; set; }
-    public int MinimumShelfLifeDays { get; set; }
     public bool WarnBeforeLotExpires { get; set; }
     public int DaysBeforeExpiryWarning { get; set; }
 
@@ -172,6 +179,8 @@ public class CreateInventoryItemDto
     public ItemType ItemType { get; set; } = ItemType.StockItem;
     public ItemStatus Status { get; set; } = ItemStatus.Active;
     public ValuationMethod ValuationMethod { get; set; } = ValuationMethod.WeightedAverage;
+    public bool IsProjectApplicable { get; set; }
+    public bool IsCostCentreApplicable { get; set; }
 
     // === COSTS & PRICING TAB ===
     public decimal StandardCost { get; set; }
@@ -193,6 +202,8 @@ public class CreateInventoryItemDto
     // === TRACKING TAB ===
     public bool IsSerialTracked { get; set; }
     public bool IsLotTracked { get; set; }
+    public bool IsBatchTracked { get; set; }
+    public bool IsManufactureDateTracked { get; set; }
     public bool IsExpirationTracked { get; set; }
     public bool IsLocationTracked { get; set; }
 
@@ -266,6 +277,35 @@ public class CreateInventoryItemDto
 public class UpdateInventoryItemDto : CreateInventoryItemDto
 {
     public bool IsActive { get; set; } = true;
+
+    [Required]
+    public string RowVersion { get; set; } = string.Empty;
+}
+
+public sealed class ImportInventoryItemsDto
+{
+    [Required]
+    [MinLength(1)]
+    [MaxLength(500)]
+    public List<CreateInventoryItemDto> Items { get; set; } = new();
+}
+
+public sealed class InventoryItemImportResultDto
+{
+    public int ImportedCount { get; set; }
+    public IReadOnlyList<InventoryItemDto> Items { get; set; } = Array.Empty<InventoryItemDto>();
+}
+
+public sealed class InventoryItemChangeAuditDto
+{
+    public Guid Id { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+    public Guid? UserId { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public string Action { get; set; } = string.Empty;
+    public string? OldValues { get; set; }
+    public string? NewValues { get; set; }
+    public string? CorrelationId { get; set; }
 }
 
 public sealed class InventoryIdentifierMatchDto
@@ -597,6 +637,8 @@ public class AllocateInventoryDto
 
     [Required]
     public Guid UserId { get; set; }
+
+    public Guid? NegativeStockOverrideId { get; set; }
 }
 
 #endregion
@@ -1052,6 +1094,19 @@ public class StockAdjustmentDto
     public DateTime? ApprovedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedByName { get; set; }
+    public Guid RequestedById { get; set; }
+    public Guid? SubmittedById { get; set; }
+    public DateTime? SubmittedAtUtc { get; set; }
+    public Guid? PostedById { get; set; }
+    public DateTime? PostedAtUtc { get; set; }
+    public Guid? ReversedById { get; set; }
+    public DateTime? ReversedAtUtc { get; set; }
+    public string? ReversalReason { get; set; }
+    public Guid? FinancePostingEventId { get; set; }
+    public Guid? FinanceJournalEntryId { get; set; }
+    public Guid? ReversalFinancePostingEventId { get; set; }
+    public Guid? ReversalFinanceJournalEntryId { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -1060,6 +1115,17 @@ public class StockAdjustmentDto
 public class StockAdjustmentDetailDto : StockAdjustmentDto
 {
     public List<StockAdjustmentItemDto> Items { get; set; } = new();
+    public List<InventoryControlEvidenceDto> Evidence { get; set; } = new();
+    public List<StockAdjustmentActionDto> Actions { get; set; } = new();
+}
+
+public sealed class StockAdjustmentActionDto
+{
+    public int Sequence { get; set; }
+    public string ActionType { get; set; } = string.Empty;
+    public Guid ActorUserId { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+    public string? Comment { get; set; }
 }
 
 /// <summary>
@@ -1131,6 +1197,11 @@ public class CreateStockAdjustmentDto
 
     [Required]
     public List<CreateStockAdjustmentItemDto> Items { get; set; } = new();
+
+    public Guid? RelatedIssueVoucherId { get; set; }
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+    [MaxLength(100)] public string? CorrelationId { get; set; }
+    public List<InventoryControlEvidenceRequest> Evidence { get; set; } = new();
 }
 
 /// <summary>
@@ -1188,6 +1259,26 @@ public class UpdateStockAdjustmentDto
     public DateTime? AdjustmentDate { get; set; }
 
     public List<CreateStockAdjustmentItemDto>? Items { get; set; }
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    public List<InventoryControlEvidenceRequest>? Evidence { get; set; }
+}
+
+public class StockAdjustmentActionRequest
+{
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+    [MaxLength(1000)] public string? Comment { get; set; }
+    public Dictionary<Guid, Guid> NegativeStockOverrideIds { get; set; } = new();
+}
+
+public sealed class DecideStockAdjustmentRequest : StockAdjustmentActionRequest
+{
+    public bool Approved { get; set; }
+}
+
+public sealed class ReverseStockAdjustmentRequest : StockAdjustmentActionRequest
+{
+    [Required, MaxLength(1000)] public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>

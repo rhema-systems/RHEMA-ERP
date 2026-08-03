@@ -33,6 +33,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
     private readonly INotificationTopicPublisher _notificationTopics;
     private readonly ILogger<ProcurementMasterDataChangeService> _logger;
     private readonly IInventoryItemIdentifierService? _inventoryIdentifiers;
+    private readonly IInventoryItemProfileService? _inventoryProfiles;
 
     public ProcurementMasterDataChangeService(
         IUnitOfWork unitOfWork,
@@ -41,7 +42,8 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         IWorkflowInstanceService workflowInstances,
         INotificationTopicPublisher notificationTopics,
         ILogger<ProcurementMasterDataChangeService> logger,
-        IInventoryItemIdentifierService? inventoryIdentifiers = null)
+        IInventoryItemIdentifierService? inventoryIdentifiers = null,
+        IInventoryItemProfileService? inventoryProfiles = null)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -50,6 +52,7 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         _notificationTopics = notificationTopics;
         _logger = logger;
         _inventoryIdentifiers = inventoryIdentifiers;
+        _inventoryProfiles = inventoryProfiles;
     }
 
     private IGenericRepository<ProcurementMasterDataControlPolicy> Policies => _unitOfWork.Repository<ProcurementMasterDataControlPolicy>();
@@ -1240,6 +1243,22 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
                     ValidateSupplierCompliance(partner);
                 break;
             case InventoryItem item:
+                if (_inventoryProfiles is not null)
+                {
+                    try
+                    {
+                        await _inventoryProfiles.NormalizeAndValidateAsync(item, item.Id, cancellationToken);
+                    }
+                    catch (InventoryItemProfileValidationException exception)
+                    {
+                        throw new ProcurementMasterDataChangeValidationException(exception.Code, exception.Message);
+                    }
+                    catch (InventoryIdentifierConflictException exception)
+                    {
+                        throw new ProcurementMasterDataChangeValidationException("INVENTORY_IDENTIFIER_DUPLICATE", exception.Message);
+                    }
+                    break;
+                }
                 item.Barcode = NormalizeInventoryIdentifier(item.Barcode);
                 item.AlternateBarcode = NormalizeInventoryIdentifier(item.AlternateBarcode);
                 item.QRCode = NormalizeInventoryIdentifier(item.QRCode);

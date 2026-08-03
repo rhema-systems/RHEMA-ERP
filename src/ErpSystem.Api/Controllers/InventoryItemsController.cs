@@ -42,6 +42,7 @@ public class InventoryItemsController : ControllerBase
     private readonly ILogger<InventoryItemsController> _logger;
     private readonly IProcurementMasterDataChangeService? _masterDataChanges;
     private readonly IInventoryItemIdentifierService? _identifierService;
+    private readonly IInventoryItemProfileService? _profileService;
     private readonly IAuditLogService? _auditLog;
     private readonly IUnitOfWork? _unitOfWork;
 
@@ -63,7 +64,8 @@ public class InventoryItemsController : ControllerBase
         IProcurementMasterDataChangeService? masterDataChanges = null,
         IInventoryItemIdentifierService? identifierService = null,
         IAuditLogService? auditLog = null,
-        IUnitOfWork? unitOfWork = null)
+        IUnitOfWork? unitOfWork = null,
+        IInventoryItemProfileService? profileService = null)
     {
         _currentUserProvider = currentUserProvider;
         _inventoryItemRepository = inventoryItemRepository;
@@ -81,6 +83,7 @@ public class InventoryItemsController : ControllerBase
         _logger = logger;
         _masterDataChanges = masterDataChanges;
         _identifierService = identifierService;
+        _profileService = profileService;
         _auditLog = auditLog;
         _unitOfWork = unitOfWork;
     }
@@ -314,22 +317,29 @@ public class InventoryItemsController : ControllerBase
 
             var inventoryItem = _mapper.Map<InventoryItem>(createDto);
             inventoryItem.TenantId = GetTenantId();
-            NormalizeIdentifiers(inventoryItem);
-            if (_identifierService is not null)
+            if (_profileService is not null)
             {
-                await _identifierService.ValidateItemIdentifiersAsync(
-                    inventoryItem.TenantId,
-                    null,
-                    inventoryItem.Barcode,
-                    inventoryItem.AlternateBarcode,
-                    inventoryItem.QRCode,
-                    HttpContext.RequestAborted);
+                await _profileService.NormalizeAndValidateAsync(inventoryItem, null, HttpContext.RequestAborted);
+            }
+            else
+            {
+                NormalizeIdentifiers(inventoryItem);
+                if (_identifierService is not null)
+                {
+                    await _identifierService.ValidateItemIdentifiersAsync(
+                        inventoryItem.TenantId,
+                        null,
+                        inventoryItem.Barcode,
+                        inventoryItem.AlternateBarcode,
+                        inventoryItem.QRCode,
+                        HttpContext.RequestAborted);
+                }
             }
 
             var createdItem = await _inventoryItemRepository.AddAsync(inventoryItem);
-            var auditQueued = await QueueAuditAsync("InventoryItemIdentifiers.Created", createdItem, null);
+            var auditQueued = await QueueAuditAsync("InventoryItem.Created", createdItem, null);
             await _inventoryItemRepository.SaveChangesAsync();
-            if (!auditQueued) await AuditFallbackAsync("InventoryItemIdentifiers.Created", createdItem, null);
+            if (!auditQueued) await AuditFallbackAsync("InventoryItem.Created", createdItem, null);
 
             var itemDto = _mapper.Map<InventoryItemDto>(createdItem);
             return CreatedAtAction(nameof(GetInventoryItem), new { id = createdItem.Id }, itemDto);
@@ -337,6 +347,10 @@ public class InventoryItemsController : ControllerBase
         catch (InventoryIdentifierConflictException ex)
         {
             return Conflict(new ProblemDetails { Status = 409, Title = "Duplicate inventory identifier", Detail = ex.Message, Extensions = { ["code"] = "INVENTORY_IDENTIFIER_DUPLICATE", ["identifier"] = ex.Identifier } });
+        }
+        catch (InventoryItemProfileValidationException ex)
+        {
+            return UnprocessableEntity(ProfileProblem(ex));
         }
         catch (UnauthorizedAccessException)
         {
@@ -370,6 +384,17 @@ public class InventoryItemsController : ControllerBase
                 return NotFound($"Inventory item with ID {id} not found");
             }
 
+            if (!MatchesRowVersion(updateDto.RowVersion, existingItem.RowVersion))
+            {
+                return Conflict(new ProblemDetails
+                {
+                    Status = StatusCodes.Status409Conflict,
+                    Title = "Inventory item changed",
+                    Detail = "The item profile was changed by another user. Reload it before saving.",
+                    Extensions = { ["code"] = "ITEM_PROFILE_CONCURRENCY_CONFLICT" }
+                });
+            }
+
             // Check if item code is being changed and if the new code already exists
             if (existingItem.ItemCode != updateDto.ItemCode)
             {
@@ -380,27 +405,32 @@ public class InventoryItemsController : ControllerBase
                 }
             }
 
-            var previousIdentifiers = new { existingItem.Barcode, existingItem.AlternateBarcode, existingItem.QRCode };
+            var previousProfile = SnapshotProfile(existingItem);
             _mapper.Map(updateDto, existingItem);
-            NormalizeIdentifiers(existingItem);
-            if (_identifierService is not null)
+            existingItem.Status = updateDto.IsActive ? updateDto.Status : ItemStatus.Inactive;
+            if (_profileService is not null)
             {
-                await _identifierService.ValidateItemIdentifiersAsync(
-                    GetTenantId(),
-                    existingItem.Id,
-                    existingItem.Barcode,
-                    existingItem.AlternateBarcode,
-                    existingItem.QRCode,
-                    HttpContext.RequestAborted);
+                await _profileService.NormalizeAndValidateAsync(existingItem, existingItem.Id, HttpContext.RequestAborted);
+            }
+            else
+            {
+                NormalizeIdentifiers(existingItem);
+                if (_identifierService is not null)
+                {
+                    await _identifierService.ValidateItemIdentifiersAsync(
+                        GetTenantId(),
+                        existingItem.Id,
+                        existingItem.Barcode,
+                        existingItem.AlternateBarcode,
+                        existingItem.QRCode,
+                        HttpContext.RequestAborted);
+                }
             }
 
-            // Handle IsActive -> Status conversion
-            existingItem.Status = updateDto.IsActive ? ItemStatus.Active : ItemStatus.Inactive;
-
             await _inventoryItemRepository.UpdateAsync(existingItem);
-            var auditQueued = await QueueAuditAsync("InventoryItemIdentifiers.Updated", existingItem, previousIdentifiers);
+            var auditQueued = await QueueAuditAsync("InventoryItem.Updated", existingItem, previousProfile);
             await _inventoryItemRepository.SaveChangesAsync();
-            if (!auditQueued) await AuditFallbackAsync("InventoryItemIdentifiers.Updated", existingItem, previousIdentifiers);
+            if (!auditQueued) await AuditFallbackAsync("InventoryItem.Updated", existingItem, previousProfile);
 
             var itemDto = _mapper.Map<InventoryItemDto>(existingItem);
             return Ok(itemDto);
@@ -408,6 +438,20 @@ public class InventoryItemsController : ControllerBase
         catch (InventoryIdentifierConflictException ex)
         {
             return Conflict(new ProblemDetails { Status = 409, Title = "Duplicate inventory identifier", Detail = ex.Message, Extensions = { ["code"] = "INVENTORY_IDENTIFIER_DUPLICATE", ["identifier"] = ex.Identifier } });
+        }
+        catch (InventoryItemProfileValidationException ex)
+        {
+            return UnprocessableEntity(ProfileProblem(ex));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Inventory item changed",
+                Detail = "The item profile was changed by another user. Reload it before saving.",
+                Extensions = { ["code"] = "ITEM_PROFILE_CONCURRENCY_CONFLICT" }
+            });
         }
         catch (UnauthorizedAccessException)
         {
@@ -418,6 +462,139 @@ public class InventoryItemsController : ControllerBase
             _logger.LogError(ex, "Error updating inventory item {ItemId}", id);
             return StatusCode(500, "An error occurred while updating the inventory item");
         }
+    }
+
+    /// <summary>
+    /// Atomically imports validated item-master profiles. The same profile boundary
+    /// used by direct create/edit and maker-checker application is enforced here.
+    /// </summary>
+    [HttpPost("import")]
+    public async Task<ActionResult<InventoryItemImportResultDto>> ImportInventoryItems(
+        [FromBody] ImportInventoryItemsDto request)
+    {
+        var protection = await GuardDirectMutationAsync(null, "InventoryItem.Import");
+        if (protection is not null) return protection;
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (_unitOfWork is null || _profileService is null)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "The item-profile import boundary is unavailable.");
+
+        var tenantId = GetTenantId();
+        var normalizedCodes = request.Items.Select(value => value.ItemCode?.Trim().ToUpperInvariant()).ToArray();
+        if (normalizedCodes.Any(string.IsNullOrWhiteSpace) ||
+            normalizedCodes.GroupBy(value => value, StringComparer.Ordinal).Any(group => group.Count() > 1))
+        {
+            return UnprocessableEntity(ProfileProblem(new InventoryItemProfileValidationException(
+                "ITEM_IMPORT_DUPLICATE_CODE",
+                "Every import row requires a unique stock code.")));
+        }
+
+        var identifiers = request.Items
+            .SelectMany(value => new[] { value.Barcode, value.AlternateBarcode, value.QRCode })
+            .Select(value => _identifierService?.Normalize(value) ?? NormalizeIdentifier(value))
+            .Where(value => value is not null)
+            .Cast<string>()
+            .ToArray();
+        if (identifiers.GroupBy(value => value, StringComparer.Ordinal).Any(group => group.Count() > 1))
+        {
+            return UnprocessableEntity(ProfileProblem(new InventoryItemProfileValidationException(
+                "ITEM_IMPORT_DUPLICATE_IDENTIFIER",
+                "An item identifier may occur only once in an import payload.")));
+        }
+
+        var imported = new List<InventoryItem>();
+        try
+        {
+            await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, HttpContext.RequestAborted);
+                try
+                {
+                    await _unitOfWork.AcquireTransactionLockAsync($"inventory:item-profile-import:{tenantId:N}", HttpContext.RequestAborted);
+                    foreach (var row in request.Items)
+                    {
+                        var item = _mapper.Map<InventoryItem>(row);
+                        item.TenantId = tenantId;
+                        await _profileService.NormalizeAndValidateAsync(item, null, HttpContext.RequestAborted);
+                        await _inventoryItemRepository.AddAsync(item);
+                        await QueueAuditAsync("InventoryItem.Imported", item, null);
+                        imported.Add(item);
+                    }
+
+                    await _unitOfWork.SaveChangesAsync(HttpContext.RequestAborted);
+                    await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                    _unitOfWork.ClearTrackedChanges();
+                    imported.Clear();
+                    throw;
+                }
+            }, HttpContext.RequestAborted);
+
+            return Ok(new InventoryItemImportResultDto
+            {
+                ImportedCount = imported.Count,
+                Items = imported.Select(item => _mapper.Map<InventoryItemDto>(item)).ToArray()
+            });
+        }
+        catch (InventoryIdentifierConflictException ex)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Duplicate inventory identifier",
+                Detail = ex.Message,
+                Extensions = { ["code"] = "INVENTORY_IDENTIFIER_DUPLICATE", ["identifier"] = ex.Identifier }
+            });
+        }
+        catch (InventoryItemProfileValidationException ex)
+        {
+            return UnprocessableEntity(ProfileProblem(ex));
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogWarning(ex, "Inventory item import conflicted for tenant {TenantId}", tenantId);
+            return Conflict(new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Inventory item import conflict",
+                Detail = "The import conflicts with current item-master data. Reload the register and retry.",
+                Extensions = { ["code"] = "ITEM_IMPORT_CONFLICT" }
+            });
+        }
+    }
+
+    /// <summary>
+    /// Returns the immutable ordinary/staged change history for one tenant item.
+    /// </summary>
+    [HttpGet("{id:guid}/history")]
+    public async Task<ActionResult<IReadOnlyList<InventoryItemChangeAuditDto>>> GetInventoryItemHistory(Guid id)
+    {
+        if (_unitOfWork is null) return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        var tenantId = GetTenantId();
+        var itemExists = await _unitOfWork.Repository<InventoryItem>()
+            .GetQueryable(value => value.TenantId == tenantId && value.Id == id && !value.IsDeleted)
+            .AnyAsync(HttpContext.RequestAborted);
+        if (!itemExists) return NotFound();
+
+        var entries = await _unitOfWork.Repository<AuditLog>()
+            .GetQueryable(value => value.TenantId == tenantId && value.ResourceId == id.ToString() &&
+                (value.Resource == "InventoryItem" || value.Resource == "InventoryItemIdentifier"))
+            .OrderByDescending(value => value.Timestamp)
+            .ThenByDescending(value => value.Id)
+            .Select(value => new InventoryItemChangeAuditDto
+            {
+                Id = value.Id,
+                OccurredAtUtc = value.Timestamp,
+                UserId = value.UserId,
+                Username = value.Username,
+                Action = value.Action,
+                OldValues = value.OldValues,
+                NewValues = value.NewValues
+            })
+            .ToListAsync(HttpContext.RequestAborted);
+        return Ok(entries);
     }
 
     /// <summary>
@@ -1135,6 +1312,64 @@ public class InventoryItemsController : ControllerBase
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized.ToUpperInvariant();
     }
 
+    private static bool MatchesRowVersion(string value, byte[] current)
+    {
+        try
+        {
+            return !string.IsNullOrWhiteSpace(value) &&
+                Convert.FromBase64String(value).AsSpan().SequenceEqual(current);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private ProblemDetails ProfileProblem(InventoryItemProfileValidationException exception) => new()
+    {
+        Status = StatusCodes.Status422UnprocessableEntity,
+        Title = "Inventory item profile is invalid",
+        Detail = exception.Message,
+        Instance = HttpContext.Request.Path,
+        Extensions =
+        {
+            ["code"] = exception.Code,
+            ["correlationId"] = HttpContext.TraceIdentifier
+        }
+    };
+
+    private static object SnapshotProfile(InventoryItem item) => new
+    {
+        item.ItemCode,
+        item.Name,
+        item.Description,
+        item.CategoryId,
+        item.UnitOfMeasure,
+        item.UnitOfMeasureScheduleId,
+        item.IsProjectApplicable,
+        item.IsCostCentreApplicable,
+        item.ValuationMethod,
+        item.IsValuationLocked,
+        item.StandardCost,
+        item.MinimumLevel,
+        item.MaximumLevel,
+        item.ReorderLevel,
+        item.ReorderQuantity,
+        item.SafetyStock,
+        item.LeadTimeDays,
+        item.SafetyLeadTimeDays,
+        item.IsSerialTracked,
+        item.IsLotTracked,
+        item.IsBatchTracked,
+        item.IsManufactureDateTracked,
+        item.IsExpirationTracked,
+        item.ShelfLifeDays,
+        item.Status,
+        item.Barcode,
+        item.AlternateBarcode,
+        item.QRCode
+    };
+
     private async Task<bool> QueueAuditAsync(string action, InventoryItem item, object? previous)
     {
         if (_unitOfWork is null) return false;
@@ -1144,10 +1379,10 @@ public class InventoryItemsController : ControllerBase
             UserId = _currentUserProvider.UserId,
             Username = string.IsNullOrWhiteSpace(_currentUserProvider.Username) ? "Unknown" : _currentUserProvider.Username,
             Action = action,
-            Resource = "InventoryItemIdentifier",
+            Resource = "InventoryItem",
             ResourceId = item.Id.ToString(),
             OldValues = previous is null ? null : JsonSerializer.Serialize(previous),
-            NewValues = JsonSerializer.Serialize(new { item.Barcode, item.AlternateBarcode, item.QRCode }),
+            NewValues = JsonSerializer.Serialize(SnapshotProfile(item)),
             IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
             UserAgent = Request.Headers.UserAgent.ToString(),
             Timestamp = DateTime.UtcNow
@@ -1163,7 +1398,7 @@ public class InventoryItemsController : ControllerBase
             "InventoryItem",
             item.Id.ToString(),
             previous,
-            new { item.Barcode, item.AlternateBarcode, item.QRCode })
+            SnapshotProfile(item))
         ?? Task.CompletedTask;
 }
 

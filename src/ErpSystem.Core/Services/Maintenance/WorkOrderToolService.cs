@@ -1,3 +1,5 @@
+using System.Data;
+using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Maintenance;
@@ -20,6 +22,7 @@ public class WorkOrderToolService : IWorkOrderToolService
     private readonly ILogger<WorkOrderToolService> _logger;
     private readonly ICurrentUserService _currentUserService;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IInventoryNegativeStockControlService _negativeStockControls;
 
     public WorkOrderToolService(
         IWorkOrderToolRepository workOrderToolRepository,
@@ -30,7 +33,8 @@ public class WorkOrderToolService : IWorkOrderToolService
         IWarehouseQuantityRepository warehouseQuantityRepository,
         ILogger<WorkOrderToolService> logger,
         ICurrentUserService currentUserService,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IInventoryNegativeStockControlService negativeStockControls)
     {
         _workOrderToolRepository = workOrderToolRepository;
         _toolRepository = toolRepository;
@@ -41,6 +45,7 @@ public class WorkOrderToolService : IWorkOrderToolService
         _logger = logger;
         _currentUserService = currentUserService;
         _unitOfWork = unitOfWork;
+        _negativeStockControls = negativeStockControls;
     }
 
     public async Task<WorkOrderToolDto> AllocateToolAsync(AllocateWorkOrderToolDto allocateDto)
@@ -160,7 +165,7 @@ public class WorkOrderToolService : IWorkOrderToolService
         // Use execution strategy to handle retries with transaction
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
-            await _unitOfWork.BeginTransactionAsync();
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
             try
             {
                 _logger.LogInformation("Removing tool {ToolId} allocation from work order {WorkOrderId}",
@@ -533,7 +538,22 @@ public class WorkOrderToolService : IWorkOrderToolService
                         continue;
                     }
 
-                    // Check warehouse quantity availability (quantity of 1 for tools)
+                    var workOrderToolId = Guid.NewGuid();
+                    var decreaseAuthorization = await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
+                    {
+                        InventoryItemId = allocateDto.ToolId,
+                        WarehouseId = allocateDto.WarehouseId,
+                        Quantity = 1,
+                        ReferenceType = "MaintenanceWorkOrderToolReservation",
+                        ReferenceNumber = $"WO-{allocateDto.WorkOrderId:N}",
+                        ReferenceId = allocateDto.WorkOrderId,
+                        ReferenceLineId = workOrderToolId,
+                        NegativeStockOverrideId = allocateDto.NegativeStockOverrideId,
+                        DecreaseCurrentStock = false,
+                        CheckInventoryItemBalance = false,
+                        CorrelationId = $"work-order:{allocateDto.WorkOrderId:N}:tool:{workOrderToolId:N}:reserve"
+                    });
+                    // Reload after the shared tenant/item lock.
                     var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
                         allocateDto.WarehouseId, allocateDto.ToolId);
 
@@ -544,7 +564,7 @@ public class WorkOrderToolService : IWorkOrderToolService
                         continue;
                     }
 
-                    if (warehouseQuantity.AvailableStock < 1)
+                    if (warehouseQuantity.AvailableStock < 1 && !decreaseAuthorization.EmergencyOverrideApplied)
                     {
                         _logger.LogWarning(
                             "Tool {ItemCode} not available in warehouse. Available: {Available}",
@@ -576,7 +596,7 @@ public class WorkOrderToolService : IWorkOrderToolService
 
                     var workOrderTool = new WorkOrderTool
                     {
-                        Id = Guid.NewGuid(),
+                        Id = workOrderToolId,
                         WorkOrderId = allocateDto.WorkOrderId,
                         ToolId = allocateDto.ToolId,
                         IsRequired = allocateDto.IsRequired,
@@ -598,6 +618,12 @@ public class WorkOrderToolService : IWorkOrderToolService
                     await allocationRepo.AddAsync(allocation);
                     await _workOrderToolRepository.AddAsync(workOrderTool);
                     await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
+
+                    if (decreaseAuthorization.EmergencyOverrideApplied)
+                    {
+                        await _unitOfWork.SaveChangesAsync();
+                        await _negativeStockControls.ClearMutationContextAsync();
+                    }
 
                     allocatedTools.Add(await MapToDto(workOrderTool));
 

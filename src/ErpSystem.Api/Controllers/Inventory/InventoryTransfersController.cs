@@ -1,6 +1,8 @@
 using System.Security.Claims;
+using System.ComponentModel.DataAnnotations;
 using ErpSystem.Api.Services;
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -16,28 +18,22 @@ namespace ErpSystem.Api.Controllers.Inventory;
 /// </summary>
 [ApiController]
 [Route("api/inventory/transfers")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class InventoryTransfersController : ControllerBase
 {
     private readonly IInventoryTransferService _transferService;
     private readonly TransferDocumentService _documentService;
-    private readonly IAuditLogService _auditLogService;
-    private readonly ICurrentUserService _currentUserService;
     private readonly IWorkflowService _workflowService;
     private readonly ILogger<InventoryTransfersController> _logger;
 
     public InventoryTransfersController(
         IInventoryTransferService transferService,
         TransferDocumentService documentService,
-        IAuditLogService auditLogService,
-        ICurrentUserService currentUserService,
         IWorkflowService workflowService,
         ILogger<InventoryTransfersController> logger)
     {
         _transferService = transferService;
         _documentService = documentService;
-        _auditLogService = auditLogService;
-        _currentUserService = currentUserService;
         _workflowService = workflowService;
         _logger = logger;
     }
@@ -80,7 +76,7 @@ public class InventoryTransfersController : ControllerBase
 
             return Ok(transfers);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving inventory transfers");
             return StatusCode(500, "An error occurred while retrieving inventory transfers");
@@ -114,7 +110,7 @@ public class InventoryTransfersController : ControllerBase
 
             return Ok(transfer);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving inventory transfer {Id}", id);
             return StatusCode(500, "An error occurred while retrieving the inventory transfer");
@@ -135,7 +131,7 @@ public class InventoryTransfersController : ControllerBase
 
             return Ok(transfer);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving inventory transfer {TransferNumber}", transferNumber);
             return StatusCode(500, "An error occurred while retrieving the inventory transfer");
@@ -155,7 +151,7 @@ public class InventoryTransfersController : ControllerBase
             var transfers = await _transferService.GetByWarehouseAsync(warehouseId, isSource);
             return Ok(transfers);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving transfers for warehouse {WarehouseId}", warehouseId);
             return StatusCode(500, "An error occurred while retrieving inventory transfers");
@@ -173,7 +169,7 @@ public class InventoryTransfersController : ControllerBase
             var transfers = await _transferService.GetInTransitAsync();
             return Ok(transfers);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving in-transit transfers");
             return StatusCode(500, "An error occurred while retrieving in-transit transfers");
@@ -191,7 +187,7 @@ public class InventoryTransfersController : ControllerBase
             var transfers = await _transferService.GetPendingApprovalAsync();
             return Ok(transfers);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving pending approval transfers");
             return StatusCode(500, "An error occurred while retrieving pending approval transfers");
@@ -214,7 +210,7 @@ public class InventoryTransfersController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error creating inventory transfer");
             return StatusCode(500, "An error occurred while creating the inventory transfer");
@@ -241,7 +237,7 @@ public class InventoryTransfersController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error updating inventory transfer {Id}", id);
             return StatusCode(500, "An error occurred while updating the inventory transfer");
@@ -271,7 +267,7 @@ public class InventoryTransfersController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error submitting transfer {Id} for approval", id);
             return StatusCode(500, "An error occurred while submitting the transfer for approval");
@@ -305,7 +301,7 @@ public class InventoryTransfersController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error approving transfer {Id}", id);
             return StatusCode(500, "An error occurred while approving the transfer");
@@ -344,7 +340,7 @@ public class InventoryTransfersController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error rejecting transfer {Id}", id);
             return StatusCode(500, "An error occurred while rejecting the transfer");
@@ -355,13 +351,17 @@ public class InventoryTransfersController : ControllerBase
     /// Ships an inventory transfer
     /// </summary>
     [HttpPost("{id}/ship")]
-    public async Task<ActionResult> Ship(Guid id, [FromBody] ShipTransferDto? dto = null)
+    public async Task<ActionResult> Ship(Guid id, [FromBody] ShipTransferDto dto)
     {
         try
         {
             var userId = GetCurrentUserId();
-            var shippedItems = dto?.Items?.ToDictionary(i => i.ItemId, i => i.ShippedQuantity);
-            var result = await _transferService.ShipAsync(id, userId, dto?.TrackingNumber, shippedItems);
+            var shippedItems = dto.Items?.ToDictionary(i => i.ItemId, i => i.ShippedQuantity);
+            var control = dto.ToControl();
+            control.NegativeStockOverrideIds = dto.Items?
+                .Where(item => item.NegativeStockOverrideId.HasValue)
+                .ToDictionary(item => item.ItemId, item => item.NegativeStockOverrideId!.Value) ?? new();
+            var result = await _transferService.ShipAsync(id, userId, dto.TrackingNumber, shippedItems, control);
             if (!result)
                 return BadRequest("Failed to ship transfer");
 
@@ -371,11 +371,23 @@ public class InventoryTransfersController : ControllerBase
         {
             return NotFound(ex.Message);
         }
+        catch (InventoryTrackingAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRACKING_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryTrackingControlException ex)
+        {
+            return UnprocessableEntity(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRANSFER_SOD", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error shipping transfer {Id}", id);
             return StatusCode(500, "An error occurred while shipping the transfer");
@@ -401,11 +413,23 @@ public class InventoryTransfersController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (InventoryTrackingAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRACKING_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryTrackingControlException ex)
+        {
+            return UnprocessableEntity(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRANSFER_SOD", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error shipping transfer {Id} with costs", id);
             return StatusCode(500, "An error occurred while shipping the transfer with costs");
@@ -432,11 +456,15 @@ public class InventoryTransfersController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRANSFER_SOD", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error saving shipping costs for transfer {Id}", id);
             return StatusCode(500, "An error occurred while saving shipping costs");
@@ -447,12 +475,12 @@ public class InventoryTransfersController : ControllerBase
     /// Receives an inventory transfer
     /// </summary>
     [HttpPost("{id}/receive")]
-    public async Task<ActionResult> Receive(Guid id, [FromBody] ReceiveTransferDto? dto = null)
+    public async Task<ActionResult> Receive(Guid id, [FromBody] ReceiveTransferDto dto)
     {
         try
         {
             var userId = GetCurrentUserId();
-            var result = await _transferService.ReceiveAsync(id, userId, dto?.ReceivedItems);
+            var result = await _transferService.ReceiveAsync(id, userId, dto.ReceivedItems, dto.ToControl());
             if (!result)
                 return BadRequest("Failed to receive transfer");
 
@@ -462,11 +490,23 @@ public class InventoryTransfersController : ControllerBase
         {
             return NotFound(ex.Message);
         }
+        catch (InventoryTrackingAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRACKING_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryTrackingControlException ex)
+        {
+            return UnprocessableEntity(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRANSFER_SOD", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error receiving transfer {Id}", id);
             return StatusCode(500, "An error occurred while receiving the transfer");
@@ -482,7 +522,7 @@ public class InventoryTransfersController : ControllerBase
         try
         {
             var userId = GetCurrentUserId();
-            var result = await _transferService.CancelAsync(id, dto.Reason, userId);
+            var result = await _transferService.CancelAsync(id, dto.Reason, userId, dto.ToControl());
             if (!result)
                 return BadRequest("Failed to cancel transfer");
 
@@ -492,11 +532,15 @@ public class InventoryTransfersController : ControllerBase
         {
             return NotFound(ex.Message);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRANSFER_SOD", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error cancelling transfer {Id}", id);
             return StatusCode(500, "An error occurred while cancelling the transfer");
@@ -512,49 +556,10 @@ public class InventoryTransfersController : ControllerBase
     {
         try
         {
-            // Get transfer details before reversal for audit logging
-            var transferBefore = await _transferService.GetByIdAsync(id);
-            if (transferBefore == null)
-                return NotFound($"Inventory transfer with ID {id} not found");
-
             var userId = GetCurrentUserId();
-            var result = await _transferService.ReverseShipmentAsync(id, dto.Reason, userId);
+            var result = await _transferService.ReverseShipmentAsync(id, dto.Reason, userId, dto.ToControl());
             if (!result)
                 return BadRequest("Failed to reverse shipment");
-
-            // Log the audit event
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var usernameClaim = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst(ClaimTypes.Email)?.Value;
-            var tenantId = _currentUserService.TenantId;
-
-            if (Guid.TryParse(userIdClaim, out var auditUserId) && !string.IsNullOrEmpty(usernameClaim) && tenantId.HasValue)
-            {
-                var auditLog = new Core.Entities.AuditLog
-                {
-                    UserId = auditUserId,
-                    Username = usernameClaim,
-                    Action = "REVERSE_SHIPMENT",
-                    Resource = "InventoryTransfer",
-                    ResourceId = id.ToString(),
-                    OldValues = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        TransferNumber = transferBefore.TransferNumber,
-                        Status = transferBefore.Status,
-                        TrackingNumber = transferBefore.TrackingNumber
-                    }),
-                    NewValues = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        Status = "Cancelled",
-                        Reason = dto.Reason,
-                        ReversedAt = DateTime.UtcNow
-                    }),
-                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
-                    UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
-                    TenantId = tenantId.Value
-                };
-
-                await _auditLogService.CreateAuditLogAsync(auditLog);
-            }
 
             return Ok(new { message = "Shipment reversed and transfer cancelled successfully." });
         }
@@ -562,15 +567,53 @@ public class InventoryTransfersController : ControllerBase
         {
             return NotFound(ex.Message);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRANSFER_SOD", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error reversing shipment for transfer {Id}", id);
             return StatusCode(500, "An error occurred while reversing the shipment");
         }
+    }
+
+    [HttpGet("discrepancy-reasons")]
+    public ActionResult<IReadOnlyDictionary<string, string>> GetDiscrepancyReasons() =>
+        Ok(InventoryTransferDiscrepancyReasonCodes.All);
+
+    [HttpGet("discrepancy-resolutions")]
+    public ActionResult<IReadOnlyDictionary<string, string>> GetDiscrepancyResolutions() =>
+        Ok(InventoryTransferDiscrepancyResolutionCodes.All);
+
+    [HttpPost("{id}/resolve-discrepancies")]
+    public async Task<ActionResult> ResolveDiscrepancies(Guid id, [FromBody] ResolveInventoryTransferDiscrepancyRequest request)
+    {
+        try
+        {
+            await _transferService.ResolveDiscrepanciesAsync(id, GetCurrentUserId(), request);
+            return Ok(new { message = "Transfer discrepancies resolved successfully" });
+        }
+        catch (ArgumentException ex) { return NotFound(new { code = "INV_TRANSFER_DISCREPANCY_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRANSFER_SOD", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InvalidOperationException ex) { return Conflict(new { code = "INV_TRANSFER_DISCREPANCY_CONFLICT", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+    }
+
+    [HttpPost("{id}/close")]
+    public async Task<ActionResult> Close(Guid id, [FromBody] CloseInventoryTransferRequest request)
+    {
+        try
+        {
+            await _transferService.CloseAsync(id, GetCurrentUserId(), request);
+            return Ok(new { message = "Transfer closed successfully" });
+        }
+        catch (ArgumentException ex) { return NotFound(new { code = "INV_TRANSFER_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_TRANSFER_SOD", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InvalidOperationException ex) { return Conflict(new { code = "INV_TRANSFER_CLOSE_CONFLICT", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
     }
 
     /// <summary>
@@ -588,7 +631,7 @@ public class InventoryTransfersController : ControllerBase
         {
             return NotFound(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error generating shipment note for transfer {Id}", id);
             return StatusCode(500, "An error occurred while generating the shipment note");
@@ -610,7 +653,7 @@ public class InventoryTransfersController : ControllerBase
         {
             return NotFound(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error generating GRN for transfer {Id}", id);
             return StatusCode(500, "An error occurred while generating the GRN");
@@ -637,7 +680,7 @@ public class InventoryTransfersController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error adding item to transfer {Id}", id);
             return StatusCode(500, "An error occurred while adding the item");
@@ -664,7 +707,7 @@ public class InventoryTransfersController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error updating item on transfer {Id}", id);
             return StatusCode(500, "An error occurred while updating the item");
@@ -694,7 +737,7 @@ public class InventoryTransfersController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error removing item from transfer {Id}", id);
             return StatusCode(500, "An error occurred while removing the item");
@@ -721,9 +764,26 @@ public class ApproveTransferDto
 /// <summary>
 /// DTO for shipping a transfer
 /// </summary>
-public class ShipTransferDto
+public abstract class TransferMutationDto
+{
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+    [MaxLength(100)] public string? CorrelationId { get; set; }
+    [MaxLength(1000)] public string? Comment { get; set; }
+
+    public InventoryTransferMutationContext ToControl() => new()
+    {
+        RowVersion = RowVersion,
+        IdempotencyKey = IdempotencyKey,
+        CorrelationId = CorrelationId,
+        Comment = Comment
+    };
+}
+
+public class ShipTransferDto : TransferMutationDto
 {
     public string? TrackingNumber { get; set; }
+    [Required, MinLength(1)]
     public List<ShipTransferItemDto>? Items { get; set; }
 }
 
@@ -732,30 +792,36 @@ public class ShipTransferDto
 /// </summary>
 public class ShipTransferItemDto
 {
+    [Required]
     public Guid ItemId { get; set; }
+    [Range(0.0001, double.MaxValue)]
     public decimal ShippedQuantity { get; set; }
+    public Guid? NegativeStockOverrideId { get; set; }
 }
 
 /// <summary>
 /// DTO for receiving a transfer
 /// </summary>
-public class ReceiveTransferDto
+public class ReceiveTransferDto : TransferMutationDto
 {
+    [Required, MinLength(1)]
     public List<InventoryTransferItemDto>? ReceivedItems { get; set; }
 }
 
 /// <summary>
 /// DTO for cancelling a transfer
 /// </summary>
-public class CancelTransferDto
+public class CancelTransferDto : TransferMutationDto
 {
+    [Required, MaxLength(1000)]
     public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>
 /// DTO for reversing a shipment
 /// </summary>
-public class ReverseShipmentDto
+public class ReverseShipmentDto : TransferMutationDto
 {
+    [Required, MaxLength(1000)]
     public string Reason { get; set; } = string.Empty;
 }
