@@ -24,7 +24,7 @@ class FakeTransaction {
   objectStore() {
     return {
       put: (value: unknown) => {
-        const key = (value as { idempotencyKey: string }).idempotencyKey;
+        const key = (value as { queueKey: string }).queueKey;
         this.values.set(key, structuredClone(value));
         queueMicrotask(() => this.oncomplete?.());
       },
@@ -40,6 +40,18 @@ class FakeTransaction {
         });
         return request;
       },
+      index: () => ({
+        getAll: (scopeKey: string) => {
+          const request = new FakeRequest<unknown[]>();
+          queueMicrotask(() => {
+            request.result = [...this.values.values()]
+              .filter(value => (value as { scopeKey: string }).scopeKey === scopeKey)
+              .map(value => structuredClone(value));
+            request.onsuccess?.();
+          });
+          return request;
+        },
+      }),
     };
   }
 }
@@ -49,7 +61,11 @@ class FakeDatabase {
   private readonly values = new Map<string, unknown>();
 
   objectStoreNames = { contains: () => this.created };
-  createObjectStore() { this.created = true; }
+  createObjectStore() {
+    this.created = true;
+    return { createIndex: () => undefined };
+  }
+  deleteObjectStore() { this.created = false; this.values.clear(); }
   transaction() { return new FakeTransaction(this.values); }
   close() {}
 }
@@ -78,6 +94,7 @@ const requiredOperations = [
   InventoryScanOperation.TransferShipment,
   InventoryScanOperation.TransferReceipt,
 ];
+const scope = { tenantId: 'tenant-a', actorUserId: 'stores-user-a' };
 
 const request = (operation: InventoryScanOperation, sequence: number): SynchronizeInventoryScanBatch => ({
   deviceId: 'scanner-e2e024',
@@ -109,29 +126,29 @@ describe('inventory scan offline queue', () => {
   it('flushes all five required operations in durable capture order', async () => {
     for (const [index, operation] of requiredOperations.entries()) {
       vi.setSystemTime(new Date(`2026-08-02T12:00:0${index}.000Z`));
-      await queueInventoryScanBatch(request(operation, index));
+      await queueInventoryScanBatch(scope, request(operation, index));
     }
     const synchronize = vi.fn().mockResolvedValue({ status: 'Applied' });
 
-    const result = await flushInventoryScanQueue(synchronize);
+    const result = await flushInventoryScanQueue(scope, synchronize);
 
     expect(synchronize.mock.calls.map(([value]) => value.operation)).toEqual(requiredOperations);
     expect(result).toEqual({ completed: requiredOperations.map((_, index) => `e2e024-${index}`), failed: [] });
-    expect(await listQueuedInventoryScanBatches()).toEqual([]);
+    expect(await listQueuedInventoryScanBatches(scope)).toEqual([]);
   });
 
   it('stops at the first failure and preserves dependent work for an ordered retry', async () => {
     for (const [index, operation] of requiredOperations.slice(0, 3).entries()) {
       vi.setSystemTime(new Date(`2026-08-02T12:00:0${index}.000Z`));
-      await queueInventoryScanBatch(request(operation, index));
+      await queueInventoryScanBatch(scope, request(operation, index));
     }
-    const before = await listQueuedInventoryScanBatches();
+    const before = await listQueuedInventoryScanBatches(scope);
     const synchronize = vi.fn()
       .mockResolvedValueOnce({ status: 'Applied' })
       .mockRejectedValueOnce(new Error('temporary network failure'));
 
-    const result = await flushInventoryScanQueue(synchronize);
-    const remaining = await listQueuedInventoryScanBatches();
+    const result = await flushInventoryScanQueue(scope, synchronize);
+    const remaining = await listQueuedInventoryScanBatches(scope);
 
     expect(synchronize).toHaveBeenCalledTimes(2);
     expect(result).toEqual({
@@ -142,5 +159,22 @@ describe('inventory scan offline queue', () => {
     expect(remaining[0]).toMatchObject({ attempts: 2, lastError: 'temporary network failure' });
     expect(remaining[0].queuedAtUtc).toBe(before[1].queuedAtUtc);
     expect(remaining[1]).toMatchObject({ attempts: 1 });
+  });
+
+  it('partitions queued stock work by tenant and authenticated actor', async () => {
+    const otherActor = { tenantId: scope.tenantId, actorUserId: 'stores-user-b' };
+    const otherTenant = { tenantId: 'tenant-b', actorUserId: scope.actorUserId };
+    await queueInventoryScanBatch(scope, request(InventoryScanOperation.GoodsReceipt, 1));
+    await queueInventoryScanBatch(otherActor, request(InventoryScanOperation.RequisitionIssue, 2));
+    await queueInventoryScanBatch(otherTenant, request(InventoryScanOperation.TransferShipment, 3));
+    const synchronize = vi.fn().mockResolvedValue({ status: 'Applied' });
+
+    await flushInventoryScanQueue(otherActor, synchronize);
+
+    expect(synchronize).toHaveBeenCalledOnce();
+    expect(synchronize.mock.calls[0][0].idempotencyKey).toBe('e2e024-2');
+    expect((await listQueuedInventoryScanBatches(scope)).map(value => value.idempotencyKey)).toEqual(['e2e024-1']);
+    expect(await listQueuedInventoryScanBatches(otherActor)).toEqual([]);
+    expect((await listQueuedInventoryScanBatches(otherTenant)).map(value => value.idempotencyKey)).toEqual(['e2e024-3']);
   });
 });

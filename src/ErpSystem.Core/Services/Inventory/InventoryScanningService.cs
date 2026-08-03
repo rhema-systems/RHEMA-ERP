@@ -379,8 +379,10 @@ public sealed class InventoryScanningService : IInventoryScanningService
             var manufactureDates = group.Select(line => Utc(line.Input.ManufactureDate)).Where(value => value.HasValue).Distinct().ToList();
             var expiryDates = group.Select(line => Utc(line.Input.ExpiryDate)).Where(value => value.HasValue).Distinct().ToList();
             var exceptions = group.Select(line => line.Input.InventoryTrackingExceptionId).Where(value => value.HasValue).Distinct().ToList();
+            var rowVersions = group.Select(line => Clean(line.Input.DocumentLineRowVersion))
+                .Where(value => value is not null).Distinct(StringComparer.Ordinal).ToList();
             if (locations.Count > 1 || lots.Count > 1 || batches.Count > 1 || serials.Count > 1 ||
-                manufactureDates.Count > 1 || expiryDates.Count > 1 || exceptions.Count > 1)
+                manufactureDates.Count > 1 || expiryDates.Count > 1 || exceptions.Count > 1 || rowVersions.Count > 1)
                 throw new InventoryScanningException("INV_SCAN_LINE_METADATA_AMBIGUOUS", "Scans for one transaction line must use one location, lot, batch, serial, date, and exception scope.");
             var first = group.First();
             transactionLines.Add(new InventoryTransactionScanLineDto
@@ -389,7 +391,8 @@ public sealed class InventoryScanningService : IInventoryScanningService
                 BaseQuantity = group.Sum(line => line.BaseQuantity), LocationId = locations.SingleOrDefault(),
                 LotNumber = lots.SingleOrDefault(), BatchNumber = batches.SingleOrDefault(), SerialNumber = serials.SingleOrDefault(),
                 ManufactureDate = manufactureDates.SingleOrDefault(), ExpiryDate = expiryDates.SingleOrDefault(),
-                InventoryTrackingExceptionId = exceptions.SingleOrDefault()
+                InventoryTrackingExceptionId = exceptions.SingleOrDefault(),
+                DocumentLineRowVersion = rowVersions.SingleOrDefault()
             });
         }
 
@@ -452,12 +455,22 @@ public sealed class InventoryScanningService : IInventoryScanningService
                 }).ToList());
                 break;
             case InventoryScanOperation.PhysicalCount:
-                await _counts.RecordCountItemsAsync(transactionLines.Select(item => new RecordCountItemDto
+                foreach (var item in transactionLines.OrderBy(value => value.DocumentLineId))
                 {
-                    PhysicalCountItemId = item.DocumentLineId, CountedQuantity = item.BaseQuantity,
-                    LotNumber = item.LotNumber, SerialNumber = item.SerialNumber,
-                    Notes = "Recorded from authenticated mobile scan synchronization."
-                }), UserId);
+                    var rowVersion = Clean(item.DocumentLineRowVersion)
+                        ?? throw new InventoryScanningException("INV_SCAN_COUNT_ROW_VERSION_REQUIRED",
+                            "Each physical-count scan must retain the count-line row version captured with its document context.");
+                    await _counts.RecordCountItemAsync(new RecordCountItemDto
+                    {
+                        PhysicalCountItemId = item.DocumentLineId,
+                        CountedQuantity = item.BaseQuantity,
+                        LotNumber = item.LotNumber,
+                        SerialNumber = item.SerialNumber,
+                        Notes = "Recorded from authenticated mobile scan synchronization.",
+                        RowVersion = rowVersion,
+                        IdempotencyKey = $"{transactionIdempotencyKey}:{item.DocumentLineId:N}"
+                    }, UserId);
+                }
                 break;
             default:
                 throw new InventoryScanningException("INV_SCAN_OPERATION_UNSUPPORTED", "The scan operation is not supported.");
@@ -671,7 +684,8 @@ public sealed class InventoryScanningService : IInventoryScanningService
                 EnsureDocumentState(document is null || document.Status == "InProgress", operation, document?.Status);
                 result = document is null ? null : Context(operation, document.Id, document.CountNumber, document.Status, document.WarehouseId,
                     document.Warehouse.Name, document.CountDate, document.Items.Select(item => Line(item.Id, item.InventoryItemId, item.ItemCode, item.ItemName,
-                        item.SystemQuantity, item.IsCounted ? item.CountedQuantity : 0, item.LocationId ?? document.LocationId, item.Location?.Name, item.LotNumber, item.SerialNumber)));
+                        item.SystemQuantity, item.IsCounted ? item.CountedQuantity : 0, item.LocationId ?? document.LocationId, item.Location?.Name,
+                        item.LotNumber, item.SerialNumber, rowVersion: Convert.ToBase64String(item.RowVersion))));
                 break;
             }
             default:
@@ -821,12 +835,12 @@ public sealed class InventoryScanningService : IInventoryScanningService
 
     private static InventoryScanDocumentLineDto Line(Guid id, Guid inventoryItemId, string code, string name, decimal expected, decimal processed,
         Guid? locationId, string? locationName, string? lot, string? serial, string? batch = null,
-        DateTime? manufactureDate = null, DateTime? expiryDate = null) => new()
+        DateTime? manufactureDate = null, DateTime? expiryDate = null, string? rowVersion = null) => new()
     {
         DocumentLineId = id, InventoryItemId = inventoryItemId, ItemCode = code, ItemName = name,
         ExpectedQuantity = expected, ProcessedQuantity = processed, LocationId = locationId, LocationName = locationName,
         LotNumber = lot, BatchNumber = batch, SerialNumber = serial,
-        ManufactureDate = manufactureDate, ExpiryDate = expiryDate
+        ManufactureDate = manufactureDate, ExpiryDate = expiryDate, RowVersion = rowVersion
     };
 
     private static void AddCandidate(List<InventoryLabelCandidateDto> target, InventoryItem item, string? identifier, string kind)
@@ -853,6 +867,7 @@ public sealed class InventoryScanningService : IInventoryScanningService
             Lines = request.Lines.OrderBy(item => item.ClientLineId).Select(item => new
             {
                 item.ClientLineId, Identifier = item.RawIdentifier.Trim().ToUpperInvariant(), item.DocumentLineId, item.Quantity,
+                DocumentLineRowVersion = Clean(item.DocumentLineRowVersion),
                 item.LocationId, LocationIdentifier = Clean(item.LocationIdentifier), Lot = Clean(item.LotNumber),
                 Batch = Clean(item.BatchNumber), Serial = Clean(item.SerialNumber), Manufacture = Utc(item.ManufactureDate),
                 Expiry = Utc(item.ExpiryDate), item.InventoryTrackingExceptionId, item.ScannedAtUtc

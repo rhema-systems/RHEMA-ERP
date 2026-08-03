@@ -100,6 +100,9 @@ public sealed class InventoryNegativeStockControlTests : IDisposable
         guard.Should().Contain("FileVirusScanStatus.Clean");
         guard.Should().Contain("WorkflowInstanceStatus.Completed");
         guard.Should().Contain("INV_NEGATIVE_STOCK_PROHIBITED");
+        guard.Should().Contain("PermissionCode = permission");
+        guard.Should().Contain("\"procurement.inventory.read\", \"Inventory.EmergencyOverride\"");
+        guard.Should().Contain("CheckCapabilityAsync");
     }
 
     [Fact]

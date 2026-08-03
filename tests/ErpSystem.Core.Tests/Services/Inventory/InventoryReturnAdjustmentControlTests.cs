@@ -3,6 +3,7 @@ using System.Reflection;
 using ErpSystem.Core.DTOs.Documents;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Services.Inventory;
 using ErpSystem.Data;
 using ErpSystem.Data.Migrations;
 using FluentAssertions;
@@ -107,6 +108,75 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
     public void Store_return_voucher_uses_shared_document_output_type()
     {
         DocumentTypes.InventoryStoreReturnVoucher.Should().Be("Inventory.StoreReturnVoucher");
+    }
+
+    [Fact]
+    public void Adjustment_creation_replay_hash_includes_evidence_and_normalized_line_payload()
+    {
+        var method = typeof(StockAdjustmentService).GetMethod(
+            "CreateAdjustmentPayloadHash", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var itemId = Guid.NewGuid();
+        var locationId = Guid.NewGuid();
+        var request = new CreateStockAdjustmentDto
+        {
+            WarehouseId = Guid.NewGuid(),
+            ReasonCode = StockAdjustmentReasonCodes.Damage,
+            Description = "Damaged stock",
+            Reference = "INSPECTION-1",
+            Items =
+            {
+                new CreateStockAdjustmentItemDto
+                {
+                    InventoryItemId = itemId,
+                    LocationId = locationId,
+                    AdjustmentQuantity = -2,
+                    LotNumber = " LOT-01 "
+                }
+            },
+            Evidence =
+            {
+                new InventoryControlEvidenceRequest
+                {
+                    CentralDocumentVersionId = Guid.NewGuid(),
+                    EvidenceReference = " Damage report "
+                }
+            }
+        };
+        var original = (string)method.Invoke(null, new object[]
+        {
+            request, StockAdjustmentReasonCodes.Damage, "Damaged stock", "INSPECTION-1"
+        })!;
+        request.Evidence[0].CentralDocumentVersionId = Guid.NewGuid();
+        var changedEvidence = (string)method.Invoke(null, new object[]
+        {
+            request, StockAdjustmentReasonCodes.Damage, "Damaged stock", "INSPECTION-1"
+        })!;
+
+        original.Should().NotBe(changedEvidence);
+    }
+
+    [Fact]
+    public void Adjustment_draft_accepts_consignment_scope_and_defers_negative_stock_authorization_to_posting()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
+            "StockAdjustmentService.cs"));
+        var buildStart = source.IndexOf("private async Task BuildLinesAsync", StringComparison.Ordinal);
+        var buildEnd = source.IndexOf("private async Task RequireAccessAsync", buildStart, StringComparison.Ordinal);
+        var draftLineBuilder = source[buildStart..buildEnd];
+
+        draftLineBuilder.Should().Contain("location.InventoryWarehouseId != adjustment.WarehouseId");
+        draftLineBuilder.Should().NotContain("AvailableStock < Math.Abs",
+            "negative-stock authority is bound to the saved adjustment and exact posting line");
+        source.Should().Contain("PrepareDecreaseAsync(new InventoryStockDecreaseRequest");
+        source.Should().Contain("NegativeStockOverrideId = negativeStockOverrideIds.GetValueOrDefault(item.Id)");
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "ErpSystem.sln")))
+            directory = directory.Parent;
+        return directory?.FullName ?? throw new InvalidOperationException("Repository root was not found.");
     }
 
     public void Dispose() => _context.Dispose();

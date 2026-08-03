@@ -200,10 +200,16 @@ public class StockAdjustmentService : IStockAdjustmentService
         if (dto.Items.Count == 0 || dto.Items.Any(x => x.AdjustmentQuantity == 0))
             throw new InvalidOperationException("At least one non-zero stock adjustment line is required.");
         var key = Required(dto.IdempotencyKey, "An idempotency key is required.", 100);
+        var reasonCode = ValidateReasonCode(dto.ReasonCode);
+        var description = Required(dto.Description, "A detailed adjustment reason is required.", 1000);
+        var reference = Normalize(dto.Reference, 100) ?? string.Empty;
+        var payloadHash = CreateAdjustmentPayloadHash(dto, reasonCode, description, reference);
         var existing = await Adjustments.FirstOrDefaultAsync(x => x.IdempotencyKey == key);
         if (existing is not null)
+        {
+            EnsureMatchingCreationPayload(existing, payloadHash);
             return await GetByIdAsync(existing.Id) ?? throw new InvalidOperationException("The existing stock adjustment could not be loaded.");
-        var reasonCode = ValidateReasonCode(dto.ReasonCode);
+        }
         var adjustment = new StockAdjustment
         {
             TenantId = _currentUserProvider.TenantId,
@@ -211,8 +217,8 @@ public class StockAdjustmentService : IStockAdjustmentService
             AdjustmentDate = dto.AdjustmentDate ?? DateTime.UtcNow,
             WarehouseId = dto.WarehouseId,
             ReasonCode = reasonCode,
-            Description = Required(dto.Description, "A detailed adjustment reason is required.", 1000),
-            Reference = Normalize(dto.Reference, 100) ?? string.Empty,
+            Description = description,
+            Reference = reference,
             Status = "Draft",
             RequestedById = userId,
             RelatedIssueVoucherId = dto.RelatedIssueVoucherId,
@@ -220,7 +226,7 @@ public class StockAdjustmentService : IStockAdjustmentService
             CorrelationId = Normalize(dto.CorrelationId, 100) ?? $"stock-adjustment:{Guid.NewGuid():N}"
         };
         await BuildLinesAsync(adjustment, dto.Items);
-        adjustment.PayloadHash = AdjustmentPayloadHash(adjustment);
+        adjustment.PayloadHash = payloadHash;
         adjustment.IntegrityHash = AdjustmentIntegrityHash(adjustment);
         await RequireAccessAsync("procurement.inventory.adjust.request", adjustment, adjustment.AdjustmentNumber);
         await AddEvidenceAsync(adjustment, dto.Evidence, EvidenceRequired(reasonCode));
@@ -892,7 +898,7 @@ public class StockAdjustmentService : IStockAdjustmentService
                 throw new InvalidOperationException("Every controlled stock-adjustment line requires an exact warehouse location.");
             var location = await _locationRepository.GetByIdAsync(input.LocationId.Value)
                 ?? throw new ArgumentException("A selected stock-adjustment location was not found.");
-            if (location.WarehouseId != adjustment.WarehouseId || !location.IsActive)
+            if (location.InventoryWarehouseId != adjustment.WarehouseId || !location.IsActive)
                 throw new InvalidOperationException("Every adjustment location must be active and belong to the selected warehouse.");
             var inventoryItem = await _itemRepository.GetByIdAsync(input.InventoryItemId)
                 ?? throw new ArgumentException($"Inventory item {input.InventoryItemId} not found.");
@@ -900,8 +906,6 @@ public class StockAdjustmentService : IStockAdjustmentService
                 throw new ArgumentException($"Inventory item {input.InventoryItemId} not found.");
             var quantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(location.InventoryWarehouseId, input.InventoryItemId);
             var systemQuantity = quantity?.CurrentStock ?? 0m;
-            if (input.AdjustmentQuantity < 0 && (quantity is null || quantity.AvailableStock < Math.Abs(input.AdjustmentQuantity)))
-                throw new InvalidOperationException($"Available stock is insufficient for {inventoryItem.ItemCode}.");
             var unitCost = inventoryItem.AverageCost > 0 ? inventoryItem.AverageCost
                 : inventoryItem.StandardCost > 0 ? inventoryItem.StandardCost : inventoryItem.LastPurchaseCost;
             if (unitCost <= 0) throw new InvalidOperationException($"A server-derived inventory cost is required for {inventoryItem.ItemCode}.");
@@ -1003,7 +1007,7 @@ public class StockAdjustmentService : IStockAdjustmentService
     {
         var location = (item.LocationId.HasValue ? await _locationRepository.GetByIdAsync(item.LocationId.Value) : null)
             ?? throw new InvalidOperationException("The exact adjustment location no longer exists.");
-        if (location.WarehouseId != adjustment.WarehouseId || !location.IsActive)
+        if (location.InventoryWarehouseId != adjustment.WarehouseId || !location.IsActive)
             throw new InvalidOperationException("The adjustment location is inactive or outside the selected warehouse.");
         var warehouseId = location.InventoryWarehouseId;
         var warehouse = await _warehouseRepository.GetByIdAsync(warehouseId)
@@ -1196,8 +1200,63 @@ public class StockAdjustmentService : IStockAdjustmentService
     {
         item.WarehouseId, item.ReasonCode, item.Description, item.Reference, item.RelatedIssueVoucherId,
         Lines = item.Items.OrderBy(x => x.InventoryItemId).ThenBy(x => x.LocationId)
-            .Select(x => new { x.InventoryItemId, x.LocationId, x.AdjustmentQuantity, x.UnitCost, x.LotNumber, x.SerialNumber, x.Reason, x.Notes })
+            .Select(x => new { x.InventoryItemId, x.LocationId, x.AdjustmentQuantity, x.UnitCost, x.LotNumber, x.SerialNumber, x.Reason, x.Notes }),
+        Evidence = item.Evidence.OrderBy(x => x.CentralDocumentVersionId)
+            .Select(x => new { x.CentralDocumentVersionId, x.EvidenceReference })
     }));
+
+    private static string CreateAdjustmentPayloadHash(
+        CreateStockAdjustmentDto dto,
+        string reasonCode,
+        string description,
+        string reference) => Hash(JsonSerializer.Serialize(new
+    {
+        dto.WarehouseId,
+        ReasonCode = reasonCode,
+        Description = description,
+        Reference = reference,
+        dto.AdjustmentDate,
+        dto.RelatedIssueVoucherId,
+        Lines = dto.Items
+            .Select(x => new
+            {
+                x.InventoryItemId,
+                x.LocationId,
+                x.AdjustmentQuantity,
+                LotNumber = Normalize(x.LotNumber, 100),
+                SerialNumber = Normalize(x.SerialNumber, 100),
+                Reason = Normalize(x.Reason, 500),
+                Notes = Normalize(x.Notes, 1000)
+            })
+            .OrderBy(x => x.InventoryItemId).ThenBy(x => x.LocationId)
+            .ThenBy(x => x.AdjustmentQuantity).ThenBy(x => x.LotNumber).ThenBy(x => x.SerialNumber)
+            .ThenBy(x => x.Reason).ThenBy(x => x.Notes),
+        Evidence = (dto.Evidence ?? new List<InventoryControlEvidenceRequest>())
+            .Select(x => new
+            {
+                x.CentralDocumentVersionId,
+                EvidenceReference = Normalize(x.EvidenceReference, 500)
+            })
+            .OrderBy(x => x.CentralDocumentVersionId).ThenBy(x => x.EvidenceReference)
+    }));
+
+    private static void EnsureMatchingCreationPayload(StockAdjustment existing, string payloadHash)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(existing.PayloadHash) ||
+                !CryptographicOperations.FixedTimeEquals(
+                    Convert.FromHexString(existing.PayloadHash),
+                    Convert.FromHexString(payloadHash)))
+                throw new StockAdjustmentIdempotencyConflictException(
+                    "This stock-adjustment idempotency key was already used for a different payload.");
+        }
+        catch (FormatException)
+        {
+            throw new StockAdjustmentIdempotencyConflictException(
+                "This stock-adjustment idempotency key is bound to an invalid prior payload and cannot be replayed.");
+        }
+    }
 
     private static string AdjustmentIntegrityHash(StockAdjustment item) => Hash($"{item.Id:N}|{item.TenantId:N}|{item.AdjustmentNumber}|{item.WarehouseId:N}|{item.ReasonCode}|{item.Status}|{item.TotalAdjustmentValue}|{item.RequestedById:N}|{item.ApprovedById:N}|{item.PostedById:N}|{item.ReversedById:N}|{item.PayloadHash}");
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
@@ -1232,6 +1291,8 @@ public class StockAdjustmentService : IStockAdjustmentService
 /// <summary>
 /// Interface for stock adjustment service
 /// </summary>
+public sealed class StockAdjustmentIdempotencyConflictException(string message) : InvalidOperationException(message);
+
 public interface IStockAdjustmentService
 {
     Task<IEnumerable<StockAdjustmentDto>> GetAllAsync(string? status = null, string? reasonCode = null, DateTime? startDate = null, DateTime? endDate = null);

@@ -79,9 +79,20 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             query = query.Where(value => statuses.Contains(value.Status));
         }
         var values = await query.OrderByDescending(value => value.AllocationDate).ThenBy(value => value.Id)
-            .Take(take).AsNoTracking().ToListAsync(cancellationToken);
-        var result = new List<InventoryProjectReservationDto>(values.Count);
-        foreach (var value in values) result.Add(await MapAsync(value, includeNotifications: false, cancellationToken));
+            .AsNoTracking().ToListAsync(cancellationToken);
+        var accessByScope = new Dictionary<(Guid WarehouseId, Guid? LocationId), bool>();
+        var result = new List<InventoryProjectReservationDto>(Math.Min(values.Count, take));
+        foreach (var value in values)
+        {
+            var scope = (value.WarehouseId, value.LocationId);
+            if (!accessByScope.TryGetValue(scope, out var allowed))
+            {
+                allowed = await CanReadAsync(value, cancellationToken);
+                accessByScope[scope] = allowed;
+            }
+            if (allowed) result.Add(await MapAsync(value, includeNotifications: false, cancellationToken));
+            if (result.Count == take) break;
+        }
         return result;
     }
 
@@ -94,6 +105,9 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             item.Id == id && item.TenantId == _currentUser.TenantId, cancellationToken)
             ?? throw new InventoryProjectReservationNotFoundException(
                 "The project reservation was not found in the current tenant.");
+        if (!await CanReadAsync(value, cancellationToken))
+            throw new InventoryProjectReservationAuthorizationException(
+                "You are not assigned to read this project reservation's warehouse and location.");
         return await MapAsync(value, includeNotifications: true, cancellationToken);
     }
 
@@ -677,6 +691,22 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             SourceReference = allocation.ReferenceNumber ?? allocation.Id.ToString("N")
         }, correlation, cancellationToken);
         if (!decision.Allowed) throw new InventoryProjectReservationAuthorizationException(decision.Message);
+    }
+
+    private async Task<bool> CanReadAsync(
+        InventoryAllocation allocation,
+        CancellationToken cancellationToken)
+    {
+        var decision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = "procurement.inventory.read",
+            WarehouseId = allocation.WarehouseId,
+            LocationId = allocation.LocationId,
+            RequireLocationScope = true,
+            SourceType = "InventoryProjectReservation",
+            SourceReference = allocation.ReferenceNumber ?? allocation.Id.ToString("N")
+        }, $"inventory-project-reservation-read:{allocation.Id:N}", cancellationToken);
+        return decision.Allowed;
     }
 
     private async Task AddActionAsync(

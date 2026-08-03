@@ -75,9 +75,19 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
         if (warehouseId.HasValue) query = query.Where(value => value.WarehouseId == warehouseId.Value);
         if (status.HasValue) query = query.Where(value => value.Status == status.Value);
         var values = await query.AsNoTracking().OrderByDescending(value => value.GeneratedAtUtc)
-            .ThenBy(value => value.RecommendationNumber).Take(take).ToListAsync(cancellationToken);
-        var result = new List<InventoryReplenishmentRecommendationDto>(values.Count);
-        foreach (var value in values) result.Add(await MapAsync(value, cancellationToken));
+            .ThenBy(value => value.RecommendationNumber).ToListAsync(cancellationToken);
+        var accessByWarehouse = new Dictionary<Guid, bool>();
+        var result = new List<InventoryReplenishmentRecommendationDto>(Math.Min(values.Count, take));
+        foreach (var value in values)
+        {
+            if (!accessByWarehouse.TryGetValue(value.WarehouseId, out var allowed))
+            {
+                allowed = await CanReadAsync(value, cancellationToken);
+                accessByWarehouse[value.WarehouseId] = allowed;
+            }
+            if (allowed) result.Add(await MapAsync(value, cancellationToken));
+            if (result.Count == take) break;
+        }
         return result;
     }
 
@@ -90,6 +100,9 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
             item.Id == id && item.TenantId == _currentUser.TenantId, cancellationToken)
             ?? throw new InventoryReplenishmentNotFoundException(
                 "The replenishment recommendation was not found in the current tenant.");
+        if (!await CanReadAsync(value, cancellationToken))
+            throw new InventoryReplenishmentAuthorizationException(
+                "You are not assigned to read replenishment recommendations for this warehouse.");
         return await MapAsync(value, cancellationToken);
     }
 
@@ -753,6 +766,21 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
             SourceReference = reference
         }, correlation, cancellationToken);
         if (!result.Allowed) throw new InventoryReplenishmentAuthorizationException(result.Message);
+    }
+
+    private async Task<bool> CanReadAsync(
+        InventoryReplenishmentRecommendation value,
+        CancellationToken cancellationToken)
+    {
+        var result = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = "procurement.inventory.read",
+            WarehouseId = value.WarehouseId,
+            RequireLocationScope = false,
+            SourceType = EntityType,
+            SourceReference = value.RecommendationNumber
+        }, $"inventory-replenishment-read:{value.Id:N}", cancellationToken);
+        return result.Allowed;
     }
 
     private async Task RecordEventAsync(

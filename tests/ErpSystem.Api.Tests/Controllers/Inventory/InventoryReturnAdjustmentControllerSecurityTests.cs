@@ -1,8 +1,14 @@
 using System.Reflection;
+using System.Security.Claims;
 using ErpSystem.Api.Controllers.Inventory;
+using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.Services.Inventory;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using Moq;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Controllers.Inventory;
@@ -49,5 +55,31 @@ public sealed class InventoryReturnAdjustmentControllerSecurityTests
         var method = typeof(InventoryRequisitionsController).GetMethod(nameof(InventoryRequisitionsController.DownloadReturnVoucher))!;
         method.GetCustomAttribute<HttpGetAttribute>()!.Template.Should().Be("return-vouchers/{voucherId:guid}/download");
         method.GetCustomAttribute<AllowAnonymousAttribute>(inherit: true).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Adjustment_creation_reports_changed_idempotency_payload_as_conflict()
+    {
+        var userId = Guid.NewGuid();
+        var service = new Mock<IStockAdjustmentService>();
+        service.Setup(value => value.CreateAsync(It.IsAny<CreateStockAdjustmentDto>(), userId))
+            .ThrowsAsync(new StockAdjustmentIdempotencyConflictException("Idempotency payload changed."));
+        var controller = new StockAdjustmentsController(service.Object,
+            Mock.Of<ILogger<StockAdjustmentsController>>())
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "test"))
+                }
+            }
+        };
+
+        var result = await controller.Create(new CreateStockAdjustmentDto());
+
+        result.Result.Should().BeOfType<ConflictObjectResult>()
+            .Which.Value.Should().Be("Idempotency payload changed.");
     }
 }

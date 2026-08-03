@@ -38,7 +38,7 @@ export type InventoryScanDocumentSummary = {
 export type InventoryScanDocumentLine = {
   documentLineId: string; inventoryItemId: string; itemCode: string; itemName: string; expectedQuantity: number;
   processedQuantity: number; locationId?: string; locationName?: string; lotNumber?: string; batchNumber?: string;
-  serialNumber?: string; manufactureDate?: string; expiryDate?: string;
+  serialNumber?: string; manufactureDate?: string; expiryDate?: string; rowVersion?: string;
 };
 
 export type InventoryScanDocumentContext = InventoryScanDocumentSummary & {
@@ -46,7 +46,7 @@ export type InventoryScanDocumentContext = InventoryScanDocumentSummary & {
 };
 
 export type InventoryScanInput = {
-  clientLineId: string; rawIdentifier: string; documentLineId?: string; quantity: number; locationId?: string;
+  clientLineId: string; rawIdentifier: string; documentLineId?: string; documentLineRowVersion?: string; quantity: number; locationId?: string;
   locationIdentifier?: string; lotNumber?: string; batchNumber?: string; serialNumber?: string;
   manufactureDate?: string; expiryDate?: string; inventoryTrackingExceptionId?: string; scannedAtUtc: string;
 };

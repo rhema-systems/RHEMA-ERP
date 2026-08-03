@@ -105,6 +105,47 @@ public sealed class ProcurementAccessControlServiceTests
     }
 
     [Fact]
+    public async Task RestrictedAssignmentAcceptsAConsignmentBinForItsEffectiveInventoryWarehouse()
+    {
+        await using var fixture = new Fixture();
+        await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        var consignmentLocationId = Guid.NewGuid();
+        fixture.Context.WarehouseLocations.Add(new WarehouseLocation
+        {
+            Id = consignmentLocationId,
+            TenantId = fixture.TenantId,
+            WarehouseId = fixture.WarehouseId,
+            LocationCode = "SUPPLIER-CONSIGNMENT",
+            Name = "Supplier consignment bin",
+            IsActive = true,
+            IsConsignmentBin = true,
+            ConsignmentWarehouseId = fixture.OtherWarehouseId
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        await fixture.Service.SaveAssignmentAsync(null, new SaveProcurementResponsibilityAssignmentRequest
+        {
+            UserId = fixture.UserId,
+            RoleName = "TDC_STORES_OFFICER",
+            WarehouseScopeMode = ProcurementWarehouseScopeMode.Restricted,
+            WarehouseIds = new() { fixture.OtherWarehouseId },
+            LocationScopeMode = ProcurementLocationScopeMode.Restricted,
+            LocationIds = new() { consignmentLocationId },
+            EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
+            Reason = "Consignment stores assignment regression"
+        }, "trace-consignment-assignment");
+
+        var allowed = await fixture.Service.CheckCapabilityAsync(
+            Request(fixture.OtherWarehouseId, consignmentLocationId), "trace-consignment-capability");
+
+        allowed.Allowed.Should().BeTrue();
+        allowed.WarehouseId.Should().Be(fixture.OtherWarehouseId);
+        allowed.LocationId.Should().Be(consignmentLocationId);
+        (await fixture.Context.ProcurementResponsibilityLocations.SingleAsync())
+            .WarehouseId.Should().Be(fixture.OtherWarehouseId);
+    }
+
+    [Fact]
     public async Task CrossStoreTransferAuthorityRequiresBothAssignedWarehousesAndLocations()
     {
         await using var fixture = new Fixture();

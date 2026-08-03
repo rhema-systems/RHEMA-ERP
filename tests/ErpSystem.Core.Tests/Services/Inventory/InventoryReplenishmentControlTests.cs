@@ -137,6 +137,8 @@ public sealed class InventoryReplenishmentControlTests : IDisposable
         service.Should().Contain("IWorkflowIntegrationService");
         service.Should().Contain("INotificationService");
         service.Should().Contain("IProcurementRequisitionLinkageService");
+        service.Should().Contain("PermissionCode = \"procurement.inventory.read\"");
+        service.Should().Contain("CheckCapabilityAsync");
         service.Should().Contain("RequisitionType.StockReplenishment");
         service.Should().Contain("Status = \"Draft\"");
         service.Should().NotContain("Status = \"Approved\"");
@@ -204,6 +206,15 @@ public sealed class InventoryReplenishmentControlTests : IDisposable
 
         var access = new Mock<IProcurementAccessControlService>();
         access.Setup(value => value.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementAccessCapabilityRequest request, string correlation, CancellationToken _) =>
+                new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = true, Code = "ALLOWED", Message = "Allowed", ActorUserId = actorId,
+                    TenantId = tenantId, PermissionCode = request.PermissionCode,
+                    WarehouseId = request.WarehouseId, CorrelationId = correlation
+                });
+        access.Setup(value => value.CheckCapabilityAsync(
                 It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ProcurementAccessCapabilityRequest request, string correlation, CancellationToken _) =>
                 new ProcurementAccessCapabilityDecisionDto

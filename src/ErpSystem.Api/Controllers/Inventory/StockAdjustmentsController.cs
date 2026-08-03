@@ -129,6 +129,10 @@ public class StockAdjustmentsController : ControllerBase
             var adjustment = await _adjustmentService.CreateAsync(dto, userId);
             return CreatedAtAction(nameof(GetById), new { id = adjustment.Id }, adjustment);
         }
+        catch (StockAdjustmentIdempotencyConflictException ex)
+        {
+            return Conflict(ex.Message);
+        }
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);

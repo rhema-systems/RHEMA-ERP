@@ -207,7 +207,7 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
             nameof(IInventoryTransferService.ApplyScanMetadataAsync),
             nameof(IInventoryTransferService.ReceiveAsync));
         _counts.Invocations.Select(item => item.Method.Name).Should().Equal(
-            nameof(IPhysicalCountService.RecordCountItemsAsync));
+            nameof(IPhysicalCountService.RecordCountItemAsync));
 
         var issue = (IssueRequisitionDto)_requisitions.Invocations
             .Single(item => item.Method.Name == nameof(IInventoryRequisitionService.IssueAsync)).Arguments[1];
@@ -218,13 +218,15 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
             LotNumber = "LOT-01",
             SerialNumber = "SERIAL-01"
         });
-        var countItems = (IEnumerable<RecordCountItemDto>)_counts.Invocations.Single().Arguments[0];
-        countItems.Should().ContainSingle().Which.Should().BeEquivalentTo(new
+        var countItem = (RecordCountItemDto)_counts.Invocations.Single().Arguments[0];
+        countItem.Should().BeEquivalentTo(new
         {
             CountedQuantity = 2m,
             LotNumber = "LOT-01",
-            SerialNumber = "SERIAL-01"
+            SerialNumber = "SERIAL-01",
+            RowVersion = Convert.ToBase64String(new byte[] { 1, 2, 3 }),
         });
+        countItem.IdempotencyKey.Should().StartWith("scan:test-batch:");
     }
 
     [Fact]
@@ -386,12 +388,25 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
     private async Task InvokeApplyTransactionAsync(InventoryScanOperation operation)
     {
         var documentId = Guid.NewGuid();
+        var documentLineId = Guid.NewGuid();
         if (operation == InventoryScanOperation.RequisitionReturn)
         {
             await _context.AddAsync(new InventoryRequisition
             {
                 Id = documentId, TenantId = _tenantId, RequisitionNumber = "REQ-RETURN-DELEGATION",
                 DepartmentId = Guid.NewGuid(), WarehouseId = Guid.NewGuid(), Status = RequisitionStatus.Issued
+            });
+            await _context.SaveChangesAsync();
+        }
+        if (operation == InventoryScanOperation.PhysicalCount)
+        {
+            await _context.AddAsync(new PhysicalCountItem
+            {
+                Id = documentLineId,
+                TenantId = _tenantId,
+                PhysicalCountId = documentId,
+                InventoryItemId = Guid.NewGuid(),
+                RowVersion = new byte[] { 1, 2, 3 }
             });
             await _context.SaveChangesAsync();
         }
@@ -406,7 +421,8 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
                 new InventoryScanInputDto
                 {
                     ClientLineId = Guid.NewGuid(), RawIdentifier = "ITEM-01", Quantity = 2,
-                    LotNumber = "LOT-01", SerialNumber = "SERIAL-01"
+                    LotNumber = "LOT-01", SerialNumber = "SERIAL-01",
+                    DocumentLineRowVersion = Convert.ToBase64String(new byte[] { 1, 2, 3 })
                 },
                 new InventoryIdentifierMatchDto
                 {
@@ -415,7 +431,7 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
                 },
                 new InventoryScanDocumentLineDto
                 {
-                    DocumentLineId = Guid.NewGuid(), InventoryItemId = Guid.NewGuid(),
+                    DocumentLineId = documentLineId, InventoryItemId = Guid.NewGuid(),
                     ItemCode = "ITEM-01", ItemName = "Scan item", ExpectedQuantity = 2
                 },
                 2m,

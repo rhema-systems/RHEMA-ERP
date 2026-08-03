@@ -117,6 +117,7 @@ public sealed class InventoryScanDocumentLineDto
     public string? SerialNumber { get; set; }
     public DateTime? ManufactureDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
+    public string? RowVersion { get; set; }
 }
 
 public sealed class SynchronizeInventoryScanBatchRequest
@@ -135,6 +136,7 @@ public sealed class InventoryScanInputDto
     [Required] public Guid ClientLineId { get; set; }
     [Required, StringLength(200)] public string RawIdentifier { get; set; } = string.Empty;
     public Guid? DocumentLineId { get; set; }
+    [StringLength(200)] public string? DocumentLineRowVersion { get; set; }
     [Range(0.00000001, 999999999)] public decimal Quantity { get; set; } = 1;
     public Guid? LocationId { get; set; }
     [StringLength(100)] public string? LocationIdentifier { get; set; }
@@ -214,6 +216,7 @@ public sealed class InventoryTransactionScanLineDto
     public DateTime? ManufactureDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
     public Guid? InventoryTrackingExceptionId { get; set; }
+    public string? DocumentLineRowVersion { get; set; }
 }
 
 public sealed class InventoryScanningException(string code, string message) : InvalidOperationException(message)

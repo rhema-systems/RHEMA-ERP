@@ -213,7 +213,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             if (requestedLocations.Count != requestedLocationIds.Count)
                 throw new ProcurementAccessNotFoundException("One or more selected locations do not belong to the current tenant.");
             if (request.WarehouseScopeMode == ProcurementWarehouseScopeMode.Restricted &&
-                requestedLocations.Any(item => !requestedWarehouseIds.Contains(item.WarehouseId)))
+                requestedLocations.Any(item => !requestedWarehouseIds.Contains(item.InventoryWarehouseId)))
                 throw new ProcurementAccessValidationException("LOCATION_WAREHOUSE_SCOPE_INVALID",
                     "Every restricted location must belong to one of the assignment's restricted warehouses.");
         }
@@ -298,7 +298,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
                 Id = Guid.NewGuid(),
                 TenantId = _currentUser.TenantId,
                 AssignmentId = assignment.Id,
-                WarehouseId = location.WarehouseId,
+                WarehouseId = location.InventoryWarehouseId,
                 WarehouseLocationId = location.Id,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = _currentUser.Username,

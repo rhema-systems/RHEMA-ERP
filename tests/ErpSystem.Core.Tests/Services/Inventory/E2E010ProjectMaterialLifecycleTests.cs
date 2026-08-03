@@ -83,6 +83,24 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
                     CorrelationId = correlationId,
                     EvaluatedAtUtc = DateTime.UtcNow
                 });
+        access.Setup(service => service.CheckCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementAccessCapabilityRequest request, string correlationId, CancellationToken _) =>
+                new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = true,
+                    Code = "ALLOWED",
+                    Message = "Representative E2E actor is in scope.",
+                    ActorUserId = _currentUser.UserId,
+                    TenantId = _tenantId,
+                    PermissionCode = request.PermissionCode,
+                    WarehouseId = request.WarehouseId,
+                    LocationId = request.LocationId,
+                    CorrelationId = correlationId,
+                    EvaluatedAtUtc = DateTime.UtcNow
+                });
 
         var controlEvents = new Mock<IProcurementControlEventService>();
         controlEvents.Setup(service => service.RecordAsync(

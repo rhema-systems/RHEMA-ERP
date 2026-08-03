@@ -83,9 +83,21 @@ public sealed class InventoryNegativeStockControlService : IInventoryNegativeSto
             .Include(value => value.InventoryItem)
             .Include(value => value.Warehouse)
             .OrderByDescending(value => value.ApprovedAtUtc)
-            .Take(take)
             .ToListAsync(cancellationToken);
-        return values.Select(Map).ToList();
+        var accessByScope = new Dictionary<(Guid WarehouseId, Guid? LocationId), bool>();
+        var result = new List<InventoryNegativeStockOverrideDto>(Math.Min(values.Count, take));
+        foreach (var value in values)
+        {
+            var scope = (value.WarehouseId, value.LocationId);
+            if (!accessByScope.TryGetValue(scope, out var allowed))
+            {
+                allowed = await CanReadOverrideAsync(value, cancellationToken);
+                accessByScope[scope] = allowed;
+            }
+            if (allowed) result.Add(Map(value));
+            if (result.Count == take) break;
+        }
+        return result;
     }
 
     public async Task<InventoryNegativeStockOverrideDto> RegisterApprovedOverrideAsync(
@@ -363,6 +375,26 @@ public sealed class InventoryNegativeStockControlService : IInventoryNegativeSto
             SourceReference = string.IsNullOrWhiteSpace(reference) ? "negative-stock" : reference.Trim()
         }, NormalizeCorrelation(correlationId), cancellationToken);
         if (!decision.Allowed) throw new InventoryNegativeStockAuthorizationException(decision.Message);
+    }
+
+    private async Task<bool> CanReadOverrideAsync(
+        InventoryNegativeStockOverride value,
+        CancellationToken cancellationToken)
+    {
+        foreach (var permission in new[] { "procurement.inventory.read", "Inventory.EmergencyOverride" })
+        {
+            var decision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = permission,
+                WarehouseId = value.WarehouseId,
+                LocationId = value.LocationId,
+                RequireLocationScope = true,
+                SourceType = "InventoryNegativeStockOverride",
+                SourceReference = value.ReferenceNumber
+            }, $"inventory-negative-stock-read:{value.Id:N}:{permission}", cancellationToken);
+            if (decision.Allowed) return true;
+        }
+        return false;
     }
 
     private async Task RecordControlEventAsync(InventoryNegativeStockOverride entity, string action,

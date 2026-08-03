@@ -17,6 +17,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Code128Barcode } from '@/components/inventory/Code128Barcode';
 import { InventoryCameraScanner } from '@/components/inventory/InventoryCameraScanner';
+import { useTenant } from '@/contexts/TenantContext';
+import { useAuth } from '@/hooks/use-auth';
+import { authService } from '@/services/auth';
 import { printQrLabel } from '@/lib/print-qr-label';
 import {
   flushInventoryScanQueue, listQueuedInventoryScanBatches, QueuedInventoryScanBatch, queueInventoryScanBatch,
@@ -46,6 +49,9 @@ type Problem = { detail?: string; title?: string; code?: string };
 const errorMessage = (error: unknown, fallback: string) => (error as AxiosError<Problem>)?.response?.data?.detail || (error instanceof Error ? error.message : fallback);
 
 export default function InventoryMobileScanningPage() {
+  const { user: queriedUser } = useAuth();
+  const user = queriedUser ?? authService.getStoredUser();
+  const { currentTenant } = useTenant();
   const [online, setOnline] = useState(true);
   const [operation, setOperation] = useState(InventoryScanOperation.GoodsReceipt);
   const [documents, setDocuments] = useState<InventoryScanDocumentSummary[]>([]);
@@ -82,12 +88,21 @@ export default function InventoryMobileScanningPage() {
   const [labelBusy, setLabelBusy] = useState(false);
   const labelRef = useRef<HTMLDivElement>(null);
   const flushInFlight = useRef(false);
+  const queueScope = useMemo(() => {
+    const tenantId = currentTenant?.id || user?.currentTenantId || user?.tenantId;
+    return user?.id && tenantId ? { actorUserId: user.id, tenantId } : undefined;
+  }, [currentTenant?.id, user?.currentTenantId, user?.id, user?.tenantId]);
 
   const refreshPending = useCallback(async () => {
-    const queued = await listQueuedInventoryScanBatches();
+    if (!queueScope) {
+      setQueuedBatches([]);
+      setPendingCount(0);
+      return;
+    }
+    const queued = await listQueuedInventoryScanBatches(queueScope);
     setQueuedBatches(queued);
     setPendingCount(queued.length);
-  }, []);
+  }, [queueScope]);
   const refreshHistory = useCallback(async () => {
     if (!navigator.onLine) return;
     const [loadedBatches, loadedPrints] = await Promise.all([inventoryScanningService.getRecentBatches(), inventoryScanningService.getRecentPrints()]);
@@ -96,10 +111,10 @@ export default function InventoryMobileScanningPage() {
   }, []);
 
   const flushQueue = useCallback(async () => {
-    if (!navigator.onLine || flushInFlight.current) return;
+    if (!navigator.onLine || flushInFlight.current || !queueScope) return;
     flushInFlight.current = true;
     try {
-      const result = await flushInventoryScanQueue(inventoryScanningService.synchronize);
+      const result = await flushInventoryScanQueue(queueScope, inventoryScanningService.synchronize);
       await refreshPending();
       if (result.completed.length) {
         toast.success(`Synchronized ${result.completed.length} queued scan batch${result.completed.length === 1 ? '' : 'es'}.`);
@@ -111,7 +126,7 @@ export default function InventoryMobileScanningPage() {
     } finally {
       flushInFlight.current = false;
     }
-  }, [refreshHistory, refreshPending]);
+  }, [queueScope, refreshHistory, refreshPending]);
 
   useEffect(() => {
     const update = () => {
@@ -167,9 +182,15 @@ export default function InventoryMobileScanningPage() {
       return;
     }
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) return toast.error('Quantity must be greater than zero.');
+    const selectedDocumentLine = documentLineId === 'auto'
+      ? context.lines.length === 1 ? context.lines[0] : undefined
+      : context.lines.find(line => line.documentLineId === documentLineId);
+    if (operation === InventoryScanOperation.PhysicalCount && !selectedDocumentLine?.rowVersion)
+      return toast.error('Select the physical-count document line so its concurrency version is retained for offline synchronization.');
     setLines(current => [...current, {
       clientLineId: crypto.randomUUID(), rawIdentifier: value,
-      documentLineId: documentLineId === 'auto' ? undefined : documentLineId,
+      documentLineId: selectedDocumentLine?.documentLineId,
+      documentLineRowVersion: selectedDocumentLine?.rowVersion,
       quantity: parsedQuantity, locationId: locationId || undefined, locationIdentifier: locationIdentifier || undefined,
       lotNumber: lotNumber || undefined, batchNumber: batchNumber || undefined, serialNumber: serialNumber || undefined,
       manufactureDate: manufactureDate || undefined, expiryDate: expiryDate || undefined,
@@ -178,10 +199,11 @@ export default function InventoryMobileScanningPage() {
     setIdentifier('');
     setSerialNumber('');
     if (captured) toast.success(`Captured ${value}.`);
-  }, [batchNumber, context, documentLineId, expiryDate, identifier, locationId, locationIdentifier, lotNumber, manufactureDate, quantity, scanTarget, serialNumber, trackingExceptionId]);
+  }, [batchNumber, context, documentLineId, expiryDate, identifier, locationId, locationIdentifier, lotNumber, manufactureDate, operation, quantity, scanTarget, serialNumber, trackingExceptionId]);
 
   const sync = async () => {
     if (!context || lines.length === 0) return;
+    if (!queueScope) return toast.error('Your authenticated tenant session is required before scan work can be saved.');
     const request: SynchronizeInventoryScanBatch = {
       deviceId: getInventoryScanDeviceId(), idempotencyKey: crypto.randomUUID(), operation,
       documentId: context.documentId, warehouseId: context.warehouseId, applyTransaction, lines,
@@ -189,7 +211,7 @@ export default function InventoryMobileScanningPage() {
     setSynchronizing(true);
     try {
       if (!navigator.onLine) {
-        await queueInventoryScanBatch(request, 'Offline capture');
+        await queueInventoryScanBatch(queueScope, request, 'Offline capture');
         toast.success('Scan batch saved offline. It will synchronize with the same idempotency key when connectivity returns.');
       } else {
         const result = await inventoryScanningService.synchronize(request);
@@ -201,7 +223,7 @@ export default function InventoryMobileScanningPage() {
       await refreshPending();
     } catch (error) {
       if (!navigator.onLine || !(error as AxiosError)?.response) {
-        await queueInventoryScanBatch(request, errorMessage(error, 'Network unavailable'));
+        await queueInventoryScanBatch(queueScope, request, errorMessage(error, 'Network unavailable'));
         toast.warning('Network interrupted. The batch is safely queued for idempotent retry.');
         setLines([]);
         await refreshPending();

@@ -79,6 +79,8 @@ public sealed class InventoryProjectReservationControlTests : IDisposable
         service.Should().Contain("CreateNotificationAsync");
         service.Should().Contain("AcquireTransactionLockAsync");
         service.Should().Contain("IsolationLevel.Serializable");
+        service.Should().Contain("PermissionCode = \"procurement.inventory.read\"");
+        service.Should().Contain("CheckCapabilityAsync");
         service.Should().NotContain("Repository<SalesAllocation>");
 
         var requisition = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "Inventory",
