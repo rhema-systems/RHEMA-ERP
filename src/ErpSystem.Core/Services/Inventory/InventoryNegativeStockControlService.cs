@@ -77,25 +77,38 @@ public sealed class InventoryNegativeStockControlService : IInventoryNegativeSto
     {
         EnsureActor();
         take = Math.Clamp(take, 1, 500);
-        var values = await Overrides
-            .Where(value => value.TenantId == TenantId && !value.IsDeleted)
-            .AsNoTracking()
-            .Include(value => value.InventoryItem)
-            .Include(value => value.Warehouse)
-            .OrderByDescending(value => value.ApprovedAtUtc)
-            .ToListAsync(cancellationToken);
         var accessByScope = new Dictionary<(Guid WarehouseId, Guid? LocationId), bool>();
-        var result = new List<InventoryNegativeStockOverrideDto>(Math.Min(values.Count, take));
-        foreach (var value in values)
+        var result = new List<InventoryNegativeStockOverrideDto>(take);
+        var pageSize = Math.Max(take, 50);
+        var offset = 0;
+        while (result.Count < take)
         {
-            var scope = (value.WarehouseId, value.LocationId);
-            if (!accessByScope.TryGetValue(scope, out var allowed))
+            var candidates = await Overrides
+                .Where(value => value.TenantId == TenantId && !value.IsDeleted)
+                .AsNoTracking()
+                .Include(value => value.InventoryItem)
+                .Include(value => value.Warehouse)
+                .OrderByDescending(value => value.ApprovedAtUtc)
+                .ThenByDescending(value => value.Id)
+                .Skip(offset)
+                .Take(pageSize)
+                .ToListAsync(cancellationToken);
+            if (candidates.Count == 0) break;
+            offset += candidates.Count;
+
+            foreach (var value in candidates)
             {
-                allowed = await CanReadOverrideAsync(value, cancellationToken);
-                accessByScope[scope] = allowed;
+                var scope = (value.WarehouseId, value.LocationId);
+                if (!accessByScope.TryGetValue(scope, out var allowed))
+                {
+                    allowed = await CanReadOverrideAsync(value, cancellationToken);
+                    accessByScope[scope] = allowed;
+                }
+                if (allowed) result.Add(Map(value));
+                if (result.Count == take) break;
             }
-            if (allowed) result.Add(Map(value));
-            if (result.Count == take) break;
+
+            if (candidates.Count < pageSize) break;
         }
         return result;
     }

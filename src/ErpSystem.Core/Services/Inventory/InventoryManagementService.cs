@@ -193,7 +193,11 @@ public class InventoryManagementService : IInventoryManagementService
         try
         {
             // Find best location for allocation
-            var bestLocation = await FindBestAllocationLocationAsync(request.InventoryItemId, request.Quantity) ?? throw new InvalidOperationException("No suitable location found for allocation");
+            var bestLocation = await FindBestAllocationLocationAsync(
+                request.InventoryItemId,
+                request.Quantity,
+                request.NegativeStockOverrideId.HasValue)
+                ?? throw new InvalidOperationException("No suitable location found for allocation");
             var warehouseId = bestLocation.Location.InventoryWarehouseId;
             var allocationId = Guid.NewGuid();
             var decreaseAuthorization = await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
@@ -528,13 +532,18 @@ public class InventoryManagementService : IInventoryManagementService
 
     #region Helper Methods
 
-    private async Task<InventoryLocation?> FindBestAllocationLocationAsync(Guid inventoryItemId, decimal requiredQuantity)
+    private async Task<InventoryLocation?> FindBestAllocationLocationAsync(
+        Guid inventoryItemId,
+        decimal requiredQuantity,
+        bool allowInsufficientQuantity)
     {
         var locations = await _locationRepository.GetByInventoryItemAsync(inventoryItemId);
 
-        // Prefer locations that are picking locations and have sufficient available quantity
+        // An emergency request must still select an exact picking bin so the shared
+        // negative-stock boundary can validate the override against that location.
         return locations
-            .Where(loc => loc.AvailableQuantity >= requiredQuantity && loc.Location.IsPickingLocation)
+            .Where(loc => loc.Location.IsPickingLocation &&
+                (allowInsufficientQuantity || loc.AvailableQuantity >= requiredQuantity))
             .OrderByDescending(loc => loc.AvailableQuantity) // Prefer locations with more stock
             .FirstOrDefault();
     }

@@ -199,6 +199,43 @@ public sealed class InventoryReadScopeRegressionTests
     }
 
     [Fact]
+    public async Task Negative_stock_history_pages_past_denied_rows_to_fill_the_authorized_limit()
+    {
+        await using var context = Context();
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var allowedWarehouse = Warehouse(tenantId, "NEG-PAGED-A");
+        var deniedWarehouse = Warehouse(tenantId, "NEG-PAGED-B");
+        var allowedLocation = Location(tenantId, allowedWarehouse, "NEG-PA-01");
+        var deniedLocation = Location(tenantId, deniedWarehouse, "NEG-PB-01");
+        var allowedItem = Item(tenantId, "NEG-PAGED-ITEM-A");
+        var deniedItem = Item(tenantId, "NEG-PAGED-ITEM-B");
+        var now = DateTime.UtcNow;
+        var denied = Enumerable.Range(1, 50).Select(index =>
+        {
+            var value = Override(tenantId, deniedWarehouse, deniedLocation, deniedItem, $"NEG-DENIED-{index:000}");
+            value.ApprovedAtUtc = now.AddMinutes(-index);
+            return value;
+        }).ToList();
+        var allowed = Override(tenantId, allowedWarehouse, allowedLocation, allowedItem, "NEG-ALLOWED-OLDER");
+        allowed.ApprovedAtUtc = now.AddDays(-2);
+        context.AddRange(allowedWarehouse, deniedWarehouse, allowedLocation, deniedLocation, allowedItem, deniedItem);
+        context.AddRange(denied);
+        context.Add(allowed);
+        await context.SaveChangesAsync();
+        using var unitOfWork = new UnitOfWork(context);
+        var current = CurrentUser(tenantId, userId);
+        var access = ScopedAccess(allowedWarehouse.Id, allowedLocation.Id);
+        var service = new InventoryNegativeStockControlService(unitOfWork, current.Object,
+            Mock.Of<IProcurementConfigurationService>(), access.Object,
+            Mock.Of<IProcurementControlEventService>(), Mock.Of<IInventoryNegativeStockMutationStore>());
+
+        var visible = await service.GetOverridesAsync(1);
+
+        visible.Should().ContainSingle().Which.Id.Should().Be(allowed.Id);
+    }
+
+    [Fact]
     public async Task Project_reservation_release_replays_before_stale_row_version_and_verifies_payload_actor()
     {
         await using var context = Context();

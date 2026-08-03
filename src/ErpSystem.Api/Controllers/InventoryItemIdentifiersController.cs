@@ -322,43 +322,43 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
     {
         var result = new ImportState();
         using var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8, true, leaveOpen: false);
-        var headerLine = await reader.ReadLineAsync(cancellationToken);
-        if (headerLine is null) throw new InvalidDataException("The CSV file is empty.");
-        var headers = ParseCsvLine(headerLine);
+        var header = await ReadCsvRecordAsync(reader, 1, cancellationToken);
+        if (header is null) throw new InvalidDataException("The CSV file is empty.");
+        var headers = ParseCsvLine(header.Value);
         if (headers.Count != CsvColumns.Length || !headers.SequenceEqual(CsvColumns, StringComparer.OrdinalIgnoreCase))
         {
             throw new InvalidDataException($"Expected columns: {string.Join(", ", CsvColumns)}.");
         }
 
-        var lineNumber = 1;
-        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        var nextLineNumber = header.EndLine + 1;
+        while (await ReadCsvRecordAsync(reader, nextLineNumber, cancellationToken) is { } record)
         {
-            lineNumber++;
-            if (string.IsNullOrWhiteSpace(line)) continue;
+            nextLineNumber = record.EndLine + 1;
+            if (string.IsNullOrWhiteSpace(record.Value)) continue;
             result.TotalRows++;
-            var values = ParseCsvLine(line);
+            var values = ParseCsvLine(record.Value);
             if (values.Count != CsvColumns.Length)
             {
-                result.Errors.Add($"Line {lineNumber}: expected {CsvColumns.Length} columns but found {values.Count}.");
+                result.Errors.Add($"Line {record.StartLine}: expected {CsvColumns.Length} columns but found {values.Count}.");
                 continue;
             }
 
             var itemCode = ImportValue(values[0]);
             if (string.IsNullOrWhiteSpace(itemCode))
             {
-                result.Errors.Add($"Line {lineNumber}: ItemCode is required.");
+                result.Errors.Add($"Line {record.StartLine}: ItemCode is required.");
                 continue;
             }
 
             result.Rows.Add(new ImportRow(
-                lineNumber,
+                record.StartLine,
                 itemCode!,
                 _identifiers.Normalize(ImportValue(values[2])),
                 _identifiers.Normalize(ImportValue(values[3])),
                 _identifiers.Normalize(ImportValue(values[4])),
                 ImportValue(values[5]),
                 _identifiers.Normalize(ImportValue(values[6])),
-                ParseConversion(values[7], lineNumber)));
+                ParseConversion(values[7], record.StartLine)));
         }
 
         ValidateBatchDuplicates(result);
@@ -562,14 +562,14 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
     private static string EscapeCsv(string? value)
     {
         if (string.IsNullOrEmpty(value)) return string.Empty;
-        var safe = IsFormulaPrefix(value[0]) ? $"'{value}" : value;
+        var safe = IsFormulaValue(value) ? $"'{value}" : value;
         return $"\"{safe.Replace("\"", "\"\"")}\"";
     }
 
     private static string? ImportValue(string value)
     {
         var trimmed = value.Trim();
-        if (trimmed.Length > 1 && trimmed[0] == '\'' && IsFormulaPrefix(trimmed[1]))
+        if (trimmed.Length > 1 && trimmed[0] == '\'' && IsFormulaValue(trimmed[1..]))
         {
             trimmed = trimmed[1..];
         }
@@ -577,6 +577,54 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
     }
 
     private static bool IsFormulaPrefix(char value) => value is '=' or '+' or '-' or '@';
+
+    private static bool IsFormulaValue(string value)
+    {
+        foreach (var character in value)
+        {
+            if (char.IsWhiteSpace(character) || char.IsControl(character)) continue;
+            return IsFormulaPrefix(character);
+        }
+        return false;
+    }
+
+    private static async Task<CsvRecord?> ReadCsvRecordAsync(
+        StreamReader reader,
+        int startLine,
+        CancellationToken cancellationToken)
+    {
+        var firstLine = await reader.ReadLineAsync(cancellationToken);
+        if (firstLine is null) return null;
+
+        var value = new StringBuilder(firstLine);
+        var endLine = startLine;
+        var quoted = UpdateCsvQuoteState(firstLine, false);
+        while (quoted)
+        {
+            var continuation = await reader.ReadLineAsync(cancellationToken);
+            if (continuation is null)
+                throw new InvalidDataException($"Line {startLine}: unterminated quoted CSV field.");
+            value.Append('\n').Append(continuation);
+            quoted = UpdateCsvQuoteState(continuation, quoted);
+            endLine++;
+        }
+        return new CsvRecord(value.ToString(), startLine, endLine);
+    }
+
+    private static bool UpdateCsvQuoteState(string value, bool quoted)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (value[index] != '"') continue;
+            if (quoted && index + 1 < value.Length && value[index + 1] == '"')
+            {
+                index++;
+                continue;
+            }
+            quoted = !quoted;
+        }
+        return quoted;
+    }
 
     private static decimal ParseConversion(string value, int lineNumber)
     {
@@ -675,6 +723,8 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
         string? UnitCode,
         string? UnitBarcode,
         decimal ConversionToBase);
+
+    private sealed record CsvRecord(string Value, int StartLine, int EndLine);
 
     private sealed class ImportState : InventoryIdentifierImportResultDto
     {

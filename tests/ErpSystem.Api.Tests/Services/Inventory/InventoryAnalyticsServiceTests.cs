@@ -129,6 +129,29 @@ public sealed class InventoryAnalyticsServiceTests
         error.Which.Code.Should().Be("INV_ANALYTICS_THRESHOLDS_INVALID");
     }
 
+    [Fact, Trait("Batch", "TDC-0614")]
+    public void Analytics_indexes_related_inputs_before_projecting_each_balance()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "ErpSystem.sln")))
+            directory = directory.Parent;
+        var root = directory?.FullName ?? throw new InvalidOperationException("Repository root was not found.");
+        var source = File.ReadAllText(Path.Combine(root,
+            "src", "ErpSystem.Api", "Services", "Inventory", "InventoryAnalyticsService.cs"));
+        var loopStart = source.IndexOf("foreach (var balance in balances)", StringComparison.Ordinal);
+        var loopEnd = source.IndexOf("var overallBands", loopStart, StringComparison.Ordinal);
+        var loop = source[loopStart..loopEnd];
+
+        source.Should().Contain("layersByScope");
+        source.Should().Contain("traceabilityByScope");
+        source.Should().Contain("outboundByScope");
+        source.Should().Contain("replenishmentByItemWarehouse");
+        loop.Should().NotContain("layers.Where");
+        loop.Should().NotContain("traceabilityEvents.Where");
+        loop.Should().NotContain("movements.Where");
+        loop.Should().NotContain("replenishments.FirstOrDefault");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Fixture(ApplicationDbContext db, InventoryAnalyticsService service)

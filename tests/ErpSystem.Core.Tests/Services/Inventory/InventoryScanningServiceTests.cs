@@ -177,6 +177,39 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Label_print_recording_requires_inventory_read_or_an_operating_capability()
+    {
+        await _context.Set<Warehouse>().AddAsync(new Warehouse
+        {
+            TenantId = _tenantId, Code = "WH-LABEL-PRINT-DENIED", Name = "Denied print warehouse", IsActive = true
+        });
+        await _context.SaveChangesAsync();
+        _access.Setup(item => item.CheckCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = false });
+        _access.Setup(item => item.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = false, Message = "No inventory assignment." });
+
+        var print = () => _service.RecordLabelPrintAsync(new RecordInventoryLabelPrintRequest
+        {
+            LabelProfileId = Guid.NewGuid(),
+            InventoryItemId = Guid.NewGuid(),
+            Identifier = "FORGED-LABEL",
+            IdentifierKind = "PrimaryBarcode",
+            LabelCount = 1
+        }, "corr-print-denied");
+
+        await print.Should().ThrowAsync<InventoryScanningAuthorizationException>();
+        (await _context.Set<InventoryLabelPrintEvent>().CountAsync()).Should().Be(0);
+        _access.Verify(item => item.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.inventory.read" &&
+                request.SourceType == "InventoryLabelPrint"),
+            "corr-print-denied", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task External_actor_cannot_read_internal_scanning_controls()
     {
         _currentUser.SetupGet(item => item.IsExternalUser).Returns(true);

@@ -128,19 +128,28 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
                  value.Status == InventoryReplenishmentRecommendationStatus.ConvertedToRequisition))
             .OrderByDescending(value => value.GeneratedAtUtc).ToListAsync(cancellationToken);
 
+        var layersByScope = layers.GroupBy(Key)
+            .ToDictionary(group => group.Key, group => group.ToList());
+        var traceabilityByScope = traceabilityEvents.GroupBy(Key)
+            .ToDictionary(group => group.Key, group => group.ToList());
+        var outboundByScope = movements
+            .Where(value => value.Direction == MovementDirection.Out)
+            .GroupBy(value => new ScopeItemKey(value.InventoryItemId, value.WarehouseId, value.LocationId))
+            .ToDictionary(group => group.Key, group => group.Sum(value => Math.Abs(value.Quantity)));
+        var replenishmentByItemWarehouse = replenishments
+            .GroupBy(value => new ItemWarehouseKey(value.InventoryItemId, value.WarehouseId))
+            .ToDictionary(group => group.Key, group => group.First());
+
         var rows = new List<InventoryItemLocationAnalyticsDto>(balances.Count);
         foreach (var balance in balances)
         {
             var key = new ScopeItemKey(balance.InventoryItemId, balance.WarehouseId, balance.LocationId);
-            var rowLayers = layers.Where(value => Key(value) == key).ToList();
+            var rowLayers = layersByScope.GetValueOrDefault(key) ?? [];
             var expiryExposures = BuildExpiryExposures(balance, rowLayers,
-                traceabilityEvents.Where(value => Key(value) == key).ToList());
+                traceabilityByScope.GetValueOrDefault(key) ?? []);
             var fragments = BuildFragments(balance, rowLayers, now);
             var rowBands = BuildBands(fragments);
-            var outbound = movements.Where(value => value.InventoryItemId == key.InventoryItemId &&
-                    value.WarehouseId == key.WarehouseId && value.LocationId == key.LocationId &&
-                    value.Direction == MovementDirection.Out)
-                .Sum(value => Math.Abs(value.Quantity));
+            var outbound = outboundByScope.GetValueOrDefault(key);
             var averageDailyDemand = Round(outbound / DemandWindowDays);
             var anchor = balance.LastIssueDate ?? balance.LastMovementDate ?? balance.LastReceiptDate ?? balance.CreatedAt;
             var daysSinceActivity = Days(now, anchor);
@@ -157,8 +166,8 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
             var expired = expiryExposures.Where(value => value.ExpiryDate < now.Date).ToList();
             var expiring = expiryExposures.Where(value => value.ExpiryDate >= now.Date &&
                 value.ExpiryDate <= expiryCutoff).ToList();
-            var recommendation = replenishments.FirstOrDefault(value =>
-                value.InventoryItemId == key.InventoryItemId && value.WarehouseId == key.WarehouseId);
+            var recommendation = replenishmentByItemWarehouse.GetValueOrDefault(
+                new ItemWarehouseKey(key.InventoryItemId, key.WarehouseId));
             var disposal = expired.Count != 0 ||
                            (classification == InventoryActivityClassification.NonMoving && balance.QuantityOnHand > 0m);
             var replenishment = classification == InventoryActivityClassification.Stockout;
@@ -379,6 +388,7 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
 
     private readonly record struct ScopeKey(Guid WarehouseId, Guid? LocationId);
     private readonly record struct ScopeItemKey(Guid InventoryItemId, Guid WarehouseId, Guid? LocationId);
+    private readonly record struct ItemWarehouseKey(Guid InventoryItemId, Guid WarehouseId);
     private readonly record struct TraceabilityKey(
         string? LotNumber,
         string? BatchNumber,

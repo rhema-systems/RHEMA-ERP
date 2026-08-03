@@ -179,6 +179,7 @@ public sealed class InventoryScanningService : IInventoryScanningService
         CancellationToken cancellationToken = default)
     {
         EnsureActor();
+        await RequireLabelPrintCapabilityAsync(correlationId, cancellationToken);
         var profile = await Profiles.AsNoTracking().SingleOrDefaultAsync(item => item.TenantId == TenantId && item.Id == request.LabelProfileId && !item.IsDeleted && item.IsActive, cancellationToken)
             ?? throw new InventoryScanningException("INV_LABEL_PROFILE_NOT_FOUND", "The active label profile was not found in the current tenant.");
         var match = await _identifiers.ResolveAsync(TenantId, request.Identifier, cancellationToken)
@@ -815,9 +816,29 @@ public sealed class InventoryScanningService : IInventoryScanningService
             "An active receive, issue, transfer, or count responsibility assignment is required to change label profiles.");
     }
 
-    private async Task RequireLabelCandidateReadCapabilityAsync(CancellationToken cancellationToken)
+    private Task RequireLabelCandidateReadCapabilityAsync(CancellationToken cancellationToken) =>
+        RequireAnyLabelCapabilityAsync(
+            "InventoryLabelCandidate",
+            "label-candidate-search",
+            "label-candidate-search",
+            "Inventory-read authority or an active receive, issue, transfer, or count responsibility is required to search label candidates.",
+            cancellationToken);
+
+    private Task RequireLabelPrintCapabilityAsync(string correlationId, CancellationToken cancellationToken) =>
+        RequireAnyLabelCapabilityAsync(
+            "InventoryLabelPrint",
+            "label-print",
+            NormalizeCorrelation(correlationId),
+            "Inventory-read authority or an active receive, issue, transfer, or count responsibility is required to record label printing.",
+            cancellationToken);
+
+    private async Task RequireAnyLabelCapabilityAsync(
+        string sourceType,
+        string sourceReference,
+        string correlationId,
+        string denialMessage,
+        CancellationToken cancellationToken)
     {
-        const string sourceReference = "label-candidate-search";
         var warehouseIds = await _unitOfWork.Repository<Warehouse>().GetQueryable(item =>
                 item.TenantId == TenantId && item.IsActive && !item.IsDeleted)
             .AsNoTracking().Select(item => item.Id).ToListAsync(cancellationToken);
@@ -837,9 +858,9 @@ public sealed class InventoryScanningService : IInventoryScanningService
                 {
                     PermissionCode = permission,
                     WarehouseId = warehouseId,
-                    SourceType = "InventoryLabelCandidate",
+                    SourceType = sourceType,
                     SourceReference = sourceReference
-                }, sourceReference, cancellationToken);
+                }, correlationId, cancellationToken);
                 if (decision.Allowed) return;
             }
         }
@@ -850,17 +871,16 @@ public sealed class InventoryScanningService : IInventoryScanningService
             {
                 PermissionCode = "procurement.inventory.read",
                 WarehouseId = warehouseIds.Count > 0 ? warehouseIds[0] : null,
-                SourceType = "InventoryLabelCandidate",
+                SourceType = sourceType,
                 SourceReference = sourceReference
-            }, sourceReference, cancellationToken);
+            }, correlationId, cancellationToken);
             if (denial.Allowed) return;
         }
         catch (Exception exception) when (exception is ProcurementAccessAuthorizationException or ProcurementAccessValidationException)
         {
             // Map the shared authorization boundary to the scanning API's structured 403 contract.
         }
-        throw new InventoryScanningAuthorizationException(
-            "Inventory-read authority or an active receive, issue, transfer, or count responsibility is required to search label candidates.");
+        throw new InventoryScanningAuthorizationException(denialMessage);
     }
 
     private async Task<bool> HasCapabilityAsync(

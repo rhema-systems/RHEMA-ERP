@@ -66,6 +66,27 @@ public sealed class InventoryNegativeStockControlTests : IDisposable
     }
 
     [Fact]
+    public void Forward_migration_guards_both_exact_bin_stock_representations()
+    {
+        var migration = new Phase6ReviewExactBinNegativeStockGuard();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { builder });
+
+        var sql = string.Join(Environment.NewLine,
+            builder.Operations.OfType<SqlOperation>().Select(value => value.Sql));
+        sql.Should().Contain("TR_InventoryLocations_NegativeStockGuard");
+        sql.Should().Contain("TR_InventoryBalances_ExactBinNegativeStockGuard");
+        sql.Should().Contain("TDC0610_OVERRIDE_ID");
+        sql.Should().Contain("TDC0610_TRANSACTION_ID");
+        sql.Should().Contain("o.[LocationId] = i.[LocationId]");
+        sql.Should().Contain("i.[LocationId] IS NOT NULL");
+        sql.Should().Contain("wl.[ConsignmentWarehouseId]");
+        sql.Should().NotContain("UPDATE [dbo].[InventoryLocations]");
+        sql.Should().NotContain("UPDATE [dbo].[InventoryBalances]");
+    }
+
+    [Fact]
     public void Current_relational_model_matches_the_compiled_migration_snapshot()
     {
         using var sqlServerContext = new ApplicationDbContext(
@@ -206,6 +227,33 @@ public sealed class InventoryNegativeStockControlTests : IDisposable
         source.Should().NotContain("CurrentStock -=");
         source.Should().NotContain("AvailableStock -=");
         source.Should().NotContain("new InventoryTransaction");
+    }
+
+    [Fact]
+    public void Emergency_work_order_allocation_selects_an_exact_picking_bin_before_override_validation()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
+            "src", "ErpSystem.Core", "Services", "Inventory", "InventoryManagementService.cs"));
+
+        source.Should().Contain("request.NegativeStockOverrideId.HasValue");
+        source.Should().Contain("allowInsufficientQuantity || loc.AvailableQuantity >= requiredQuantity");
+        source.IndexOf("FindBestAllocationLocationAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(source.IndexOf("PrepareDecreaseAsync", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Bulk_tool_allocation_skips_an_unavailable_tool_before_preparing_a_decrease()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(),
+            "src", "ErpSystem.Core", "Services", "Maintenance", "WorkOrderToolService.cs"));
+        var bulkStart = source.IndexOf("AllocateToolsBulkAsync", StringComparison.Ordinal);
+        var unavailable = source.IndexOf(
+            "availableStock.Value < 1 && !allocateDto.NegativeStockOverrideId.HasValue",
+            bulkStart, StringComparison.Ordinal);
+        var prepare = source.IndexOf("PrepareDecreaseAsync", bulkStart, StringComparison.Ordinal);
+
+        unavailable.Should().BeGreaterThan(bulkStart);
+        unavailable.Should().BeLessThan(prepare);
     }
 
     private static string FindRepositoryRoot()

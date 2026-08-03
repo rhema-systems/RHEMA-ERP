@@ -2,11 +2,13 @@ using System.Data;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
@@ -539,6 +541,26 @@ public class WorkOrderToolService : IWorkOrderToolService
                     }
 
                     var workOrderToolId = Guid.NewGuid();
+                    var availableStock = await _unitOfWork.Repository<WarehouseQuantity>()
+                        .GetQueryable(value => value.WarehouseId == allocateDto.WarehouseId &&
+                            value.InventoryItemId == allocateDto.ToolId && !value.IsDeleted)
+                        .AsNoTracking()
+                        .Select(value => (decimal?)value.AvailableStock)
+                        .SingleOrDefaultAsync();
+                    if (!availableStock.HasValue)
+                    {
+                        _logger.LogWarning("Tool {ToolId} not found in warehouse {WarehouseId}, skipping",
+                            allocateDto.ToolId, allocateDto.WarehouseId);
+                        continue;
+                    }
+                    if (availableStock.Value < 1 && !allocateDto.NegativeStockOverrideId.HasValue)
+                    {
+                        _logger.LogWarning(
+                            "Tool {ItemCode} not available in warehouse. Available: {Available}",
+                            tool.ItemCode, availableStock.Value);
+                        continue;
+                    }
+
                     var decreaseAuthorization = await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
                     {
                         InventoryItemId = allocateDto.ToolId,
