@@ -51,8 +51,10 @@ const headers = () => ({
 });
 
 export const inventoryDirectedOperationService = {
-  async assignees() {
-    return (await axios.get<DirectedAssignee[]>(`${API_URL}/assignees`, { headers: headers() })).data;
+  async assignees(warehouseId?: string, taskType?: DirectedTaskType) {
+    return (await axios.get<DirectedAssignee[]>(`${API_URL}/assignees`, {
+      params: { warehouseId: warehouseId || undefined, taskType }, headers: headers(),
+    })).data;
   },
   async suggestions(warehouseId: string, taskType?: DirectedTaskType, take = 250) {
     return (await axios.get<DirectedSuggestion[]>(`${API_URL}/suggestions`, {

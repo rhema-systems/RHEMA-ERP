@@ -53,22 +53,36 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
     private IQueryable<InventoryItem> Items => _unitOfWork.Repository<InventoryItem>().GetQueryable();
 
     public async Task<IReadOnlyList<InventoryDirectedAssigneeDto>> GetAssigneesAsync(
+        Guid? warehouseId = null,
+        InventoryDirectedTaskType? taskType = null,
         CancellationToken cancellationToken = default)
     {
         EnsureActor();
-        var now = DateTime.UtcNow;
-        return await _unitOfWork.Repository<UserTenant>().GetQueryable().AsNoTracking()
-            .Where(value => value.TenantId == TenantId && !value.IsDeleted &&
-                            value.Status == UserTenantStatus.Active &&
-                            (!value.ExpiresAt.HasValue || value.ExpiresAt > now) && value.User.IsActive &&
-                            !value.User.UserRoles.Any(role => role.Role.Name == Constants.Roles.ExternalUser))
-            .OrderBy(value => value.User.FirstName).ThenBy(value => value.User.LastName).ThenBy(value => value.User.UserName)
-            .Select(value => new InventoryDirectedAssigneeDto
+        IReadOnlyList<InventoryDirectedSuggestionDto> suggestions = warehouseId.HasValue
+            ? await GetSuggestionsAsync(warehouseId.Value, taskType, 250, cancellationToken)
+            : Array.Empty<InventoryDirectedSuggestionDto>();
+        var permissions = taskType.HasValue
+            ? new[] { PermissionFor(taskType.Value) }
+            : new[]
             {
-                UserId = value.UserId,
-                Username = value.User.UserName ?? value.User.Email ?? value.UserId.ToString(),
-                DisplayName = (value.User.FirstName + " " + value.User.LastName).Trim()
-            }).ToListAsync(cancellationToken);
+                PermissionFor(InventoryDirectedTaskType.PutAway),
+                PermissionFor(InventoryDirectedTaskType.Picking),
+                PermissionFor(InventoryDirectedTaskType.Replenishment)
+            };
+        var (assignments, rolesByPermission) = await LoadAssigneeAuthorizationsAsync(permissions, cancellationToken);
+        var eligible = assignments.Where(assignment => suggestions.Count > 0
+                ? suggestions.Any(suggestion => AssignmentCoversSuggestion(assignment, suggestion, rolesByPermission))
+                : AssignmentGrantsAnyPermission(assignment, permissions, rolesByPermission) &&
+                  (!warehouseId.HasValue || AssignmentCoversWarehouse(assignment, warehouseId.Value)))
+            .GroupBy(assignment => assignment.UserId).Select(group => group.First())
+            .OrderBy(assignment => assignment.User.FirstName).ThenBy(assignment => assignment.User.LastName)
+            .ThenBy(assignment => assignment.User.UserName).ToList();
+        return eligible.Select(value => new InventoryDirectedAssigneeDto
+        {
+            UserId = value.UserId,
+            Username = value.User.UserName ?? value.User.Email ?? value.UserId.ToString(),
+            DisplayName = (value.User.FirstName + " " + value.User.LastName).Trim()
+        }).ToList();
     }
 
     public async Task<IReadOnlyList<InventoryDirectedSuggestionDto>> GetSuggestionsAsync(
@@ -230,6 +244,7 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
                             "The directed suggestion is no longer current or accessible. Refresh the work queue.");
                     var assigneeId = request.AssignedToUserId.GetValueOrDefault(UserId);
                     await EnsureActiveTenantUserAsync(assigneeId, cancellationToken);
+                    await EnsureAssigneeCapabilityAsync(assigneeId, suggestion, cancellationToken);
                     var now = DateTime.UtcNow;
                     var task = new InventoryDirectedTask
                     {
@@ -322,8 +337,7 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
             if (task.DestinationLocationId.HasValue)
             {
                 var capacity = await GetCapacityAsync(task.DestinationLocationId.Value, task.InventoryItemId,
-                    task.TaskType == InventoryDirectedTaskType.PutAway && !task.IsQuarantine ? 0m : task.Quantity,
-                    cancellationToken);
+                    task.Quantity, cancellationToken);
                 EnsureCapacity(task, capacity);
                 task.CapacitySnapshotJson = JsonSerializer.Serialize(capacity);
             }
@@ -361,7 +375,7 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
                 await AddActionAsync(task, InventoryDirectedTaskActionType.PickConfirmed, task.Status,
                     normalizedComment, new { task.SourceDocumentId, task.SourceLineId, task.Quantity }, correlationId);
             }
-            else if (task.TaskType == InventoryDirectedTaskType.Replenishment)
+            else if (task.TaskType is InventoryDirectedTaskType.Replenishment or InventoryDirectedTaskType.PutAway)
             {
                 var transfer = await _transfers.CreateAsync(new CreateInventoryTransferDto
                 {
@@ -392,14 +406,6 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
                 task.Status = InventoryDirectedTaskStatus.AwaitingStockMove;
                 await AddActionAsync(task, InventoryDirectedTaskActionType.TransferCreated, task.Status,
                     normalizedComment, new { InventoryTransferId = transfer.Id, transfer.TransferNumber }, correlationId);
-            }
-            else
-            {
-                task.Status = InventoryDirectedTaskStatus.Completed;
-                task.CompletedByUserId = UserId;
-                task.CompletedAtUtc = DateTime.UtcNow;
-                await AddActionAsync(task, InventoryDirectedTaskActionType.PlacementConfirmed, task.Status,
-                    normalizedComment, new { task.SourceLocationId, task.DestinationLocationId, task.Quantity }, correlationId);
             }
             task.IntegrityHash = TaskIntegrity(task);
             await AddAuditAsync("Confirm", task, before,
@@ -694,7 +700,7 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
             if (row.DestinationLocationId.HasValue)
             {
                 capacity = await GetCapacityAsync(row.DestinationLocationId.Value, row.InventoryItemId,
-                    taskType == InventoryDirectedTaskType.PutAway && !row.IsQuarantine ? 0m : row.Quantity,
+                    row.Quantity,
                     cancellationToken);
                 if (!capacity.HasCapacity || row.IsQuarantine != capacity.IsQuarantineLocation) continue;
             }
@@ -849,7 +855,7 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
             if (line.ApprovedQuantity - line.IssuedQuantity < task.Quantity)
                 throw new InventoryDirectedOperationConflictException("INV_DIRECTED_SOURCE_STALE", "The remaining approved requisition quantity is below the directed pick quantity.");
         }
-        if (task.TaskType is InventoryDirectedTaskType.Picking or InventoryDirectedTaskType.Replenishment)
+        if (task.TaskType is InventoryDirectedTaskType.PutAway or InventoryDirectedTaskType.Picking or InventoryDirectedTaskType.Replenishment)
         {
             var available = await InventoryLocations.AsNoTracking()
                 .Where(value => value.TenantId == TenantId && !value.IsDeleted &&
@@ -900,6 +906,80 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
             ? true
             : await CanAccessLocationAsync(permission, suggestion.WarehouseId, null, suggestion.SourceReference, cancellationToken);
     }
+
+    private async Task EnsureAssigneeCapabilityAsync(
+        Guid assigneeId,
+        InventoryDirectedSuggestionDto suggestion,
+        CancellationToken cancellationToken)
+    {
+        var permission = PermissionFor(suggestion.TaskType);
+        var (assignments, rolesByPermission) = await LoadAssigneeAuthorizationsAsync([permission], cancellationToken, assigneeId);
+        if (!assignments.Any(assignment => AssignmentCoversSuggestion(assignment, suggestion, rolesByPermission)))
+            throw new InventoryDirectedOperationAuthorizationException(
+                "The selected assignee does not hold the task permission for every source and destination location.");
+    }
+
+    private async Task<(List<ProcurementResponsibilityAssignment> Assignments,
+        Dictionary<string, HashSet<string>> RolesByPermission)> LoadAssigneeAuthorizationsAsync(
+        IEnumerable<string> permissionCodes,
+        CancellationToken cancellationToken,
+        Guid? userId = null)
+    {
+        var permissions = permissionCodes.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var grants = await _unitOfWork.Repository<Permission>().GetQueryable(value =>
+                permissions.Contains(value.Name) && !value.IsDeleted)
+            .SelectMany(value => value.RolePermissions.Select(rolePermission => new
+            {
+                Permission = value.Name,
+                RoleName = rolePermission.Role.Name
+            })).Where(value => value.RoleName != null).AsNoTracking().ToListAsync(cancellationToken);
+        var rolesByPermission = grants.GroupBy(value => value.Permission, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Select(value => value.RoleName!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+        var now = DateTime.UtcNow;
+        var activeUserIds = await _unitOfWork.Repository<UserTenant>().GetQueryable(value =>
+                value.TenantId == TenantId && !value.IsDeleted && value.Status == UserTenantStatus.Active &&
+                (!value.ExpiresAt.HasValue || value.ExpiresAt > now) && value.User.IsActive &&
+                !value.User.UserRoles.Any(role => role.Role.Name == Constants.Roles.ExternalUser) &&
+                (!userId.HasValue || value.UserId == userId.Value))
+            .AsNoTracking().Select(value => value.UserId).ToListAsync(cancellationToken);
+        var assignments = await _unitOfWork.Repository<ProcurementResponsibilityAssignment>().GetQueryable(value =>
+                value.TenantId == TenantId && activeUserIds.Contains(value.UserId) && !value.IsDeleted && value.IsActive &&
+                value.EffectiveFrom <= now && (!value.EffectiveTo.HasValue || value.EffectiveTo >= now))
+            .Include(value => value.User)
+            .Include(value => value.Warehouses.Where(scope => !scope.IsDeleted))
+            .Include(value => value.Locations.Where(scope => !scope.IsDeleted))
+            .AsNoTracking().ToListAsync(cancellationToken);
+        return (assignments, rolesByPermission);
+    }
+
+    private static bool AssignmentCoversSuggestion(
+        ProcurementResponsibilityAssignment assignment,
+        InventoryDirectedSuggestionDto suggestion,
+        IReadOnlyDictionary<string, HashSet<string>> rolesByPermission)
+    {
+        var permission = PermissionFor(suggestion.TaskType);
+        if (!rolesByPermission.TryGetValue(permission, out var roles) || !roles.Contains(assignment.RoleName) ||
+            !AssignmentCoversWarehouse(assignment, suggestion.WarehouseId)) return false;
+        var locations = new[] { suggestion.SourceLocationId, suggestion.DestinationLocationId }
+            .Where(value => value.HasValue).Select(value => value!.Value).Distinct().ToList();
+        if (locations.Count == 0) return assignment.LocationScopeMode == ProcurementLocationScopeMode.All;
+        return locations.All(locationId => assignment.LocationScopeMode == ProcurementLocationScopeMode.All ||
+            (assignment.LocationScopeMode == ProcurementLocationScopeMode.Restricted &&
+             assignment.Locations.Any(scope => scope.WarehouseLocationId == locationId)));
+    }
+
+    private static bool AssignmentGrantsAnyPermission(
+        ProcurementResponsibilityAssignment assignment,
+        IEnumerable<string> permissions,
+        IReadOnlyDictionary<string, HashSet<string>> rolesByPermission) =>
+        permissions.Any(permission => rolesByPermission.TryGetValue(permission, out var roles) &&
+                                      roles.Contains(assignment.RoleName));
+
+    private static bool AssignmentCoversWarehouse(ProcurementResponsibilityAssignment assignment, Guid warehouseId) =>
+        assignment.WarehouseScopeMode == ProcurementWarehouseScopeMode.All ||
+        (assignment.WarehouseScopeMode == ProcurementWarehouseScopeMode.Restricted &&
+         assignment.Warehouses.Any(scope => scope.WarehouseId == warehouseId));
 
     private Task<bool> CanAccessTaskAsync(InventoryDirectedTask task, CancellationToken cancellationToken) =>
         CanAccessSuggestionAsync(new InventoryDirectedSuggestionDto

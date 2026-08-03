@@ -443,6 +443,65 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Reservation_substitution_refreshes_item_unit_and_requisition_value_atomically()
+    {
+        var replacementId = Guid.NewGuid();
+        var original = await _context.Set<InventoryItem>().AsNoTracking().SingleAsync(value => value.Id == _itemId);
+        await _context.AddRangeAsync(
+            new InventoryItem
+            {
+                Id = replacementId, TenantId = _tenantId, CategoryId = original.CategoryId,
+                ItemCode = "MAT-REPLACEMENT", Name = "Replacement project material", UnitOfMeasure = "BOX",
+                Status = ItemStatus.Active, AverageCost = 15m, CurrentStock = 20m, AvailableStock = 20m,
+                IsProjectApplicable = true
+            },
+            new WarehouseQuantity
+            {
+                TenantId = _tenantId, WarehouseId = _warehouseId, InventoryItemId = replacementId,
+                CurrentStock = 20m, AvailableStock = 20m, AverageCost = 15m
+            },
+            new InventoryLocation
+            {
+                TenantId = _tenantId, LocationId = _locationId, InventoryItemId = replacementId,
+                Quantity = 20m, AvailableQuantity = 20m, AverageCost = 15m
+            });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        var reservation = await _reservations.ReserveAsync(new CreateInventoryProjectReservationRequest
+        {
+            InventoryRequisitionItemId = _requisitionLineId,
+            LocationId = _locationId,
+            Quantity = 5m,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(2),
+            IdempotencyKey = "substitution-reserve",
+            CorrelationId = "substitution-test"
+        });
+        _context.ChangeTracker.Clear();
+        var reservedEntity = await _context.Set<InventoryAllocation>().SingleAsync(value => value.Id == reservation.Id);
+        reservedEntity.RowVersion = [51, 52, 53, 54];
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        await _reservations.SubstituteAsync(reservation.Id, new SubstituteInventoryProjectReservationRequest
+        {
+            ReplacementInventoryItemId = replacementId,
+            Reason = "Approved material equivalent.",
+            IdempotencyKey = "substitution-replace",
+            CorrelationId = "substitution-test",
+            RowVersion = Convert.ToBase64String([51, 52, 53, 54])
+        });
+
+        _context.ChangeTracker.Clear();
+        var requisition = await _context.Set<InventoryRequisition>().Include(value => value.Items)
+            .SingleAsync(value => value.Id == _requisitionId);
+        requisition.TotalValue.Should().Be(150m);
+        requisition.Items.Single().Should().Match<InventoryRequisitionItem>(value =>
+            value.InventoryItemId == replacementId && value.ItemCode == "MAT-REPLACEMENT" &&
+            value.ItemName == "Replacement project material" && value.UnitOfMeasure == "BOX" &&
+            value.UnitCost == 15m);
+    }
+
+    [Fact]
     [Trait("Batch", "E2E-010")]
     public async Task Approved_project_reservation_partial_issue_and_return_reconcile_notifications_stock_and_cost()
     {

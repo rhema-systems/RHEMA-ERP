@@ -162,6 +162,61 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Document_context_denies_the_whole_payload_when_any_line_location_is_out_of_scope()
+    {
+        var warehouse = new Warehouse
+        {
+            TenantId = _tenantId, Code = "WH-CONTEXT", Name = "Context warehouse", IsActive = true
+        };
+        var allowedLocation = new WarehouseLocation
+        {
+            TenantId = _tenantId, WarehouseId = warehouse.Id, LocationCode = "CTX-ALLOWED", IsActive = true
+        };
+        var deniedLocation = new WarehouseLocation
+        {
+            TenantId = _tenantId, WarehouseId = warehouse.Id, LocationCode = "CTX-DENIED", IsActive = true
+        };
+        var item = new InventoryItem
+        {
+            TenantId = _tenantId, CategoryId = Guid.NewGuid(), ItemCode = "CTX-ITEM", Name = "Context item"
+        };
+        var count = new PhysicalCount
+        {
+            TenantId = _tenantId, WarehouseId = warehouse.Id, Warehouse = warehouse,
+            CountNumber = "COUNT-CONTEXT", Status = "InProgress", CountDate = DateTime.UtcNow,
+            Items =
+            {
+                new PhysicalCountItem
+                {
+                    TenantId = _tenantId, InventoryItemId = item.Id, InventoryItem = item,
+                    LocationId = allowedLocation.Id, Location = allowedLocation, ItemCode = item.ItemCode, ItemName = item.Name
+                },
+                new PhysicalCountItem
+                {
+                    TenantId = _tenantId, InventoryItemId = item.Id, InventoryItem = item,
+                    LocationId = deniedLocation.Id, Location = deniedLocation, ItemCode = item.ItemCode, ItemName = item.Name
+                }
+            }
+        };
+        await _context.AddRangeAsync(warehouse, allowedLocation, deniedLocation, item, count);
+        await _context.SaveChangesAsync();
+        _access.Setup(value => value.CheckCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementAccessCapabilityRequest request, string _, CancellationToken __) =>
+                new ProcurementAccessCapabilityDecisionDto { Allowed = request.LocationId != deniedLocation.Id });
+        _access.Setup(value => value.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = false });
+
+        var load = () => _service.GetDocumentContextAsync(InventoryScanOperation.PhysicalCount, count.Id);
+
+        await load.Should().ThrowAsync<InventoryScanningAuthorizationException>();
+        _access.Verify(value => value.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request => request.LocationId == deniedLocation.Id &&
+                request.RequireLocationScope), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Scan_batch_reads_filter_list_and_deny_direct_cross_location_access()
     {
         var item = new InventoryItem
@@ -307,6 +362,75 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
             RowVersion = Convert.ToBase64String(new byte[] { 1, 2, 3 }),
         });
         countItem.IdempotencyKey.Should().StartWith("scan:test-batch:");
+    }
+
+    [Fact]
+    public async Task Reconciliation_reports_only_movements_created_by_the_current_scan_batch()
+    {
+        var item = new InventoryItem
+        {
+            TenantId = _tenantId, CategoryId = Guid.NewGuid(), ItemCode = "SCAN-DELTA", Name = "Delta item"
+        };
+        var warehouse = new Warehouse
+        {
+            TenantId = _tenantId, Code = "WH-DELTA", Name = "Delta warehouse", IsActive = true
+        };
+        var requisition = new InventoryRequisition
+        {
+            TenantId = _tenantId, RequisitionNumber = "REQ-DELTA", DepartmentId = Guid.NewGuid(),
+            WarehouseId = warehouse.Id, Warehouse = warehouse, Status = RequisitionStatus.Approved,
+            Items =
+            {
+                new InventoryRequisitionItem
+                {
+                    TenantId = _tenantId, InventoryItemId = item.Id, InventoryItem = item,
+                    ItemCode = item.ItemCode, ItemName = item.Name, ApprovedQuantity = 5
+                }
+            }
+        };
+        await _context.AddRangeAsync(item, warehouse, requisition, new StockMovement
+        {
+            TenantId = _tenantId, InventoryItemId = item.Id, WarehouseId = warehouse.Id,
+            MovementType = "Issue", Quantity = -2, ReferenceId = requisition.Id,
+            ReferenceType = ReferenceType.Requisition, MovementDate = DateTime.UtcNow.AddHours(-1)
+        });
+        await _context.SaveChangesAsync();
+        _identifiers.Setup(value => value.ResolveAsync(_tenantId, item.ItemCode, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InventoryIdentifierMatchDto
+            {
+                InventoryItemId = item.Id, ItemCode = item.ItemCode, ItemName = item.Name,
+                Identifier = item.ItemCode, IdentifierKind = "ItemCode", ConversionToBase = 1
+            });
+        _requisitions.Setup(value => value.IssueAsync(requisition.Id, It.IsAny<IssueRequisitionDto>()))
+            .Returns(async () =>
+            {
+                await _context.AddAsync(new StockMovement
+                {
+                    TenantId = _tenantId, InventoryItemId = item.Id, WarehouseId = warehouse.Id,
+                    MovementType = "Issue", Quantity = -1, ReferenceId = requisition.Id,
+                    ReferenceType = ReferenceType.Requisition, MovementDate = DateTime.UtcNow
+                });
+                await _context.SaveChangesAsync();
+                return true;
+            });
+
+        var result = await _service.SynchronizeAsync(new SynchronizeInventoryScanBatchRequest
+        {
+            DeviceId = "delta-scanner", IdempotencyKey = "delta-batch", Operation = InventoryScanOperation.RequisitionIssue,
+            DocumentId = requisition.Id, WarehouseId = warehouse.Id, ApplyTransaction = true,
+            Lines =
+            {
+                new InventoryScanInputDto
+                {
+                    ClientLineId = Guid.NewGuid(), RawIdentifier = item.ItemCode,
+                    DocumentLineId = requisition.Items.Single().Id, Quantity = 1, ScannedAtUtc = DateTime.UtcNow
+                }
+            }
+        }, "corr-delta");
+
+        result.Reconciliation.Should().NotBeNull();
+        result.Reconciliation!.StockMovementCount.Should().Be(1);
+        result.Reconciliation.NetStockMovementQuantity.Should().Be(-1);
     }
 
     [Fact]

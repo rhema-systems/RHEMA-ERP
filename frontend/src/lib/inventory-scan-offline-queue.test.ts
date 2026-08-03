@@ -4,6 +4,7 @@ import {
   flushInventoryScanQueue,
   listQueuedInventoryScanBatches,
   queueInventoryScanBatch,
+  removeQueuedInventoryScanBatch,
 } from './inventory-scan-offline-queue';
 
 class FakeRequest<T> {
@@ -159,6 +160,20 @@ describe('inventory scan offline queue', () => {
     expect(remaining[0]).toMatchObject({ attempts: 2, lastError: 'temporary network failure' });
     expect(remaining[0].queuedAtUtc).toBe(before[1].queuedAtUtc);
     expect(remaining[1]).toMatchObject({ attempts: 1 });
+  });
+
+  it('lets an operator discard a permanently failed head and then flush dependent work', async () => {
+    await queueInventoryScanBatch(scope, request(InventoryScanOperation.RequisitionIssue, 1));
+    await queueInventoryScanBatch(scope, request(InventoryScanOperation.TransferShipment, 2));
+    await flushInventoryScanQueue(scope, vi.fn().mockRejectedValue(new Error('document is no longer eligible')));
+
+    await removeQueuedInventoryScanBatch(scope, 'e2e024-1');
+    const synchronize = vi.fn().mockResolvedValue({ status: 'Applied' });
+    const result = await flushInventoryScanQueue(scope, synchronize);
+
+    expect(result).toEqual({ completed: ['e2e024-2'], failed: [] });
+    expect(synchronize).toHaveBeenCalledOnce();
+    expect(await listQueuedInventoryScanBatches(scope)).toEqual([]);
   });
 
   it('partitions queued stock work by tenant and authenticated actor', async () => {

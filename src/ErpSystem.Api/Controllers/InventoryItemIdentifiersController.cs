@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
@@ -29,6 +30,7 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
     private readonly IUnitOfWork _unitOfWork;
     private readonly IInventoryItemIdentifierService _identifiers;
     private readonly ICurrentUserProvider _currentUser;
+    private readonly IProcurementAccessControlService _access;
     private readonly IProcurementMasterDataChangeService? _masterDataChanges;
     private readonly ILogger<InventoryItemIdentifiersController> _logger;
 
@@ -36,12 +38,14 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
         IUnitOfWork unitOfWork,
         IInventoryItemIdentifierService identifiers,
         ICurrentUserProvider currentUser,
+        IProcurementAccessControlService access,
         ILogger<InventoryItemIdentifiersController> logger,
         IProcurementMasterDataChangeService? masterDataChanges = null)
     {
         _unitOfWork = unitOfWork;
         _identifiers = identifiers;
         _currentUser = currentUser;
+        _access = access;
         _logger = logger;
         _masterDataChanges = masterDataChanges;
     }
@@ -112,6 +116,7 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
         try
         {
             var tenantId = GetTenantId();
+            if (!await HasMutationPermissionAsync($"item:{inventoryItemId:N}", cancellationToken)) return Forbid();
             var protection = await GuardDirectMutationAsync(inventoryItemId, "InventoryItem.IdentifierUpdate", cancellationToken);
             if (protection is not null) return protection;
             var item = await Items.SingleOrDefaultAsync(
@@ -158,6 +163,7 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
         try
         {
             var tenantId = GetTenantId();
+            if (!await HasMutationPermissionAsync($"item:{inventoryItemId:N}:unit:{unitOfMeasureId:N}", cancellationToken)) return Forbid();
             var protection = await GuardDirectMutationAsync(inventoryItemId, "InventoryItem.UnitIdentifierUpdate", cancellationToken);
             if (protection is not null) return protection;
             var item = await Items.AsNoTracking().SingleOrDefaultAsync(
@@ -282,6 +288,7 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
         try
         {
             var tenantId = GetTenantId();
+            if (!await HasMutationPermissionAsync("identifier-import", cancellationToken)) return Forbid();
             var protection = await GuardDirectMutationAsync(null, "InventoryItem.IdentifierImport", cancellationToken);
             if (protection is not null) return protection;
             var parsed = await ParseImportAsync(file, cancellationToken);
@@ -456,6 +463,17 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
             Instance = HttpContext.Request.Path,
             Extensions = { ["code"] = decision.Code, ["correlationId"] = decision.CorrelationId, ["policyId"] = decision.PolicyId }
         });
+    }
+
+    private async Task<bool> HasMutationPermissionAsync(string sourceReference, CancellationToken cancellationToken)
+    {
+        var decision = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = "procurement.inventory.master-data.manage",
+            SourceType = "InventoryItemIdentifier",
+            SourceReference = sourceReference
+        }, HttpContext.TraceIdentifier, cancellationToken);
+        return decision.Allowed;
     }
 
     private async Task QueueAuditAsync(string action, Guid resourceId, object? before, object? after)

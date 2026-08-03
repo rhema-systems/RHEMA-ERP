@@ -23,6 +23,7 @@ import { authService } from '@/services/auth';
 import { printQrLabel } from '@/lib/print-qr-label';
 import {
   flushInventoryScanQueue, listQueuedInventoryScanBatches, QueuedInventoryScanBatch, queueInventoryScanBatch,
+  removeQueuedInventoryScanBatch,
 } from '@/lib/inventory-scan-offline-queue';
 import {
   getInventoryScanDeviceId, InventoryLabelCandidate, InventoryLabelPrint, InventoryLabelProfile,
@@ -109,6 +110,14 @@ export default function InventoryMobileScanningPage() {
     setBatches(loadedBatches);
     setPrints(loadedPrints);
   }, []);
+
+  const discardQueuedBatch = useCallback(async (batch: QueuedInventoryScanBatch) => {
+    if (!queueScope) return;
+    if (!window.confirm('Discard this failed scan batch permanently? Its captured lines cannot be recovered.')) return;
+    await removeQueuedInventoryScanBatch(queueScope, batch.idempotencyKey);
+    await refreshPending();
+    toast.success('The failed scan batch was discarded. Later queued work can now synchronize.');
+  }, [queueScope, refreshPending]);
 
   const flushQueue = useCallback(async () => {
     if (!navigator.onLine || flushInFlight.current || !queueScope) return;
@@ -320,7 +329,7 @@ export default function InventoryMobileScanningPage() {
               <Button className="w-full" onClick={() => void sync()} disabled={!context || lines.length === 0 || synchronizing}>{synchronizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : online ? <CheckCircle2 className="mr-2 h-4 w-4" /> : <CloudOff className="mr-2 h-4 w-4" />}{online ? 'Synchronize batch' : 'Save batch offline'}</Button>
             </CardContent></Card>
           </div>
-          {queuedBatches.length > 0 && <Card><CardHeader><CardTitle>Offline synchronization queue</CardTitle><CardDescription>Queued batches retain their original device and idempotency keys. A failed batch stays first until corrected or retried.</CardDescription></CardHeader><CardContent><div className="overflow-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>Queued</TableHead><TableHead>Operation / document</TableHead><TableHead>Lines</TableHead><TableHead>Attempts / last result</TableHead></TableRow></TableHeader><TableBody>{queuedBatches.map(batch => <TableRow key={batch.idempotencyKey}><TableCell className="text-xs">{new Date(batch.queuedAtUtc).toLocaleString()}<div className="font-mono text-muted-foreground">{batch.deviceId}</div></TableCell><TableCell>{OPERATIONS.find(([value]) => value === batch.operation)?.[1]}<div className="font-mono text-xs text-muted-foreground">{batch.documentId}</div></TableCell><TableCell>{batch.lines.length}</TableCell><TableCell>{batch.attempts}<div className="max-w-xl text-xs text-destructive">{batch.lastError || 'Waiting for connectivity'}</div></TableCell></TableRow>)}</TableBody></Table></div></CardContent></Card>}
+          {queuedBatches.length > 0 && <Card><CardHeader><CardTitle>Offline synchronization queue</CardTitle><CardDescription>Queued batches retain their original device and idempotency keys. A failed head can be retried or explicitly discarded so later work is not permanently blocked.</CardDescription></CardHeader><CardContent><div className="overflow-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>Queued</TableHead><TableHead>Operation / document</TableHead><TableHead>Lines</TableHead><TableHead>Attempts / last result</TableHead><TableHead className="text-right">Recovery</TableHead></TableRow></TableHeader><TableBody>{queuedBatches.map((batch, index) => <TableRow key={batch.idempotencyKey}><TableCell className="text-xs">{new Date(batch.queuedAtUtc).toLocaleString()}<div className="font-mono text-muted-foreground">{batch.deviceId}</div></TableCell><TableCell>{OPERATIONS.find(([value]) => value === batch.operation)?.[1]}<div className="font-mono text-xs text-muted-foreground">{batch.documentId}</div></TableCell><TableCell>{batch.lines.length}</TableCell><TableCell>{batch.attempts}<div className="max-w-xl text-xs text-destructive">{batch.lastError || 'Waiting for connectivity'}</div></TableCell><TableCell className="text-right">{index === 0 && batch.lastError ? <Button size="sm" variant="destructive" onClick={() => void discardQueuedBatch(batch)}><Trash2 className="mr-2 h-4 w-4" />Discard failed batch</Button> : <span className="text-xs text-muted-foreground">{index === 0 ? 'Retry from Sync queue' : 'Waiting behind earlier work'}</span>}</TableCell></TableRow>)}</TableBody></Table></div></CardContent></Card>}
         </TabsContent>
 
         <TabsContent value="labels" className="space-y-4">

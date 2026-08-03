@@ -25,9 +25,11 @@ public sealed class InventoryDirectedOperationsController : ControllerBase
 
     [HttpGet("assignees")]
     public Task<ActionResult<IReadOnlyList<InventoryDirectedAssigneeDto>>> GetAssignees(
-        CancellationToken cancellationToken) =>
+        [FromQuery] Guid? warehouseId = null,
+        [FromQuery] InventoryDirectedTaskType? taskType = null,
+        CancellationToken cancellationToken = default) =>
         ExecuteAsync<IReadOnlyList<InventoryDirectedAssigneeDto>>(async () =>
-            Ok(await _service.GetAssigneesAsync(cancellationToken)));
+            Ok(await _service.GetAssigneesAsync(warehouseId, taskType, cancellationToken)));
 
     [HttpGet("suggestions")]
     public Task<ActionResult<IReadOnlyList<InventoryDirectedSuggestionDto>>> GetSuggestions(

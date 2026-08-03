@@ -339,9 +339,23 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             line.InventoryItemId = replacement.Id;
             line.ItemCode = replacement.ItemCode;
             line.ItemName = replacement.Name;
+            line.UnitOfMeasure = replacement.UnitOfMeasure;
             line.UnitCost = replacement.AverageCost;
             line.LineValue = line.IssuedQuantity * line.UnitCost;
             await _unitOfWork.Repository<InventoryRequisitionItem>().UpdateAsync(line);
+
+            var requisitionHeader = await _unitOfWork.Repository<InventoryRequisition>().GetQueryable(value =>
+                    value.Id == line.InventoryRequisitionId && value.TenantId == allocation.TenantId && !value.IsDeleted)
+                .SingleAsync(cancellationToken);
+            var otherLineValues = await _unitOfWork.Repository<InventoryRequisitionItem>().GetQueryable(value =>
+                    value.InventoryRequisitionId == requisitionHeader.Id && value.Id != line.Id &&
+                    value.TenantId == allocation.TenantId && !value.IsDeleted)
+                .Select(value => value.RequestedQuantity * value.UnitCost)
+                .ToListAsync(cancellationToken);
+            requisitionHeader.TotalValue = otherLineValues.Sum() + line.RequestedQuantity * line.UnitCost;
+            requisitionHeader.UpdatedAt = DateTime.UtcNow;
+            requisitionHeader.LastModifiedById = _currentUser.UserId;
+            await _unitOfWork.Repository<InventoryRequisition>().UpdateAsync(requisitionHeader);
 
             var next = new InventoryAllocation
             {

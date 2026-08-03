@@ -5,7 +5,9 @@ namespace ErpSystem.Core.Interfaces.Inventory;
 
 public interface IInventoryDirectedOperationService
 {
-    Task<IReadOnlyList<InventoryDirectedAssigneeDto>> GetAssigneesAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InventoryDirectedAssigneeDto>> GetAssigneesAsync(
+        Guid? warehouseId = null, InventoryDirectedTaskType? taskType = null,
+        CancellationToken cancellationToken = default);
     Task<IReadOnlyList<InventoryDirectedSuggestionDto>> GetSuggestionsAsync(
         Guid warehouseId, InventoryDirectedTaskType? taskType = null, int take = 100,
         CancellationToken cancellationToken = default);

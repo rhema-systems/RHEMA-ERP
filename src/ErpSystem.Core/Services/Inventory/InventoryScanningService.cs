@@ -242,6 +242,9 @@ public sealed class InventoryScanningService : IInventoryScanningService
         EnsureActor();
         var context = await LoadDocumentContextAsync(operation, documentId, cancellationToken);
         await RequireCapabilityAsync(operation, context.WarehouseId, context.DocumentReference, cancellationToken);
+        foreach (var locationId in context.Lines.Select(item => item.LocationId).Distinct())
+            await RequireCapabilityAsync(operation, context.WarehouseId, context.DocumentReference,
+                cancellationToken, locationId, requireLocationScope: true);
         return context;
     }
 
@@ -322,6 +325,9 @@ public sealed class InventoryScanningService : IInventoryScanningService
                 }
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+                var movementIdsBeforeApply = request.ApplyTransaction
+                    ? await MovementIdsForDocumentAsync(request.DocumentId, cancellationToken)
+                    : new HashSet<Guid>();
                 if (request.ApplyTransaction)
                 {
                     await ApplyTransactionAsync(request.Operation, request.DocumentId, resolved,
@@ -330,7 +336,8 @@ public sealed class InventoryScanningService : IInventoryScanningService
                     batch.ProcessedAtUtc = DateTime.UtcNow;
                 }
 
-                var reconciliation = await ReconcileAsync(request.Operation, request.DocumentId, resolved, cancellationToken);
+                var reconciliation = await ReconcileAsync(request.Operation, request.DocumentId, resolved,
+                    movementIdsBeforeApply, request.ApplyTransaction, cancellationToken);
                 batch.ReconciliationJson = JsonSerializer.Serialize(reconciliation);
                 await AddAuditAsync(request.ApplyTransaction ? "InventoryScanBatch.Applied" : "InventoryScanBatch.Captured", batch.Id, null,
                     new { batch.DeviceId, batch.IdempotencyKey, batch.Operation, batch.DocumentId, batch.DocumentReference, batch.WarehouseId,
@@ -578,11 +585,16 @@ public sealed class InventoryScanningService : IInventoryScanningService
         InventoryScanOperation operation,
         Guid documentId,
         IReadOnlyList<ResolvedLine> lines,
+        IReadOnlySet<Guid> movementIdsBeforeApply,
+        bool applyTransaction,
         CancellationToken cancellationToken)
     {
-        var movements = await _unitOfWork.Repository<StockMovement>().GetQueryable(item =>
-                item.TenantId == TenantId && item.ReferenceId == documentId && !item.IsDeleted)
-            .AsNoTracking().ToListAsync(cancellationToken);
+        var movements = applyTransaction
+            ? (await _unitOfWork.Repository<StockMovement>().GetQueryable(item =>
+                    item.TenantId == TenantId && item.ReferenceId == documentId && !item.IsDeleted)
+                .AsNoTracking().ToListAsync(cancellationToken))
+                .Where(item => !movementIdsBeforeApply.Contains(item.Id)).ToList()
+            : [];
         return new InventoryScanReconciliationDto
         {
             DocumentStatus = await LoadDocumentStatusAsync(operation, documentId, cancellationToken),
@@ -594,6 +606,13 @@ public sealed class InventoryScanningService : IInventoryScanningService
             ReconciledAtUtc = DateTime.UtcNow
         };
     }
+
+    private async Task<HashSet<Guid>> MovementIdsForDocumentAsync(
+        Guid documentId,
+        CancellationToken cancellationToken) =>
+        (await _unitOfWork.Repository<StockMovement>().GetQueryable(item =>
+                item.TenantId == TenantId && item.ReferenceId == documentId && !item.IsDeleted)
+            .AsNoTracking().Select(item => item.Id).ToListAsync(cancellationToken)).ToHashSet();
 
     private async Task<IReadOnlyList<InventoryScanDocumentSummaryDto>> LoadDocumentSummariesAsync(
         InventoryScanOperation operation,

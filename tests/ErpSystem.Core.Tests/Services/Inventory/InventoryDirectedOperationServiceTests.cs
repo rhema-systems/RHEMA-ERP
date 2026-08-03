@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -145,6 +146,38 @@ public sealed class InventoryDirectedOperationServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Put_away_confirmation_creates_an_authoritative_inter_bin_transfer_before_completion()
+    {
+        var (warehouse, item, receiving, storage) = await SeedBinsAsync();
+        var task = NewDirectedTask(warehouse, item, receiving.Id, storage.Id, InventoryDirectedTaskType.PutAway,
+            "ManualPutAway", Guid.NewGuid(), Guid.NewGuid(), 3);
+        await _context.AddRangeAsync(
+            new InventoryLocation
+            {
+                TenantId = _tenantId, InventoryItemId = item.Id, LocationId = receiving.Id,
+                Quantity = 3, AvailableQuantity = 3
+            }, task);
+        await _context.SaveChangesAsync();
+        var transferId = Guid.NewGuid();
+        _transfers.Setup(value => value.CreateAsync(It.IsAny<CreateInventoryTransferDto>(), _userId))
+            .ReturnsAsync(new InventoryTransferDto { Id = transferId, TransferNumber = "TRF-PUTAWAY-001" });
+
+        var result = await _service.ConfirmTaskAsync(task.Id, new ConfirmInventoryDirectedTaskRequest
+        {
+            RowVersion = Convert.ToBase64String(task.RowVersion), Comment = "Placement bins verified."
+        }, "corr-putaway");
+
+        result.Status.Should().Be(InventoryDirectedTaskStatus.AwaitingStockMove);
+        result.CompletedAtUtc.Should().BeNull();
+        result.LinkedInventoryTransferId.Should().Be(transferId);
+        _transfers.Verify(value => value.CreateAsync(It.Is<CreateInventoryTransferDto>(request =>
+            request.SourceWarehouseId == warehouse.Id && request.DestinationWarehouseId == warehouse.Id &&
+            request.Items.Single().SourceLocationId == receiving.Id &&
+            request.Items.Single().DestinationLocationId == storage.Id &&
+            request.Items.Single().RequestedQuantity == 3), _userId), Times.Once);
+    }
+
+    [Fact]
     public async Task Location_authority_filters_suggestions_and_external_users_fail_closed()
     {
         var (warehouse, item, reserve, pick) = await SeedBinsAsync();
@@ -163,6 +196,86 @@ public sealed class InventoryDirectedOperationServiceTests : IAsyncLifetime
         _currentUser.SetupGet(value => value.IsExternalUser).Returns(true);
         var denied = () => _service.GetTasksAsync();
         await denied.Should().ThrowAsync<InventoryDirectedOperationAuthorizationException>();
+    }
+
+    [Fact]
+    public async Task Assignee_list_and_creation_require_actual_permission_and_exact_bin_responsibility()
+    {
+        var (warehouse, item, reserve, pick) = await SeedBinsAsync();
+        item.ReorderLevel = 5;
+        item.ReorderQuantity = 5;
+        var tenant = await _context.Set<Tenant>().SingleAsync(value => value.Id == _tenantId);
+        var eligibleUser = await _context.Set<ApplicationUser>().SingleAsync(value => value.Id == _userId);
+        var ineligibleUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, UserName = "ordinary.employee@test.local",
+            FirstName = "Ordinary", LastName = "Employee", IsActive = true
+        };
+        var role = new ApplicationRole("TDC_STORES_MANAGER") { Id = Guid.NewGuid() };
+        var permission = new Permission
+        {
+            Name = "procurement.inventory.transfer", DisplayName = "Transfer inventory",
+            Description = "Focused directed-operation permission.", Category = "Procurement and Inventory"
+        };
+        var assignment = new ProcurementResponsibilityAssignment
+        {
+            TenantId = _tenantId, UserId = eligibleUser.Id, User = eligibleUser, RoleId = role.Id, Role = role,
+            RoleName = role.Name!, WarehouseScopeMode = ProcurementWarehouseScopeMode.Restricted,
+            LocationScopeMode = ProcurementLocationScopeMode.Restricted, EffectiveFrom = DateTime.UtcNow.AddDays(-1),
+            IsActive = true, Reason = "Focused directed-operation assignment."
+        };
+        assignment.Warehouses.Add(new ProcurementResponsibilityWarehouse
+        {
+            TenantId = _tenantId, Assignment = assignment, WarehouseId = warehouse.Id, Warehouse = warehouse
+        });
+        assignment.Locations.Add(new ProcurementResponsibilityLocation
+        {
+            TenantId = _tenantId, Assignment = assignment, WarehouseId = warehouse.Id, Warehouse = warehouse,
+            WarehouseLocationId = reserve.Id, WarehouseLocation = reserve
+        });
+        assignment.Locations.Add(new ProcurementResponsibilityLocation
+        {
+            TenantId = _tenantId, Assignment = assignment, WarehouseId = warehouse.Id, Warehouse = warehouse,
+            WarehouseLocationId = pick.Id, WarehouseLocation = pick
+        });
+        await _context.AddRangeAsync(
+            ineligibleUser,
+            new UserTenant { TenantId = _tenantId, Tenant = tenant, UserId = eligibleUser.Id, User = eligibleUser },
+            new UserTenant { TenantId = _tenantId, Tenant = tenant, UserId = ineligibleUser.Id, User = ineligibleUser },
+            role, permission,
+            new RolePermission { RoleId = role.Id, Role = role, PermissionId = permission.Id, Permission = permission },
+            assignment,
+            new InventoryLocation
+            {
+                TenantId = _tenantId, InventoryItemId = item.Id, LocationId = reserve.Id,
+                Quantity = 10, AvailableQuantity = 10
+            },
+            new InventoryLocation
+            {
+                TenantId = _tenantId, InventoryItemId = item.Id, LocationId = pick.Id,
+                Quantity = 0, AvailableQuantity = 0
+            });
+        await _context.SaveChangesAsync();
+
+        var suggestion = (await _service.GetSuggestionsAsync(warehouse.Id, InventoryDirectedTaskType.Replenishment)).Single();
+        var assignees = await _service.GetAssigneesAsync(warehouse.Id, InventoryDirectedTaskType.Replenishment);
+
+        assignees.Should().ContainSingle().Which.UserId.Should().Be(eligibleUser.Id);
+        var denied = () => _service.CreateTaskAsync(new CreateInventoryDirectedTaskRequest
+        {
+            WarehouseId = warehouse.Id, SuggestionKey = suggestion.SuggestionKey,
+            AssignedToUserId = ineligibleUser.Id, Reason = "Assign directed replenishment.",
+            IdempotencyKey = "directed-ineligible-assignee"
+        }, "corr-directed-assignee");
+        await denied.Should().ThrowAsync<InventoryDirectedOperationAuthorizationException>();
+
+        var created = await _service.CreateTaskAsync(new CreateInventoryDirectedTaskRequest
+        {
+            WarehouseId = warehouse.Id, SuggestionKey = suggestion.SuggestionKey,
+            AssignedToUserId = eligibleUser.Id, Reason = "Assign directed replenishment.",
+            IdempotencyKey = "directed-eligible-assignee"
+        }, "corr-directed-assignee");
+        created.AssignedToUserId.Should().Be(eligibleUser.Id);
     }
 
     [Fact]
