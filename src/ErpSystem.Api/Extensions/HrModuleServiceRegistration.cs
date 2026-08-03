@@ -383,6 +383,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IClientTimesheetConfirmationRepository, ClientTimesheetConfirmationRepository>();
         services.AddScoped<ITimesheetInvoiceRepository, TimesheetInvoiceRepository>();
         services.AddScoped<ITimesheetInvoiceLinkRepository, TimesheetInvoiceLinkRepository>();
+        // Payroll owns the salary structure; HR mirrors it. Registered before the salary services because
+        // they depend on it for reconcile-on-read.
+        services.AddScoped<ISalaryStructureProjectionService, SalaryStructureProjectionService>();
         services.AddScoped<ISalaryStructureService, SalaryStructureService>();
         services.AddScoped<ISalaryGradeService, SalaryStructureService>();
         services.AddScoped<ISalaryLevelService, SalaryStructureService>();

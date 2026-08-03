@@ -23,6 +23,9 @@ import {
   Scale,
   Banknote,
   Globe,
+  GraduationCap,
+  IdCard,
+  Tags,
   Globe2,
   ListTree,
   Mail,
@@ -336,9 +339,8 @@ const navigationItems: NavItem[] = [
           { title: 'Contributions', href: '/hr/payroll/contributions', icon: CreditCard },
         ],
       },
-      { title: 'Attendance', href: '/hr/attendance', icon: UserCheck },
-      { title: 'Leave Management', href: '/hr/leave', icon: UserCheck },
-      { title: 'Performance', href: '/hr/performance', icon: BarChart3 },
+      // Attendance, Leave Management and Performance are re-added with their areas —
+      // linking to routes that do not exist yet only produces 404s.
     ],
   },
   {
@@ -911,10 +913,13 @@ const navigationItems: NavItem[] = [
           { title: 'Job Positions', href: '/administration/hr/positions', icon: Users },
           { title: 'Staff Levels', href: '/administration/hr/staff-levels', icon: ListTree },
           { title: 'Skills', href: '/administration/hr/skills', icon: Wrench },
+          { title: 'Qualifications', href: '/administration/hr/qualifications', icon: GraduationCap },
+          { title: 'Identification Types', href: '/administration/hr/identification-types', icon: IdCard },
+          { title: 'Reason Codes', href: '/administration/hr/reason-codes', icon: Tags },
           { title: 'Countries', href: '/administration/hr/countries', icon: Globe },
           { title: 'Departments', href: '/administration/hr/departments', icon: Building },
-          { title: 'Employee Categories', href: '/administration/hr/categories', icon: Users },
-          { title: 'Leave Types', href: '/administration/hr/leave-types', icon: UserCheck },
+          // Leave Types is re-added with the Leave area; Employee Categories has no
+          // backing controller at all, so it is dropped rather than parked.
           {
             title: 'Payroll',
             href: '/administration/hr/payroll',

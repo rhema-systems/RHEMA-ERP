@@ -173,6 +173,18 @@ public class EmployeeService : IEmployeeService
             return;
         }
 
+        // OrganizationLevelId and PositionId are required on the history row. An employee may not have
+        // them yet, and coalescing to Guid.Empty writes an FK that matches no row — the insert then
+        // fails and takes the whole read down with it. Skip the back-fill instead; it runs again once
+        // the employee has an org level.
+        if (!employee.OrganizationLevelId.HasValue || employee.PositionId == Guid.Empty)
+        {
+            _logger.LogDebug(
+                "Skipping initial position history for {EmployeeId}: no organization level or position yet.",
+                employee.Id);
+            return;
+        }
+
         var startDate = employee.DateEmployed.HasValue
             ? employee.DateEmployed.Value.ToDateTime(TimeOnly.MinValue)
             : DateTime.UtcNow;
@@ -181,9 +193,10 @@ public class EmployeeService : IEmployeeService
         {
             EmployeeId = employee.Id,
             TenantId = employee.TenantId,
-            LocationLevelId = employee.LocationLevelId ?? Guid.Empty,
+            // Nullable on both sides — leave it null rather than inventing an empty FK.
+            LocationLevelId = employee.LocationLevelId,
             LocationId = employee.LocationId,
-            OrganizationLevelId = employee.OrganizationLevelId ?? Guid.Empty,
+            OrganizationLevelId = employee.OrganizationLevelId.Value,
             OrganizationUnitId = employee.OrganizationUnitId,
             PositionId = employee.PositionId,
             StartDate = startDate,
@@ -614,6 +627,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeContact>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         if (entity.IsPrimary)
         {
@@ -710,6 +726,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeEmergencyContact>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         if (entity.IsPrimary)
         {
@@ -829,6 +848,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeDependent>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -889,6 +911,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeDependentBenefit>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -978,6 +1003,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeQualification>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1073,6 +1101,9 @@ public class EmployeeService : IEmployeeService
         if (exists) throw new InvalidOperationException("Employee already has this skill assigned.");
 
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1169,6 +1200,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeIdentificationCard>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1263,6 +1297,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeWorkHistory>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1325,6 +1362,7 @@ public class EmployeeService : IEmployeeService
         var entity = new EmployeeContractDetail
         {
             EmployeeId = dto.EmployeeId,
+            TenantId = GetTenantId(),
             ContractNumber = dto.ContractNumber.Trim(),
             EmploymentType = dto.EmploymentType,
             StartDate = dto.StartDate,
@@ -1482,6 +1520,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<ExpatriateAssignment>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1557,6 +1598,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeePositionHistory>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         // close current history if overlapping
         var current = await repo.FirstOrDefaultAsync(x => x.EmployeeId == dto.EmployeeId && x.EndDate == null);
@@ -1632,6 +1676,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         // Prevent overlaps: close any assignment overlapping the new EffectiveDate
         var current = await repo.FirstOrDefaultAsync(a =>
@@ -1699,6 +1746,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeReferee>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         if (entity.IsPrimary)
         {
@@ -1814,6 +1864,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeGuarantor>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         if (entity.IsPrimary)
         {
@@ -1977,6 +2030,9 @@ public class EmployeeService : IEmployeeService
         }
 
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();

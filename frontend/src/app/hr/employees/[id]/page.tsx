@@ -17,6 +17,20 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { employeeService } from '@/services/hr/employee.service';
 import type { EmployeeDetail } from '@/types/hr/employee';
+import { ContactsTab } from '@/components/hr/employee/tabs/ContactsTab';
+import { EmergencyContactsTab } from '@/components/hr/employee/tabs/EmergencyContactsTab';
+import { DependentsTab } from '@/components/hr/employee/tabs/DependentsTab';
+import { QualificationsTab } from '@/components/hr/employee/tabs/QualificationsTab';
+import { SkillsTab } from '@/components/hr/employee/tabs/SkillsTab';
+import { IdentificationTab } from '@/components/hr/employee/tabs/IdentificationTab';
+import { WorkHistoryTab } from '@/components/hr/employee/tabs/WorkHistoryTab';
+import { ContractsTab } from '@/components/hr/employee/tabs/ContractsTab';
+import { ExpatriateTab } from '@/components/hr/employee/tabs/ExpatriateTab';
+import { PositionHistoryTab } from '@/components/hr/employee/tabs/PositionHistoryTab';
+import { SalaryAssignmentsTab } from '@/components/hr/employee/tabs/SalaryAssignmentsTab';
+import { RefereesTab } from '@/components/hr/employee/tabs/RefereesTab';
+import { GuarantorsTab } from '@/components/hr/employee/tabs/GuarantorsTab';
+import { BankDetailsTab } from '@/components/hr/employee/tabs/BankDetailsTab';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -62,7 +76,7 @@ export default function EmployeeDetailPage() {
 
   const { data: manager } = useQuery({
     queryKey: ['hr', 'employees', e?.managerId, 'lookup'],
-    queryFn: () => employeeService.getById(e!.managerId as string),
+    queryFn: () => employeeService.getById(e?.managerId as string),
     enabled: !!e?.managerId,
   });
 
@@ -148,13 +162,26 @@ export default function EmployeeDetailPage() {
       />
 
       <Tabs defaultValue="overview">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="contacts">Contacts</TabsTrigger>
-          <TabsTrigger value="dependents">Dependents</TabsTrigger>
-          <TabsTrigger value="qualifications">Qualifications</TabsTrigger>
-          <TabsTrigger value="bank">Bank</TabsTrigger>
-        </TabsList>
+        {/* 15 tabs will not fit a fixed row — let the strip scroll on narrow screens. */}
+        <div className="overflow-x-auto pb-1">
+          <TabsList className="inline-flex w-max">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="contacts">Addresses</TabsTrigger>
+            <TabsTrigger value="emergency">Emergency</TabsTrigger>
+            <TabsTrigger value="dependents">Dependents</TabsTrigger>
+            <TabsTrigger value="qualifications">Qualifications</TabsTrigger>
+            <TabsTrigger value="skills">Skills</TabsTrigger>
+            <TabsTrigger value="identification">Identification</TabsTrigger>
+            <TabsTrigger value="work-history">Work History</TabsTrigger>
+            <TabsTrigger value="contracts">Contracts</TabsTrigger>
+            <TabsTrigger value="expatriate">Expatriate</TabsTrigger>
+            <TabsTrigger value="position-history">Position History</TabsTrigger>
+            <TabsTrigger value="salary">Salary</TabsTrigger>
+            <TabsTrigger value="referees">Referees</TabsTrigger>
+            <TabsTrigger value="guarantors">Guarantors</TabsTrigger>
+            <TabsTrigger value="bank">Bank</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="overview" className="space-y-4 pt-4">
           <InfoCard title="Personal">
@@ -209,18 +236,48 @@ export default function EmployeeDetailPage() {
           )}
         </TabsContent>
 
-        {(['contacts', 'dependents', 'qualifications', 'bank'] as const).map((tab) => (
-          <TabsContent key={tab} value={tab} className="pt-4">
-            <Card>
-              <CardContent className="py-8">
-                <EmptyState
-                  title="Coming soon"
-                  description="This section will be built in a follow-up iteration."
-                />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        ))}
+        <TabsContent value="contacts" className="pt-4">
+          <ContactsTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="emergency" className="pt-4">
+          <EmergencyContactsTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="dependents" className="pt-4">
+          <DependentsTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="qualifications" className="pt-4">
+          <QualificationsTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="skills" className="pt-4">
+          <SkillsTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="identification" className="pt-4">
+          <IdentificationTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="work-history" className="pt-4">
+          <WorkHistoryTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="contracts" className="pt-4">
+          <ContractsTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="expatriate" className="pt-4">
+          <ExpatriateTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="position-history" className="pt-4">
+          <PositionHistoryTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="salary" className="pt-4">
+          <SalaryAssignmentsTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="referees" className="pt-4">
+          <RefereesTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="guarantors" className="pt-4">
+          <GuarantorsTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="bank" className="pt-4">
+          <BankDetailsTab employeeId={id} />
+        </TabsContent>
       </Tabs>
 
       <ConfirmationDialog

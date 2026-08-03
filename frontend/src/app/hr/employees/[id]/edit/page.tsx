@@ -100,7 +100,7 @@ export default function EditEmployeePage() {
   // Seed the manager picker label from the current manager, if any.
   const { data: manager } = useQuery({
     queryKey: ['hr', 'employees', employee?.managerId, 'lookup'],
-    queryFn: () => employeeService.getById(employee!.managerId as string),
+    queryFn: () => employeeService.getById(employee?.managerId as string),
     enabled: !!employee?.managerId,
   });
 

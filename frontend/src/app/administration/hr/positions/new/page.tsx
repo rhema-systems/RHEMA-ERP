@@ -15,6 +15,7 @@ import { employeePositionService } from '@/services/hr/employee-position.service
 import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
 import { staffLevelService } from '@/services/hr/staff-level.service';
+import { salaryGradeService } from '@/services/hr/salary-grade.service';
 import { skillService } from '@/services/hr/skill.service';
 
 const toIntOrNull = (v: string) => (v && v.trim() ? Number(v) : null);
@@ -45,6 +46,12 @@ export default function NewEmployeePositionPage() {
     queryFn: () => staffLevelService.getActive(),
   });
 
+  // Defined in Payroll, mirrored into HR — read-only picker data.
+  const { data: salaryGrades } = useQuery({
+    queryKey: ['hr', 'salary-grades', 'active'],
+    queryFn: () => salaryGradeService.getActive(),
+  });
+
   const { data: skills } = useQuery({
     queryKey: ['hr', 'skills', 'active'],
     queryFn: () => skillService.getActive(),
@@ -61,6 +68,7 @@ export default function NewEmployeePositionPage() {
         organizationUnitId: values.organizationUnitId,
         reportsToPositionId: values.reportsToPositionId || null,
         staffLevelId: values.staffLevelId || null,
+        salaryGradeId: values.salaryGradeId || null,
         level: values.level,
         expectedHeadcount: values.expectedHeadcount,
         workMode: values.workMode,
@@ -111,6 +119,7 @@ export default function NewEmployeePositionPage() {
           units={units ?? []}
           positions={positions ?? []}
           staffLevels={staffLevels ?? []}
+          salaryGrades={salaryGrades ?? []}
           skills={skills ?? []}
           defaultValues={emptyEmployeePosition}
           onSubmit={handleSubmit}

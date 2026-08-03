@@ -15,6 +15,7 @@ import { employeePositionService } from '@/services/hr/employee-position.service
 import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
 import { staffLevelService } from '@/services/hr/staff-level.service';
+import { salaryGradeService } from '@/services/hr/salary-grade.service';
 import { skillService } from '@/services/hr/skill.service';
 
 const toIntOrNull = (v: string) => (v && v.trim() ? Number(v) : null);
@@ -54,6 +55,13 @@ export default function EditEmployeePositionPage() {
     queryFn: () => staffLevelService.getActive(),
   });
 
+  // Defined in Payroll, mirrored into HR — read-only picker data. Includes inactive grades so an
+  // existing assignment to a withdrawn grade still renders instead of silently blanking.
+  const { data: salaryGrades } = useQuery({
+    queryKey: ['hr', 'salary-grades', 'all'],
+    queryFn: () => salaryGradeService.getAll(),
+  });
+
   const { data: skills } = useQuery({
     queryKey: ['hr', 'skills', 'active'],
     queryFn: () => skillService.getActive(),
@@ -76,6 +84,7 @@ export default function EditEmployeePositionPage() {
         organizationUnitId: values.organizationUnitId,
         reportsToPositionId: values.reportsToPositionId || null,
         staffLevelId: values.staffLevelId || null,
+        salaryGradeId: values.salaryGradeId || null,
         level: values.level,
         expectedHeadcount: values.expectedHeadcount,
         workMode: values.workMode,
@@ -129,6 +138,7 @@ export default function EditEmployeePositionPage() {
           units={units ?? []}
           positions={reportsToOptions}
           staffLevels={staffLevels ?? []}
+          salaryGrades={salaryGrades ?? []}
           skills={skills ?? []}
           defaultValues={{
             title: position.title,
@@ -138,6 +148,7 @@ export default function EditEmployeePositionPage() {
             organizationLevelId: position.organizationLevelId,
             reportsToPositionId: position.reportsToPositionId ?? '',
             staffLevelId: position.staffLevelId ?? '',
+            salaryGradeId: position.salaryGradeId ?? '',
             level: position.level,
             expectedHeadcount: position.expectedHeadcount,
             workMode: position.workMode,

@@ -26,6 +26,7 @@ public class SalaryStructureService :
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ISalaryStructureProjectionService _projectionService;
     private readonly ILogger<SalaryStructureService> _logger;
 
     private readonly IGenericRepository<SalaryGrade> _salaryGradeRepository;
@@ -38,6 +39,7 @@ public class SalaryStructureService :
         IGenericRepository<SalaryNotch> salaryNotchRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        ISalaryStructureProjectionService projectionService,
         ILogger<SalaryStructureService> logger)
     {
         _salaryGradeRepository = salaryGradeRepository;
@@ -45,7 +47,24 @@ public class SalaryStructureService :
         _salaryNotchRepository = salaryNotchRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _projectionService = projectionService;
         _logger = logger;
+    }
+
+    // Payroll owns the salary structure; these tables are a mirror of it (see
+    // ISalaryStructureProjectionService). Because the payroll module cannot be modified to push changes,
+    // HR pulls them on read. The call short-circuits cheaply when payroll has not changed.
+    private async Task EnsureProjectedAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _projectionService.EnsureCurrentAsync(tenantId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // A projection failure must not take down a read. Serve what is already mirrored.
+            _logger.LogError(ex, "Salary structure projection failed for tenant {TenantId}; serving the existing mirror.", tenantId);
+        }
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -191,6 +210,8 @@ public class SalaryStructureService :
     public async Task<SalaryGradeDetailDto> GetGradeHierarchyAsync(Guid tenantId, Guid gradeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await EnsureProjectedAsync(tenantId, cancellationToken);
+
         var entity = await _salaryGradeRepository
             .GetQueryable(g => g.TenantId == tenantId && g.Id == gradeId)
             .AsNoTracking()
@@ -209,6 +230,8 @@ public class SalaryStructureService :
     public async Task<IReadOnlyList<SalaryGradeDto>> GetAllGradesAsync(Guid tenantId, bool includeInactive = true, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await EnsureProjectedAsync(tenantId, cancellationToken);
+
         var query = _salaryGradeRepository
             .GetQueryable(g => g.TenantId == tenantId)
             .AsNoTracking();
@@ -237,6 +260,8 @@ public class SalaryStructureService :
         tenantId = RequireCurrentTenant(tenantId);
         if (pageNumber <= 0) throw new ArgumentOutOfRangeException(nameof(pageNumber));
         if (pageSize <= 0) throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+        await EnsureProjectedAsync(tenantId, cancellationToken);
 
         var query = _salaryGradeRepository
             .GetQueryable(g => g.TenantId == tenantId)
@@ -387,6 +412,8 @@ public class SalaryStructureService :
     public async Task<IReadOnlyList<SalaryLevelDto>> GetLevelsByGradeAsync(Guid tenantId, Guid gradeId, bool includeInactive = true, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await EnsureProjectedAsync(tenantId, cancellationToken);
+
         var query = _salaryLevelRepository
             .GetQueryable(l => l.TenantId == tenantId && l.SalaryGradeId == gradeId)
             .AsNoTracking();
@@ -663,6 +690,8 @@ public class SalaryStructureService :
     public async Task<IReadOnlyList<SalaryNotchDto>> GetNotchesByLevelAsync(Guid tenantId, Guid levelId, bool includeInactive = true, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await EnsureProjectedAsync(tenantId, cancellationToken);
+
         var query = _salaryNotchRepository
             .GetQueryable(n => n.TenantId == tenantId && n.SalaryLevelId == levelId)
             .AsNoTracking();

@@ -27,11 +27,12 @@ import {
 import type { OrganizationLevel, OrganizationUnitSummary } from '@/types/hr/organization';
 import { SKILL_LEVEL_OPTIONS, type EmployeePosition } from '@/types/hr/position';
 import type { StaffLevelListItem } from '@/types/hr/staff-level';
+import type { SalaryGrade } from '@/types/hr/salary';
 import type { Skill } from '@/types/hr/skill';
 
 const NONE = 'none';
 const workModes = ['OnSite', 'Remote', 'Hybrid'] as const;
-const skillLevels = ['Beginner', 'Intermediate', 'Advanced', 'Expert'] as const;
+const skillLevels = ['Beginner', 'Intermediate', 'Advanced', 'Expert', 'Master'] as const;
 
 // Optional integer entered as text ('' = not provided).
 const optionalInt = z
@@ -48,6 +49,7 @@ export const employeePositionSchema = z.object({
   organizationLevelId: z.string().min(1, 'Select a unit to derive its level'),
   reportsToPositionId: z.string().optional().or(z.literal('')),
   staffLevelId: z.string().optional().or(z.literal('')),
+  salaryGradeId: z.string().optional().or(z.literal('')),
   level: z.coerce.number().int('Must be a whole number').min(1, 'Must be at least 1'),
   expectedHeadcount: z.coerce.number().int('Must be a whole number').min(1, 'Must be at least 1'),
   workMode: z.enum(workModes),
@@ -80,6 +82,7 @@ export const emptyEmployeePosition: EmployeePositionFormValues = {
   organizationLevelId: '',
   reportsToPositionId: '',
   staffLevelId: '',
+  salaryGradeId: '',
   level: 1,
   expectedHeadcount: 1,
   workMode: 'OnSite',
@@ -100,6 +103,8 @@ interface EmployeePositionFormProps {
   units: OrganizationUnitSummary[];
   positions: EmployeePosition[];
   staffLevels: StaffLevelListItem[];
+  /** Defined in Payroll and mirrored into HR — read-only here. */
+  salaryGrades: SalaryGrade[];
   skills: Skill[];
   defaultValues: EmployeePositionFormValues;
   onSubmit: (values: EmployeePositionFormValues) => Promise<void>;
@@ -113,6 +118,7 @@ export function EmployeePositionForm({
   units,
   positions,
   staffLevels,
+  salaryGrades,
   skills,
   defaultValues,
   onSubmit,
@@ -134,6 +140,7 @@ export function EmployeePositionForm({
   const requiresLicense = form.watch('requiresLicense');
   const isActive = form.watch('isActive');
   const staffLevelValue = form.watch('staffLevelId') || NONE;
+  const salaryGradeValue = form.watch('salaryGradeId') || NONE;
 
   const { fields: skillFields, append: appendSkill, remove: removeSkill } = useFieldArray({
     control: form.control,
@@ -276,6 +283,30 @@ export function EmployeePositionForm({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="salaryGradeId">Salary Grade</Label>
+              <Select
+                value={salaryGradeValue}
+                onValueChange={(value) =>
+                  form.setValue('salaryGradeId', value === NONE ? '' : value)
+                }
+              >
+                <SelectTrigger id="salaryGradeId">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>None</SelectItem>
+                  {salaryGrades.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>
+                      {g.code} — {g.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Grades are defined in Payroll and mirrored here.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="workMode">Work Mode</Label>

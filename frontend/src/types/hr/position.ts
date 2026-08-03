@@ -1,12 +1,15 @@
 // Enums serialize as strings (JsonStringEnumConverter is registered globally).
 export type WorkMode = 'OnSite' | 'Remote' | 'Hybrid';
-export type SkillLevel = 'Beginner' | 'Intermediate' | 'Advanced' | 'Expert';
+// Mirrors ErpSystem.Core.Enums.SkillLevel, which has five members — 'Master' was
+// missing here, so a Master-level skill coming back from the API was untyped.
+export type SkillLevel = 'Beginner' | 'Intermediate' | 'Advanced' | 'Expert' | 'Master';
 
 export const SKILL_LEVEL_OPTIONS: { value: SkillLevel; label: string }[] = [
   { value: 'Beginner', label: 'Beginner' },
   { value: 'Intermediate', label: 'Intermediate' },
   { value: 'Advanced', label: 'Advanced' },
   { value: 'Expert', label: 'Expert' },
+  { value: 'Master', label: 'Master' },
 ];
 
 // Mirrors PositionSkillRequirementDto (read).
