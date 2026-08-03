@@ -273,6 +273,7 @@ public class CreateTechnicianSkillAssignmentDto
 
     [StringLength(1000)]
     public string? Notes { get; set; }
+
 }
 
 /// <summary>
@@ -3061,6 +3062,8 @@ public class CreateWorkOrderPartDto
 
     [StringLength(1000)]
     public string? Notes { get; set; }
+
+    public Guid? NegativeStockOverrideId { get; set; }
 }
 
 public class UpdateWorkOrderPartDto
@@ -3091,6 +3094,8 @@ public class UpdateWorkOrderPartDto
 
     [StringLength(1000)]
     public string? Notes { get; set; }
+
+    public Guid? NegativeStockOverrideId { get; set; }
 }
 
 // Work Order Labor DTOs

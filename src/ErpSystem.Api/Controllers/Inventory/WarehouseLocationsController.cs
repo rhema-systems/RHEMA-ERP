@@ -7,6 +7,7 @@ using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace ErpSystem.Api.Controllers.Inventory;
 
@@ -21,6 +22,7 @@ public class WarehouseLocationsController : ControllerBase
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<WarehouseLocationsController> _logger;
     private readonly IProcurementMasterDataChangeService? _masterDataChanges;
+    private readonly IInventoryNegativeStockControlService _negativeStockControls;
 
     public WarehouseLocationsController(
         IWarehouseLocationRepository locationRepository,
@@ -28,6 +30,7 @@ public class WarehouseLocationsController : ControllerBase
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<WarehouseLocationsController> logger,
+        IInventoryNegativeStockControlService negativeStockControls,
         IProcurementMasterDataChangeService? masterDataChanges = null)
     {
         _locationRepository = locationRepository;
@@ -36,6 +39,7 @@ public class WarehouseLocationsController : ControllerBase
         _currentUserProvider = currentUserProvider;
         _logger = logger;
         _masterDataChanges = masterDataChanges;
+        _negativeStockControls = negativeStockControls;
     }
 
     /// <summary>
@@ -374,6 +378,8 @@ public class WarehouseLocationsController : ControllerBase
                 return BadRequest("This bin has allocated/reserved quantities. Clear allocations before reclassifying ownership.");
             }
 
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+
             var now = DateTime.UtcNow;
             var userId = _currentUserProvider.UserId;
 
@@ -388,12 +394,25 @@ public class WarehouseLocationsController : ControllerBase
                     continue;
                 }
 
+                await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
+                {
+                    InventoryItemId = il.InventoryItemId,
+                    WarehouseId = sourceWarehouseId,
+                    LocationId = location.Id,
+                    Quantity = qtyToMove,
+                    ReferenceType = "ConsignmentReclassification",
+                    ReferenceNumber = location.LocationCode,
+                    ReferenceId = location.Id,
+                    ReferenceLineId = il.Id,
+                    CorrelationId = HttpContext.TraceIdentifier
+                });
+
                 var inventoryItem = await inventoryItemRepo
                     .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == il.InventoryItemId && !x.IsDeleted);
 
                 if (inventoryItem == null)
                 {
-                    return BadRequest($"Inventory item {il.InventoryItemId} not found for tenant context.");
+                    throw new InvalidOperationException($"Inventory item {il.InventoryItemId} not found for tenant context.");
                 }
 
                 var sourceWq = await warehouseQtyRepo.FirstOrDefaultAsync(q =>
@@ -401,12 +420,12 @@ public class WarehouseLocationsController : ControllerBase
 
                 if (sourceWq == null)
                 {
-                    return BadRequest($"Warehouse quantity not found for item {il.InventoryItemId} in source warehouse.");
+                    throw new InvalidOperationException($"Warehouse quantity not found for item {il.InventoryItemId} in source warehouse.");
                 }
 
                 if (sourceWq.CurrentStock < qtyToMove)
                 {
-                    return BadRequest(
+                    throw new InvalidOperationException(
                         $"Insufficient source warehouse stock for item {inventoryItem.ItemCode}. " +
                         $"Bin has {qtyToMove}, but source warehouse has {sourceWq.CurrentStock}.");
                 }
@@ -451,7 +470,7 @@ public class WarehouseLocationsController : ControllerBase
                 // Reduce owned/main inventory totals (consignment stock is excluded from InventoryItem totals).
                 if (inventoryItem.CurrentStock < qtyToMove)
                 {
-                    return BadRequest(
+                    throw new InvalidOperationException(
                         $"Insufficient owned inventory totals for item {inventoryItem.ItemCode}. " +
                         $"Owned total is {inventoryItem.CurrentStock}, but bin has {qtyToMove}.");
                 }
@@ -518,6 +537,7 @@ public class WarehouseLocationsController : ControllerBase
             }
 
             await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.CommitAsync();
 
             return Ok(new
             {
@@ -532,6 +552,7 @@ public class WarehouseLocationsController : ControllerBase
         }
         catch (Exception ex)
         {
+            if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
             _logger.LogError(ex, "Error reclassifying stock to consignment for location {LocationId}", id);
             return StatusCode(500, "An error occurred while reclassifying stock to consignment.");
         }

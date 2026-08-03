@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Inventory;
@@ -262,8 +263,11 @@ public class GoodsReceiptNoteItemDto
     public decimal UnitCost { get; set; }
     public decimal TotalCost { get; set; }
     public string? LotNumber { get; set; }
+    public string? BatchNumber { get; set; }
     public string? SerialNumber { get; set; }
+    public DateTime? ManufactureDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
     public InspectionResult InspectionResult { get; set; }
     public string? InspectionNotes { get; set; }
     public Guid? StorageLocationId { get; set; }
@@ -320,9 +324,14 @@ public class CreateGoodsReceiptNoteItemDto
     public string? LotNumber { get; set; }
 
     [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    [MaxLength(100)]
     public string? SerialNumber { get; set; }
 
+    public DateTime? ManufactureDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
     public Guid? StorageLocationId { get; set; }
 
     [MaxLength(2000)]
@@ -398,7 +407,12 @@ public class InventoryTransferDetailDto : InventoryTransferDto
     public string? ReceivedByName { get; set; }
     public string? TrackingNumber { get; set; }
     public string? CarrierName { get; set; }
+    public bool HasOpenDiscrepancy { get; set; }
+    public DateTime? CompletedDate { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
     public List<InventoryTransferItemDto> Items { get; set; } = new();
+    public List<InventoryTransferActionDto> Actions { get; set; } = new();
+    public List<InventoryTransferDiscrepancyDto> Discrepancies { get; set; } = new();
 }
 
 public class InventoryTransferItemDto
@@ -410,6 +424,8 @@ public class InventoryTransferItemDto
     public decimal RequestedQuantity { get; set; }
     public decimal ShippedQuantity { get; set; }
     public decimal ReceivedQuantity { get; set; }
+    public decimal DamagedQuantity { get; set; }
+    public decimal ShortageQuantity { get; set; }
     public string UnitOfMeasure { get; set; } = string.Empty;
     public decimal UnitCost { get; set; }
     public decimal TotalCost { get; set; }
@@ -420,12 +436,67 @@ public class InventoryTransferItemDto
     public decimal LandedUnitCost { get; set; }
     
     public string? LotNumber { get; set; }
+    public string? BatchNumber { get; set; }
     public string? SerialNumber { get; set; }
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
     public Guid? SourceLocationId { get; set; }
     public string? SourceLocationName { get; set; }
     public Guid? DestinationLocationId { get; set; }
     public string? DestinationLocationName { get; set; }
     public string? Notes { get; set; }
+    [MaxLength(50)] public string? DiscrepancyReasonCode { get; set; }
+    [MaxLength(1000)] public string? DiscrepancyReason { get; set; }
+    public List<InventoryControlEvidenceRequest> Evidence { get; set; } = new();
+}
+
+public class InventoryTransferMutationContext
+{
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+    [MaxLength(100)] public string? CorrelationId { get; set; }
+    [MaxLength(1000)] public string? Comment { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public string? PayloadSalt { get; set; }
+    public Dictionary<Guid, Guid> NegativeStockOverrideIds { get; set; } = new();
+}
+
+public sealed class ResolveInventoryTransferDiscrepancyRequest : InventoryTransferMutationContext
+{
+    [Required] public List<Guid> DiscrepancyIds { get; set; } = new();
+    [Required, MaxLength(50)] public string ResolutionCode { get; set; } = string.Empty;
+    [Required, MaxLength(1000)] public string ResolutionNotes { get; set; } = string.Empty;
+    public List<InventoryControlEvidenceRequest> Evidence { get; set; } = new();
+}
+
+public sealed class CloseInventoryTransferRequest : InventoryTransferMutationContext
+{
+}
+
+public sealed class InventoryTransferActionDto
+{
+    public Guid Id { get; set; }
+    public int Sequence { get; set; }
+    public string ActionType { get; set; } = string.Empty;
+    public Guid ActorUserId { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+    public string CorrelationId { get; set; } = string.Empty;
+    public string? Comment { get; set; }
+}
+
+public sealed class InventoryTransferDiscrepancyDto
+{
+    public Guid Id { get; set; }
+    public Guid InventoryTransferItemId { get; set; }
+    public decimal DamagedQuantity { get; set; }
+    public decimal ShortageQuantity { get; set; }
+    public string ReasonCode { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? ResolutionCode { get; set; }
+    public string? ResolutionNotes { get; set; }
+    public DateTime? ResolvedAtUtc { get; set; }
+    public List<InventoryControlEvidenceDto> Evidence { get; set; } = new();
 }
 
 public class CreateInventoryTransferDto
@@ -484,7 +555,14 @@ public class CreateInventoryTransferItemDto
     public string? LotNumber { get; set; }
 
     [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    [MaxLength(100)]
     public string? SerialNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
@@ -506,7 +584,14 @@ public class AddTransferItemDto
     public string? LotNumber { get; set; }
 
     [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    [MaxLength(100)]
     public string? SerialNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
@@ -525,7 +610,14 @@ public class UpdateTransferItemDto
     public string? LotNumber { get; set; }
 
     [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    [MaxLength(100)]
     public string? SerialNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
@@ -536,6 +628,10 @@ public class UpdateTransferItemDto
 /// </summary>
 public class ShipTransferWithCostsDto
 {
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+    [MaxLength(100)] public string? CorrelationId { get; set; }
+    [MaxLength(1000)] public string? Comment { get; set; }
     [MaxLength(100)]
     public string? TrackingNumber { get; set; }
 
@@ -622,6 +718,15 @@ public class PhysicalCountDto
     public Guid? CategoryId { get; set; }
     public string? CategoryName { get; set; }
     public bool FreezeInventory { get; set; }
+    public bool BlindCount { get; set; }
+    public bool SystemQuantityVisible { get; set; }
+    public string? ABCClass { get; set; }
+    public DateTime? ScheduledForUtc { get; set; }
+    public DateTime? CutoffAtUtc { get; set; }
+    public DateTime? FreezeStartedAtUtc { get; set; }
+    public DateTime? FreezeReleasedAtUtc { get; set; }
+    public Guid? StockAdjustmentId { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
     public int TotalItems { get; set; }
     public int CountedItems { get; set; }
     public int ItemsWithVariance { get; set; }
@@ -635,7 +740,15 @@ public class PhysicalCountDetailDto : PhysicalCountDto
 {
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedDate { get; set; }
+    public Guid? StoresApprovedById { get; set; }
+    public DateTime? StoresApprovedAtUtc { get; set; }
+    public Guid? FinanceApprovedById { get; set; }
+    public DateTime? FinanceApprovedAtUtc { get; set; }
+    public Guid? AuditAttestedById { get; set; }
+    public DateTime? AuditAttestedAtUtc { get; set; }
+    public string? InvestigationSummary { get; set; }
     public List<PhysicalCountItemDto> Items { get; set; } = new();
+    public List<PhysicalCountActionDto> Actions { get; set; } = new();
 }
 
 public class PhysicalCountItemDto
@@ -657,6 +770,14 @@ public class PhysicalCountItemDto
     public bool IsCounted { get; set; }
     public DateTime? CountedAt { get; set; }
     public string? CountedByName { get; set; }
+    public int CountAttempts { get; set; }
+    public bool RequiresRecount { get; set; }
+    public decimal? FirstCountQuantity { get; set; }
+    public decimal? RecountedQuantity { get; set; }
+    public DateTime? RecountedAtUtc { get; set; }
+    public Guid? RecountedById { get; set; }
+    public string? InvestigationNotes { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
     public string? Notes { get; set; }
 }
 
@@ -669,6 +790,8 @@ public class CreatePhysicalCountDto
     public Guid? LocationId { get; set; }
     public Guid? CategoryId { get; set; }
     public bool FreezeInventory { get; set; }
+    public bool BlindCount { get; set; }
+    [MaxLength(1)] public string? ABCClass { get; set; }
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
@@ -691,6 +814,91 @@ public class RecordCountItemDto
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+}
+
+public class PhysicalCountMutationRequest
+{
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+    [MaxLength(100)] public string? CorrelationId { get; set; }
+    [MaxLength(2000)] public string? Comment { get; set; }
+}
+
+public sealed class PhysicalCountDecisionRequest : PhysicalCountMutationRequest
+{
+    public bool Approved { get; set; } = true;
+    [MaxLength(2000)] public string? Reason { get; set; }
+}
+
+public sealed class RecordPhysicalCountRecountRequest : PhysicalCountMutationRequest
+{
+    [Required] public Guid PhysicalCountItemId { get; set; }
+    [Required] public string ItemRowVersion { get; set; } = string.Empty;
+    [Range(0, double.MaxValue)] public decimal RecountedQuantity { get; set; }
+    [Required, MaxLength(2000)] public string InvestigationNotes { get; set; } = string.Empty;
+}
+
+public sealed class InventoryCycleCountScheduleDto
+{
+    public Guid Id { get; set; }
+    public Guid WarehouseId { get; set; }
+    public Guid LocationId { get; set; }
+    public string ABCClass { get; set; } = string.Empty;
+    public int FrequencyDays { get; set; }
+    public DateTime NextDueAtUtc { get; set; }
+    public Guid CalendarOccurrenceId { get; set; }
+    public Guid CutoffOccurrenceId { get; set; }
+    public DateTime CutoffAtUtc { get; set; }
+    public bool FreezeInventory { get; set; }
+    public bool BlindCount { get; set; }
+    public decimal RecountQuantityThreshold { get; set; }
+    public decimal RecountValueThreshold { get; set; }
+    public bool IsActive { get; set; }
+    public DateTime? LastGeneratedAtUtc { get; set; }
+    public Guid? LastPhysicalCountId { get; set; }
+    public string? Notes { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
+}
+
+public sealed class SaveInventoryCycleCountScheduleRequest
+{
+    [Required] public Guid WarehouseId { get; set; }
+    [Required] public Guid LocationId { get; set; }
+    [Required, MaxLength(1)] public string ABCClass { get; set; } = "A";
+    [Range(1, 366)] public int FrequencyDays { get; set; }
+    public DateTime NextDueAtUtc { get; set; }
+    [Required] public Guid CalendarOccurrenceId { get; set; }
+    [Required] public Guid CutoffOccurrenceId { get; set; }
+    public bool FreezeInventory { get; set; } = true;
+    public bool BlindCount { get; set; } = true;
+    [Range(0, double.MaxValue)] public decimal RecountQuantityThreshold { get; set; }
+    [Range(0, double.MaxValue)] public decimal RecountValueThreshold { get; set; }
+    public bool IsActive { get; set; } = true;
+    [MaxLength(500)] public string? Notes { get; set; }
+    public string? RowVersion { get; set; }
+}
+
+public sealed class PhysicalCountActionDto
+{
+    public Guid Id { get; set; }
+    public int Sequence { get; set; }
+    public string ActionType { get; set; } = string.Empty;
+    public Guid ActorUserId { get; set; }
+    public string ActorRole { get; set; } = string.Empty;
+    public DateTime OccurredAtUtc { get; set; }
+    public string? Comment { get; set; }
+    public string IntegrityHash { get; set; } = string.Empty;
+}
+
+public sealed class CycleCountGenerationResultDto
+{
+    public int DueSchedules { get; set; }
+    public int CountsCreated { get; set; }
+    public int EmptySchedules { get; set; }
+    public List<Guid> PhysicalCountIds { get; set; } = new();
 }
 
 public class UpdatePhysicalCountDto
@@ -1073,10 +1281,13 @@ public class InventoryRequisitionDto
     public decimal TotalQuantity { get; set; }
     public decimal TotalValue { get; set; }
     public string? RequestedByName { get; set; }
+    public Guid? RequestedById { get; set; }
+    public Guid? ApprovedById { get; set; }
     public string? ApprovedByName { get; set; }
     public string? Notes { get; set; }
     public string? Purpose { get; set; }
     public string CreatedAtFormatted { get; set; } = string.Empty;
+    public string RowVersion { get; set; } = string.Empty;
 
     /// <summary>
     /// Convenience field for UX: the current workflow step name when the requisition is pending approval.
@@ -1109,7 +1320,11 @@ public class InventoryRequisitionItemDto
     public decimal UnitCost { get; set; }
     public decimal TotalCost { get; set; }
     public string? LotNumber { get; set; }
+    public string? BatchNumber { get; set; }
     public string? SerialNumber { get; set; }
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
     public Guid? LocationId { get; set; }
     public string? LocationName { get; set; }
     public string? Notes { get; set; }
@@ -1196,7 +1411,14 @@ public class CreateInventoryRequisitionItemDto
     public string? LotNumber { get; set; }
 
     [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    [MaxLength(100)]
     public string? SerialNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
@@ -1217,7 +1439,14 @@ public class AddRequisitionItemDto
     public string? LotNumber { get; set; }
 
     [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    [MaxLength(100)]
     public string? SerialNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
@@ -1235,7 +1464,14 @@ public class UpdateRequisitionItemDto
     public string? LotNumber { get; set; }
 
     [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    [MaxLength(100)]
     public string? SerialNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
@@ -1256,16 +1492,116 @@ public class IssueRequisitionItemDto
     public string? LotNumber { get; set; }
 
     [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    [MaxLength(100)]
     public string? SerialNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
+    public Guid? NegativeStockOverrideId { get; set; }
 }
 
 public class IssueRequisitionDto
 {
     [Required]
+    [MaxLength(100)]
+    public string IdempotencyKey { get; set; } = string.Empty;
+
+    [Required]
+    public string RowVersion { get; set; } = string.Empty;
+
+    [Required]
+    public Guid? ReceiverUserId { get; set; }
+
+    [Required]
     public List<IssueRequisitionItemDto> Items { get; set; } = new();
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    public string? CorrelationId { get; set; }
+}
+
+public sealed class InventoryIssueReceiverDto
+{
+    public Guid UserId { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+}
+
+public sealed class InventoryIssueVoucherLineDto
+{
+    public Guid Id { get; set; }
+    public Guid InventoryRequisitionItemId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public string ItemCode { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public Guid WarehouseId { get; set; }
+    public Guid? LocationId { get; set; }
+    public string? LocationCode { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal TotalValue { get; set; }
+    public string? UnitOfMeasure { get; set; }
+    public string? LotNumber { get; set; }
+    public string? BatchNumber { get; set; }
+    public string? SerialNumber { get; set; }
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+}
+
+public sealed class InventoryIssueVoucherActionDto
+{
+    public int Sequence { get; set; }
+    public InventoryIssueVoucherActionType ActionType { get; set; }
+    public InventoryIssueVoucherStatus StatusAfter { get; set; }
+    public Guid ActorUserId { get; set; }
+    public string ActorName { get; set; } = string.Empty;
+    public DateTime OccurredAtUtc { get; set; }
+    public string Comment { get; set; } = string.Empty;
+}
+
+public sealed class InventoryIssueVoucherDto
+{
+    public Guid Id { get; set; }
+    public string VoucherNumber { get; set; } = string.Empty;
+    public Guid InventoryRequisitionId { get; set; }
+    public string RequisitionNumber { get; set; } = string.Empty;
+    public InventoryIssueVoucherStatus Status { get; set; }
+    public Guid WarehouseId { get; set; }
+    public string WarehouseName { get; set; } = string.Empty;
+    public Guid? LocationId { get; set; }
+    public string? LocationCode { get; set; }
+    public Guid DepartmentId { get; set; }
+    public string? DepartmentName { get; set; }
+    public string? CostCenter { get; set; }
+    public Guid? ProjectId { get; set; }
+    public string? ProjectCode { get; set; }
+    public Guid RequestedById { get; set; }
+    public string RequestedByName { get; set; } = string.Empty;
+    public Guid ApprovedById { get; set; }
+    public string ApprovedByName { get; set; } = string.Empty;
+    public Guid IssuedById { get; set; }
+    public string IssuedByName { get; set; } = string.Empty;
+    public Guid ReceiverUserId { get; set; }
+    public string ReceiverName { get; set; } = string.Empty;
+    public Guid? AcknowledgedById { get; set; }
+    public DateTime IssuedAtUtc { get; set; }
+    public DateTime? AcknowledgedAtUtc { get; set; }
+    public string? Notes { get; set; }
+    public string? ReceiverComment { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
+    public IReadOnlyList<InventoryIssueVoucherLineDto> Lines { get; set; } = Array.Empty<InventoryIssueVoucherLineDto>();
+    public IReadOnlyList<InventoryIssueVoucherActionDto> Actions { get; set; } = Array.Empty<InventoryIssueVoucherActionDto>();
+}
+
+public sealed class AcknowledgeInventoryIssueVoucherRequest
+{
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, MaxLength(1000)] public string Comment { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
 }
 
 public class ReturnRequisitionItemDto
@@ -1283,7 +1619,14 @@ public class ReturnRequisitionItemDto
     public string? LotNumber { get; set; }
 
     [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    [MaxLength(100)]
     public string? SerialNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
 }
 
 public class ReturnRequisitionDto
@@ -1291,8 +1634,117 @@ public class ReturnRequisitionDto
     [Required]
     public List<ReturnRequisitionItemDto> Items { get; set; } = new();
 
+    [Required, MaxLength(50)]
+    public string ReasonCode { get; set; } = string.Empty;
+
+    [Required, MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    [Required, MaxLength(100)]
+    public string IdempotencyKey { get; set; } = string.Empty;
+
+    [MaxLength(100)]
+    public string? CorrelationId { get; set; }
+
+    [Required]
+    public string RowVersion { get; set; } = string.Empty;
+
+    public List<InventoryControlEvidenceRequest> Evidence { get; set; } = new();
+}
+
+public sealed class InventoryControlEvidenceRequest
+{
+    public Guid CentralDocumentVersionId { get; set; }
+    [Required, MaxLength(500)] public string EvidenceReference { get; set; } = string.Empty;
+}
+
+public sealed class InventoryControlEvidenceDto
+{
+    public Guid Id { get; set; }
+    public Guid CentralDocumentVersionId { get; set; }
+    public Guid FileUploadRecordId { get; set; }
+    public string EvidenceReference { get; set; } = string.Empty;
+    public string DocumentReference { get; set; } = string.Empty;
+    public string VersionNumber { get; set; } = string.Empty;
+}
+
+public sealed class InventoryReturnVoucherLineDto
+{
+    public Guid Id { get; set; }
+    public Guid RequisitionItemId { get; set; }
+    public Guid InventoryItemId { get; set; }
+    public string ItemCode { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public Guid? LocationId { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal TotalValue { get; set; }
+    public string? LotNumber { get; set; }
+    public string? BatchNumber { get; set; }
+    public string? SerialNumber { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+}
+
+public sealed class InventoryReturnVoucherActionDto
+{
+    public int Sequence { get; set; }
+    public string ActionType { get; set; } = string.Empty;
+    public Guid ActorUserId { get; set; }
+    public string ActorName { get; set; } = string.Empty;
+    public DateTime OccurredAtUtc { get; set; }
+    public string? Comment { get; set; }
+}
+
+public sealed class InventoryReturnVoucherDto
+{
+    public Guid Id { get; set; }
+    public string VoucherNumber { get; set; } = string.Empty;
+    public Guid InventoryRequisitionId { get; set; }
+    public string RequisitionNumber { get; set; } = string.Empty;
+    public Guid WarehouseId { get; set; }
+    public string WarehouseName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string ReasonCode { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string? Notes { get; set; }
+    public Guid RequestedById { get; set; }
+    public string RequestedByName { get; set; } = string.Empty;
+    public Guid? ApprovedById { get; set; }
+    public DateTime? ApprovedAtUtc { get; set; }
+    public Guid? PostedById { get; set; }
+    public DateTime? PostedAtUtc { get; set; }
+    public Guid? ReversedById { get; set; }
+    public DateTime? ReversedAtUtc { get; set; }
+    public string? ReversalReason { get; set; }
+    public decimal TotalValue { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
+    public IReadOnlyList<InventoryReturnVoucherLineDto> Lines { get; set; } = Array.Empty<InventoryReturnVoucherLineDto>();
+    public IReadOnlyList<InventoryControlEvidenceDto> Evidence { get; set; } = Array.Empty<InventoryControlEvidenceDto>();
+    public IReadOnlyList<InventoryReturnVoucherActionDto> Actions { get; set; } = Array.Empty<InventoryReturnVoucherActionDto>();
+}
+
+public sealed class DecideInventoryReturnVoucherRequest
+{
+    public bool Approved { get; set; }
+    [Required, MaxLength(1000)] public string Comment { get; set; } = string.Empty;
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+}
+
+public sealed class PostInventoryReturnVoucherRequest
+{
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+}
+
+public sealed class ReverseInventoryReturnVoucherRequest
+{
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, MaxLength(1000)] public string Reason { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
 }
 
 #endregion

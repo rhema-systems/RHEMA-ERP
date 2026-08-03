@@ -1,7 +1,11 @@
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Inventory;
@@ -10,7 +14,7 @@ namespace ErpSystem.Core.Services.Inventory;
 /// Physical Count management service
 /// Handles physical inventory counts, variances, and adjustments
 /// </summary>
-public class PhysicalCountService : IPhysicalCountService
+public partial class PhysicalCountService : IPhysicalCountService
 {
     private readonly IPhysicalCountRepository _countRepository;
     private readonly IPhysicalCountItemRepository _countItemRepository;
@@ -19,6 +23,9 @@ public class PhysicalCountService : IPhysicalCountService
     private readonly IWarehouseQuantityRepository _warehouseQuantityRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IProcurementAccessControlService _accessControl;
+    private readonly IStockAdjustmentService _stockAdjustmentService;
+    private readonly IProcurementControlEventService _controlEvents;
     private readonly ILogger<PhysicalCountService> _logger;
 
     public PhysicalCountService(
@@ -29,6 +36,9 @@ public class PhysicalCountService : IPhysicalCountService
         IWarehouseQuantityRepository warehouseQuantityRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
+        IProcurementAccessControlService accessControl,
+        IStockAdjustmentService stockAdjustmentService,
+        IProcurementControlEventService controlEvents,
         ILogger<PhysicalCountService> logger)
     {
         _countRepository = countRepository;
@@ -38,6 +48,9 @@ public class PhysicalCountService : IPhysicalCountService
         _warehouseQuantityRepository = warehouseQuantityRepository;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _accessControl = accessControl;
+        _stockAdjustmentService = stockAdjustmentService;
+        _controlEvents = controlEvents;
         _logger = logger;
     }
 
@@ -48,25 +61,27 @@ public class PhysicalCountService : IPhysicalCountService
         var counts = await _countRepository.GetByDateRangeAsync(
             fromDate ?? DateTime.UtcNow.AddMonths(-3),
             toDate ?? DateTime.UtcNow);
-        return counts.Select(MapToDto);
+        return (await FilterReadableAsync(counts)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<PhysicalCountDto>> GetByWarehouseAsync(Guid warehouseId)
     {
         var counts = await _countRepository.GetByWarehouseAsync(warehouseId);
-        return counts.Select(MapToDto);
+        return (await FilterReadableAsync(counts)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<PhysicalCountDto>> GetInProgressAsync()
     {
         var counts = await _countRepository.GetInProgressAsync();
-        return counts.Select(MapToDto);
+        return (await FilterReadableAsync(counts)).Select(MapToDto);
     }
 
     public async Task<PhysicalCountDetailDto?> GetByIdAsync(Guid id)
     {
         var count = await _countRepository.GetWithItemsAsync(id);
-        return count != null ? MapToDetailDto(count) : null;
+        return count != null && await CanAccessAsync(count, "procurement.inventory.read")
+            ? MapToDetailDto(count)
+            : null;
     }
 
     public async Task<PhysicalCountDetailDto?> GetByCountNumberAsync(string countNumber)
@@ -74,7 +89,9 @@ public class PhysicalCountService : IPhysicalCountService
         var count = await _countRepository.GetByCountNumberAsync(countNumber);
         if (count == null) return null;
         var fullCount = await _countRepository.GetWithItemsAsync(count.Id);
-        return fullCount != null ? MapToDetailDto(fullCount) : null;
+        return fullCount != null && await CanAccessAsync(fullCount, "procurement.inventory.read")
+            ? MapToDetailDto(fullCount)
+            : null;
     }
 
     public async Task<IEnumerable<PhysicalCountDto>> GetFilteredAsync(PhysicalCountFilterDto filter)
@@ -97,8 +114,11 @@ public class PhysicalCountService : IPhysicalCountService
         if (!string.IsNullOrEmpty(filter.CountNumber))
             query = query.Where(c => c.CountNumber.Contains(filter.CountNumber, StringComparison.OrdinalIgnoreCase));
 
-        return query
+        var page = query
             .OrderByDescending(c => c.CountDate)
+            .ToList();
+        var readable = await FilterReadableAsync(page);
+        return readable
             .Skip((filter.Page - 1) * filter.PageSize)
             .Take(filter.PageSize)
             .Select(MapToDto);
@@ -110,6 +130,7 @@ public class PhysicalCountService : IPhysicalCountService
 
     public async Task<PhysicalCountDto> CreateAsync(CreatePhysicalCountDto dto, Guid userId)
     {
+        EnsureActor(userId);
         var warehouse = await _warehouseRepository.GetByIdAsync(dto.WarehouseId)
             ?? throw new ArgumentException($"Warehouse {dto.WarehouseId} not found");
 
@@ -122,6 +143,12 @@ public class PhysicalCountService : IPhysicalCountService
             throw new InvalidOperationException("TenantId is required to create a physical count");
         }
 
+        await EnsureAccessAsync(
+            "procurement.inventory.count",
+            dto.WarehouseId,
+            dto.LocationId,
+            "create");
+
         var count = new PhysicalCount
         {
             CountNumber = await GenerateCountNumberAsync(),
@@ -130,7 +157,11 @@ public class PhysicalCountService : IPhysicalCountService
             CountDate = DateTime.UtcNow,
             LocationId = dto.LocationId,
             CategoryId = dto.CategoryId,
-            FreezeInventory = dto.FreezeInventory,
+            FreezeInventory = dto.CountType == CountType.CycleCount || dto.FreezeInventory,
+            BlindCount = dto.CountType == CountType.CycleCount || dto.BlindCount,
+            ABCClass = dto.CountType == CountType.CycleCount
+                ? NormalizeAbcClass(dto.ABCClass) ?? "C"
+                : NormalizeAbcClass(dto.ABCClass),
             Notes = dto.Notes,
             Status = "Draft",
             InitiatedById = userId,
@@ -142,6 +173,9 @@ public class PhysicalCountService : IPhysicalCountService
 
         // Populate count items based on warehouse inventory
         await PopulateCountItemsAsync(count);
+        await AddCountActionAsync(count, PhysicalCountActionType.Created, userId,
+            $"create:{count.Id:N}", dto.Notes, null, "Manual");
+        await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Created physical count {CountNumber} for warehouse {WarehouseId}", count.CountNumber, dto.WarehouseId);
         return MapToDto(count);
@@ -149,16 +183,24 @@ public class PhysicalCountService : IPhysicalCountService
 
     public async Task<bool> StartCountAsync(Guid countId, Guid userId)
     {
+        EnsureActor(userId);
         var count = await _countRepository.GetByIdAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
 
+        await EnsureAccessAsync(count, "procurement.inventory.count");
+
         if (count.Status != "Draft")
             throw new InvalidOperationException("Count must be in Draft status to start");
+        if (count.CutoffAtUtc.HasValue && DateTime.UtcNow > count.CutoffAtUtc.Value)
+            throw new InvalidOperationException("The count cannot start after its governed cut-off.");
 
         count.Status = "InProgress";
         count.StartedDate = DateTime.UtcNow;
         count.CountedById = userId;
+        if (count.FreezeInventory) count.FreezeStartedAtUtc = DateTime.UtcNow;
         await _countRepository.UpdateAsync(count);
+        await AddCountActionAsync(count, PhysicalCountActionType.Started, userId,
+            $"start:{count.Id:N}", "Count started and the governed freeze became effective.", null, "Counter");
         await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Started physical count {CountNumber}", count.CountNumber);
@@ -167,10 +209,25 @@ public class PhysicalCountService : IPhysicalCountService
 
     public async Task<bool> RecordCountItemAsync(RecordCountItemDto dto, Guid userId)
     {
+        EnsureActor(userId);
         var item = await _countItemRepository.GetByIdAsync(dto.PhysicalCountItemId)
             ?? throw new ArgumentException($"Physical count item {dto.PhysicalCountItemId} not found");
+        var count = await _countRepository.GetByIdAsync(item.PhysicalCountId)
+            ?? throw new ArgumentException($"Physical count {item.PhysicalCountId} not found");
+        await EnsureAccessAsync(
+            "procurement.inventory.count",
+            count.WarehouseId,
+            item.LocationId ?? count.LocationId,
+            count.CountNumber);
+
+        if (count.Status != "InProgress")
+            throw new InvalidOperationException("First-count quantities can only be recorded while the count is In Progress.");
+        EnsureRowVersion(item.RowVersion, dto.RowVersion, "The count line changed. Reload and retry.");
+        if (await HasCountActionAsync(count.Id, PhysicalCountActionType.CountRecorded, dto.IdempotencyKey))
+            return true;
 
         item.CountedQuantity = dto.CountedQuantity;
+        item.FirstCountQuantity = dto.CountedQuantity;
         item.VarianceQuantity = dto.CountedQuantity - item.SystemQuantity;
         item.VarianceValue = item.VarianceQuantity * item.UnitCost;
         item.IsCounted = true;
@@ -182,6 +239,8 @@ public class PhysicalCountService : IPhysicalCountService
         item.CountAttempts++;
 
         await _countItemRepository.UpdateAsync(item);
+        await AddCountActionAsync(count, PhysicalCountActionType.CountRecorded, userId,
+            dto.IdempotencyKey, dto.Notes, new { item.Id, dto.CountedQuantity }, "Counter");
         await _unitOfWork.SaveChangesAsync();
 
         // Update count summary
@@ -192,41 +251,24 @@ public class PhysicalCountService : IPhysicalCountService
 
     public async Task<bool> RecordCountItemsAsync(IEnumerable<RecordCountItemDto> items, Guid userId)
     {
-        Guid? countId = null;
-        foreach (var dto in items)
-        {
-            var item = await _countItemRepository.GetByIdAsync(dto.PhysicalCountItemId);
-            if (item == null) continue;
-
-            countId ??= item.PhysicalCountId;
-
-            item.CountedQuantity = dto.CountedQuantity;
-            item.VarianceQuantity = dto.CountedQuantity - item.SystemQuantity;
-            item.VarianceValue = item.VarianceQuantity * item.UnitCost;
-            item.IsCounted = true;
-            item.CountedAt = DateTime.UtcNow;
-            item.CountedById = userId;
-            item.LotNumber = dto.LotNumber;
-            item.SerialNumber = dto.SerialNumber;
-            item.Notes = dto.Notes;
-            item.CountAttempts++;
-
-            await _countItemRepository.UpdateAsync(item);
-        }
-
-        await _unitOfWork.SaveChangesAsync();
-
-        if (countId.HasValue)
-            await UpdateCountSummaryAsync(countId.Value);
-
-        return true;
+        throw new InvalidOperationException(
+            "The legacy batch-count path is disabled because it cannot prove per-line concurrency and replay. Record each governed line independently.");
     }
 
     public async Task<bool> CompleteCountAsync(Guid countId, Guid userId)
     {
+        EnsureActor(userId);
         var count = await _countRepository.GetWithItemsAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
 
+        await EnsureAccessAsync(count, "procurement.inventory.count");
+
+        if (count.Status == "PendingStoresApproval" && count.CountedById == userId)
+        {
+            await EnsureStockAdjustmentSubmittedAsync(count.Id, userId, $"complete:{count.Id:N}",
+                "Retry controlled count submission.");
+            return true;
+        }
         if (count.Status != "InProgress")
             throw new InvalidOperationException("Count must be In Progress to complete");
 
@@ -235,10 +277,40 @@ public class PhysicalCountService : IPhysicalCountService
         if (uncounted > 0)
             throw new InvalidOperationException($"{uncounted} items have not been counted yet");
 
-        count.Status = "PendingApproval";
+        var schedule = count.CycleCountScheduleId.HasValue
+            ? await _unitOfWork.Repository<InventoryCycleCountSchedule>().GetByIdAsync(count.CycleCountScheduleId.Value)
+            : null;
+        foreach (var item in count.Items)
+        {
+            item.VarianceQuantity = item.CountedQuantity - item.SystemQuantity;
+            item.VarianceValue = item.VarianceQuantity * item.UnitCost;
+            item.RequiresRecount = item.VarianceQuantity != 0 &&
+                (schedule is null || Math.Abs(item.VarianceQuantity) >= schedule.RecountQuantityThreshold ||
+                 Math.Abs(item.VarianceValue) >= schedule.RecountValueThreshold);
+            await _countItemRepository.UpdateAsync(item);
+        }
+        count.CountedItems = count.Items.Count(i => i.IsCounted);
+        count.VarianceItems = count.Items.Count(i => i.IsCounted && i.VarianceQuantity != 0);
+        count.TotalSystemQuantity = count.Items.Sum(i => i.SystemQuantity);
+        count.TotalCountedQuantity = count.Items.Sum(i => i.CountedQuantity);
+        count.TotalVarianceQuantity = count.Items.Sum(i => i.VarianceQuantity);
+        count.TotalVarianceValue = count.Items.Sum(i => i.VarianceValue);
+        count.Status = count.Items.Any(item => item.RequiresRecount) ? "RecountRequired" : "PendingStoresApproval";
         count.CompletedDate = DateTime.UtcNow;
         await _countRepository.UpdateAsync(count);
+        await AddCountActionAsync(count,
+            count.Status == "RecountRequired" ? PhysicalCountActionType.RecountRequired : PhysicalCountActionType.Submitted,
+            userId, $"complete:{count.Id:N}:{count.CompletedDate:O}",
+            count.Status == "RecountRequired" ? "Variance thresholds require an independently investigated recount." : "Count submitted for Stores approval.",
+            new { count.VarianceItems, count.TotalVarianceValue }, "Counter");
         await _unitOfWork.SaveChangesAsync();
+        if (count.Status == "PendingStoresApproval")
+            await EnsureStockAdjustmentSubmittedAsync(count.Id, userId, $"complete:{count.Id:N}",
+                "Submitted after the governed first count.");
+        await RecordCountControlEventAsync(count, "Complete",
+            count.Status == "RecountRequired" ? ProcurementControlEventResult.ReviewRequired : ProcurementControlEventResult.Allowed,
+            $"complete:{count.Id:N}", null,
+            count.Status == "RecountRequired" ? "Independent recount required." : "Submitted for Stores approval.");
 
         _logger.LogInformation("Completed physical count {CountNumber}", count.CountNumber);
         return true;
@@ -246,64 +318,32 @@ public class PhysicalCountService : IPhysicalCountService
 
     public async Task<bool> ApproveVariancesAsync(Guid countId, Guid userId)
     {
-        var count = await _countRepository.GetByIdAsync(countId)
-            ?? throw new ArgumentException($"Physical count {countId} not found");
-
-        if (count.Status != "PendingApproval")
-            throw new InvalidOperationException("Count must be Pending Approval to approve");
-
-        count.Status = "Approved";
-        count.ApprovedById = userId;
-        count.ApprovedDate = DateTime.UtcNow;
-        await _countRepository.UpdateAsync(count);
-        await _unitOfWork.SaveChangesAsync();
-
-        _logger.LogInformation("Approved variances for physical count {CountNumber}", count.CountNumber);
-        return true;
+        throw new InvalidOperationException("The legacy single-approval path is disabled. Use the governed Stores, Finance, and Internal Audit stages.");
     }
 
     public async Task<bool> PostAdjustmentsAsync(Guid countId, Guid userId)
     {
-        var count = await _countRepository.GetWithItemsAsync(countId)
-            ?? throw new ArgumentException($"Physical count {countId} not found");
-
-        if (count.Status != "Approved")
-            throw new InvalidOperationException("Count must be Approved to post adjustments");
-
-        // Apply adjustments to warehouse quantities
-        foreach (var item in count.Items.Where(i => i.VarianceQuantity != 0))
-        {
-            var whQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(count.WarehouseId, item.InventoryItemId);
-            if (whQty != null)
-            {
-                whQty.CurrentStock = item.CountedQuantity;
-                whQty.AvailableStock = item.CountedQuantity - whQty.AllocatedStock;
-                whQty.LastMovementDate = DateTime.UtcNow;
-                await _warehouseQuantityRepository.UpdateAsync(whQty);
-            }
-        }
-
-        count.Status = "Posted";
-        count.PostedById = userId;
-        count.PostedDate = DateTime.UtcNow;
-        await _countRepository.UpdateAsync(count);
-        await _unitOfWork.SaveChangesAsync();
-
-        _logger.LogInformation("Posted adjustments for physical count {CountNumber}", count.CountNumber);
-        return true;
+        throw new InvalidOperationException("The legacy direct quantity overwrite path is disabled. Use the governed controlled-adjustment posting stage.");
     }
 
     public async Task<bool> CancelAsync(Guid countId, string reason, Guid userId)
     {
+        EnsureActor(userId);
         var count = await _countRepository.GetByIdAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
 
-        if (count.Status == "Posted")
-            throw new InvalidOperationException("Cannot cancel a posted count");
+        await EnsureAccessAsync(count, "procurement.inventory.count");
+
+        if (count.Status is not ("Draft" or "InProgress" or "RecountRequired"))
+            throw new InvalidOperationException("Only a Draft, In Progress, or Recount Required count can be cancelled.");
 
         count.Status = "Cancelled";
+        count.CancellationReason = reason;
+        count.FreezeReleasedAtUtc = DateTime.UtcNow;
         count.Notes = $"{count.Notes}\nCancelled: {reason}";
         await _countRepository.UpdateAsync(count);
+        await AddCountActionAsync(count, PhysicalCountActionType.Cancelled, userId,
+            $"cancel:{count.Id:N}", reason, null, "Counter");
         await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Cancelled physical count {CountNumber}: {Reason}", count.CountNumber, reason);
@@ -312,19 +352,28 @@ public class PhysicalCountService : IPhysicalCountService
 
     public async Task<IEnumerable<PhysicalCountItemDto>> GetItemsWithVarianceAsync(Guid countId)
     {
+        var count = await _countRepository.GetByIdAsync(countId)
+            ?? throw new ArgumentException($"Physical count {countId} not found");
+        await EnsureAccessAsync(count, "procurement.inventory.read");
         var items = await _countItemRepository.GetItemsWithVarianceAsync(countId);
-        return items.Select(MapItemToDto);
+        var reveal = IsSystemQuantityVisible(count);
+        return items.Select(item => MapItemToDto(item, reveal));
     }
 
     public async Task<PhysicalCountDto> UpdateAsync(Guid countId, UpdatePhysicalCountDto dto, Guid userId)
     {
+        EnsureActor(userId);
         var count = await _countRepository.GetByIdAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
+
+        await EnsureAccessAsync(count, "procurement.inventory.count");
 
         if (count.Status != "Draft")
             throw new InvalidOperationException("Can only update counts in Draft status");
 
         if (dto.Notes != null) count.Notes = dto.Notes;
+        if (count.CycleCountScheduleId.HasValue && (dto.FreezeInventory == false || dto.BlindCount == false))
+            throw new InvalidOperationException("Scheduled cycle counts must remain frozen and blind.");
         if (dto.FreezeInventory.HasValue) count.FreezeInventory = dto.FreezeInventory.Value;
         if (dto.BlindCount.HasValue) count.BlindCount = dto.BlindCount.Value;
         if (dto.IncludeZeroStock.HasValue) count.IncludeZeroStock = dto.IncludeZeroStock.Value;
@@ -338,11 +387,18 @@ public class PhysicalCountService : IPhysicalCountService
 
     public async Task<PhysicalCountItemDto> AddCountItemAsync(Guid countId, AddCountItemDto dto, Guid userId)
     {
+        EnsureActor(userId);
         var count = await _countRepository.GetByIdAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
 
-        if (count.Status != "Draft" && count.Status != "InProgress")
-            throw new InvalidOperationException("Cannot add items to a completed count");
+        await EnsureAccessAsync(
+            "procurement.inventory.count",
+            count.WarehouseId,
+            dto.LocationId ?? count.LocationId,
+            count.CountNumber);
+
+        if (count.Status != "Draft")
+            throw new InvalidOperationException("Count lines can only be added before the governed count starts.");
 
         var inventoryItem = await _itemRepository.GetByIdAsync(dto.InventoryItemId)
             ?? throw new ArgumentException($"Inventory item {dto.InventoryItemId} not found");
@@ -376,16 +432,23 @@ public class PhysicalCountService : IPhysicalCountService
         await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Added item {ItemCode} to physical count {CountNumber}", inventoryItem.ItemCode, count.CountNumber);
-        return MapItemToDto(countItem);
+        return MapItemToDto(countItem, IsSystemQuantityVisible(count));
     }
 
     public async Task<bool> RemoveCountItemAsync(Guid countItemId, Guid userId)
     {
+        EnsureActor(userId);
         var item = await _countItemRepository.GetByIdAsync(countItemId)
             ?? throw new ArgumentException($"Physical count item {countItemId} not found");
 
         var count = await _countRepository.GetByIdAsync(item.PhysicalCountId)
             ?? throw new ArgumentException($"Physical count not found");
+
+        await EnsureAccessAsync(
+            "procurement.inventory.count",
+            count.WarehouseId,
+            item.LocationId ?? count.LocationId,
+            count.CountNumber);
 
         if (count.Status != "Draft")
             throw new InvalidOperationException("Cannot remove items from a started count");
@@ -401,19 +464,8 @@ public class PhysicalCountService : IPhysicalCountService
 
     public async Task<bool> RejectVariancesAsync(Guid countId, string reason, Guid userId)
     {
-        var count = await _countRepository.GetByIdAsync(countId)
-            ?? throw new ArgumentException($"Physical count {countId} not found");
-
-        if (count.Status != "PendingApproval")
-            throw new InvalidOperationException("Count must be Pending Approval to reject");
-
-        count.Status = "InProgress"; // Send back for recount
-        count.Notes = $"{count.Notes}\nRejected: {reason}";
-        await _countRepository.UpdateAsync(count);
-        await _unitOfWork.SaveChangesAsync();
-
-        _logger.LogInformation("Rejected variances for physical count {CountNumber}: {Reason}", count.CountNumber, reason);
-        return true;
+        throw new InvalidOperationException(
+            "The legacy rejection path is disabled. Reject at the governed Stores, Finance, or Internal Audit stage with row-version and idempotency evidence.");
     }
 
     public async Task<PhysicalCountExportDto> ExportCountSheetAsync(Guid countId)
@@ -421,6 +473,9 @@ public class PhysicalCountService : IPhysicalCountService
         var count = await _countRepository.GetWithItemsAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
 
+        await EnsureAccessAsync(count, "procurement.inventory.read");
+
+        var revealSystemQuantity = IsSystemQuantityVisible(count);
         return new PhysicalCountExportDto
         {
             Id = count.Id,
@@ -435,10 +490,10 @@ public class PhysicalCountService : IPhysicalCountService
                 ItemName = i.ItemName ?? string.Empty,
                 UnitOfMeasure = i.UnitOfMeasure ?? string.Empty,
                 LocationName = i.Location?.LocationCode,
-                SystemQuantity = i.SystemQuantity,
-                CountedQuantity = i.CountedQuantity,
-                VarianceQuantity = i.VarianceQuantity,
-                VarianceValue = i.VarianceValue,
+                SystemQuantity = revealSystemQuantity ? i.SystemQuantity : 0,
+                CountedQuantity = revealSystemQuantity ? i.CountedQuantity : 0,
+                VarianceQuantity = revealSystemQuantity ? i.VarianceQuantity : 0,
+                VarianceValue = revealSystemQuantity ? i.VarianceValue : 0,
                 LotNumber = i.LotNumber,
                 SerialNumber = i.SerialNumber,
                 IsCounted = i.IsCounted,
@@ -452,8 +507,10 @@ public class PhysicalCountService : IPhysicalCountService
         var count = await _countRepository.GetWithItemsAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
 
-        if (count.Status != "Draft" && count.Status != "InProgress")
-            throw new InvalidOperationException("Cannot import items to a completed count");
+        await EnsureAccessAsync(count, "procurement.inventory.count");
+
+        if (count.Status != "InProgress")
+            throw new InvalidOperationException("Count quantities can only be imported while the governed count is In Progress.");
 
         var result = new ImportCountResultDto();
         var itemsList = items.ToList();
@@ -472,6 +529,7 @@ public class PhysicalCountService : IPhysicalCountService
             }
 
             countItem.CountedQuantity = importItem.CountedQuantity;
+            countItem.FirstCountQuantity = importItem.CountedQuantity;
             countItem.VarianceQuantity = importItem.CountedQuantity - countItem.SystemQuantity;
             countItem.VarianceValue = countItem.VarianceQuantity * countItem.UnitCost;
             countItem.IsCounted = true;
@@ -497,6 +555,8 @@ public class PhysicalCountService : IPhysicalCountService
     {
         var count = await _countRepository.GetWithItemsAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
+
+        await EnsureAccessAsync(count, "procurement.inventory.read");
 
         var varianceItems = count.Items.Where(i => i.IsCounted && i.VarianceQuantity != 0).ToList();
 
@@ -535,6 +595,72 @@ public class PhysicalCountService : IPhysicalCountService
     #endregion
 
     #region Private Helpers
+
+    private async Task<IReadOnlyList<PhysicalCount>> FilterReadableAsync(IEnumerable<PhysicalCount> counts)
+    {
+        var readable = new List<PhysicalCount>();
+        foreach (var count in counts)
+        {
+            if (await CanAccessAsync(count, "procurement.inventory.read"))
+                readable.Add(count);
+        }
+
+        return readable;
+    }
+
+    private Task EnsureAccessAsync(
+        PhysicalCount count,
+        string permission) => EnsureAccessAsync(
+            permission,
+            count.WarehouseId,
+            count.LocationId,
+            count.CountNumber);
+
+    private async Task EnsureAccessAsync(
+        string permission,
+        Guid warehouseId,
+        Guid? locationId,
+        string sourceReference)
+    {
+        var decision = await _accessControl.EnforceCapabilityAsync(
+            BuildAccessRequest(permission, warehouseId, locationId, sourceReference),
+            Guid.NewGuid().ToString("N"));
+        if (!decision.Allowed)
+            throw new ProcurementAccessAuthorizationException(decision.Message);
+    }
+
+    private async Task<bool> CanAccessAsync(PhysicalCount count, string permission)
+    {
+        try
+        {
+            var decision = await _accessControl.CheckCapabilityAsync(
+                BuildAccessRequest(permission, count.WarehouseId, count.LocationId, count.CountNumber),
+                Guid.NewGuid().ToString("N"));
+            return decision.Allowed;
+        }
+        catch (ProcurementAccessAuthorizationException)
+        {
+            return false;
+        }
+        catch (ProcurementAccessValidationException)
+        {
+            return false;
+        }
+    }
+
+    private static ProcurementAccessCapabilityRequest BuildAccessRequest(
+        string permission,
+        Guid warehouseId,
+        Guid? locationId,
+        string sourceReference) => new()
+        {
+            PermissionCode = permission,
+            WarehouseId = warehouseId,
+            LocationId = locationId,
+            RequireLocationScope = true,
+            SourceType = "PhysicalCount",
+            SourceReference = sourceReference
+        };
 
     private async Task<string> GenerateCountNumberAsync()
     {
@@ -602,6 +728,7 @@ public class PhysicalCountService : IPhysicalCountService
 
     private static PhysicalCountDto MapToDto(PhysicalCount count)
     {
+        var revealSystemQuantity = IsSystemQuantityVisible(count);
         return new PhysicalCountDto
         {
             Id = count.Id,
@@ -617,6 +744,15 @@ public class PhysicalCountService : IPhysicalCountService
             LocationName = count.Location?.LocationCode,
             CategoryId = count.CategoryId,
             FreezeInventory = count.FreezeInventory,
+            BlindCount = count.BlindCount,
+            SystemQuantityVisible = revealSystemQuantity,
+            ABCClass = count.ABCClass,
+            ScheduledForUtc = count.ScheduledForUtc,
+            CutoffAtUtc = count.CutoffAtUtc,
+            FreezeStartedAtUtc = count.FreezeStartedAtUtc,
+            FreezeReleasedAtUtc = count.FreezeReleasedAtUtc,
+            StockAdjustmentId = count.StockAdjustmentId,
+            RowVersion = Convert.ToBase64String(count.RowVersion),
             TotalItems = count.TotalItems,
             CountedItems = count.CountedItems,
             ItemsWithVariance = count.VarianceItems,
@@ -629,6 +765,7 @@ public class PhysicalCountService : IPhysicalCountService
 
     private static PhysicalCountDetailDto MapToDetailDto(PhysicalCount count)
     {
+        var revealSystemQuantity = IsSystemQuantityVisible(count);
         return new PhysicalCountDetailDto
         {
             Id = count.Id,
@@ -644,6 +781,15 @@ public class PhysicalCountService : IPhysicalCountService
             LocationName = count.Location?.LocationCode,
             CategoryId = count.CategoryId,
             FreezeInventory = count.FreezeInventory,
+            BlindCount = count.BlindCount,
+            SystemQuantityVisible = revealSystemQuantity,
+            ABCClass = count.ABCClass,
+            ScheduledForUtc = count.ScheduledForUtc,
+            CutoffAtUtc = count.CutoffAtUtc,
+            FreezeStartedAtUtc = count.FreezeStartedAtUtc,
+            FreezeReleasedAtUtc = count.FreezeReleasedAtUtc,
+            StockAdjustmentId = count.StockAdjustmentId,
+            RowVersion = Convert.ToBase64String(count.RowVersion),
             TotalItems = count.TotalItems,
             CountedItems = count.CountedItems,
             ItemsWithVariance = count.VarianceItems,
@@ -653,11 +799,29 @@ public class PhysicalCountService : IPhysicalCountService
             CreatedAtFormatted = count.CreatedAt.ToString("yyyy-MM-dd HH:mm"),
             ApprovedByName = count.ApprovedBy?.FullName,
             ApprovedDate = count.ApprovedDate,
-            Items = count.Items.Select(MapItemToDto).ToList()
+            StoresApprovedById = count.StoresApprovedById,
+            StoresApprovedAtUtc = count.StoresApprovedAtUtc,
+            FinanceApprovedById = count.FinanceApprovedById,
+            FinanceApprovedAtUtc = count.FinanceApprovedAtUtc,
+            AuditAttestedById = count.AuditAttestedById,
+            AuditAttestedAtUtc = count.AuditAttestedAtUtc,
+            InvestigationSummary = count.InvestigationSummary,
+            Items = count.Items.Select(item => MapItemToDto(item, revealSystemQuantity)).ToList(),
+            Actions = count.Actions.OrderBy(item => item.Sequence).Select(item => new PhysicalCountActionDto
+            {
+                Id = item.Id,
+                Sequence = item.Sequence,
+                ActionType = item.ActionType.ToString(),
+                ActorUserId = item.ActorUserId,
+                ActorRole = item.ActorRole,
+                OccurredAtUtc = item.OccurredAtUtc,
+                Comment = item.Comment,
+                IntegrityHash = item.IntegrityHash
+            }).ToList()
         };
     }
 
-    private static PhysicalCountItemDto MapItemToDto(PhysicalCountItem item)
+    private static PhysicalCountItemDto MapItemToDto(PhysicalCountItem item, bool revealSystemQuantity = true)
     {
         return new PhysicalCountItemDto
         {
@@ -667,11 +831,11 @@ public class PhysicalCountService : IPhysicalCountService
             ItemName = item.ItemName ?? string.Empty,
             LocationId = item.LocationId,
             LocationName = item.Location?.LocationCode,
-            SystemQuantity = item.SystemQuantity,
-            CountedQuantity = item.CountedQuantity,
-            VarianceQuantity = item.VarianceQuantity,
-            VarianceValue = item.VarianceValue,
-            VariancePercent = item.SystemQuantity != 0 
+            SystemQuantity = revealSystemQuantity ? item.SystemQuantity : 0,
+            CountedQuantity = revealSystemQuantity ? item.CountedQuantity : 0,
+            VarianceQuantity = revealSystemQuantity ? item.VarianceQuantity : 0,
+            VarianceValue = revealSystemQuantity ? item.VarianceValue : 0,
+            VariancePercent = revealSystemQuantity && item.SystemQuantity != 0
                 ? (item.VarianceQuantity / item.SystemQuantity) * 100 
                 : 0,
             UnitOfMeasure = item.UnitOfMeasure ?? string.Empty,
@@ -680,9 +844,20 @@ public class PhysicalCountService : IPhysicalCountService
             IsCounted = item.IsCounted,
             CountedAt = item.CountedAt,
             CountedByName = item.CountedBy?.FullName,
+            CountAttempts = item.CountAttempts,
+            RequiresRecount = item.RequiresRecount,
+            FirstCountQuantity = revealSystemQuantity ? item.FirstCountQuantity : null,
+            RecountedQuantity = revealSystemQuantity ? item.RecountedQuantity : null,
+            RecountedAtUtc = item.RecountedAtUtc,
+            RecountedById = item.RecountedById,
+            InvestigationNotes = revealSystemQuantity ? item.InvestigationNotes : null,
+            RowVersion = Convert.ToBase64String(item.RowVersion),
             Notes = item.Notes
         };
     }
+
+    private static bool IsSystemQuantityVisible(PhysicalCount count) =>
+        !count.BlindCount || count.Status is not ("Draft" or "InProgress" or "RecountRequired");
 
     #endregion
 }

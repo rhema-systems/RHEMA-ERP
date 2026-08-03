@@ -18,10 +18,11 @@ import {
   StockAdjustmentReasonCodes,
   StockAdjustmentStatusColors,
   CreateStockAdjustmentDto,
-  CreateStockAdjustmentItemDto,
+  CreateStockAdjustmentItemDto, InventoryControlEvidenceRequest,
   UpdateStockAdjustmentDto
 } from '@/services/stockAdjustmentService';
-import { inventoryManagementService, WarehouseDto, WarehouseInventoryItemDto } from '@/services/inventoryManagementService';
+import { inventoryManagementService, WarehouseDto, WarehouseInventoryItemDto, WarehouseLocationDto } from '@/services/inventoryManagementService';
+import { documentManagementService, CentralDocumentRecord } from '@/services/document-management.service';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 
@@ -43,6 +44,7 @@ interface FormData {
 
 interface ItemFormData {
   inventoryItemId: string;
+  locationId: string;
   quantity: number;
   unitCost: number;
   reason: string;
@@ -56,6 +58,9 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
   const [receiptDetail, setReceiptDetail] = useState<StockAdjustmentDetailDto | null>(null);
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [warehouseInventoryItems, setWarehouseInventoryItems] = useState<WarehouseInventoryItemDto[]>([]);
+  const [warehouseLocations, setWarehouseLocations] = useState<WarehouseLocationDto[]>([]);
+  const [dmsRecords, setDmsRecords] = useState<CentralDocumentRecord[]>([]);
+  const [evidence, setEvidence] = useState<InventoryControlEvidenceRequest[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [itemSearchTerm, setItemSearchTerm] = useState('');
   const [showAddItem, setShowAddItem] = useState(false);
@@ -66,7 +71,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
 
   const [formData, setFormData] = useState<FormData>({
     warehouseId: '',
-    reasonCode: 'PURCHASE_RECEIPT',
+    reasonCode: 'CYCLE_COUNT',
     receiptDate: format(new Date(), 'yyyy-MM-dd'),
     description: '',
     reference: ''
@@ -74,6 +79,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
 
   const [itemFormData, setItemFormData] = useState<ItemFormData>({
     inventoryItemId: '',
+    locationId: '',
     quantity: 1,
     unitCost: 0,
     reason: ''
@@ -93,14 +99,15 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
       if (mode === 'create') {
         setFormData({
           warehouseId: '',
-          reasonCode: 'PURCHASE_RECEIPT',
+          reasonCode: 'CYCLE_COUNT',
           receiptDate: format(new Date(), 'yyyy-MM-dd'),
           description: '',
           reference: ''
         });
         setReceiptDetail(null);
+        setEvidence([]);
       }
-      loadWarehouses();
+      void Promise.all([loadWarehouses(), loadDmsRecords()]);
     }
   }, [open, mode]);
 
@@ -114,7 +121,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
   // Load warehouse items when warehouse changes
   useEffect(() => {
     if (formData.warehouseId && canEdit) {
-      loadWarehouseItems(formData.warehouseId);
+      void Promise.all([loadWarehouseItems(formData.warehouseId), loadWarehouseLocations(formData.warehouseId)]);
     }
   }, [formData.warehouseId, canEdit]);
 
@@ -135,11 +142,12 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
       setReceiptDetail(detail);
       setFormData({
         warehouseId: detail.warehouseId || '',
-        reasonCode: detail.reasonCode || 'PURCHASE_RECEIPT',
+        reasonCode: detail.reasonCode || 'CYCLE_COUNT',
         receiptDate: detail.adjustmentDate ? format(new Date(detail.adjustmentDate), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
         description: detail.description || '',
         reference: detail.reference || ''
       });
+      setEvidence(detail.evidence.map((item) => ({ centralDocumentVersionId: item.centralDocumentVersionId, evidenceReference: item.evidenceReference })));
     } catch (err) {
       console.error('Error loading receipt:', err);
       toast({ title: 'Error', description: 'Failed to load receipt details', variant: 'destructive' });
@@ -160,9 +168,51 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
     }
   };
 
+  const loadWarehouseLocations = async (warehouseId: string) => {
+    try {
+      const locations = await inventoryManagementService.getWarehouseLocations(warehouseId);
+      setWarehouseLocations(locations.filter((item) => item.isActive));
+    } catch {
+      setWarehouseLocations([]);
+    }
+  };
+
+  const loadDmsRecords = async () => {
+    try {
+      const records = await documentManagementService.getRecords();
+      setDmsRecords(records.filter((record) => record.lifecycleStatus === 'Active' && record.versionStatus === 'Published' && Boolean(record.currentVersion)));
+    } catch {
+      setDmsRecords([]);
+    }
+  };
+
+  const addEvidence = async (recordId: string) => {
+    try {
+      const detail = await documentManagementService.getRecord(recordId);
+      if (!detail) throw new Error('The DMS record could not be loaded.');
+      const version = detail.versions.find((item) => item.versionNumber === detail.record.currentVersion && item.status === 'Published' && item.fileUploadRecordId);
+      if (!version) throw new Error('Select a central-DMS record with a current published repository version.');
+      setEvidence((items) => items.some((item) => item.centralDocumentVersionId === version.id) ? items : [...items, {
+        centralDocumentVersionId: version.id,
+        evidenceReference: `${detail.record.documentReference} / ${version.versionNumber}`,
+      }]);
+    } catch (error) {
+      toast({ title: 'Evidence unavailable', description: error instanceof Error ? error.message : 'Unable to link DMS evidence', variant: 'destructive' });
+    }
+  };
+
   const handleSave = async () => {
-    if (!formData.warehouseId || !formData.reasonCode) {
-      toast({ title: 'Validation Error', description: 'Please select warehouse and receipt reason', variant: 'destructive' });
+    if (!formData.warehouseId || !formData.reasonCode || !formData.description.trim()) {
+      toast({ title: 'Validation Error', description: 'Select a warehouse and reason, then enter a detailed justification.', variant: 'destructive' });
+      return;
+    }
+    if (pendingItems.some((item) => !item.locationId)) {
+      toast({ title: 'Location required', description: 'Every controlled adjustment line requires an exact warehouse location.', variant: 'destructive' });
+      return;
+    }
+    const evidenceRequired = ['DAMAGE', 'LOSS', 'THEFT', 'EXPIRED', 'QUALITY_ISSUE', 'DONATION', 'WRITE_OFF', 'OTHER'].includes(formData.reasonCode);
+    if (evidenceRequired && evidence.length === 0) {
+      toast({ title: 'Evidence required', description: 'Link a current published central-DMS document for this adjustment reason.', variant: 'destructive' });
       return;
     }
     try {
@@ -172,13 +222,10 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
           warehouseId: formData.warehouseId,
           reasonCode: formData.reasonCode,
           adjustmentDate: formData.receiptDate,
-          description: formData.description || undefined,
+          description: formData.description.trim(),
           reference: formData.reference || undefined,
-          items: pendingItems.map(item => ({
-            ...item,
-            // Ensure quantity is always positive for receipts
-            adjustmentQuantity: Math.abs(item.adjustmentQuantity)
-          }))
+          items: pendingItems,
+          evidence,
         };
         await stockAdjustmentService.create(createDto);
         toast({ title: 'Success', description: 'Inventory receipt created successfully' });
@@ -186,8 +233,10 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
         const updateDto: UpdateStockAdjustmentDto = {
           reasonCode: formData.reasonCode,
           adjustmentDate: formData.receiptDate,
-          description: formData.description || undefined,
-          reference: formData.reference || undefined
+          description: formData.description.trim(),
+          reference: formData.reference || undefined,
+          rowVersion: receiptDetail?.rowVersion || '',
+          evidence,
         };
         await stockAdjustmentService.update(receiptId, updateDto);
         toast({ title: 'Success', description: 'Inventory receipt updated successfully' });
@@ -204,8 +253,8 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
   };
 
   const handleAddItem = async () => {
-    if (!itemFormData.inventoryItemId || itemFormData.quantity <= 0) {
-      toast({ title: 'Validation Error', description: 'Please select an item and enter a positive quantity', variant: 'destructive' });
+    if (!itemFormData.inventoryItemId || !itemFormData.locationId || itemFormData.quantity === 0) {
+      toast({ title: 'Validation Error', description: 'Select an item and exact location, then enter a non-zero signed quantity.', variant: 'destructive' });
       return;
     }
     try {
@@ -215,8 +264,8 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
         if (selectedItem) {
           setPendingItems([...pendingItems, {
             inventoryItemId: itemFormData.inventoryItemId,
-            // Always positive for receipts
-            adjustmentQuantity: Math.abs(itemFormData.quantity),
+            locationId: itemFormData.locationId,
+            adjustmentQuantity: itemFormData.quantity,
             unitCost: itemFormData.unitCost || selectedItem.unitCost || 0,
             reason: itemFormData.reason || undefined
           }]);
@@ -226,7 +275,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
         await loadReceiptDetail();
         toast({ title: 'Info', description: 'Item management in edit mode requires saving first' });
       }
-      setItemFormData({ inventoryItemId: '', quantity: 1, unitCost: 0, reason: '' });
+      setItemFormData({ inventoryItemId: '', locationId: '', quantity: 1, unitCost: 0, reason: '' });
       setShowAddItem(false);
     } catch (err) {
       console.error('Error adding item:', err);
@@ -280,8 +329,8 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
   };
 
   const handleSaveItemEdit = async () => {
-    if (!editingItemId || editingItemData.quantity <= 0) {
-      toast({ title: 'Validation Error', description: 'Please enter a positive quantity', variant: 'destructive' });
+    if (!editingItemId || editingItemData.quantity === 0) {
+      toast({ title: 'Validation Error', description: 'Please enter a non-zero signed quantity', variant: 'destructive' });
       return;
     }
 
@@ -292,8 +341,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
       if (updatedItems[idx]) {
         updatedItems[idx] = {
           ...updatedItems[idx],
-          // Always positive for receipts
-          adjustmentQuantity: Math.abs(editingItemData.quantity),
+          adjustmentQuantity: editingItemData.quantity,
           reason: editingItemData.reason || undefined
         };
         setPendingItems(updatedItems);
@@ -319,7 +367,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
 
   const displayItems = isCreateMode ? pendingItems.map((item, idx) => {
     const invItem = warehouseInventoryItems.find(i => i.inventoryItemId === item.inventoryItemId);
-    const quantity = Math.abs(item.adjustmentQuantity);
+    const quantity = item.adjustmentQuantity;
     return {
       id: idx.toString(),
       inventoryItemId: item.inventoryItemId,
@@ -334,7 +382,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
       reason: item.reason
     };
   }) : (receiptDetail?.items || []).filter(item => !deletedItemIds.includes(item.id)).map(item => {
-    const quantity = Math.abs(item.adjustmentQuantity);
+    const quantity = item.adjustmentQuantity;
     return {
       id: item.id,
       inventoryItemId: item.inventoryItemId,
@@ -350,7 +398,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
     };
   });
 
-  // Calculate totals (always positive for receipts)
+  // Signed quantity/value preserves positive and negative controlled adjustments.
   const totalReceiptValue = displayItems.reduce((sum, i) => sum + i.totalValue, 0);
   const totalQuantity = displayItems.reduce((sum, i) => sum + i.quantity, 0);
 
@@ -360,12 +408,12 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
         <DialogHeader>
           <div className="flex flex-col gap-1">
             <DialogTitle>
-              {isCreateMode ? 'New Inventory Receipt' : isEditMode ? 'Edit Inventory Receipt' : 'View Inventory Receipt'}
+              {isCreateMode ? 'New Controlled Stock Adjustment' : isEditMode ? 'Edit Stock Adjustment' : 'View Stock Adjustment'}
               {receiptDetail && <span className="ml-2 text-muted-foreground">#{receiptDetail.adjustmentNumber}</span>}
             </DialogTitle>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">
-                {isCreateMode ? 'Receive inventory into warehouse' : isEditMode ? 'Edit receipt details' : 'View receipt details'}
+                {isCreateMode ? 'Prepare a signed, location-specific adjustment for independent approval' : isEditMode ? 'Edit the Draft adjustment' : 'Review control evidence and lifecycle'}
               </span>
               {receiptDetail && getStatusBadge(receiptDetail.status)}
             </div>
@@ -393,7 +441,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Receipt Reason *</Label>
+                  <Label>Adjustment Reason *</Label>
                   <Select value={formData.reasonCode} onValueChange={(v) => setFormData({ ...formData, reasonCode: v })} disabled={!canEdit}>
                     <SelectTrigger><SelectValue placeholder="Select reason" /></SelectTrigger>
                     <SelectContent>
@@ -404,7 +452,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Receipt Date</Label>
+                  <Label>Adjustment Date</Label>
                   <Input type="date" value={formData.receiptDate} onChange={(e) => setFormData({ ...formData, receiptDate: e.target.value })} disabled={!canEdit} />
                 </div>
                 <div className="space-y-2">
@@ -413,8 +461,21 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} disabled={!canEdit} rows={3} placeholder="Describe the reason for this receipt..." />
+                <Label>Detailed justification *</Label>
+                <Textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} disabled={!canEdit} rows={3} placeholder="Explain why this controlled stock adjustment is required..." />
+              </div>
+              <div className="space-y-2">
+                <Label>Central DMS evidence</Label>
+                {canEdit && (
+                  <Select onValueChange={(value) => void addEvidence(value)}>
+                    <SelectTrigger><SelectValue placeholder="Link a current published DMS record" /></SelectTrigger>
+                    <SelectContent>{dmsRecords.map((record) => <SelectItem key={record.id} value={record.id}>{record.documentReference} - {record.title}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {evidence.map((item) => <Badge key={item.centralDocumentVersionId} variant="outline">{item.evidenceReference}</Badge>)}
+                  {evidence.length === 0 && <span className="text-xs text-muted-foreground">Required for damage, loss, theft, expiry, quality, donation, write-off, and other exceptions.</span>}
+                </div>
               </div>
 
               {/* Summary Cards */}
@@ -436,7 +497,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm text-muted-foreground">Total Quantity</p>
-                          <p className="text-2xl font-bold text-green-600">+{totalQuantity}</p>
+                          <p className="text-2xl font-bold">{totalQuantity}</p>
                         </div>
                         <ArrowUpCircle className="h-8 w-8 text-green-500" />
                       </div>
@@ -447,7 +508,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm text-muted-foreground">Total Value</p>
-                          <p className="text-2xl font-bold text-green-600">+${totalReceiptValue.toFixed(2)}</p>
+                          <p className="text-2xl font-bold">${totalReceiptValue.toFixed(2)}</p>
                         </div>
                         <ArrowUpCircle className="h-8 w-8 text-green-500" />
                       </div>
@@ -464,14 +525,14 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                     <Plus className="h-4 w-4 mr-1" />Add Item
                   </Button>
                   <div className="text-sm text-muted-foreground">
-                    All quantities will be added to inventory (positive receipt)
+                    Use a positive quantity to increase stock or a negative quantity to decrease stock.
                   </div>
                 </div>
               )}
 
               {showAddItem && canEdit && (
                 <Card>
-                  <CardHeader><CardTitle className="text-sm">Add Receipt Item</CardTitle></CardHeader>
+                  <CardHeader><CardTitle className="text-sm">Add adjustment line</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
                     <div className="space-y-2">
                       <Label>Search and Select Item</Label>
@@ -521,17 +582,23 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                         </div>
                       )}
                     </div>
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-4 gap-4">
                       <div className="space-y-2">
-                        <Label>Quantity to Receive</Label>
+                        <Label>Exact location *</Label>
+                        <Select value={itemFormData.locationId} onValueChange={(value) => setItemFormData({ ...itemFormData, locationId: value })}>
+                          <SelectTrigger><SelectValue placeholder="Select bin/location" /></SelectTrigger>
+                          <SelectContent>{warehouseLocations.map((location) => <SelectItem key={location.id} value={location.id}>{location.locationCode} - {location.name || location.locationType}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Signed quantity *</Label>
                         <Input 
                           type="number" 
-                          min="1"
                           value={itemFormData.quantity} 
-                          onChange={(e) => setItemFormData({ ...itemFormData, quantity: Math.max(1, parseInt(e.target.value) || 1) })} 
-                          placeholder="Enter quantity"
+                          onChange={(e) => setItemFormData({ ...itemFormData, quantity: Number(e.target.value) })}
+                          placeholder="e.g. 5 or -5"
                         />
-                        <p className="text-xs text-muted-foreground">Quantity will be added to inventory</p>
+                        <p className="text-xs text-muted-foreground">Positive increases; negative decreases.</p>
                       </div>
                       <div className="space-y-2">
                         <Label>Unit Cost</Label>
@@ -558,7 +625,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                   <TableRow>
                     <TableHead>Item</TableHead>
                     <TableHead className="text-right">{isCreateMode ? 'Current Stock' : 'Stock Before'}</TableHead>
-                    <TableHead className="text-right">Qty to Receive</TableHead>
+                    <TableHead className="text-right">Adjustment Qty</TableHead>
                     <TableHead className="text-right">{isCreateMode ? 'New Stock' : 'Stock After'}</TableHead>
                     <TableHead>UoM</TableHead>
                     <TableHead className="text-right">Unit Cost</TableHead>
@@ -588,14 +655,14 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                               onChange={(e) => setEditingItemData({ ...editingItemData, quantity: Math.max(1, parseInt(e.target.value) || 1) })}
                             />
                           ) : (
-                            <span className="text-green-600 font-medium">+{item.quantity}</span>
+                            <span className={item.quantity >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>{item.quantity > 0 ? '+' : ''}{item.quantity}</span>
                           )}
                         </TableCell>
                         <TableCell className="text-right font-medium">{item.newStock}</TableCell>
                         <TableCell>{item.unitOfMeasure}</TableCell>
                         <TableCell className="text-right">{item.unitCost.toFixed(2)}</TableCell>
-                        <TableCell className="text-right font-medium text-green-600">
-                          +${item.totalValue.toFixed(2)}
+                        <TableCell className="text-right font-medium">
+                          ${item.totalValue.toFixed(2)}
                         </TableCell>
                         {canEdit && (
                           <TableCell>

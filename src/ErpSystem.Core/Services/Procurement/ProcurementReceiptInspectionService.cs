@@ -45,6 +45,7 @@ public sealed class ProcurementReceiptInspectionService :
     private readonly IProcurementReceiptSourceControlService _sourceControl;
     private readonly IProcurementReceiptInspectionStore _store;
     private readonly IInventoryValuationService _valuation;
+    private readonly IInventoryReceiptFinancePostingService _receiptFinancePosting;
     private readonly IProcurementBudgetService _budgetService;
     private readonly ILogger<ProcurementReceiptInspectionService> _logger;
 
@@ -62,6 +63,7 @@ public sealed class ProcurementReceiptInspectionService :
         IProcurementReceiptSourceControlService sourceControl,
         IProcurementReceiptInspectionStore store,
         IInventoryValuationService valuation,
+        IInventoryReceiptFinancePostingService receiptFinancePosting,
         IProcurementBudgetService budgetService,
         ILogger<ProcurementReceiptInspectionService> logger)
     {
@@ -78,6 +80,7 @@ public sealed class ProcurementReceiptInspectionService :
         _sourceControl = sourceControl;
         _store = store;
         _valuation = valuation;
+        _receiptFinancePosting = receiptFinancePosting;
         _budgetService = budgetService;
         _logger = logger;
     }
@@ -966,6 +969,9 @@ public sealed class ProcurementReceiptInspectionService :
                 pendingWarehouseQuantities, cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        if (stockPostings.Count > 0)
+            await _receiptFinancePosting.PostAcceptedReceiptAsync(
+                inspection.PurchaseOrderReceiptId, cancellationToken);
         await SynchronizeLinkedGoodsReceiptNoteAsync(inspection, cancellationToken);
     }
 
@@ -1071,7 +1077,9 @@ public sealed class ProcurementReceiptInspectionService :
             if (uom is not null && uom.ConversionToBase > 0) conversion = uom.ConversionToBase;
         }
         var baseQuantity = quantity * conversion;
-        var purchaseCost = poLine.LandedUnitCost > 0 ? poLine.LandedUnitCost : poLine.UnitPrice;
+        // Receipt valuation carries only the accepted purchase price. Freight, duty and
+        // other landed costs are allocated and posted later by the authoritative landed-cost owner.
+        var purchaseCost = poLine.UnitPrice;
         var baseCost = purchaseCost / conversion;
         var inventoryItem = await _unitOfWork.Repository<InventoryItem>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&

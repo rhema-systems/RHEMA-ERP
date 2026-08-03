@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.EntityFrameworkCore;
 
@@ -51,6 +52,8 @@ public sealed class ProcurementCalendarBackgroundService : BackgroundService
 
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         var processor = scope.ServiceProvider.GetRequiredService<IProcurementCalendarProcessor>();
+        var physicalCounts = scope.ServiceProvider.GetRequiredService<IPhysicalCountService>();
+        var projectReservations = scope.ServiceProvider.GetRequiredService<IInventoryProjectReservationService>();
         var tenantIds = await unitOfWork.Repository<Tenant>().GetQueryable(item => !item.IsDeleted)
             .Select(item => item.Id).ToListAsync(cancellationToken);
         var now = DateTime.UtcNow;
@@ -61,6 +64,14 @@ public sealed class ProcurementCalendarBackgroundService : BackgroundService
                 await processor.ProcessTenantAsync(tenantId, now, null, ProcurementCalendarRunTrigger.Scheduled,
                     null, "Procurement calendar scheduler", "Scheduled calendar generation, reminder, and escalation run.",
                     $"scheduler-{tenantId:N}-{now:yyyyMMddHH}", cancellationToken);
+                var generated = await physicalCounts.GenerateDueCycleCountsAsync(tenantId, now);
+                if (generated.CountsCreated > 0)
+                    _logger.LogInformation("Generated {Count} governed ABC cycle counts for tenant {TenantId}.",
+                        generated.CountsCreated, tenantId);
+                var expired = await projectReservations.ExpireDueAsync(tenantId, now, cancellationToken);
+                if (expired.ExpiredCount > 0)
+                    _logger.LogInformation("Expired {Count} governed project inventory reservations for tenant {TenantId}.",
+                        expired.ExpiredCount, tenantId);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {

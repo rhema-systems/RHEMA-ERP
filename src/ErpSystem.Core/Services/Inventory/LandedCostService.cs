@@ -1,3 +1,4 @@
+using System.Data;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
@@ -31,6 +32,7 @@ public class LandedCostService : ILandedCostService
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<LandedCostService> _logger;
+    private readonly IInventoryLandedCostFinancePostingService? _financePosting;
 
     public LandedCostService(
         ILandedCostRepository landedCostRepository,
@@ -41,7 +43,8 @@ public class LandedCostService : ILandedCostService
         IPurchaseOrderReceiptRepository purchaseOrderReceiptRepository,
         IBusinessPartnerRepository businessPartnerRepository,
         IUnitOfWork unitOfWork,
-        ILogger<LandedCostService> logger)
+        ILogger<LandedCostService> logger,
+        IInventoryLandedCostFinancePostingService? financePosting = null)
     {
         _landedCostRepository = landedCostRepository;
         _landedCostItemRepository = landedCostItemRepository;
@@ -52,6 +55,7 @@ public class LandedCostService : ILandedCostService
         _businessPartnerRepository = businessPartnerRepository;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _financePosting = financePosting;
     }
 
     public async Task<IEnumerable<LandedCostDto>> GetAllAsync()
@@ -818,7 +822,24 @@ public class LandedCostService : ILandedCostService
 
     public Task<bool> PostToInventoryAsync(Guid landedCostId, Guid userId)
     {
-        return PostToInventoryOnlyAsync(landedCostId, userId);
+        if (_unitOfWork.HasActiveTransaction)
+            return PostToInventoryOnlyAsync(landedCostId, userId);
+        return _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+            try
+            {
+                var result = await PostToInventoryOnlyAsync(landedCostId, userId);
+                await _unitOfWork.CommitAsync();
+                return result;
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        });
     }
 
     private async Task<bool> PostToInventoryOnlyAsync(Guid landedCostId, Guid userId)
@@ -830,7 +851,10 @@ public class LandedCostService : ILandedCostService
             throw new InvalidOperationException("Cannot post a cancelled landed cost");
 
         if (string.Equals(landedCost.Status, "Posted", StringComparison.OrdinalIgnoreCase))
+        {
+            await PostFinanceAsync(landedCost.Id);
             return true;
+        }
 
         if (!string.Equals(landedCost.Status, "Allocated", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(landedCost.Status, "Approved", StringComparison.OrdinalIgnoreCase))
@@ -1168,7 +1192,16 @@ public class LandedCostService : ILandedCostService
         await _landedCostRepository.UpdateAsync(landedCost);
 
         await _unitOfWork.SaveChangesAsync();
+        await PostFinanceAsync(landedCost.Id);
         return true;
+    }
+
+    private Task<InventoryFinancePostingResult> PostFinanceAsync(Guid landedCostId)
+    {
+        if (_financePosting is null)
+            throw new InvalidOperationException(
+                "Inventory landed-cost Finance posting is not configured. The valuation transaction was rolled back.");
+        return _financePosting.PostLandedCostAsync(landedCostId);
     }
 
     private async Task CreateValueAdjustmentMovementAsync(

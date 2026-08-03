@@ -28,7 +28,24 @@ export interface StockAdjustmentDto {
   approvedAt?: string;
   createdAt: string;
   createdByName?: string;
+  requestedById: string;
+  submittedById?: string;
+  submittedAtUtc?: string;
+  postedById?: string;
+  postedAtUtc?: string;
+  reversedById?: string;
+  reversedAtUtc?: string;
+  reversalReason?: string;
+  financePostingEventId?: string;
+  financeJournalEntryId?: string;
+  reversalFinancePostingEventId?: string;
+  reversalFinanceJournalEntryId?: string;
+  rowVersion: string;
 }
+
+export interface InventoryControlEvidenceRequest { centralDocumentVersionId: string; evidenceReference: string; }
+export interface InventoryControlEvidenceDto extends InventoryControlEvidenceRequest { id: string; fileUploadRecordId: string; documentReference: string; versionNumber: string; }
+export interface StockAdjustmentActionDto { sequence: number; actionType: string; actorUserId: string; occurredAtUtc: string; comment?: string; }
 
 export interface StockAdjustmentItemDto {
   id: string;
@@ -57,6 +74,8 @@ export interface StockAdjustmentItemDto {
 
 export interface StockAdjustmentDetailDto extends StockAdjustmentDto {
   items: StockAdjustmentItemDto[];
+  evidence: InventoryControlEvidenceDto[];
+  actions: StockAdjustmentActionDto[];
 }
 
 export interface CreateStockAdjustmentItemDto {
@@ -77,6 +96,10 @@ export interface CreateStockAdjustmentDto {
   reference?: string;
   adjustmentDate?: string;
   items: CreateStockAdjustmentItemDto[];
+  relatedIssueVoucherId?: string;
+  idempotencyKey?: string;
+  correlationId?: string;
+  evidence?: InventoryControlEvidenceRequest[];
 }
 
 export interface UpdateStockAdjustmentDto {
@@ -85,29 +108,36 @@ export interface UpdateStockAdjustmentDto {
   reference?: string;
   adjustmentDate?: string;
   items?: CreateStockAdjustmentItemDto[];
+  rowVersion: string;
+  evidence?: InventoryControlEvidenceRequest[];
 }
 
 // Receipt Reason codes (for Inventory Receipt - always positive adjustments)
 export const StockAdjustmentReasonCodes = {
-  PURCHASE_RECEIPT: 'Purchase Receipt',
-  RETURN_FROM_CUSTOMER: 'Return from Customer',
-  TRANSFER_IN: 'Transfer In',
-  PRODUCTION_OUTPUT: 'Production Output',
-  FOUND_INVENTORY: 'Found Inventory',
-  CYCLE_COUNT: 'Cycle Count Correction',
-  PHYSICAL_COUNT: 'Physical Count Correction',
+  CYCLE_COUNT: 'Cycle Count Adjustment',
+  PHYSICAL_COUNT: 'Physical Count Adjustment',
+  DAMAGE: 'Damaged Goods',
+  LOSS: 'Lost Inventory',
+  FOUND: 'Found Inventory',
+  THEFT: 'Theft / Shrinkage',
+  EXPIRED: 'Expired Inventory',
+  QUALITY_ISSUE: 'Quality Issue',
+  DONATION: 'Donation',
+  WRITE_OFF: 'Write-off',
+  POSITIVE_ADJUSTMENT: 'Positive Adjustment',
+  NEGATIVE_ADJUSTMENT: 'Negative Adjustment',
   INITIAL_STOCK: 'Initial Stock Entry',
-  DONATION_RECEIVED: 'Donation Received',
-  SAMPLE_RECEIVED: 'Sample Received',
-  WARRANTY_REPLACEMENT: 'Warranty Replacement',
-  OTHER: 'Other Receipt',
+  OTHER: 'Other Controlled Adjustment',
 };
 
 // Status colors
 export const StockAdjustmentStatusColors: Record<string, string> = {
   Draft: 'bg-gray-100 text-gray-800',
+  PendingApproval: 'bg-amber-100 text-amber-800',
   Approved: 'bg-blue-100 text-blue-800',
+  Rejected: 'bg-red-100 text-red-800',
   Posted: 'bg-green-100 text-green-800',
+  Reversed: 'bg-purple-100 text-purple-800',
   Cancelled: 'bg-red-100 text-red-800',
 };
 
@@ -173,7 +203,7 @@ export const stockAdjustmentService = {
   async create(dto: CreateStockAdjustmentDto): Promise<StockAdjustmentDetailDto> {
     const response = await axios.post<StockAdjustmentDetailDto>(
       `${API_URL}/inventory/adjustments`,
-      dto,
+      { ...dto, idempotencyKey: dto.idempotencyKey || crypto.randomUUID(), correlationId: dto.correlationId || `adjustment-ui:${crypto.randomUUID()}`, evidence: dto.evidence || [] },
       { headers: getAuthHeaders() }
     );
     return response.data;
@@ -196,23 +226,38 @@ export const stockAdjustmentService = {
     });
   },
 
-  // Approve adjustment
-  async approve(id: string): Promise<StockAdjustmentDetailDto> {
+  async submit(id: string): Promise<StockAdjustmentDetailDto> {
+    const current = await this.getById(id);
     const response = await axios.post<StockAdjustmentDetailDto>(
-      `${API_URL}/inventory/adjustments/${id}/approve`,
-      {},
+      `${API_URL}/inventory/adjustments/${id}/submit`,
+      { rowVersion: current.rowVersion, idempotencyKey: crypto.randomUUID(), comment: 'Submitted for independent stock-adjustment approval.' },
       { headers: getAuthHeaders() }
     );
     return response.data;
   },
 
+  async decide(id: string, approved: boolean, comment: string): Promise<StockAdjustmentDetailDto> {
+    const current = await this.getById(id);
+    const response = await axios.post<StockAdjustmentDetailDto>(`${API_URL}/inventory/adjustments/${id}/decision`,
+      { approved, comment, rowVersion: current.rowVersion, idempotencyKey: crypto.randomUUID() }, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
   // Post adjustment (apply to inventory)
   async post(id: string): Promise<StockAdjustmentDetailDto> {
+    const current = await this.getById(id);
     const response = await axios.post<StockAdjustmentDetailDto>(
       `${API_URL}/inventory/adjustments/${id}/post`,
-      {},
+      { rowVersion: current.rowVersion, idempotencyKey: crypto.randomUUID(), comment: 'Posted atomically to stock and Finance.' },
       { headers: getAuthHeaders() }
     );
+    return response.data;
+  },
+
+  async reverse(id: string, reason: string): Promise<StockAdjustmentDetailDto> {
+    const current = await this.getById(id);
+    const response = await axios.post<StockAdjustmentDetailDto>(`${API_URL}/inventory/adjustments/${id}/reverse`,
+      { rowVersion: current.rowVersion, idempotencyKey: crypto.randomUUID(), reason, comment: reason }, { headers: getAuthHeaders() });
     return response.data;
   },
 

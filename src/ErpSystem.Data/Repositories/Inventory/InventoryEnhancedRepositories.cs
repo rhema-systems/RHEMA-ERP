@@ -540,8 +540,19 @@ public class PhysicalCountRepository : GenericRepository<PhysicalCount>, IPhysic
             .Include(c => c.Warehouse)
             .Include(c => c.Location)
             .Include(c => c.InitiatedBy)
+            .Include(c => c.CountedBy)
+            .Include(c => c.StoresApprovedBy)
+            .Include(c => c.FinanceApprovedBy)
+            .Include(c => c.AuditAttestedBy)
+            .Include(c => c.Actions.OrderBy(a => a.Sequence))
             .Include(c => c.Items)
                 .ThenInclude(i => i.InventoryItem)
+            .Include(c => c.Items)
+                .ThenInclude(i => i.Location)
+            .Include(c => c.Items)
+                .ThenInclude(i => i.CountedBy)
+            .Include(c => c.Items)
+                .ThenInclude(i => i.RecountedBy)
             .FirstOrDefaultAsync(c => c.Id == countId && !c.IsDeleted);
     }
 

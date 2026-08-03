@@ -12,7 +12,7 @@ namespace ErpSystem.Api.Controllers.Inventory;
 /// </summary>
 [ApiController]
 [Route("api/inventory/adjustments")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class StockAdjustmentsController : ControllerBase
 {
     private readonly IStockAdjustmentService _adjustmentService;
@@ -195,15 +195,15 @@ public class StockAdjustmentsController : ControllerBase
     }
 
     /// <summary>
-    /// Approves a stock adjustment (changes status from Draft to Approved)
+    /// Submits a draft stock adjustment to the shared approval workflow.
     /// </summary>
-    [HttpPost("{id}/approve")]
-    public async Task<ActionResult<StockAdjustmentDetailDto>> Approve(Guid id)
+    [HttpPost("{id}/submit")]
+    public async Task<ActionResult<StockAdjustmentDetailDto>> Submit(Guid id, [FromBody] StockAdjustmentActionRequest request)
     {
         try
         {
             var userId = GetCurrentUserId();
-            var adjustment = await _adjustmentService.ApproveAsync(id, userId);
+            var adjustment = await _adjustmentService.SubmitAsync(id, userId, request);
             return Ok(adjustment);
         }
         catch (ArgumentException ex)
@@ -216,21 +216,29 @@ public class StockAdjustmentsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error approving stock adjustment {Id}", id);
-            return StatusCode(500, "An error occurred while approving the stock adjustment");
+            _logger.LogError(ex, "Error submitting stock adjustment {Id}", id);
+            return StatusCode(500, "An error occurred while submitting the stock adjustment");
         }
+    }
+
+    [HttpPost("{id}/decision")]
+    public async Task<ActionResult<StockAdjustmentDetailDto>> Decide(Guid id, [FromBody] DecideStockAdjustmentRequest request)
+    {
+        try { return Ok(await _adjustmentService.DecideAsync(id, GetCurrentUserId(), request)); }
+        catch (ArgumentException ex) { return NotFound(new { code = "INV_ADJUSTMENT_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InvalidOperationException ex) { return Conflict(new { code = "INV_ADJUSTMENT_DECISION_REJECTED", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
     }
 
     /// <summary>
     /// Posts a stock adjustment (applies the adjustment to inventory)
     /// </summary>
     [HttpPost("{id}/post")]
-    public async Task<ActionResult<StockAdjustmentDetailDto>> Post(Guid id)
+    public async Task<ActionResult<StockAdjustmentDetailDto>> Post(Guid id, [FromBody] StockAdjustmentActionRequest request)
     {
         try
         {
             var userId = GetCurrentUserId();
-            var adjustment = await _adjustmentService.PostAsync(id, userId);
+            var adjustment = await _adjustmentService.PostAsync(id, userId, request);
             return Ok(adjustment);
         }
         catch (ArgumentException ex)
@@ -246,6 +254,14 @@ public class StockAdjustmentsController : ControllerBase
             _logger.LogError(ex, "Error posting stock adjustment {Id}", id);
             return StatusCode(500, "An error occurred while posting the stock adjustment");
         }
+    }
+
+    [HttpPost("{id}/reverse")]
+    public async Task<ActionResult<StockAdjustmentDetailDto>> Reverse(Guid id, [FromBody] ReverseStockAdjustmentRequest request)
+    {
+        try { return Ok(await _adjustmentService.ReverseAsync(id, GetCurrentUserId(), request)); }
+        catch (ArgumentException ex) { return NotFound(new { code = "INV_ADJUSTMENT_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InvalidOperationException ex) { return Conflict(new { code = "INV_ADJUSTMENT_REVERSAL_REJECTED", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
     }
 
     /// <summary>

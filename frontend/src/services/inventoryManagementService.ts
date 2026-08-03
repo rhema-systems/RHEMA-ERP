@@ -120,6 +120,11 @@ export interface InventoryCategoryDto {
   defaultUnitOfMeasure?: string;
   defaultSerialTracking: boolean;
   defaultLotTracking: boolean;
+  defaultBatchTracking: boolean;
+  defaultManufactureDateTracking: boolean;
+  defaultExpirationTracking: boolean;
+  enforceFifoIssue: boolean;
+  minimumShelfLifeDays: number;
   defaultRequiresInspection: boolean;
 }
 
@@ -154,6 +159,8 @@ export interface InventoryItemDto {
   isSerialTracked: boolean;
   isLotTracked: boolean;
   isBatchTracked: boolean;
+  isManufactureDateTracked: boolean;
+  isExpirationTracked: boolean;
   itemType: number;
   status: number;
   isActive: boolean;
@@ -214,6 +221,10 @@ export interface InventoryItemDto {
   allowBackorder: boolean;
   valuationMethod: number; // 1=WeightedAverage, 2=FIFO, 3=LIFO, 4=StandardCost
   isValuationLocked: boolean;
+  isProjectApplicable: boolean;
+  isCostCentreApplicable: boolean;
+  safetyStock: number;
+  rowVersion: string;
 }
 
 export interface CreateInventoryItemDto {
@@ -236,9 +247,12 @@ export interface CreateInventoryItemDto {
   unitOfMeasureId?: string;
   unitOfMeasureScheduleId?: string;
   valuationMethod: number; // 1=WeightedAverage, 2=FIFO, 3=LIFO, 4=StandardCost
+  isProjectApplicable: boolean;
+  isCostCentreApplicable: boolean;
   quantityDecimals: number;
   currencyDecimals: number;
   itemType: number;
+  status: number;
 
   // Costs & Pricing
   standardCost: number;
@@ -261,6 +275,7 @@ export interface CreateInventoryItemDto {
   isSerialTracked: boolean;
   isLotTracked: boolean;
   isBatchTracked: boolean;
+  isManufactureDateTracked: boolean;
   isExpirationTracked: boolean;
   isLocationTracked: boolean;
   lotCategory?: string;
@@ -323,6 +338,23 @@ export interface CreateInventoryItemDto {
 
 export interface UpdateInventoryItemDto extends CreateInventoryItemDto {
   isActive: boolean;
+  status: number;
+  rowVersion: string;
+}
+
+export interface InventoryItemChangeAuditDto {
+  id: string;
+  occurredAtUtc: string;
+  userId?: string;
+  username: string;
+  action: string;
+  oldValues?: string;
+  newValues?: string;
+}
+
+export interface InventoryItemImportResultDto {
+  importedCount: number;
+  items: InventoryItemDto[];
 }
 
 // Item Class
@@ -650,7 +682,11 @@ export interface GoodsReceiptNoteItemDto {
   locationId?: string;
   locationName?: string;
   batchNumber?: string;
+  lotNumber?: string;
+  serialNumber?: string;
+  manufactureDate?: string;
   expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
 }
 
 export interface CreateGoodsReceiptNoteDto {
@@ -672,7 +708,11 @@ export interface CreateGoodsReceiptNoteItemDto {
   unitCost: number;
   locationId?: string;
   batchNumber?: string;
+  lotNumber?: string;
+  serialNumber?: string;
+  manufactureDate?: string;
   expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
 }
 
 export interface UpdateGRNInspectionDto {
@@ -711,7 +751,48 @@ export interface InventoryTransferDto {
 }
 
 export interface InventoryTransferDetailDto extends InventoryTransferDto {
+  hasOpenDiscrepancy: boolean;
+  completedDate?: string;
+  rowVersion: string;
   items: InventoryTransferItemDto[];
+  actions: InventoryTransferActionDto[];
+  discrepancies: InventoryTransferDiscrepancyDto[];
+}
+
+export interface InventoryTransferActionDto {
+  id: string;
+  sequence: number;
+  actionType: string;
+  actorUserId: string;
+  occurredAtUtc: string;
+  correlationId: string;
+  comment?: string;
+}
+
+export interface InventoryTransferEvidenceRequest {
+  centralDocumentVersionId: string;
+  evidenceReference: string;
+}
+
+export interface InventoryTransferEvidenceDto extends InventoryTransferEvidenceRequest {
+  id: string;
+  fileUploadRecordId: string;
+  documentReference: string;
+  versionNumber: string;
+}
+
+export interface InventoryTransferDiscrepancyDto {
+  id: string;
+  inventoryTransferItemId: string;
+  damagedQuantity: number;
+  shortageQuantity: number;
+  reasonCode: string;
+  reason: string;
+  status: string;
+  resolutionCode?: string;
+  resolutionNotes?: string;
+  resolvedAtUtc?: string;
+  evidence: InventoryTransferEvidenceDto[];
 }
 
 export interface InventoryTransferItemDto {
@@ -722,6 +803,8 @@ export interface InventoryTransferItemDto {
   requestedQuantity: number;
   shippedQuantity: number;
   receivedQuantity: number;
+  damagedQuantity: number;
+  shortageQuantity: number;
   unitOfMeasure?: string;
   unitCost?: number;
   totalCost?: number;
@@ -729,7 +812,11 @@ export interface InventoryTransferItemDto {
   totalAllocatedCost?: number;
   landedUnitCost?: number;
   lotNumber?: string;
+  batchNumber?: string;
   serialNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
   sourceLocationId?: string;
   sourceLocationName?: string;
   destinationLocationId?: string;
@@ -748,7 +835,18 @@ export interface CreateInventoryTransferDto {
 export interface CreateInventoryTransferItemDto {
   inventoryItemId: string;
   requestedQuantity: number;
+  sourceLocationId?: string;
+  destinationLocationId?: string;
+  lotNumber?: string;
+  batchNumber?: string;
+  serialNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
   notes?: string;
+  discrepancyReasonCode?: string;
+  discrepancyReason?: string;
+  evidence?: InventoryTransferEvidenceRequest[];
 }
 
 export interface UpdateInventoryTransferDto {
@@ -765,7 +863,11 @@ export interface AddTransferItemDto {
   sourceLocationId?: string;
   destinationLocationId?: string;
   lotNumber?: string;
+  batchNumber?: string;
   serialNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
   notes?: string;
 }
 
@@ -774,7 +876,11 @@ export interface UpdateTransferItemDto {
   sourceLocationId?: string;
   destinationLocationId?: string;
   lotNumber?: string;
+  batchNumber?: string;
   serialNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
   notes?: string;
 }
 
@@ -784,6 +890,10 @@ export interface ShipTransferItemDto {
 }
 
 export interface ShipTransferWithCostsDto {
+  rowVersion: string;
+  idempotencyKey: string;
+  correlationId?: string;
+  comment?: string;
   trackingNumber?: string;
   carrierName?: string;
   shippingCost: number;
@@ -798,6 +908,25 @@ export interface ShipTransferWithCostsDto {
 export interface ReceiveTransferItemDto {
   id: string;  // Backend expects Id (transfer item id)
   receivedQuantity: number;
+  damagedQuantity?: number;
+  shortageQuantity?: number;
+  discrepancyReasonCode?: string;
+  discrepancyReason?: string;
+  evidence?: InventoryTransferEvidenceRequest[];
+}
+
+export interface InventoryTransferMutationRequest {
+  rowVersion: string;
+  idempotencyKey: string;
+  correlationId?: string;
+  comment?: string;
+}
+
+export interface ResolveInventoryTransferDiscrepancyRequest extends InventoryTransferMutationRequest {
+  discrepancyIds: string[];
+  resolutionCode: string;
+  resolutionNotes: string;
+  evidence: InventoryTransferEvidenceRequest[];
 }
 
 // Physical Count
@@ -816,6 +945,15 @@ export interface PhysicalCountDto {
   categoryId?: string;
   categoryName?: string;
   freezeInventory: boolean;
+  blindCount: boolean;
+  systemQuantityVisible: boolean;
+  abcClass?: string;
+  scheduledForUtc?: string;
+  cutoffAtUtc?: string;
+  freezeStartedAtUtc?: string;
+  freezeReleasedAtUtc?: string;
+  stockAdjustmentId?: string;
+  rowVersion: string;
   totalItems: number;
   countedItems: number;
   itemsWithVariance: number;
@@ -828,7 +966,15 @@ export interface PhysicalCountDto {
 export interface PhysicalCountDetailDto extends PhysicalCountDto {
   approvedByName?: string;
   approvedDate?: string;
+  storesApprovedById?: string;
+  storesApprovedAtUtc?: string;
+  financeApprovedById?: string;
+  financeApprovedAtUtc?: string;
+  auditAttestedById?: string;
+  auditAttestedAtUtc?: string;
+  investigationSummary?: string;
   items: PhysicalCountItemDto[];
+  actions: PhysicalCountActionDto[];
 }
 
 export interface PhysicalCountItemDto {
@@ -849,6 +995,14 @@ export interface PhysicalCountItemDto {
   isCounted: boolean;
   countedAt?: string;
   countedByName?: string;
+  countAttempts: number;
+  requiresRecount: boolean;
+  firstCountQuantity?: number;
+  recountedQuantity?: number;
+  recountedAtUtc?: string;
+  recountedById?: string;
+  investigationNotes?: string;
+  rowVersion: string;
   notes?: string;
 }
 
@@ -858,6 +1012,8 @@ export interface CreatePhysicalCountDto {
   locationId?: string;
   categoryId?: string;
   freezeInventory?: boolean;
+  blindCount?: boolean;
+  abcClass?: string;
   notes?: string;
 }
 
@@ -882,6 +1038,74 @@ export interface RecordCountItemDto {
   lotNumber?: string;
   serialNumber?: string;
   notes?: string;
+  rowVersion: string;
+  idempotencyKey: string;
+}
+
+export interface PhysicalCountMutationRequest {
+  rowVersion: string;
+  idempotencyKey: string;
+  correlationId?: string;
+  comment?: string;
+}
+
+export interface PhysicalCountDecisionRequest extends PhysicalCountMutationRequest {
+  approved: boolean;
+  reason?: string;
+}
+
+export interface RecordPhysicalCountRecountRequest extends PhysicalCountMutationRequest {
+  physicalCountItemId: string;
+  itemRowVersion: string;
+  recountedQuantity: number;
+  investigationNotes: string;
+}
+
+export interface PhysicalCountActionDto {
+  id: string;
+  sequence: number;
+  actionType: string;
+  actorUserId: string;
+  actorRole: string;
+  occurredAtUtc: string;
+  comment?: string;
+  integrityHash: string;
+}
+
+export interface InventoryCycleCountScheduleDto {
+  id: string;
+  warehouseId: string;
+  locationId: string;
+  abcClass: 'A' | 'B' | 'C';
+  frequencyDays: number;
+  nextDueAtUtc: string;
+  calendarOccurrenceId: string;
+  cutoffOccurrenceId: string;
+  cutoffAtUtc: string;
+  freezeInventory: boolean;
+  blindCount: boolean;
+  recountQuantityThreshold: number;
+  recountValueThreshold: number;
+  isActive: boolean;
+  lastGeneratedAtUtc?: string;
+  lastPhysicalCountId?: string;
+  notes?: string;
+  rowVersion: string;
+}
+
+export interface SaveInventoryCycleCountScheduleRequest {
+  warehouseId: string;
+  locationId: string;
+  abcClass: 'A' | 'B' | 'C';
+  frequencyDays: number;
+  nextDueAtUtc: string;
+  calendarOccurrenceId: string;
+  cutoffOccurrenceId: string;
+  recountQuantityThreshold: number;
+  recountValueThreshold: number;
+  isActive: boolean;
+  notes?: string;
+  rowVersion?: string;
 }
 
 export interface PhysicalCountFilterDto {
@@ -1667,8 +1891,8 @@ class InventoryManagementService {
     });
   }
 
-  async shipTransfer(id: string, trackingNumber?: string, items?: ShipTransferItemDto[]): Promise<void> {
-    await axios.post(`${API_URL}/inventory/transfers/${id}/ship`, { trackingNumber, items }, {
+  async shipTransfer(id: string, control: InventoryTransferMutationRequest, trackingNumber?: string, items?: ShipTransferItemDto[]): Promise<void> {
+    await axios.post(`${API_URL}/inventory/transfers/${id}/ship`, { ...control, trackingNumber, items }, {
       headers: this.getAuthHeaders()
     });
   }
@@ -1685,22 +1909,68 @@ class InventoryManagementService {
     });
   }
 
-  async receiveTransfer(id: string, receivedItems?: ReceiveTransferItemDto[]): Promise<void> {
-    await axios.post(`${API_URL}/inventory/transfers/${id}/receive`, { receivedItems }, {
+  async receiveTransfer(id: string, control: InventoryTransferMutationRequest, receivedItems?: ReceiveTransferItemDto[]): Promise<void> {
+    await axios.post(`${API_URL}/inventory/transfers/${id}/receive`, { ...control, receivedItems }, {
       headers: this.getAuthHeaders()
     });
   }
 
-  async cancelTransfer(id: string, reason: string): Promise<void> {
-    await axios.post(`${API_URL}/inventory/transfers/${id}/cancel`, { reason }, {
+  async cancelTransfer(id: string, reason: string, rowVersion?: string): Promise<void> {
+    const version = rowVersion || (await this.getInventoryTransferById(id)).rowVersion;
+    await axios.post(`${API_URL}/inventory/transfers/${id}/cancel`, {
+      reason,
+      rowVersion: version,
+      idempotencyKey: crypto.randomUUID(),
+      correlationId: `transfer-cancel:${id}:${crypto.randomUUID()}`,
+      comment: reason,
+    }, {
       headers: this.getAuthHeaders()
     });
   }
 
-  async reverseShipment(id: string, reason: string): Promise<void> {
-    await axios.post(`${API_URL}/inventory/transfers/${id}/reverse-shipment`, { reason }, {
+  async reverseShipment(id: string, reason: string, rowVersion?: string): Promise<void> {
+    const version = rowVersion || (await this.getInventoryTransferById(id)).rowVersion;
+    await axios.post(`${API_URL}/inventory/transfers/${id}/reverse-shipment`, {
+      reason,
+      rowVersion: version,
+      idempotencyKey: crypto.randomUUID(),
+      correlationId: `transfer-reverse:${id}:${crypto.randomUUID()}`,
+      comment: reason,
+    }, {
       headers: this.getAuthHeaders()
     });
+  }
+
+  async importInventoryItems(items: CreateInventoryItemDto[]): Promise<InventoryItemImportResultDto> {
+    const response = await axios.post(`${API_URL}/InventoryItems/import`, { items }, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async getInventoryItemHistory(id: string): Promise<InventoryItemChangeAuditDto[]> {
+    const response = await axios.get(`${API_URL}/InventoryItems/${id}/history`, {
+      headers: this.getAuthHeaders()
+    });
+    return response.data;
+  }
+
+  async getTransferDiscrepancyReasons(): Promise<Record<string, string>> {
+    const response = await axios.get(`${API_URL}/inventory/transfers/discrepancy-reasons`, { headers: this.getAuthHeaders() });
+    return response.data;
+  }
+
+  async getTransferDiscrepancyResolutions(): Promise<Record<string, string>> {
+    const response = await axios.get(`${API_URL}/inventory/transfers/discrepancy-resolutions`, { headers: this.getAuthHeaders() });
+    return response.data;
+  }
+
+  async resolveTransferDiscrepancies(id: string, request: ResolveInventoryTransferDiscrepancyRequest): Promise<void> {
+    await axios.post(`${API_URL}/inventory/transfers/${id}/resolve-discrepancies`, request, { headers: this.getAuthHeaders() });
+  }
+
+  async closeTransfer(id: string, request: InventoryTransferMutationRequest): Promise<void> {
+    await axios.post(`${API_URL}/inventory/transfers/${id}/close`, request, { headers: this.getAuthHeaders() });
   }
 
   async getShipmentNotePdf(id: string): Promise<Blob> {
@@ -1835,6 +2105,43 @@ class InventoryManagementService {
     await axios.post(`${API_URL}/inventory/physical-counts/${id}/record-items`, items, {
       headers: this.getAuthHeaders()
     });
+  }
+
+  async recordPhysicalCountRecount(id: string, request: RecordPhysicalCountRecountRequest): Promise<void> {
+    await axios.post(`${API_URL}/inventory/physical-counts/${id}/recount`, request, { headers: this.getAuthHeaders() });
+  }
+
+  async decidePhysicalCountStores(id: string, request: PhysicalCountDecisionRequest): Promise<void> {
+    await axios.post(`${API_URL}/inventory/physical-counts/${id}/stores-decision`, request, { headers: this.getAuthHeaders() });
+  }
+
+  async decidePhysicalCountFinance(id: string, request: PhysicalCountDecisionRequest): Promise<void> {
+    await axios.post(`${API_URL}/inventory/physical-counts/${id}/finance-decision`, request, { headers: this.getAuthHeaders() });
+  }
+
+  async attestPhysicalCountAudit(id: string, request: PhysicalCountDecisionRequest): Promise<void> {
+    await axios.post(`${API_URL}/inventory/physical-counts/${id}/audit-attestation`, request, { headers: this.getAuthHeaders() });
+  }
+
+  async postControlledPhysicalCount(id: string, request: PhysicalCountMutationRequest): Promise<void> {
+    await axios.post(`${API_URL}/inventory/physical-counts/${id}/controlled-post`, request, { headers: this.getAuthHeaders() });
+  }
+
+  async getCycleCountSchedules(): Promise<InventoryCycleCountScheduleDto[]> {
+    const response = await axios.get(`${API_URL}/inventory/physical-counts/cycle-schedules`, { headers: this.getAuthHeaders() });
+    return response.data;
+  }
+
+  async saveCycleCountSchedule(request: SaveInventoryCycleCountScheduleRequest, id?: string): Promise<InventoryCycleCountScheduleDto> {
+    const response = id
+      ? await axios.put(`${API_URL}/inventory/physical-counts/cycle-schedules/${id}`, request, { headers: this.getAuthHeaders() })
+      : await axios.post(`${API_URL}/inventory/physical-counts/cycle-schedules`, request, { headers: this.getAuthHeaders() });
+    return response.data;
+  }
+
+  async generateDueCycleCounts(): Promise<{ dueSchedules: number; countsCreated: number; emptySchedules: number; physicalCountIds: string[] }> {
+    const response = await axios.post(`${API_URL}/inventory/physical-counts/cycle-schedules/generate`, {}, { headers: this.getAuthHeaders() });
+    return response.data;
   }
 
   async completePhysicalCount(id: string): Promise<void> {

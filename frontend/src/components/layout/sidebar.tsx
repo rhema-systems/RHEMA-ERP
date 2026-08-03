@@ -72,6 +72,7 @@ import {
   KeyRound,
   PackageCheck,
   ScanLine,
+  BellRing,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -545,6 +546,76 @@ const navigationItems: NavItem[] = [
           { title: 'Inventory Transfers', href: '/inventory/transfers', icon: Package },
           { title: 'Bin Stock', href: '/inventory/bin-stock', icon: FolderTree },
           { title: 'Physical Counts', href: '/inventory/physical-counts', icon: ClipboardCheck },
+          {
+            title: 'Labels & Mobile Scanning',
+            href: '/inventory/mobile-scanning',
+            icon: ScanLine,
+            permissions: [
+              'procurement.inventory.receive',
+              'procurement.inventory.issue',
+              'procurement.inventory.transfer',
+              'procurement.inventory.count',
+            ],
+            accessMode: 'any',
+          },
+            {
+              title: 'Tracking Controls',
+              href: '/inventory/tracking-controls',
+              icon: ShieldCheck,
+              permissions: ['procurement.inventory.read'],
+            },
+            {
+              title: 'Negative Stock Controls',
+              href: '/inventory/negative-stock-controls',
+              icon: ShieldCheck,
+              permissions: ['procurement.inventory.read'],
+            },
+            {
+              title: 'Project Reservations',
+              href: '/inventory/project-reservations',
+              icon: ShieldCheck,
+              permissions: ['procurement.inventory.read'],
+            },
+            {
+              title: 'Replenishment',
+              href: '/inventory/replenishment',
+              icon: BellRing,
+              permissions: ['procurement.inventory.read'],
+            },
+            {
+              title: 'Valuation Reconciliation',
+              href: '/inventory/valuation-reconciliation',
+              icon: Scale,
+              permissions: ['Finance.Read'],
+            },
+            {
+              title: 'Ageing & Action Analytics',
+              href: '/inventory/analytics',
+              icon: BarChart3,
+              permissions: ['procurement.inventory.read'],
+            },
+            {
+              title: 'Inventory Disposal',
+              href: '/inventory/disposals',
+              icon: Gavel,
+              permissions: [
+                'procurement.inventory.read',
+                'procurement.inventory.disposal.request',
+                'procurement.inventory.disposal.approve',
+              ],
+              accessMode: 'any',
+            },
+            {
+              title: 'Directed Operations',
+              href: '/inventory/directed-operations',
+              icon: GitBranch,
+              permissions: [
+                'procurement.inventory.receive',
+                'procurement.inventory.issue',
+                'procurement.inventory.transfer',
+              ],
+              accessMode: 'any',
+            },
           { title: 'Valuation', href: '/inventory/valuation', icon: DollarSign },
         ],
       },

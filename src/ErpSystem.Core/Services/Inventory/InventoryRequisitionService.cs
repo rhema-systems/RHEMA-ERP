@@ -1,4 +1,10 @@
+using System.Data;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Enums;
@@ -6,6 +12,9 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Shared;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Inventory;
@@ -32,6 +41,12 @@ public class InventoryRequisitionService : IInventoryRequisitionService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
+    private readonly IInventoryTrackingControlService _trackingControls;
+    private readonly IInventoryNegativeStockControlService _negativeStockControls;
+    private readonly IInventoryProjectReservationService _projectReservations;
+    private readonly IProcurementAccessControlService _accessControl;
+    private readonly IProcurementControlEventService _controlEvents;
+    private readonly IInventoryReturnControlService _returnControls;
     private readonly ILogger<InventoryRequisitionService> _logger;
 
     public InventoryRequisitionService(
@@ -49,6 +64,12 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
+        IInventoryTrackingControlService trackingControls,
+        IInventoryNegativeStockControlService negativeStockControls,
+        IInventoryProjectReservationService projectReservations,
+        IProcurementAccessControlService accessControl,
+        IProcurementControlEventService controlEvents,
+        IInventoryReturnControlService returnControls,
         ILogger<InventoryRequisitionService> logger)
     {
         _requisitionRepository = requisitionRepository;
@@ -65,6 +86,12 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         _currentUserProvider = currentUserProvider;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
+        _trackingControls = trackingControls;
+        _negativeStockControls = negativeStockControls;
+        _projectReservations = projectReservations;
+        _accessControl = accessControl;
+        _controlEvents = controlEvents;
+        _returnControls = returnControls;
         _logger = logger;
     }
 
@@ -73,43 +100,45 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         var requisitions = await _requisitionRepository.GetByDateRangeAsync(
             fromDate ?? DateTime.UtcNow.AddMonths(-3),
             toDate ?? DateTime.UtcNow);
-        return requisitions.Select(MapToDto);
+        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetByProjectAsync(Guid projectId)
     {
         var requisitions = await _requisitionRepository.GetByProjectAsync(projectId);
-        return requisitions.Select(MapToDto);
+        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetByWarehouseAsync(Guid warehouseId)
     {
         var requisitions = await _requisitionRepository.GetByWarehouseAsync(warehouseId);
-        return requisitions.Select(MapToDto);
+        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetByDepartmentAsync(Guid departmentId)
     {
         var requisitions = await _requisitionRepository.GetByDepartmentAsync(departmentId);
-        return requisitions.Select(MapToDto);
+        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetPendingApprovalAsync()
     {
         var requisitions = await _requisitionRepository.GetPendingApprovalAsync();
-        return requisitions.Select(MapToDto);
+        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetPendingIssueAsync()
     {
         var requisitions = await _requisitionRepository.GetPendingIssueAsync();
-        return requisitions.Select(MapToDto);
+        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<InventoryRequisitionDetailDto?> GetByIdAsync(Guid id)
     {
         var requisition = await _requisitionRepository.GetWithItemsAsync(id);
-        return requisition != null ? MapToDetailDto(requisition) : null;
+        return requisition != null && (!IsStoresUser || await CanReadStoreRequisitionAsync(requisition))
+            ? MapToDetailDto(requisition)
+            : null;
     }
 
     public async Task<InventoryRequisitionDetailDto?> GetByRequisitionNumberAsync(string requisitionNumber)
@@ -117,7 +146,9 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         var requisition = await _requisitionRepository.GetByRequisitionNumberAsync(requisitionNumber);
         if (requisition == null) return null;
         var fullRequisition = await _requisitionRepository.GetWithItemsAsync(requisition.Id);
-        return fullRequisition != null ? MapToDetailDto(fullRequisition) : null;
+        return fullRequisition != null && (!IsStoresUser || await CanReadStoreRequisitionAsync(fullRequisition))
+            ? MapToDetailDto(fullRequisition)
+            : null;
     }
 
     public async Task<InventoryRequisitionDetailDto> CreateAsync(CreateInventoryRequisitionDto dto)
@@ -175,7 +206,11 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                     UnitCost = itemUnitCost,
                     LocationId = itemDto.LocationId,
                     LotNumber = itemDto.LotNumber,
+                    BatchNumber = itemDto.BatchNumber,
                     SerialNumber = itemDto.SerialNumber,
+                    ManufactureDate = itemDto.ManufactureDate,
+                    ExpiryDate = itemDto.ExpiryDate,
+                    InventoryTrackingExceptionId = itemDto.InventoryTrackingExceptionId,
                     Notes = itemDto.Notes,
                     TenantId = _currentUserProvider.TenantId
                 };
@@ -393,24 +428,169 @@ public class InventoryRequisitionService : IInventoryRequisitionService
 
     public async Task<bool> IssueAsync(Guid id, IssueRequisitionDto dto)
     {
+        EnsureIssueActor();
+        if (dto.Items.Count == 0)
+            throw new InventoryIssueControlException("INV_ISSUE_LINES_REQUIRED", "At least one positive issue line is required.");
+
+        if (_unitOfWork.HasActiveTransaction)
+        {
+            await _unitOfWork.AcquireTransactionLockAsync($"inventory-requisition-issue:{_currentUserProvider.TenantId:N}:{id:N}");
+            return await IssueCoreAsync(id, dto);
+        }
+
+        try
+        {
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+                try
+                {
+                    await _unitOfWork.AcquireTransactionLockAsync($"inventory-requisition-issue:{_currentUserProvider.TenantId:N}:{id:N}");
+                    var result = await IssueCoreAsync(id, dto);
+                    await _unitOfWork.CommitAsync();
+                    return result;
+                }
+                catch
+                {
+                    if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
+                    _unitOfWork.ClearTrackedChanges();
+                    throw;
+                }
+            });
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new InventoryIssueControlException("INV_ISSUE_CONCURRENCY_CONFLICT",
+                "The requisition changed after it was loaded. Refresh and retry.");
+        }
+    }
+
+    private async Task<bool> IssueCoreAsync(Guid id, IssueRequisitionDto dto)
+    {
         var requisition = await _requisitionRepository.GetWithItemsAsync(id)
-            ?? throw new ArgumentException($"Requisition {id} not found");
+            ?? throw new InventoryIssueNotFoundException($"Requisition {id} was not found in the current tenant.");
+
+        var receiverId = dto.ReceiverUserId.GetValueOrDefault(requisition.RequestedById.GetValueOrDefault());
+        if (receiverId == Guid.Empty)
+            throw new InventoryIssueControlException("INV_ISSUE_RECEIVER_REQUIRED", "An active internal receiver is required.");
+        await EnsureActiveInternalUserAsync(receiverId);
+
+        var normalizedKey = NormalizeRequired(dto.IdempotencyKey, 100, "Idempotency key");
+        var correlationId = NormalizeCorrelation(dto.CorrelationId);
+        var payloadHash = Hash(new
+        {
+            requisitionId = id,
+            receiverId,
+            notes = NormalizeOptional(dto.Notes, 2000),
+            items = dto.Items.OrderBy(item => item.ItemId).Select(item => new
+            {
+                item.ItemId,
+                item.IssuedQuantity,
+                item.LocationId,
+                LotNumber = NormalizeOptional(item.LotNumber, 100),
+                BatchNumber = NormalizeOptional(item.BatchNumber, 100),
+                SerialNumber = NormalizeOptional(item.SerialNumber, 100),
+                ManufactureDate = Utc(item.ManufactureDate),
+                ExpiryDate = Utc(item.ExpiryDate),
+                item.InventoryTrackingExceptionId,
+                item.NegativeStockOverrideId
+            })
+        });
+        var existingVoucher = await IssueVouchers.AsNoTracking().SingleOrDefaultAsync(value =>
+            value.TenantId == _currentUserProvider.TenantId && value.InventoryRequisitionId == id &&
+            value.IdempotencyKey == normalizedKey && !value.IsDeleted);
+        if (existingVoucher is not null)
+        {
+            if (!string.Equals(existingVoucher.PayloadHash, payloadHash, StringComparison.OrdinalIgnoreCase))
+                throw new InventoryIssueControlException("INV_ISSUE_IDEMPOTENCY_CONFLICT",
+                    "The idempotency key already identifies a different issue payload.");
+            return true;
+        }
+
+        EnsureRowVersion(requisition.RowVersion, dto.RowVersion, "requisition");
 
         if (requisition.Status != RequisitionStatus.Approved &&
             requisition.Status != RequisitionStatus.InProgress &&
             requisition.Status != RequisitionStatus.PartiallyIssued)
-            throw new InvalidOperationException("Only approved or in-progress requisitions can be issued");
+            throw new InventoryIssueControlException("INV_ISSUE_APPROVED_SOURCE_REQUIRED",
+                "Only an approved or partially issued requisition can be issued.");
+
+        if (!requisition.RequestedById.HasValue || !requisition.ApprovedById.HasValue)
+            throw new InventoryIssueControlException("INV_ISSUE_APPROVAL_LINEAGE_REQUIRED",
+                "The requisition must retain both requester and completed-workflow approver lineage.");
+        if (requisition.RequestedById == requisition.ApprovedById)
+            throw new InventoryIssueControlException("INV_ISSUE_REQUEST_APPROVAL_SOD",
+                "The requester and approver must be different users.");
+        if (_currentUserProvider.UserId == requisition.RequestedById ||
+            _currentUserProvider.UserId == requisition.ApprovedById)
+            throw new InventoryIssueAuthorizationException(
+                "The issuer must be independent of the requester and approver.");
+        if (_currentUserProvider.UserId == receiverId)
+            throw new InventoryIssueAuthorizationException("The issuer cannot acknowledge their own handover as receiver.");
+        if (!requisition.ProjectId.HasValue && string.IsNullOrWhiteSpace(requisition.CostCenter))
+            throw new InventoryIssueControlException("INV_ISSUE_COST_OBJECT_REQUIRED",
+                "The approved requisition must reference a project or cost centre before stock can be issued.");
 
         var warehouse = await _warehouseRepository.GetByIdAsync(requisition.WarehouseId)
-            ?? throw new ArgumentException($"Warehouse not found");
+            ?? throw new InventoryIssueNotFoundException("The source warehouse was not found in the current tenant.");
+        var issuedAt = DateTime.UtcNow;
+        var sourceSnapshotJson = JsonSerializer.Serialize(new
+        {
+            requisition.Id,
+            requisition.RequisitionNumber,
+            requisition.Status,
+            requisition.DepartmentId,
+            requisition.DepartmentName,
+            requisition.CostCenter,
+            requisition.ProjectId,
+            requisition.ProjectCode,
+            requisition.WarehouseId,
+            requisition.LocationId,
+            requisition.RequestedById,
+            requisition.ApprovedById
+        });
+        var voucher = new InventoryIssueVoucher
+        {
+            TenantId = _currentUserProvider.TenantId,
+            VoucherNumber = await GenerateIssueVoucherNumberAsync(issuedAt),
+            InventoryRequisitionId = requisition.Id,
+            Status = InventoryIssueVoucherStatus.Issued,
+            WarehouseId = requisition.WarehouseId,
+            LocationId = requisition.LocationId,
+            DepartmentId = requisition.DepartmentId,
+            DepartmentName = requisition.DepartmentName,
+            CostCenter = NormalizeOptional(requisition.CostCenter, 100),
+            ProjectId = requisition.ProjectId,
+            ProjectCode = NormalizeOptional(requisition.ProjectCode, 100),
+            RequestedById = requisition.RequestedById.Value,
+            ApprovedById = requisition.ApprovedById.Value,
+            IssuedById = _currentUserProvider.UserId,
+            ReceiverUserId = receiverId,
+            IssuedAtUtc = issuedAt,
+            Notes = NormalizeOptional(dto.Notes, 2000),
+            IdempotencyKey = normalizedKey,
+            PayloadHash = payloadHash,
+            CorrelationId = correlationId,
+            SourceSnapshotJson = sourceSnapshotJson,
+            CreatedById = _currentUserProvider.UserId
+        };
+        voucher.IntegrityHash = VoucherIntegrity(voucher);
+        await _unitOfWork.Repository<InventoryIssueVoucher>().AddAsync(voucher);
+        var pendingMovements = new List<StockMovement>();
+
         foreach (var issueItem in dto.Items)
         {
             var requisitionItem = requisition.Items.FirstOrDefault(i => i.Id == issueItem.ItemId)
-                ?? throw new ArgumentException($"Requisition item {issueItem.ItemId} not found");
+                ?? throw new InventoryIssueControlException("INV_ISSUE_LINE_NOT_FOUND",
+                    $"Requisition item {issueItem.ItemId} was not found on the approved requisition.");
+
+            if (issueItem.IssuedQuantity <= 0)
+                throw new InventoryIssueControlException("INV_ISSUE_QUANTITY_INVALID", "Issued quantity must be greater than zero.");
 
             var remainingToIssue = requisitionItem.ApprovedQuantity - requisitionItem.IssuedQuantity;
             if (issueItem.IssuedQuantity > remainingToIssue)
-                throw new InvalidOperationException($"Cannot issue more than remaining quantity for {requisitionItem.ItemCode}");
+                throw new InventoryIssueControlException("INV_ISSUE_APPROVED_QUANTITY_EXCEEDED",
+                    $"Cannot issue more than the remaining approved quantity for {requisitionItem.ItemCode}.");
 
             var effectiveLocationId = issueItem.LocationId ?? requisition.LocationId;
             var effectiveWarehouseId = requisition.WarehouseId;
@@ -419,11 +599,26 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             if (effectiveLocationId.HasValue && effectiveLocationId.Value != Guid.Empty)
             {
                 var location = await _warehouseLocationRepository.GetByIdAsync(effectiveLocationId.Value);
-                if (location != null)
-                {
-                    effectiveWarehouseId = location.InventoryWarehouseId;
-                }
+                if (location == null || location.TenantId != _currentUserProvider.TenantId || location.IsDeleted)
+                    throw new InventoryIssueNotFoundException("The issue location was not found in the current tenant.");
+                effectiveWarehouseId = location.InventoryWarehouseId;
             }
+
+            if (effectiveWarehouseId != requisition.WarehouseId)
+                throw new InventoryIssueControlException("INV_ISSUE_LOCATION_WAREHOUSE_MISMATCH",
+                    "Every issue location must belong to the approved requisition warehouse.");
+
+            var accessDecision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = "procurement.inventory.issue",
+                WarehouseId = effectiveWarehouseId,
+                LocationId = effectiveLocationId,
+                RequireLocationScope = true,
+                SourceType = "InventoryRequisition",
+                SourceReference = requisition.RequisitionNumber
+            }, correlationId);
+            if (!accessDecision.Allowed)
+                throw new InventoryIssueAuthorizationException(accessDecision.Message);
 
             if (effectiveWarehouseId != requisition.WarehouseId)
             {
@@ -431,17 +626,79 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 isConsignmentWarehouse = wh?.IsConsignmentWarehouse == true;
             }
 
-            // Check stock availability
+            await _projectReservations.FulfillForIssueAsync(new InventoryProjectReservationFulfillmentRequest
+            {
+                InventoryRequisitionId = requisition.Id,
+                InventoryRequisitionItemId = requisitionItem.Id,
+                InventoryItemId = requisitionItem.InventoryItemId,
+                WarehouseId = effectiveWarehouseId,
+                LocationId = effectiveLocationId ?? Guid.Empty,
+                Quantity = issueItem.IssuedQuantity,
+                ActorUserId = _currentUserProvider.UserId,
+                IdempotencyKey = $"issue:{normalizedKey}:{requisitionItem.Id:N}",
+                CorrelationId = correlationId
+            });
+
+            var decreaseAuthorization = await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
+            {
+                InventoryItemId = requisitionItem.InventoryItemId,
+                WarehouseId = effectiveWarehouseId,
+                LocationId = effectiveLocationId,
+                Quantity = issueItem.IssuedQuantity,
+                ReferenceType = "InventoryRequisition",
+                ReferenceNumber = requisition.RequisitionNumber,
+                ReferenceId = requisition.Id,
+                ReferenceLineId = requisitionItem.Id,
+                NegativeStockOverrideId = issueItem.NegativeStockOverrideId,
+                CorrelationId = correlationId
+            });
+
+            // Reload after the tenant/item transaction lock so this check cannot race another consumer.
             var warehouseQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveWarehouseId, requisitionItem.InventoryItemId);
-            if (warehouseQty == null || warehouseQty.AvailableStock < issueItem.IssuedQuantity)
-                throw new InvalidOperationException($"Insufficient stock for {requisitionItem.ItemCode}");
+            if (warehouseQty == null ||
+                (warehouseQty.AvailableStock < issueItem.IssuedQuantity && !decreaseAuthorization.EmergencyOverrideApplied))
+                throw new InventoryIssueControlException("INV_ISSUE_STOCK_INSUFFICIENT",
+                    $"Insufficient available stock for {requisitionItem.ItemCode}.");
+
+            var lotNumber = issueItem.LotNumber ?? requisitionItem.LotNumber;
+            var batchNumber = issueItem.BatchNumber ?? requisitionItem.BatchNumber;
+            var serialNumber = issueItem.SerialNumber ?? requisitionItem.SerialNumber;
+            var manufactureDate = issueItem.ManufactureDate ?? requisitionItem.ManufactureDate;
+            var expiryDate = issueItem.ExpiryDate ?? requisitionItem.ExpiryDate;
+            var trackingExceptionId = issueItem.InventoryTrackingExceptionId ?? requisitionItem.InventoryTrackingExceptionId;
+            var trackingSequence = requisitionItem.TrackingSequence + 1;
+            await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+            {
+                InventoryItemId = requisitionItem.InventoryItemId,
+                WarehouseId = effectiveWarehouseId,
+                LocationId = effectiveLocationId,
+                Direction = InventoryTrackingDirection.Issue,
+                Quantity = issueItem.IssuedQuantity,
+                ReferenceType = "InventoryRequisition",
+                ReferenceNumber = requisition.RequisitionNumber,
+                ReferenceId = requisition.Id,
+                ReferenceLineId = requisitionItem.Id,
+                EventKey = $"requisition:{requisition.Id:N}:{requisitionItem.Id:N}:{trackingSequence}:issue",
+                LotNumber = lotNumber,
+                BatchNumber = batchNumber,
+                SerialNumber = serialNumber,
+                ManufactureDate = manufactureDate,
+                ExpiryDate = expiryDate,
+                TrackingExceptionId = trackingExceptionId,
+                CorrelationId = $"requisition:{requisition.Id:N}:issue"
+            });
 
             // Update issued quantity
             requisitionItem.IssuedQuantity += issueItem.IssuedQuantity;
+            requisitionItem.TrackingSequence = trackingSequence;
             requisitionItem.LineValue = requisitionItem.IssuedQuantity * requisitionItem.UnitCost;
             if (issueItem.LocationId.HasValue) requisitionItem.LocationId = issueItem.LocationId;
-            if (issueItem.LotNumber != null) requisitionItem.LotNumber = issueItem.LotNumber;
-            if (issueItem.SerialNumber != null) requisitionItem.SerialNumber = issueItem.SerialNumber;
+            requisitionItem.LotNumber = lotNumber;
+            requisitionItem.BatchNumber = batchNumber;
+            requisitionItem.SerialNumber = serialNumber;
+            requisitionItem.ManufactureDate = manufactureDate;
+            requisitionItem.ExpiryDate = expiryDate;
+            requisitionItem.InventoryTrackingExceptionId = trackingExceptionId;
 
             await _requisitionItemRepository.UpdateAsync(requisitionItem);
 
@@ -449,6 +706,25 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             warehouseQty.CurrentStock -= issueItem.IssuedQuantity;
             warehouseQty.AvailableStock -= issueItem.IssuedQuantity;
             await _warehouseQuantityRepository.UpdateAsync(warehouseQty);
+
+            if (effectiveLocationId.HasValue)
+            {
+                var locationStock = await _unitOfWork.Repository<InventoryLocation>().GetQueryable(value =>
+                        value.TenantId == _currentUserProvider.TenantId && !value.IsDeleted &&
+                        value.LocationId == effectiveLocationId.Value &&
+                        value.InventoryItemId == requisitionItem.InventoryItemId)
+                    .SingleOrDefaultAsync()
+                    ?? throw new InventoryIssueControlException("INV_ISSUE_LOCATION_STOCK_MISSING",
+                        "The selected issue location has no stock balance for this item.");
+                if (locationStock.AvailableQuantity < issueItem.IssuedQuantity &&
+                    !decreaseAuthorization.EmergencyOverrideApplied)
+                    throw new InventoryIssueControlException("INV_ISSUE_LOCATION_STOCK_INSUFFICIENT",
+                        $"Insufficient available location stock for {requisitionItem.ItemCode}.");
+                locationStock.Quantity -= issueItem.IssuedQuantity;
+                locationStock.AvailableQuantity = locationStock.Quantity - locationStock.AllocatedQuantity;
+                locationStock.LastMovementDate = DateTime.UtcNow;
+                await _unitOfWork.Repository<InventoryLocation>().UpdateAsync(locationStock);
+            }
 
             // Update owned/main inventory item quantities only for non-consignment warehouses/bins.
             if (!isConsignmentWarehouse)
@@ -460,6 +736,14 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                     inventoryItem.AvailableStock -= issueItem.IssuedQuantity;
                     await _itemRepository.UpdateAsync(inventoryItem);
                 }
+            }
+
+            if (decreaseAuthorization.EmergencyOverrideApplied)
+            {
+                // Force the protected balances through the SQL hard stop while the exact
+                // transaction-bound override context is active, then clear the pooled session.
+                await _unitOfWork.SaveChangesAsync();
+                await _negativeStockControls.ClearMutationContextAsync();
             }
 
             // Create stock movement
@@ -476,11 +760,46 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 ReferenceId = requisition.Id,
                 WarehouseId = effectiveWarehouseId,
                 LocationId = effectiveLocationId,
+                LotNumber = lotNumber,
+                BatchNumber = batchNumber,
+                SerialNumber = serialNumber,
+                ManufactureDate = manufactureDate,
+                ExpirationDate = expiryDate,
+                InventoryTrackingExceptionId = trackingExceptionId,
+                InventoryIssueVoucherId = voucher.Id,
+                ProcessedById = _currentUserProvider.UserId,
                 Notes = $"Issued for requisition {requisition.RequisitionNumber}",
                 TenantId = _currentUserProvider.TenantId
             };
-            await _stockMovementRepository.AddAsync(movement);
-            await _consignmentSettlementService.TryCreateFromStockMovementAsync(movement);
+            pendingMovements.Add(movement);
+
+            var voucherLine = new InventoryIssueVoucherLine
+            {
+                TenantId = _currentUserProvider.TenantId,
+                InventoryIssueVoucherId = voucher.Id,
+                InventoryRequisitionItemId = requisitionItem.Id,
+                InventoryItemId = requisitionItem.InventoryItemId,
+                WarehouseId = effectiveWarehouseId,
+                LocationId = effectiveLocationId,
+                Quantity = issueItem.IssuedQuantity,
+                UnitCost = requisitionItem.UnitCost,
+                TotalValue = issueItem.IssuedQuantity * requisitionItem.UnitCost,
+                UnitOfMeasure = requisitionItem.UnitOfMeasure,
+                LotNumber = lotNumber,
+                BatchNumber = batchNumber,
+                SerialNumber = serialNumber,
+                ManufactureDate = manufactureDate,
+                ExpiryDate = expiryDate,
+                InventoryTrackingExceptionId = trackingExceptionId,
+                CreatedById = _currentUserProvider.UserId
+            };
+            voucherLine.IntegrityHash = Hash(new { voucherLine.InventoryIssueVoucherId,
+                voucherLine.InventoryRequisitionItemId, voucherLine.InventoryItemId, voucherLine.WarehouseId,
+                voucherLine.LocationId, voucherLine.Quantity, voucherLine.UnitCost, voucherLine.TotalValue,
+                voucherLine.UnitOfMeasure, voucherLine.LotNumber, voucherLine.BatchNumber, voucherLine.SerialNumber,
+                voucherLine.ManufactureDate, voucherLine.ExpiryDate, voucherLine.InventoryTrackingExceptionId });
+            voucher.Lines.Add(voucherLine);
+            await _unitOfWork.Repository<InventoryIssueVoucherLine>().AddAsync(voucherLine);
 
         }
 
@@ -507,6 +826,39 @@ public class InventoryRequisitionService : IInventoryRequisitionService
 
         await UpdateRequisitionTotals(requisition);
         await _requisitionRepository.UpdateAsync(requisition);
+        await AddVoucherActionAsync(voucher, InventoryIssueVoucherActionType.Issued,
+            InventoryIssueVoucherStatus.Issued, dto.Notes ?? "Stock issued and handed over for receiver acknowledgement.",
+            new { requisition.Id, requisition.RequisitionNumber, ReceiverUserId = receiverId, Lines = voucher.Lines.Count },
+            correlationId);
+        await AddIssueAuditAsync("InventoryRequisition.Issue", voucher, null,
+            new { voucher.VoucherNumber, voucher.Status, voucher.ReceiverUserId, voucher.IssuedAtUtc, Lines = voucher.Lines.Count }, correlationId);
+        // Persist voucher/line evidence first inside the same transaction so the SQL issue guard
+        // can validate each subsequently inserted stock movement against durable allowed quantity.
+        await _unitOfWork.SaveChangesAsync();
+        foreach (var movement in pendingMovements)
+        {
+            await _stockMovementRepository.AddAsync(movement);
+            await _consignmentSettlementService.TryCreateFromStockMovementAsync(movement);
+        }
+        await _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
+        {
+            EventKey = ProcurementControlEventKey.Create("inventory-requisition-issue", voucher.Id, voucher.PayloadHash),
+            EventType = "InventoryIssue",
+            Action = "Issue",
+            Result = ProcurementControlEventResult.Succeeded,
+            RuleCode = "TDC-0606",
+            RuleVersion = "1",
+            DecisionKeys = Enumerable.Range(1, 14).Select(number => $"DEC-{number:D3}").ToList(),
+            SourceType = "InventoryIssueVoucher",
+            SourceId = voucher.Id,
+            SourceReference = voucher.VoucherNumber,
+            Reason = voucher.Notes,
+            InputValues = new { requisition.Id, requisition.RequisitionNumber, voucher.RequestedById,
+                voucher.ApprovedById, voucher.IssuedById, voucher.ReceiverUserId },
+            ResultValues = new { voucher.Status, Lines = voucher.Lines.Count, voucher.PayloadHash, voucher.IntegrityHash },
+            CorrelationId = correlationId,
+            OccurredAtUtc = issuedAt
+        });
         await _unitOfWork.SaveChangesAsync();
         if (requisition.ProjectId.HasValue)
         {
@@ -517,147 +869,155 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         return true;
     }
 
-    public async Task<bool> ReturnAsync(Guid id, ReturnRequisitionDto dto)
+    public async Task<IReadOnlyList<InventoryIssueReceiverDto>> GetIssueReceiversAsync(
+        CancellationToken cancellationToken = default)
     {
-        var requisition = await _requisitionRepository.GetWithItemsAsync(id)
-            ?? throw new ArgumentException($"Requisition {id} not found");
-
-        if (requisition.Status != RequisitionStatus.PartiallyIssued &&
-            requisition.Status != RequisitionStatus.Issued &&
-            requisition.Status != RequisitionStatus.Completed)
-        {
-            throw new InvalidOperationException("Only requisitions with issued items can process returns");
-        }
-
-        var warehouse = await _warehouseRepository.GetByIdAsync(requisition.WarehouseId)
-            ?? throw new ArgumentException("Warehouse not found");
-        foreach (var returnItem in dto.Items)
-        {
-            var requisitionItem = requisition.Items.FirstOrDefault(i => i.Id == returnItem.ItemId)
-                ?? throw new ArgumentException($"Requisition item {returnItem.ItemId} not found");
-
-            if (returnItem.ReturnedQuantity > requisitionItem.IssuedQuantity)
+        EnsureIssueActor();
+        var now = DateTime.UtcNow;
+        return await _unitOfWork.Repository<UserTenant>().GetQueryable().AsNoTracking()
+            .Where(value => value.TenantId == _currentUserProvider.TenantId && !value.IsDeleted &&
+                            value.Status == UserTenantStatus.Active &&
+                            (!value.ExpiresAt.HasValue || value.ExpiresAt > now) && value.User.IsActive &&
+                            !value.User.UserRoles.Any(role => role.Role.Name == Constants.Roles.ExternalUser))
+            .OrderBy(value => value.User.FirstName).ThenBy(value => value.User.LastName).ThenBy(value => value.User.UserName)
+            .Select(value => new InventoryIssueReceiverDto
             {
-                throw new InvalidOperationException($"Cannot return more than issued quantity for {requisitionItem.ItemCode}");
-            }
-
-            var effectiveLocationId = returnItem.LocationId ?? requisitionItem.LocationId ?? requisition.LocationId;
-            var effectiveWarehouseId = requisition.WarehouseId;
-            var isConsignmentWarehouse = warehouse.IsConsignmentWarehouse;
-
-            if (effectiveLocationId.HasValue && effectiveLocationId.Value != Guid.Empty)
-            {
-                var location = await _warehouseLocationRepository.GetByIdAsync(effectiveLocationId.Value);
-                if (location != null)
-                {
-                    effectiveWarehouseId = location.InventoryWarehouseId;
-                }
-            }
-
-            if (effectiveWarehouseId != requisition.WarehouseId)
-            {
-                var wh = await _warehouseRepository.GetByIdAsync(effectiveWarehouseId);
-                isConsignmentWarehouse = wh?.IsConsignmentWarehouse == true;
-            }
-
-            requisitionItem.IssuedQuantity -= returnItem.ReturnedQuantity;
-            requisitionItem.LineValue = requisitionItem.IssuedQuantity * requisitionItem.UnitCost;
-            if (returnItem.LocationId.HasValue)
-            {
-                requisitionItem.LocationId = returnItem.LocationId;
-            }
-            if (returnItem.LotNumber != null)
-            {
-                requisitionItem.LotNumber = returnItem.LotNumber;
-            }
-            if (returnItem.SerialNumber != null)
-            {
-                requisitionItem.SerialNumber = returnItem.SerialNumber;
-            }
-
-            await _requisitionItemRepository.UpdateAsync(requisitionItem);
-
-            var warehouseQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveWarehouseId, requisitionItem.InventoryItemId);
-            if (warehouseQty == null)
-            {
-                throw new InvalidOperationException($"Warehouse quantity record not found for {requisitionItem.ItemCode}");
-            }
-
-            warehouseQty.CurrentStock += returnItem.ReturnedQuantity;
-            warehouseQty.AvailableStock += returnItem.ReturnedQuantity;
-            await _warehouseQuantityRepository.UpdateAsync(warehouseQty);
-
-            if (!isConsignmentWarehouse)
-            {
-                var inventoryItem = await _itemRepository.GetByIdAsync(requisitionItem.InventoryItemId);
-                if (inventoryItem != null)
-                {
-                    inventoryItem.CurrentStock += returnItem.ReturnedQuantity;
-                    inventoryItem.AvailableStock += returnItem.ReturnedQuantity;
-                    await _itemRepository.UpdateAsync(inventoryItem);
-                }
-            }
-
-            var movement = new StockMovement
-            {
-                InventoryItemId = requisitionItem.InventoryItemId,
-                MovementType = "Return",
-                MovementDate = DateTime.UtcNow,
-                Quantity = returnItem.ReturnedQuantity,
-                UnitCost = requisitionItem.UnitCost,
-                TotalValue = returnItem.ReturnedQuantity * requisitionItem.UnitCost,
-                ReferenceType = ReferenceType.Requisition,
-                ReferenceNumber = requisition.RequisitionNumber,
-                ReferenceId = requisition.Id,
-                WarehouseId = effectiveWarehouseId,
-                LocationId = effectiveLocationId,
-                Notes = $"Returned from requisition {requisition.RequisitionNumber}",
-                TenantId = _currentUserProvider.TenantId
-            };
-            await _stockMovementRepository.AddAsync(movement);
-            await _consignmentSettlementService.TryCreateFromStockMovementAsync(movement);
-
-        }
-
-        requisition.Status = ResolveStatusAfterReturn(requisition);
-        if (requisition.Status != RequisitionStatus.Completed)
-        {
-            requisition.CompletedDate = null;
-        }
-        requisition.IssuedById = _currentUserProvider.UserId;
-        if (dto.Notes != null)
-        {
-            requisition.Notes = dto.Notes;
-        }
-
-        await UpdateRequisitionTotals(requisition);
-        await _requisitionRepository.UpdateAsync(requisition);
-        await _unitOfWork.SaveChangesAsync();
-        if (requisition.ProjectId.HasValue)
-        {
-            await _projectService.SyncInventoryRequisitionMaterialCostAsync(requisition.Id);
-        }
-
-        _logger.LogInformation("Returned items for requisition {RequisitionNumber}", requisition.RequisitionNumber);
-        return true;
+                UserId = value.UserId,
+                Username = value.User.UserName ?? value.User.Email ?? value.UserId.ToString(),
+                DisplayName = (value.User.FirstName + " " + value.User.LastName).Trim()
+            }).ToListAsync(cancellationToken);
     }
 
-    private static RequisitionStatus ResolveStatusAfterReturn(InventoryRequisition requisition)
+    public async Task<IReadOnlyList<InventoryIssueVoucherDto>> GetIssueVouchersAsync(
+        Guid requisitionId,
+        CancellationToken cancellationToken = default)
     {
-        var anyIssued = requisition.Items.Any(i => i.IssuedQuantity > 0);
-        var allIssued = requisition.Items.All(i => i.IssuedQuantity >= i.ApprovedQuantity && i.ApprovedQuantity > 0);
-
-        if (allIssued)
+        EnsureIssueActor();
+        var requisition = await _requisitionRepository.GetWithItemsAsync(requisitionId)
+            ?? throw new InventoryIssueNotFoundException("The requisition was not found in the current tenant.");
+        var isReceiver = await IssueVouchers.AsNoTracking().AnyAsync(value =>
+            value.TenantId == _currentUserProvider.TenantId && value.InventoryRequisitionId == requisitionId &&
+            value.ReceiverUserId == _currentUserProvider.UserId && !value.IsDeleted, cancellationToken);
+        if (!isReceiver && !await CanReadIssueEvidenceAsync(requisition))
+            throw new InventoryIssueAuthorizationException("You cannot view issue vouchers outside your assigned warehouse location.");
+        var ids = await IssueVouchers.AsNoTracking()
+            .Where(value => value.TenantId == _currentUserProvider.TenantId &&
+                            value.InventoryRequisitionId == requisitionId && !value.IsDeleted)
+            .OrderByDescending(value => value.IssuedAtUtc).Select(value => value.Id).ToListAsync(cancellationToken);
+        var result = new List<InventoryIssueVoucherDto>(ids.Count);
+        foreach (var voucherId in ids)
         {
-            return RequisitionStatus.Issued;
+            var voucher = await LoadIssueVoucherAsync(voucherId, false, cancellationToken);
+            if (voucher is not null) result.Add(MapIssueVoucher(voucher));
         }
+        return result;
+    }
 
-        if (anyIssued)
+    public async Task<InventoryIssueVoucherDto?> GetIssueVoucherAsync(
+        Guid voucherId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureIssueActor();
+        var voucher = await LoadIssueVoucherAsync(voucherId, false, cancellationToken);
+        if (voucher is null) return null;
+        if (voucher.ReceiverUserId != _currentUserProvider.UserId &&
+            !await CanReadIssueEvidenceAsync(voucher.InventoryRequisition))
+            throw new InventoryIssueAuthorizationException("You cannot view this Store Issue Voucher.");
+        return MapIssueVoucher(voucher);
+    }
+
+    public async Task<InventoryIssueVoucherDto> AcknowledgeIssueVoucherAsync(
+        Guid voucherId,
+        AcknowledgeInventoryIssueVoucherRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureIssueActor();
+        var normalizedCorrelation = NormalizeCorrelation(correlationId);
+        var normalizedKey = NormalizeRequired(request.IdempotencyKey, 100, "Idempotency key");
+        var normalizedComment = NormalizeRequired(request.Comment, 1000, "Receiver comment");
+
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
-            return RequisitionStatus.PartiallyIssued;
-        }
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"inventory-issue-voucher:{_currentUserProvider.TenantId:N}:{voucherId:N}", cancellationToken);
+                var voucher = await LoadIssueVoucherAsync(voucherId, true, cancellationToken)
+                    ?? throw new InventoryIssueNotFoundException("The Store Issue Voucher was not found in the current tenant.");
+                if (voucher.ReceiverUserId != _currentUserProvider.UserId)
+                    throw new InventoryIssueAuthorizationException("Only the designated receiver can acknowledge this handover.");
 
-        return RequisitionStatus.Approved;
+                var priorAcknowledgement = voucher.Actions.SingleOrDefault(action =>
+                    action.ActionType == InventoryIssueVoucherActionType.Acknowledged &&
+                    action.PayloadJson.Contains($"\"idempotencyKey\":\"{normalizedKey}\"", StringComparison.Ordinal));
+                if (priorAcknowledgement is not null)
+                {
+                    if (voucher.Status == InventoryIssueVoucherStatus.Acknowledged &&
+                        string.Equals(voucher.ReceiverComment, normalizedComment, StringComparison.Ordinal))
+                    {
+                        await _unitOfWork.CommitAsync(cancellationToken);
+                        return MapIssueVoucher(voucher);
+                    }
+                    throw new InventoryIssueControlException("INV_ISSUE_ACK_IDEMPOTENCY_CONFLICT",
+                        "The acknowledgement key already identifies a different receiver response.");
+                }
+
+                if (voucher.Status != InventoryIssueVoucherStatus.Issued)
+                    throw new InventoryIssueControlException("INV_ISSUE_ACK_STATUS_CONFLICT",
+                        "Only an issued voucher awaiting receipt can be acknowledged.");
+                EnsureRowVersion(voucher.RowVersion, request.RowVersion, "Store Issue Voucher");
+                await EnsureActiveInternalUserAsync(_currentUserProvider.UserId, cancellationToken);
+
+                var before = new { voucher.Status, voucher.AcknowledgedById, voucher.AcknowledgedAtUtc };
+                voucher.Status = InventoryIssueVoucherStatus.Acknowledged;
+                voucher.AcknowledgedById = _currentUserProvider.UserId;
+                voucher.AcknowledgedAtUtc = DateTime.UtcNow;
+                voucher.ReceiverComment = normalizedComment;
+                voucher.UpdatedAt = DateTime.UtcNow;
+                voucher.LastModifiedById = _currentUserProvider.UserId;
+                voucher.IntegrityHash = VoucherIntegrity(voucher);
+                await AddVoucherActionAsync(voucher, InventoryIssueVoucherActionType.Acknowledged,
+                    voucher.Status, normalizedComment, new { idempotencyKey = normalizedKey }, normalizedCorrelation);
+                await AddIssueAuditAsync("InventoryIssueVoucher.Acknowledge", voucher, before,
+                    new { voucher.Status, voucher.AcknowledgedById, voucher.AcknowledgedAtUtc, voucher.ReceiverComment },
+                    normalizedCorrelation);
+                await _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
+                {
+                    EventKey = ProcurementControlEventKey.Create("inventory-issue-acknowledgement", voucher.Id, normalizedKey),
+                    EventType = "InventoryIssue",
+                    Action = "Acknowledge",
+                    Result = ProcurementControlEventResult.Succeeded,
+                    RuleCode = "TDC-0606",
+                    RuleVersion = "1",
+                    DecisionKeys = Enumerable.Range(1, 14).Select(number => $"DEC-{number:D3}").ToList(),
+                    SourceType = "InventoryIssueVoucher",
+                    SourceId = voucher.Id,
+                    SourceReference = voucher.VoucherNumber,
+                    Reason = normalizedComment,
+                    InputValues = new { voucher.ReceiverUserId, IdempotencyKey = normalizedKey },
+                    ResultValues = new { voucher.Status, voucher.AcknowledgedById, voucher.AcknowledgedAtUtc },
+                    CorrelationId = normalizedCorrelation,
+                    OccurredAtUtc = voucher.AcknowledgedAtUtc.Value
+                }, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+                return MapIssueVoucher(voucher);
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync(cancellationToken);
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        }, cancellationToken);
+    }
+
+    public async Task<bool> ReturnAsync(Guid id, ReturnRequisitionDto dto)
+    {
+        await _returnControls.RequestAsync(id, dto);
+        return true;
     }
 
     public async Task<bool> CompleteAsync(Guid id)
@@ -680,6 +1040,28 @@ public class InventoryRequisitionService : IInventoryRequisitionService
 
     public async Task<bool> CancelAsync(Guid id, string reason)
     {
+        if (!_unitOfWork.HasActiveTransaction)
+        {
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+                try
+                {
+                    var result = await CancelAsync(id, reason);
+                    await _unitOfWork.CommitAsync();
+                    return result;
+                }
+                catch
+                {
+                    if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
+                    _unitOfWork.ClearTrackedChanges();
+                    throw;
+                }
+            });
+        }
+
+        await _unitOfWork.AcquireTransactionLockAsync(
+            $"inventory-requisition-cancel:{_currentUserProvider.TenantId:N}:{id:N}");
         var requisition = await _requisitionRepository.GetByIdAsync(id)
             ?? throw new ArgumentException($"Requisition {id} not found");
 
@@ -688,6 +1070,9 @@ public class InventoryRequisitionService : IInventoryRequisitionService
 
         if (requisition.Status == RequisitionStatus.Issued || requisition.Status == RequisitionStatus.PartiallyIssued)
             throw new InvalidOperationException("Cannot cancel a requisition that has been issued. Complete it instead.");
+
+        await _projectReservations.ReleaseForCancelledRequisitionAsync(id, _currentUserProvider.UserId,
+            reason, $"requisition-cancel:{id:N}");
 
         requisition.Status = RequisitionStatus.Cancelled;
         requisition.CancellationReason = reason;
@@ -726,7 +1111,11 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             UnitCost = itemUnitCost,
             LocationId = dto.LocationId,
             LotNumber = dto.LotNumber,
+            BatchNumber = dto.BatchNumber,
             SerialNumber = dto.SerialNumber,
+            ManufactureDate = dto.ManufactureDate,
+            ExpiryDate = dto.ExpiryDate,
+            InventoryTrackingExceptionId = dto.InventoryTrackingExceptionId,
             Notes = dto.Notes,
             TenantId = _currentUserProvider.TenantId
         };
@@ -750,7 +1139,11 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             UnitCost = requisitionItem.UnitCost,
             TotalCost = requisitionItem.RequestedQuantity * requisitionItem.UnitCost,
             LotNumber = requisitionItem.LotNumber,
+            BatchNumber = requisitionItem.BatchNumber,
             SerialNumber = requisitionItem.SerialNumber,
+            ManufactureDate = requisitionItem.ManufactureDate,
+            ExpiryDate = requisitionItem.ExpiryDate,
+            InventoryTrackingExceptionId = requisitionItem.InventoryTrackingExceptionId,
             Notes = requisitionItem.Notes
         };
     }
@@ -775,7 +1168,11 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         requisitionItem.RequestedQuantity = dto.RequestedQuantity;
         requisitionItem.LocationId = dto.LocationId;
         requisitionItem.LotNumber = dto.LotNumber;
+        requisitionItem.BatchNumber = dto.BatchNumber;
         requisitionItem.SerialNumber = dto.SerialNumber;
+        requisitionItem.ManufactureDate = dto.ManufactureDate;
+        requisitionItem.ExpiryDate = dto.ExpiryDate;
+        requisitionItem.InventoryTrackingExceptionId = dto.InventoryTrackingExceptionId;
         requisitionItem.Notes = dto.Notes;
 
         await _requisitionItemRepository.UpdateAsync(requisitionItem);
@@ -797,7 +1194,11 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             UnitCost = requisitionItem.UnitCost,
             TotalCost = requisitionItem.RequestedQuantity * requisitionItem.UnitCost,
             LotNumber = requisitionItem.LotNumber,
+            BatchNumber = requisitionItem.BatchNumber,
             SerialNumber = requisitionItem.SerialNumber,
+            ManufactureDate = requisitionItem.ManufactureDate,
+            ExpiryDate = requisitionItem.ExpiryDate,
+            InventoryTrackingExceptionId = requisitionItem.InventoryTrackingExceptionId,
             Notes = requisitionItem.Notes
         };
     }
@@ -825,6 +1226,325 @@ public class InventoryRequisitionService : IInventoryRequisitionService
     }
 
     #region Private Methods
+
+    private IQueryable<InventoryIssueVoucher> IssueVouchers =>
+        _unitOfWork.Repository<InventoryIssueVoucher>().GetQueryable();
+
+    private void EnsureIssueActor()
+    {
+        if (!_currentUserProvider.IsAuthenticated || _currentUserProvider.UserId == Guid.Empty ||
+            _currentUserProvider.TenantId == Guid.Empty || _currentUserProvider.IsExternalUser)
+            throw new InventoryIssueAuthorizationException("An authenticated internal tenant user is required.");
+    }
+
+    private async Task EnsureActiveInternalUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        var active = await _unitOfWork.Repository<UserTenant>().GetQueryable().AsNoTracking()
+            .AnyAsync(value => value.TenantId == _currentUserProvider.TenantId && value.UserId == userId &&
+                               !value.IsDeleted && value.Status == UserTenantStatus.Active &&
+                               (!value.ExpiresAt.HasValue || value.ExpiresAt > now) && value.User.IsActive &&
+                               !value.User.UserRoles.Any(role => role.Role.Name == Constants.Roles.ExternalUser),
+                cancellationToken);
+        if (!active)
+            throw new InventoryIssueControlException("INV_ISSUE_RECEIVER_INVALID",
+                "The receiver is not an active internal user in the current tenant.");
+    }
+
+    private async Task<bool> CanReadIssueEvidenceAsync(InventoryRequisition requisition)
+    {
+        if (_currentUserProvider.UserId == requisition.RequestedById ||
+            _currentUserProvider.UserId == requisition.ApprovedById ||
+            _currentUserProvider.UserId == requisition.IssuedById)
+            return true;
+        return !IsStoresUser || await CanReadStoreRequisitionAsync(requisition);
+    }
+
+    private async Task<InventoryIssueVoucher?> LoadIssueVoucherAsync(
+        Guid voucherId,
+        bool tracked,
+        CancellationToken cancellationToken)
+    {
+        IQueryable<InventoryIssueVoucher> query = IssueVouchers
+            .Where(value => value.TenantId == _currentUserProvider.TenantId && value.Id == voucherId && !value.IsDeleted)
+            .Include(value => value.InventoryRequisition).ThenInclude(value => value.Warehouse)
+            .Include(value => value.InventoryRequisition).ThenInclude(value => value.Location)
+            .Include(value => value.Warehouse)
+            .Include(value => value.Location)
+            .Include(value => value.RequestedBy)
+            .Include(value => value.ApprovedBy)
+            .Include(value => value.IssuedBy)
+            .Include(value => value.ReceiverUser)
+            .Include(value => value.Lines).ThenInclude(value => value.InventoryItem)
+            .Include(value => value.Lines).ThenInclude(value => value.Location)
+            .Include(value => value.Actions);
+        if (!tracked) query = query.AsNoTracking();
+        return await query.SingleOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task<string> GenerateIssueVoucherNumberAsync(
+        DateTime issuedAt,
+        CancellationToken cancellationToken = default)
+    {
+        var prefix = $"SIV-{issuedAt:yyyyMMdd}-";
+        var count = await IssueVouchers.CountAsync(value => value.TenantId == _currentUserProvider.TenantId &&
+            value.VoucherNumber.StartsWith(prefix), cancellationToken);
+        return $"{prefix}{count + 1:D5}";
+    }
+
+    private async Task AddVoucherActionAsync(
+        InventoryIssueVoucher voucher,
+        InventoryIssueVoucherActionType actionType,
+        InventoryIssueVoucherStatus status,
+        string comment,
+        object payload,
+        string correlationId)
+    {
+        var persistedCount = await _unitOfWork.Repository<InventoryIssueVoucherAction>().GetQueryable().AsNoTracking()
+            .CountAsync(value => value.TenantId == _currentUserProvider.TenantId &&
+                                 value.InventoryIssueVoucherId == voucher.Id && !value.IsDeleted);
+        var pendingCount = voucher.Actions.Count(value => value.Id != Guid.Empty && value.CreatedAt == default);
+        var sequence = persistedCount + pendingCount + 1;
+        var previousHash = voucher.Actions.OrderByDescending(value => value.Sequence)
+                               .Select(value => value.IntegrityHash).FirstOrDefault() ?? string.Empty;
+        var now = DateTime.UtcNow;
+        var payloadJson = JsonSerializer.Serialize(payload);
+        var action = new InventoryIssueVoucherAction
+        {
+            TenantId = _currentUserProvider.TenantId,
+            InventoryIssueVoucherId = voucher.Id,
+            Sequence = sequence,
+            ActionType = actionType,
+            StatusAfter = status,
+            ActorUserId = _currentUserProvider.UserId,
+            ActorName = string.IsNullOrWhiteSpace(_currentUserProvider.FullName)
+                ? _currentUserProvider.Username
+                : _currentUserProvider.FullName,
+            OccurredAtUtc = now,
+            Comment = NormalizeRequired(comment, 1000, "Action comment"),
+            PayloadJson = payloadJson,
+            CorrelationId = NormalizeCorrelation(correlationId),
+            CreatedById = _currentUserProvider.UserId
+        };
+        action.IntegrityHash = Hash(new { previousHash, action.InventoryIssueVoucherId, action.Sequence,
+            action.ActionType, action.StatusAfter, action.ActorUserId, action.OccurredAtUtc, action.Comment,
+            action.PayloadJson, action.CorrelationId });
+        voucher.Actions.Add(action);
+        await _unitOfWork.Repository<InventoryIssueVoucherAction>().AddAsync(action);
+    }
+
+    private async Task AddIssueAuditAsync(
+        string action,
+        InventoryIssueVoucher voucher,
+        object? before,
+        object? after,
+        string correlationId)
+    {
+        await _unitOfWork.Repository<AuditLog>().AddAsync(new AuditLog
+        {
+            TenantId = _currentUserProvider.TenantId,
+            UserId = _currentUserProvider.UserId,
+            Username = string.IsNullOrWhiteSpace(_currentUserProvider.Username) ? "Unknown" : _currentUserProvider.Username,
+            Action = action,
+            Resource = "InventoryIssueVoucher",
+            ResourceId = voucher.Id.ToString(),
+            OldValues = before is null ? null : JsonSerializer.Serialize(before),
+            NewValues = after is null ? null : JsonSerializer.Serialize(after),
+            IpAddress = "Service",
+            UserAgent = $"Correlation:{NormalizeCorrelation(correlationId)}",
+            Timestamp = DateTime.UtcNow
+        });
+    }
+
+    private static InventoryIssueVoucherDto MapIssueVoucher(InventoryIssueVoucher voucher) => new()
+    {
+        Id = voucher.Id,
+        VoucherNumber = voucher.VoucherNumber,
+        InventoryRequisitionId = voucher.InventoryRequisitionId,
+        RequisitionNumber = voucher.InventoryRequisition?.RequisitionNumber ?? string.Empty,
+        Status = voucher.Status,
+        WarehouseId = voucher.WarehouseId,
+        WarehouseName = voucher.Warehouse?.Name ?? string.Empty,
+        LocationId = voucher.LocationId,
+        LocationCode = voucher.Location?.LocationCode,
+        DepartmentId = voucher.DepartmentId,
+        DepartmentName = voucher.DepartmentName,
+        CostCenter = voucher.CostCenter,
+        ProjectId = voucher.ProjectId,
+        ProjectCode = voucher.ProjectCode,
+        RequestedById = voucher.RequestedById,
+        RequestedByName = UserName(voucher.RequestedBy),
+        ApprovedById = voucher.ApprovedById,
+        ApprovedByName = UserName(voucher.ApprovedBy),
+        IssuedById = voucher.IssuedById,
+        IssuedByName = UserName(voucher.IssuedBy),
+        ReceiverUserId = voucher.ReceiverUserId,
+        ReceiverName = UserName(voucher.ReceiverUser),
+        AcknowledgedById = voucher.AcknowledgedById,
+        IssuedAtUtc = voucher.IssuedAtUtc,
+        AcknowledgedAtUtc = voucher.AcknowledgedAtUtc,
+        Notes = voucher.Notes,
+        ReceiverComment = voucher.ReceiverComment,
+        RowVersion = Convert.ToBase64String(voucher.RowVersion ?? Array.Empty<byte>()),
+        Lines = voucher.Lines.OrderBy(value => value.InventoryItem.ItemCode).Select(value => new InventoryIssueVoucherLineDto
+        {
+            Id = value.Id,
+            InventoryRequisitionItemId = value.InventoryRequisitionItemId,
+            InventoryItemId = value.InventoryItemId,
+            ItemCode = value.InventoryItem?.ItemCode ?? string.Empty,
+            ItemName = value.InventoryItem?.Name ?? string.Empty,
+            WarehouseId = value.WarehouseId,
+            LocationId = value.LocationId,
+            LocationCode = value.Location?.LocationCode,
+            Quantity = value.Quantity,
+            UnitCost = value.UnitCost,
+            TotalValue = value.TotalValue,
+            UnitOfMeasure = value.UnitOfMeasure,
+            LotNumber = value.LotNumber,
+            BatchNumber = value.BatchNumber,
+            SerialNumber = value.SerialNumber,
+            ManufactureDate = value.ManufactureDate,
+            ExpiryDate = value.ExpiryDate
+        }).ToList(),
+        Actions = voucher.Actions.OrderBy(value => value.Sequence).Select(value => new InventoryIssueVoucherActionDto
+        {
+            Sequence = value.Sequence,
+            ActionType = value.ActionType,
+            StatusAfter = value.StatusAfter,
+            ActorUserId = value.ActorUserId,
+            ActorName = value.ActorName,
+            OccurredAtUtc = value.OccurredAtUtc,
+            Comment = value.Comment
+        }).ToList()
+    };
+
+    private static string UserName(ApplicationUser? user) => user is null
+        ? string.Empty
+        : string.IsNullOrWhiteSpace((user.FirstName + " " + user.LastName).Trim())
+            ? user.UserName ?? user.Email ?? user.Id.ToString()
+            : (user.FirstName + " " + user.LastName).Trim();
+
+    private static string VoucherIntegrity(InventoryIssueVoucher voucher) => Hash(new
+    {
+        voucher.TenantId,
+        voucher.Id,
+        voucher.VoucherNumber,
+        voucher.InventoryRequisitionId,
+        voucher.Status,
+        voucher.WarehouseId,
+        voucher.LocationId,
+        voucher.DepartmentId,
+        voucher.CostCenter,
+        voucher.ProjectId,
+        voucher.RequestedById,
+        voucher.ApprovedById,
+        voucher.IssuedById,
+        voucher.ReceiverUserId,
+        voucher.AcknowledgedById,
+        voucher.IssuedAtUtc,
+        voucher.AcknowledgedAtUtc,
+        voucher.ReceiverComment,
+        voucher.IdempotencyKey,
+        voucher.PayloadHash,
+        voucher.CorrelationId,
+        voucher.SourceSnapshotJson
+    });
+
+    private static string Hash(object value) => Convert.ToHexString(
+        SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))));
+
+    private static string NormalizeRequired(string? value, int maxLength, string field)
+    {
+        var normalized = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            throw new InventoryIssueControlException("INV_ISSUE_VALUE_REQUIRED", $"{field} is required.");
+        if (normalized.Length > maxLength)
+            throw new InventoryIssueControlException("INV_ISSUE_VALUE_TOO_LONG", $"{field} cannot exceed {maxLength} characters.");
+        return normalized;
+    }
+
+    private static string? NormalizeOptional(string? value, int maxLength)
+    {
+        var normalized = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized)) return null;
+        if (normalized.Length > maxLength)
+            throw new InventoryIssueControlException("INV_ISSUE_VALUE_TOO_LONG", $"A value cannot exceed {maxLength} characters.");
+        return normalized;
+    }
+
+    private static string NormalizeCorrelation(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? Guid.NewGuid().ToString("N") : normalized[..Math.Min(100, normalized.Length)];
+    }
+
+    private static DateTime? Utc(DateTime? value) => !value.HasValue
+        ? null
+        : value.Value.Kind == DateTimeKind.Utc ? value.Value : value.Value.ToUniversalTime();
+
+    private static void EnsureRowVersion(byte[] current, string supplied, string resource)
+    {
+        if (string.IsNullOrWhiteSpace(supplied)) return;
+        byte[] expected;
+        try { expected = Convert.FromBase64String(supplied.Trim()); }
+        catch (FormatException)
+        {
+            throw new InventoryIssueControlException("INV_ISSUE_ROW_VERSION_INVALID", "RowVersion must be valid base64.");
+        }
+        if (!current.SequenceEqual(expected))
+            throw new InventoryIssueControlException("INV_ISSUE_CONCURRENCY_CONFLICT",
+                $"The {resource} changed after it was loaded. Refresh and retry.");
+    }
+
+    private bool IsStoresUser => _currentUserProvider.Roles.Any(role =>
+        role.Equals("TDC_STORES_OFFICER", StringComparison.OrdinalIgnoreCase) ||
+        role.Equals("TDC_STORES_MANAGER", StringComparison.OrdinalIgnoreCase));
+
+    private async Task<IReadOnlyList<InventoryRequisition>> ApplyStoreReadScopeAsync(
+        IEnumerable<InventoryRequisition> requisitions)
+    {
+        var candidates = requisitions.ToList();
+        if (!IsStoresUser)
+            return candidates;
+
+        var readable = new List<InventoryRequisition>();
+        foreach (var requisition in candidates)
+        {
+            if (await CanReadStoreRequisitionAsync(requisition))
+                readable.Add(requisition);
+        }
+
+        return readable;
+    }
+
+    private async Task<bool> CanReadStoreRequisitionAsync(InventoryRequisition requisition)
+    {
+        try
+        {
+            var decision = await _accessControl.CheckCapabilityAsync(
+                new ProcurementAccessCapabilityRequest
+                {
+                    PermissionCode = "procurement.inventory.read",
+                    WarehouseId = requisition.WarehouseId,
+                    LocationId = requisition.LocationId,
+                    RequireLocationScope = true,
+                    SourceType = "InventoryRequisition",
+                    SourceReference = requisition.RequisitionNumber
+                },
+                Guid.NewGuid().ToString("N"));
+            return decision.Allowed;
+        }
+        catch (ProcurementAccessAuthorizationException)
+        {
+            return false;
+        }
+        catch (ProcurementAccessValidationException)
+        {
+            return false;
+        }
+    }
 
     private async Task<ErpSystem.Core.Entities.Projects.Project?> NormalizeProjectReferenceAsync(Guid? projectId, string? projectCode)
     {
@@ -893,12 +1613,15 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             RequestedByName = requisition.RequestedBy != null
                 ? $"{requisition.RequestedBy.FirstName} {requisition.RequestedBy.LastName}"
                 : null,
+            RequestedById = requisition.RequestedById,
+            ApprovedById = requisition.ApprovedById,
             ApprovedByName = requisition.ApprovedBy != null
                 ? $"{requisition.ApprovedBy.FirstName} {requisition.ApprovedBy.LastName}"
                 : null,
             Notes = requisition.Notes,
             Purpose = requisition.Purpose,
-            CreatedAtFormatted = requisition.CreatedAt.ToString("dd MMM yyyy HH:mm")
+            CreatedAtFormatted = requisition.CreatedAt.ToString("dd MMM yyyy HH:mm"),
+            RowVersion = Convert.ToBase64String(requisition.RowVersion ?? Array.Empty<byte>())
         };
     }
 
@@ -930,12 +1653,15 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             RequestedByName = requisition.RequestedBy != null
                 ? $"{requisition.RequestedBy.FirstName} {requisition.RequestedBy.LastName}"
                 : null,
+            RequestedById = requisition.RequestedById,
+            ApprovedById = requisition.ApprovedById,
             ApprovedByName = requisition.ApprovedBy != null
                 ? $"{requisition.ApprovedBy.FirstName} {requisition.ApprovedBy.LastName}"
                 : null,
             Notes = requisition.Notes,
             Purpose = requisition.Purpose,
             CreatedAtFormatted = requisition.CreatedAt.ToString("dd MMM yyyy HH:mm"),
+            RowVersion = Convert.ToBase64String(requisition.RowVersion ?? Array.Empty<byte>()),
             ApprovalDate = requisition.ApprovalDate,
             CompletedDate = requisition.CompletedDate,
             IssuedByName = requisition.IssuedBy != null
@@ -958,7 +1684,11 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 UnitCost = i.UnitCost,
                 TotalCost = i.RequestedQuantity * i.UnitCost,
                 LotNumber = i.LotNumber,
+                BatchNumber = i.BatchNumber,
                 SerialNumber = i.SerialNumber,
+                ManufactureDate = i.ManufactureDate,
+                ExpiryDate = i.ExpiryDate,
+                InventoryTrackingExceptionId = i.InventoryTrackingExceptionId,
                 LocationId = i.LocationId,
                 LocationName = i.Location?.LocationCode,
                 Notes = i.Notes

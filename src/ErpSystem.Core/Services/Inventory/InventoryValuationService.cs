@@ -775,13 +775,19 @@ public class InventoryValuationService : IInventoryValuationService
                 break;
         }
 
-        // Create movement record
-        await CreateMovementAsync(
+        // The immutable movement must carry the value actually held in the inventory
+        // subledger. Standard-cost receipts therefore use standard cost and retain the
+        // actual-versus-standard difference separately for the Finance variance line.
+        var movementUnitCost = item.ValuationMethod == ValuationMethod.StandardCost
+            ? item.StandardCost
+            : unitCost;
+        var movement = await CreateMovementAsync(
             inventoryItemId, warehouseId, locationId,
             InventoryMovementType.PurchaseReceipt, MovementDirection.In,
-            quantity, unitCost,
+            quantity, movementUnitCost,
             referenceType, referenceNumber, referenceId,
             lotNumber, serialNumber, expirationDate);
+        movement.VarianceAmount = variance;
 
         return variance;
     }
