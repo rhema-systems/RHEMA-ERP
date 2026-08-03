@@ -234,6 +234,18 @@ namespace ErpSystem.Api.Services.Finance.Settings
             if (dto.DiscountReceivedAccountId.HasValue) settings.DiscountReceivedAccountId = dto.DiscountReceivedAccountId;
             if (dto.MigrationClearingAccountId.HasValue) settings.MigrationClearingAccountId = dto.MigrationClearingAccountId;
             if (dto.OpeningBalanceAutoRoutingEnabled.HasValue) settings.OpeningBalanceAutoRoutingEnabled = dto.OpeningBalanceAutoRoutingEnabled.Value;
+            if (dto.ApInvoicePriceTolerancePercent.HasValue)
+            {
+                if (dto.ApInvoicePriceTolerancePercent.Value is < 0 or > 100)
+                    throw new InvalidOperationException("AP invoice price tolerance must be between 0 and 100 percent.");
+                settings.ApInvoicePriceTolerancePercent = dto.ApInvoicePriceTolerancePercent.Value;
+            }
+            if (dto.ApInvoiceQuantityTolerancePercent.HasValue)
+            {
+                if (dto.ApInvoiceQuantityTolerancePercent.Value is < 0 or > 100)
+                    throw new InvalidOperationException("AP invoice quantity tolerance must be between 0 and 100 percent.");
+                settings.ApInvoiceQuantityTolerancePercent = dto.ApInvoiceQuantityTolerancePercent.Value;
+            }
 
             await _context.SaveChangesAsync();
 
@@ -370,6 +382,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 DiscountReceivedAccountId = settings.DiscountReceivedAccountId,
                 MigrationClearingAccountId = settings.MigrationClearingAccountId,
                 OpeningBalanceAutoRoutingEnabled = settings.OpeningBalanceAutoRoutingEnabled,
+                ApInvoicePriceTolerancePercent = settings.ApInvoicePriceTolerancePercent,
+                ApInvoiceQuantityTolerancePercent = settings.ApInvoiceQuantityTolerancePercent,
                 TransactionsExist = transactionsExist
             };
         }

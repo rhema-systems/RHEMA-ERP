@@ -17,20 +17,74 @@ public class PurchaseOrderReceiptsController : ControllerBase
 {
     private readonly IPurchaseOrderReceiptRepository _purchaseOrderReceiptRepository;
     private readonly ApplicationDbContext _context;
-    private readonly Services.PurchaseOrderReceiptDocumentService _documentService;
+    private readonly IProcurementReceiptDocumentService _documentService;
+    private readonly IProcurementReceiptInspectionService _inspectionService;
     private readonly ILogger<PurchaseOrderReceiptsController> _logger;
 
     public PurchaseOrderReceiptsController(
         IPurchaseOrderReceiptRepository purchaseOrderReceiptRepository,
         ApplicationDbContext context,
-        Services.PurchaseOrderReceiptDocumentService documentService,
+        IProcurementReceiptDocumentService documentService,
+        IProcurementReceiptInspectionService inspectionService,
         ILogger<PurchaseOrderReceiptsController> logger)
     {
         _purchaseOrderReceiptRepository = purchaseOrderReceiptRepository;
         _context = context;
         _documentService = documentService;
+        _inspectionService = inspectionService;
         _logger = logger;
     }
+
+    [HttpGet("{id:guid}/inspection-control")]
+    public Task<ActionResult<ProcurementReceiptInspectionOverviewDto>> GetInspectionControl(Guid id) =>
+        ExecuteInspectionAsync(() => _inspectionService.GetOverviewAsync(id, HttpContext.RequestAborted));
+
+    [HttpGet("inspection-control/supplier")]
+    public Task<ActionResult<PagedResult<ProcurementReceiptInspectionOverviewDto>>>
+        GetSupplierInspectionControl([FromQuery] int page = 1, [FromQuery] int pageSize = 20) =>
+        ExecuteInspectionAsync(() => _inspectionService.GetSupplierOverviewAsync(
+            page, pageSize, HttpContext.RequestAborted));
+
+    [HttpPost("{id:guid}/inspection-control/initialize")]
+    public Task<ActionResult<ProcurementReceiptInspectionDto>> InitializeInspection(Guid id) =>
+        ExecuteInspectionAsync(() => _inspectionService.InitializeAsync(
+            id, HttpContext.TraceIdentifier, HttpContext.RequestAborted));
+
+    [HttpPut("{id:guid}/inspection-control")]
+    public Task<ActionResult<ProcurementReceiptInspectionDto>> SaveInspection(
+        Guid id, [FromBody] SaveProcurementReceiptInspectionRequest request) =>
+        ExecuteInspectionAsync(() => _inspectionService.SaveAsync(
+            id, request, HttpContext.TraceIdentifier, HttpContext.RequestAborted));
+
+    [HttpPost("inspection-control/{caseId:guid}/submit")]
+    public Task<ActionResult<ProcurementReceiptInspectionDto>> SubmitInspection(
+        Guid caseId, [FromBody] SubmitProcurementReceiptInspectionRequest request) =>
+        ExecuteInspectionAsync(() => _inspectionService.SubmitAsync(
+            caseId, request, HttpContext.TraceIdentifier, HttpContext.RequestAborted));
+
+    [HttpPost("inspection-control/{caseId:guid}/decision")]
+    public Task<ActionResult<ProcurementReceiptInspectionDto>> DecideInspection(
+        Guid caseId, [FromBody] DecideProcurementReceiptInspectionRequest request) =>
+        ExecuteInspectionAsync(() => _inspectionService.DecideAsync(
+            caseId, request, HttpContext.TraceIdentifier, HttpContext.RequestAborted));
+
+    [HttpPost("inspection-control/{caseId:guid}/supplier-acknowledgement")]
+    public Task<ActionResult<ProcurementReceiptInspectionDto>> AcknowledgeInspection(
+        Guid caseId, [FromBody] ProcurementReceiptSupplierAcknowledgementRequest request) =>
+        ExecuteInspectionAsync(() => _inspectionService.AcknowledgeAsync(
+            caseId, request, HttpContext.TraceIdentifier, HttpContext.RequestAborted));
+
+    [HttpPost("inspection-control/{caseId:guid}/resolution")]
+    public Task<ActionResult<ProcurementReceiptInspectionDto>> ResolveInspection(
+        Guid caseId, [FromBody] ProcurementReceiptResolutionRequest request) =>
+        ExecuteInspectionAsync(() => _inspectionService.ResolveAsync(
+            caseId, request, HttpContext.TraceIdentifier, HttpContext.RequestAborted));
+
+    [HttpPost("inspection-control/{caseId:guid}/close")]
+    public Task<ActionResult<ProcurementReceiptInspectionDto>> CloseInspection(
+        Guid caseId, [FromBody] ProcurementReceiptResolutionRequest request) =>
+        ExecuteInspectionAsync(() => _inspectionService.CloseAsync(
+            caseId, request, HttpContext.TraceIdentifier, HttpContext.RequestAborted));
 
     [HttpGet]
     public async Task<ActionResult<PagedResult<PurchaseOrderReceiptDto>>> GetPurchaseOrderReceipts(
@@ -161,17 +215,17 @@ public class PurchaseOrderReceiptsController : ControllerBase
     {
         try
         {
-            var receiptNumber = await _context.PurchaseOrderReceipts
-                .Where(r => r.Id == id)
-                .Select(r => r.ReceiptNumber)
-                .FirstOrDefaultAsync();
-
-            var pdfBytes = await _documentService.GenerateGrnAsync(id);
-            return File(pdfBytes, "application/pdf", $"GRN-{receiptNumber ?? id.ToString()}.pdf");
+            var file = await _documentService.DownloadGrnAsync(
+                id, HttpContext.RequestAborted);
+            return File(file.Content, file.ContentType, file.FileName);
         }
-        catch (ArgumentException ex)
+        catch (ProcurementReceiptDocumentNotFoundException ex)
         {
             return NotFound(ex.Message);
+        }
+        catch (ProcurementReceiptDocumentConflictException ex)
+        {
+            return Conflict(new { code = "RCV_DOCUMENT_NOT_ISSUED", message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -220,7 +274,13 @@ public class PurchaseOrderReceiptsController : ControllerBase
             InspectionResult = receipt.InspectionResult,
             InspectionNotes = receipt.InspectionNotes,
             PurchaseOrderNumber = receipt.PurchaseOrder?.OrderNumber ?? string.Empty,
-            SupplierName = receipt.PurchaseOrder?.BusinessPartner?.PartnerName ?? string.Empty
+            SupplierName = receipt.PurchaseOrder?.BusinessPartner?.PartnerName ?? string.Empty,
+            ReceiptTolerancePercent = receipt.ReceiptTolerancePercent,
+            ReceiptSourceIntegrityHash =
+                receipt.ReceiptSourceIntegrityHash,
+            ReceiptSourceValidatedAtUtc =
+                receipt.ReceiptSourceValidatedAtUtc,
+            RowVersion = Convert.ToBase64String(receipt.RowVersion)
         };
     }
 
@@ -272,5 +332,65 @@ public class PurchaseOrderReceiptsController : ControllerBase
     {
         var fullName = $"{firstName} {lastName}".Trim();
         return string.IsNullOrWhiteSpace(fullName) ? null : fullName;
+    }
+
+    private async Task<ActionResult<T>> ExecuteInspectionAsync<T>(Func<Task<T>> action)
+    {
+        try
+        {
+            return Ok(await action());
+        }
+        catch (ProcurementReceiptInspectionNotFoundException ex)
+        {
+            return NotFound(InspectionProblem(ex.Code, ex.Message, StatusCodes.Status404NotFound));
+        }
+        catch (ProcurementReceiptInspectionAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                InspectionProblem("RCV_INSPECTION_FORBIDDEN", ex.Message, StatusCodes.Status403Forbidden));
+        }
+        catch (ProcurementPurchaseOrderSodBlockedException ex)
+        {
+            var problem = InspectionProblem(
+                ex.Code,
+                ex.Message,
+                StatusCodes.Status403Forbidden);
+            problem.Extensions["readiness"] = ex.Readiness;
+            return StatusCode(StatusCodes.Status403Forbidden, problem);
+        }
+        catch (ProcurementPurchaseOrderSodAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                InspectionProblem("PO_SOD_FORBIDDEN", ex.Message,
+                    StatusCodes.Status403Forbidden));
+        }
+        catch (ProcurementReceiptInspectionValidationException ex)
+        {
+            return UnprocessableEntity(InspectionProblem(ex.Code, ex.Message,
+                StatusCodes.Status422UnprocessableEntity));
+        }
+        catch (ProcurementReceiptInspectionConflictException ex)
+        {
+            return Conflict(InspectionProblem(ex.Code, ex.Message, StatusCodes.Status409Conflict));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(InspectionProblem("RCV_ROW_VERSION_CONFLICT",
+                "The receipt inspection changed. Reload and retry.", StatusCodes.Status409Conflict));
+        }
+    }
+
+    private ProblemDetails InspectionProblem(string code, string detail, int status)
+    {
+        var problem = new ProblemDetails
+        {
+            Status = status,
+            Title = code,
+            Detail = detail,
+            Instance = HttpContext.Request.Path
+        };
+        problem.Extensions["code"] = code;
+        problem.Extensions["correlationId"] = HttpContext.TraceIdentifier;
+        return problem;
     }
 }

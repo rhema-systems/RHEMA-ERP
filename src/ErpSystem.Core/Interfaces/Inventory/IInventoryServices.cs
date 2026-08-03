@@ -92,7 +92,7 @@ public interface IGoodsReceiptNoteService
     Task<GoodsReceiptNoteDetailDto?> GetByGRNNumberAsync(string grnNumber);
     Task<GoodsReceiptNoteDto> CreateAsync(CreateGoodsReceiptNoteDto dto, Guid userId);
     Task<bool> SubmitForInspectionAsync(Guid grnId, Guid userId);
-    Task<bool> UpdateInspectionResultAsync(UpdateGRNInspectionDto dto, Guid userId);
+    Task<bool> UpdateInspectionResultAsync(Guid grnId, UpdateGRNInspectionDto dto, Guid userId);
     Task<bool> CompleteInspectionAsync(Guid grnId, Guid userId);
     Task<bool> PostToInventoryAsync(Guid grnId, Guid userId);
     Task<bool> CancelAsync(Guid grnId, string reason, Guid userId);
@@ -194,6 +194,12 @@ public interface IPhysicalCountService
 /// </summary>
 public interface IInventoryValuationService
 {
+    /// <summary>
+    /// Clears request-scoped valuation state before an execution-strategy attempt.
+    /// A retry must never reuse entities that were detached by a rolled-back attempt.
+    /// </summary>
+    void ResetProcessingAttempt();
+
     Task<InventoryValuationSummaryDto> GetItemValuationAsync(Guid inventoryItemId);
     Task<IEnumerable<InventoryCostLayerDto>> GetCostLayersAsync(Guid inventoryItemId, Guid? warehouseId = null);
     Task<decimal> GetInventoryValueAsync(Guid? warehouseId = null, Guid? categoryId = null);

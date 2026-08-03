@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -17,6 +18,8 @@ public class InventoryValuationService : IInventoryValuationService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<InventoryValuationService> _logger;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IProcurementReceiptSourceControlService
+        _receiptSourceControl;
 
     // Movement numbers are generated multiple times inside a single receipt/issue operation (often before SaveChanges).
     // Using a raw DB count each time can generate duplicates within the same request because unsaved movements
@@ -31,14 +34,23 @@ public class InventoryValuationService : IInventoryValuationService
     public InventoryValuationService(
         IUnitOfWork unitOfWork,
         ILogger<InventoryValuationService> logger,
-        ICurrentUserProvider currentUserProvider)
+        ICurrentUserProvider currentUserProvider,
+        IProcurementReceiptSourceControlService receiptSourceControl)
     {
         _unitOfWork = unitOfWork;
         _logger = logger;
         _currentUserProvider = currentUserProvider;
+        _receiptSourceControl = receiptSourceControl;
     }
 
     #region Public Interface Methods
+
+    public void ResetProcessingAttempt()
+    {
+        _balanceCache.Clear();
+        _movementNumberPrefix = null;
+        _movementNumberNext = 0;
+    }
 
     public async Task<InventoryValuationSummaryDto> GetItemValuationAsync(Guid inventoryItemId)
     {
@@ -713,8 +725,21 @@ public class InventoryValuationService : IInventoryValuationService
         string? serialNumber = null,
         DateTime? expirationDate = null)
     {
+        await _receiptSourceControl.EnforceInventoryPostingAsync(
+            referenceType,
+            referenceId,
+            inventoryItemId,
+            quantity,
+            referenceId.HasValue
+                ? $"{referenceId.Value:N}:{inventoryItemId:N}"
+                : $"{Guid.NewGuid():N}:{inventoryItemId:N}");
+
         var item = await _unitOfWork.Repository<InventoryItem>()
-            .GetByIdAsync(inventoryItemId);
+            .GetQueryable(value =>
+                value.TenantId == _currentUserProvider.TenantId &&
+                value.Id == inventoryItemId &&
+                !value.IsDeleted)
+            .SingleOrDefaultAsync();
 
         if (item == null)
             throw new KeyNotFoundException($"Inventory item {inventoryItemId} not found");

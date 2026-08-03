@@ -305,6 +305,8 @@ export const MOCK_JOURNAL_ENTRIES: JournalEntry[] = [
 
 // ===== FINANCE SETTINGS =====
 export const MOCK_FINANCE_SETTINGS: FinanceSettings = {
+    apInvoicePriceTolerancePercent: 1,
+    apInvoiceQuantityTolerancePercent: 1,
     id: 'settings-1',
     tenantId: 'tenant-1',
     coaType: 'Standard',

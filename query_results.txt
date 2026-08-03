@@ -1,5 +1,0 @@
-=========================================
-CHECKING USER INFORMATION
-=========================================
-Msg 208, Level 16, State 1, Server RHEMA-MICHAEL\SQL2017, Line 9
-Invalid object name 'AspNetUsers'.

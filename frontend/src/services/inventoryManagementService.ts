@@ -615,16 +615,18 @@ export interface GoodsReceiptNoteItemDto {
 }
 
 export interface CreateGoodsReceiptNoteDto {
-  purchaseOrderId?: string;
+  purchaseOrderId: string;
   supplierId?: string;
   warehouseId: string;
   receiptDate: string;
   requiresInspection: boolean;
   notes?: string;
+  idempotencyKey?: string;
   items: CreateGoodsReceiptNoteItemDto[];
 }
 
 export interface CreateGoodsReceiptNoteItemDto {
+  purchaseOrderItemId: string;
   inventoryItemId: string;
   orderedQuantity: number;
   receivedQuantity: number;

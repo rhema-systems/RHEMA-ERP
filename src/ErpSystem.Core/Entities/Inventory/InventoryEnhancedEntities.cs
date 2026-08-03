@@ -226,6 +226,30 @@ public class GoodsReceiptNote : TenantEntity
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
+    // Governed source/capacity snapshot (TDC-0501)
+    [MaxLength(100)]
+    public string? IdempotencyKey { get; set; }
+
+    [MaxLength(64)]
+    public string? IdempotencyRequestHash { get; set; }
+
+    [MaxLength(100)]
+    public string? CorrelationId { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal ReceiptTolerancePercent { get; set; }
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ReceiptSourceSnapshotJson { get; set; }
+
+    [MaxLength(64)]
+    public string? ReceiptSourceIntegrityHash { get; set; }
+
+    public DateTime? ReceiptSourceValidatedAtUtc { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     public bool StockUpdated { get; set; } = false;
     public DateTime? StockUpdatedAt { get; set; }
 
@@ -261,6 +285,21 @@ public class GoodsReceiptNoteItem : TenantEntity
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal ReceivedQuantity { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal PreviouslyReceiptedQuantitySnapshot { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal ToleranceQuantitySnapshot { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal MaximumReceivableQuantitySnapshot { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal RemainingQuantityBeforeReceiptSnapshot { get; set; }
+
+    [MaxLength(64)]
+    public string? ReceiptLineIntegrityHash { get; set; }
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal AcceptedQuantity { get; set; } = 0;

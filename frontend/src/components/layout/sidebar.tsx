@@ -187,6 +187,7 @@ const navigationItems: NavItem[] = [
               { title: 'Cash Requirements', href: '/finance/ap/reports?tab=cash', icon: Banknote },
               { title: 'Supplier Statements', href: '/finance/ap/reports?tab=statements', icon: FileText },
               { title: 'Supplier Detailed Ledger', href: '/finance/ap/reports/supplier-detailed-ledger', icon: FileText },
+              { title: 'Procurement Reconciliation', href: '/finance/ap/reports?tab=procurement-reconciliation', icon: FileText },
             ],
           },
         ],

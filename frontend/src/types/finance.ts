@@ -494,6 +494,8 @@ export interface FinanceSettings {
     discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
     openingBalanceAutoRoutingEnabled?: boolean;
+    apInvoicePriceTolerancePercent: number;
+    apInvoiceQuantityTolerancePercent: number;
     /** True when posted transactions exist — base currency and control accounts become locked */
     transactionsExist?: boolean;
 }
@@ -516,6 +518,8 @@ export interface UpdateFinanceSettingsDto {
     discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
     openingBalanceAutoRoutingEnabled?: boolean;
+    apInvoicePriceTolerancePercent?: number;
+    apInvoiceQuantityTolerancePercent?: number;
 }
 
 // Currency

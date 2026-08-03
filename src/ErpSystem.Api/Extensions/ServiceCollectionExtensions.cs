@@ -693,6 +693,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFxAccountingService>(sp =>
                 sp.GetRequiredService<ErpSystem.Api.Services.Finance.MultiCurrency.CurrencyRevaluationService>());
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorInvoiceService, ErpSystem.Api.Services.Finance.AP.VendorInvoiceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorInvoiceMatchExceptionService, ErpSystem.Api.Services.Finance.AP.VendorInvoiceMatchExceptionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorPaymentService, ErpSystem.Api.Services.Finance.AP.VendorPaymentService>();
             services.AddScoped<ErpSystem.Api.Services.Finance.AP.FinancePurchaseOrderReceiptPostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetService>();
@@ -915,8 +916,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementFrameworkAgreementService, ErpSystem.Core.Services.Procurement.ProcurementFrameworkAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementFrameworkCallOffService, ErpSystem.Core.Services.Procurement.ProcurementFrameworkCallOffService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderSourceService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderSourceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptSourceControlService, ErpSystem.Core.Services.Procurement.ProcurementReceiptSourceControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptInspectionService, ErpSystem.Core.Services.Procurement.ProcurementReceiptInspectionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptInspectionStore, ErpSystem.Data.Repositories.Procurement.ProcurementReceiptInspectionStore>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderComplianceService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderComplianceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderSodService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderSodService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementInvoicePaymentSodService, ErpSystem.Core.Services.Procurement.ProcurementInvoicePaymentSodService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderAmendmentStore, ErpSystem.Data.Repositories.Procurement.ProcurementPurchaseOrderAmendmentStore>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderAmendmentService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderAmendmentService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementContractActivationStore, ErpSystem.Data.Repositories.Procurement.ProcurementContractActivationStore>();

@@ -603,7 +603,45 @@ export interface ProcurementPurchaseOrderSodReadinessDto {
   message: string;
   evaluatedAtUtc: string;
   decisionKeys: string[];
+  receiptActionCoverage: string[];
   checks: ProcurementPurchaseOrderSodCheckDto[];
+}
+
+export interface ProcurementReceiptSourceLineDto {
+  purchaseOrderItemId: string;
+  inventoryItemId?: string;
+  itemCode: string;
+  itemName: string;
+  unitOfMeasure: string;
+  orderedQuantity: number;
+  previouslyReceiptedQuantity: number;
+  toleranceQuantity: number;
+  maximumReceivableQuantity: number;
+  remainingQuantity: number;
+  requestedQuantity: number;
+  allowed: boolean;
+  code: string;
+  message: string;
+  integrityHash: string;
+}
+
+export interface ProcurementReceiptSourceReadinessDto {
+  purchaseOrderId: string;
+  orderNumber: string;
+  purchaseOrderStatus: string;
+  sourceType?: ProcurementPurchaseOrderSourceType;
+  sourceId?: string;
+  sourceReference: string;
+  sourceIntegrityHash: string;
+  tolerancePercent: number;
+  sourceValid: boolean;
+  canReceive: boolean;
+  code: string;
+  message: string;
+  evaluatedAtUtc: string;
+  decisionKeys: string[];
+  lines: ProcurementReceiptSourceLineDto[];
+  requiredActions: string[];
 }
 
 export interface PurchaseOrderSummaryDto {
@@ -868,6 +906,203 @@ export interface PurchaseOrderReceiptItemDto {
   locationCode?: string;
 }
 
+export type ProcurementReceiptInspectionStatus =
+  | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export type ProcurementReceiptDisposition = 0 | 1 | 2 | 3;
+export type ProcurementReceiptSupplierAcknowledgementStatus = 0 | 1 | 2 | 3;
+export type ProcurementReceiptResolutionKind = 0 | 1 | 2;
+export type ProcurementReceiptResolutionStatus = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+export type ProcurementReceiptInspectionEvidenceKind = 0 | 1;
+
+export interface ProcurementReceiptInspectionEvidenceRequest {
+  actionKey: string;
+  requirementKey: string;
+  referenceKind: ProcurementReceiptInspectionEvidenceKind;
+  workflowEvidenceDocumentId?: string;
+  fileUploadRecordId?: string;
+  evidenceReference: string;
+}
+
+export interface ProcurementReceiptInspectionLineDto {
+  id: string;
+  purchaseOrderReceiptItemId: string;
+  purchaseOrderItemId: string;
+  itemCode: string;
+  itemName: string;
+  unitOfMeasure: string;
+  receivedQuantity: number;
+  acceptedQuantity: number;
+  rejectedQuantity: number;
+  pendingQuantity: number;
+  disposition: ProcurementReceiptDisposition;
+  rejectionReason?: string;
+  inspectionNotes?: string;
+  quarantineLocationId?: string;
+}
+
+export interface ProcurementReceiptInspectionEvidenceDto {
+  id: string;
+  actionKey: string;
+  requirementKey: string;
+  referenceKind: ProcurementReceiptInspectionEvidenceKind;
+  workflowEvidenceDocumentId?: string;
+  fileUploadRecordId?: string;
+  evidenceReference: string;
+  evidenceHash: string;
+}
+
+export interface ProcurementReceiptInspectionActionDto {
+  id: string;
+  sequence: number;
+  actionType: number;
+  statusAfter: ProcurementReceiptInspectionStatus;
+  resolutionKind: ProcurementReceiptResolutionKind;
+  quantity: number;
+  reference: string;
+  comment: string;
+  actorName: string;
+  occurredAtUtc: string;
+}
+
+export interface ProcurementReceiptInspectionDto {
+  id: string;
+  purchaseOrderReceiptId: string;
+  sequence: number;
+  status: ProcurementReceiptInspectionStatus;
+  receivedQuantity: number;
+  acceptedQuantity: number;
+  rejectedQuantity: number;
+  pendingQuantity: number;
+  qualityHold: boolean;
+  qualityHoldReason?: string;
+  rejectionNoteNumber?: string;
+  supplierAcknowledgementStatus: ProcurementReceiptSupplierAcknowledgementStatus;
+  resolutionKind: ProcurementReceiptResolutionKind;
+  resolutionStatus: ProcurementReceiptResolutionStatus;
+  stockEligibleQuantity: number;
+  stockPostedQuantity: number;
+  apEligibleQuantity: number;
+  apBlockedQuantity: number;
+  workflowInstanceId?: string;
+  rowVersion: string;
+  lines: ProcurementReceiptInspectionLineDto[];
+  evidence: ProcurementReceiptInspectionEvidenceDto[];
+  actions: ProcurementReceiptInspectionActionDto[];
+}
+
+export interface ProcurementReceiptInspectionOverviewDto {
+  purchaseOrderReceiptId: string;
+  receiptNumber: string;
+  purchaseOrderNumber: string;
+  supplierName: string;
+  canEdit: boolean;
+  canSubmit: boolean;
+  canDecide: boolean;
+  canAcknowledge: boolean;
+  canResolve: boolean;
+  canClose: boolean;
+  decisionKeys: string[];
+  evidenceRequirementKeys: string[];
+  current?: ProcurementReceiptInspectionDto;
+  history: ProcurementReceiptInspectionDto[];
+}
+
+export type ProcurementReceiptDocumentKind = 0 | 1;
+export type ProcurementReceiptDocumentStatus = 0 | 1 | 2 | 3;
+export type ProcurementReceiptDocumentReconciliationStatus = 0 | 1 | 2 | 3;
+
+export interface ProcurementReceiptDocumentSignatureDto {
+  id: string;
+  requiredRole: string;
+  signedByUserId: string;
+  signedByName: string;
+  signedAtUtc: string;
+  comment?: string;
+  integrityHash: string;
+}
+
+export interface ProcurementReceiptDocumentActionDto {
+  id: string;
+  action: string;
+  fromStatus: string;
+  toStatus: string;
+  actorName: string;
+  occurredAtUtc: string;
+  reason?: string;
+  integrityHash: string;
+}
+
+export interface ProcurementReceiptDocumentDto {
+  id: string;
+  documentKind: ProcurementReceiptDocumentKind;
+  documentNumber: string;
+  templateCode: string;
+  status: ProcurementReceiptDocumentStatus;
+  reconciliationStatus: ProcurementReceiptDocumentReconciliationStatus;
+  reconciliationMessage?: string;
+  reconciledAtUtc?: string;
+  preparedByName: string;
+  preparedAtUtc: string;
+  issuedByName?: string;
+  issuedAtUtc?: string;
+  cancelledByName?: string;
+  cancelledAtUtc?: string;
+  cancellationReason?: string;
+  centralDocumentRecordId?: string;
+  centralDocumentVersionId?: string;
+  pdfUrl?: string;
+  sourceIntegrityHash: string;
+  requiredSignatures: string[];
+  allowedSignatureRoles: string[];
+  signatures: ProcurementReceiptDocumentSignatureDto[];
+  actions: ProcurementReceiptDocumentActionDto[];
+  allowedActions: string[];
+  rowVersion: string;
+}
+
+export interface ProcurementReceiptDocumentOverviewDto {
+  purchaseOrderReceiptId: string;
+  receiptNumber: string;
+  purchaseOrderNumber: string;
+  supplierName: string;
+  receiptStatus: string;
+  inspectionStatus: string;
+  configurationProfileId: string;
+  configurationProfileVersion: number;
+  configuredDocumentType: number;
+  coexistenceRule: number;
+  decisionKeys: string[];
+  requiredEvidence: string[];
+  availableEvidence: string[];
+  checks: Array<{ code: string; label: string; passed: boolean; message: string }>;
+  documents: ProcurementReceiptDocumentDto[];
+  allowedActions: string[];
+  isReconciled: boolean;
+}
+
+export interface SaveProcurementReceiptInspectionRequest {
+  comment: string;
+  idempotencyKey: string;
+  rowVersion?: string;
+  lines: Array<{
+    purchaseOrderReceiptItemId: string;
+    acceptedQuantity: number;
+    rejectedQuantity: number;
+    rejectionReason?: string;
+    inspectionNotes?: string;
+    quarantineLocationId?: string;
+  }>;
+}
+
+export interface ProcurementReceiptResolutionRequest {
+  resolutionKind: ProcurementReceiptResolutionKind;
+  reference: string;
+  comment: string;
+  idempotencyKey: string;
+  rowVersion: string;
+  evidence: ProcurementReceiptInspectionEvidenceRequest[];
+}
+
 export interface ReceivePurchaseOrderDto {
   purchaseOrderId: string;
   deliveryNote?: string;
@@ -877,6 +1112,7 @@ export interface ReceivePurchaseOrderDto {
   inspectedById?: string;
   notes?: string;
   requiresInspection: boolean;
+  idempotencyKey?: string;
   items: ReceivePurchaseOrderItemDto[];
 }
 
@@ -1294,6 +1530,17 @@ export const purchasingService = {
     return response.json();
   },
 
+  async getReceiptSourceReadiness(
+    id: string
+  ): Promise<ProcurementReceiptSourceReadinessDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrders/${id}/receipt-source-readiness`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
   /**
    * Update an existing purchase order (only Draft status)
    */
@@ -1633,12 +1880,17 @@ export const purchasingService = {
       `${API_BASE_URL}/PurchaseOrders/${id}/receive`,
       {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: {
+          ...getAuthHeaders(),
+          ...(receiptData.idempotencyKey
+            ? { 'Idempotency-Key': receiptData.idempotencyKey }
+            : {}),
+        },
         body: JSON.stringify(receiptData),
       }
     );
 
-    if (!response.ok) throw new Error('Failed to receive purchase order');
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
   },
 
@@ -1691,6 +1943,163 @@ export const purchasingService = {
 
     if (!response.ok) throw new Error('Failed to fetch purchase receipt');
     return response.json();
+  },
+
+  async getReceiptInspectionControl(
+    receiptId: string
+  ): Promise<ProcurementReceiptInspectionOverviewDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/${receiptId}/inspection-control`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getSupplierReceiptInspectionControls(
+    page = 1,
+    pageSize = 20
+  ): Promise<PagedResult<ProcurementReceiptInspectionOverviewDto>> {
+    const query = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/supplier?${query}`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async initializeReceiptInspection(receiptId: string): Promise<ProcurementReceiptInspectionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/${receiptId}/inspection-control/initialize`,
+      { method: 'POST', headers: getAuthHeaders() }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async saveReceiptInspection(
+    receiptId: string,
+    request: SaveProcurementReceiptInspectionRequest
+  ): Promise<ProcurementReceiptInspectionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/${receiptId}/inspection-control`,
+      { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(request) }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async submitReceiptInspection(
+    caseId: string,
+    request: { comment: string; rowVersion: string; evidence: ProcurementReceiptInspectionEvidenceRequest[] }
+  ): Promise<ProcurementReceiptInspectionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/${caseId}/submit`,
+      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async decideReceiptInspection(
+    caseId: string,
+    request: { approved: boolean; comment: string; rowVersion: string }
+  ): Promise<ProcurementReceiptInspectionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/${caseId}/decision`,
+      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async acknowledgeReceiptInspection(
+    caseId: string,
+    request: {
+      acknowledged: boolean;
+      reference: string;
+      comment: string;
+      idempotencyKey: string;
+      rowVersion: string;
+      evidence: ProcurementReceiptInspectionEvidenceRequest[];
+    }
+  ): Promise<ProcurementReceiptInspectionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/${caseId}/supplier-acknowledgement`,
+      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async resolveReceiptInspection(
+    caseId: string,
+    request: ProcurementReceiptResolutionRequest
+  ): Promise<ProcurementReceiptInspectionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/${caseId}/resolution`,
+      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async closeReceiptInspection(
+    caseId: string,
+    request: ProcurementReceiptResolutionRequest
+  ): Promise<ProcurementReceiptInspectionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/PurchaseOrderReceipts/inspection-control/${caseId}/close`,
+      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async getReceiptDocumentControl(receiptId: string): Promise<ProcurementReceiptDocumentOverviewDto> {
+    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/receipt/${receiptId}`, { headers: getAuthHeaders() });
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async ensureReceiptDocuments(receiptId: string): Promise<ProcurementReceiptDocumentOverviewDto> {
+    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/receipt/${receiptId}/ensure`, { method: 'POST', headers: getAuthHeaders() });
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async reconcileReceiptDocuments(receiptId: string): Promise<ProcurementReceiptDocumentOverviewDto> {
+    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/receipt/${receiptId}/reconcile`, { method: 'POST', headers: getAuthHeaders() });
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async signReceiptDocument(documentId: string, request: { requiredRole: string; comment?: string; rowVersion: string }): Promise<ProcurementReceiptDocumentDto> {
+    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/sign`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) });
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async issueReceiptDocument(documentId: string, request: { comment: string; rowVersion: string }): Promise<ProcurementReceiptDocumentDto> {
+    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/issue`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) });
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async cancelReceiptDocument(documentId: string, request: { reason: string; rowVersion: string }): Promise<ProcurementReceiptDocumentDto> {
+    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/cancel`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(request) });
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async downloadReceiptDocument(documentId: string): Promise<Blob> {
+    const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/${documentId}/download`, { headers: getAuthHeaders() });
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.blob();
   },
 
   /**
@@ -1758,6 +2167,7 @@ export const {
   getPurchaseOrders,
   getPurchaseOrderById,
   getPurchaseOrderSodReadiness,
+  getReceiptSourceReadiness,
   createPurchaseOrder,
   updatePurchaseOrder,
   updatePurchaseOrderStatus,

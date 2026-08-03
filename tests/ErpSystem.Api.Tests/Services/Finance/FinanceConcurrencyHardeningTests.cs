@@ -460,6 +460,77 @@ public sealed class FinanceConcurrencyHardeningTests
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
+    public void FinanceApprovalQueue_ShouldPageAndBatchPaymentSodReadiness()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Finance",
+            "FinanceApprovalsController.cs"));
+        var method = ExtractMember(
+            source,
+            "public async Task<ActionResult<IReadOnlyList<FinanceApprovalQueueItemDto>>> GetPending",
+            "[HttpPost(\"{approvalId:guid}/approve\")]");
+
+        method.Should().Contain(".Take(pageSize + 1)",
+            "the queue must not materialize an unbounded tenant approval set");
+        method.Should().Contain("GetQueueReadinessAsync",
+            "payment and batch participants must be evaluated from set-based page loads");
+        method.Should().NotContain("GetPaymentReadinessAsync",
+            "the queue must not reload the complete payment graph once per row");
+        method.Should().NotContain("GetBatchReadinessAsync",
+            "the queue must not reload the complete batch graph once per row");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void ApExceptionReport_ShouldCountOnlyCompletableCorrectiveActions()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "AP",
+            "ApReportsService.cs"));
+
+        source.Should().Contain("OpenCorrectiveActionCount = rows.Count(row =>");
+        source.Should().Contain("VendorInvoiceMatchExceptionRules.CanCompleteCorrectiveAction(",
+            "pending, rejected, cancelled, and expired exceptions are not actionable corrective work");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void GovernedGrnProjection_ShouldUseBaseUnitsAndHeaderLocationFallback()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Inventory",
+            "GoodsReceiptNoteService.cs"));
+
+        source.Should().Contain("purchaseOrderItem.OrderedQuantity * conversion");
+        source.Should().Contain("sourceLine.PreviouslyReceiptedQuantity * conversion");
+        source.Should().Contain("sourceLine.ToleranceQuantity * conversion");
+        source.Should().Contain("sourceLine.MaximumReceivableQuantity * conversion");
+        source.Should().Contain("sourceLine.RemainingQuantity * conversion");
+        source.Should().Contain("UnitOfMeasure = item.UnitOfMeasure");
+        source.Should().Contain("itemDto.StorageLocationId ?? dto.ReceivingLocationId");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
     public void FinanceApprovalCompletion_ShouldCommitWorkflowAndBusinessOutcomeAtomically()
     {
         var root = FindRepositoryRoot();

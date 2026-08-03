@@ -603,8 +603,77 @@ public sealed class ProcurementReceiptDocumentDecisionValueDto : EffectiveDatedD
     public ProcurementReceiptCoexistenceRule CoexistenceRule { get; set; }
     [Required, StringLength(200)] public string NumberFormat { get; set; } = string.Empty;
     [Required, StringLength(500)] public string TemplateReference { get; set; } = string.Empty;
+    [StringLength(200)] public string? GrnNumberFormat { get; set; }
+    [StringLength(200)] public string? MrnNumberFormat { get; set; }
+    [StringLength(80)] public string? GrnTemplateReference { get; set; }
+    [StringLength(80)] public string? MrnTemplateReference { get; set; }
     [MinLength(1)] public List<string> SignatureRequirements { get; set; } = new();
     [MinLength(1)] public List<string> EvidenceRequirements { get; set; } = new();
+
+    public override IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        foreach (var result in base.Validate(validationContext)) yield return result;
+
+        if (DocumentType is ProcurementReceiptDocumentType.Grn or ProcurementReceiptDocumentType.GrnAndMrn)
+            foreach (var result in ValidateFormat(ResolveNumberFormat(ProcurementReceiptDocumentType.Grn), nameof(NumberFormat)))
+                yield return result;
+        if (DocumentType is ProcurementReceiptDocumentType.Mrn or ProcurementReceiptDocumentType.GrnAndMrn)
+            foreach (var result in ValidateFormat(ResolveNumberFormat(ProcurementReceiptDocumentType.Mrn), nameof(NumberFormat)))
+                yield return result;
+
+        if (DocumentType == ProcurementReceiptDocumentType.GrnAndMrn &&
+            string.Equals(ResolveNumberFormat(ProcurementReceiptDocumentType.Grn), ResolveNumberFormat(ProcurementReceiptDocumentType.Mrn), StringComparison.OrdinalIgnoreCase))
+            yield return new ValidationResult("GRN and MRN number formats must resolve to distinct values.",
+                new[] { nameof(GrnNumberFormat), nameof(MrnNumberFormat), nameof(NumberFormat) });
+
+        if (DocumentType == ProcurementReceiptDocumentType.GrnAndMrn &&
+            CoexistenceRule == ProcurementReceiptCoexistenceRule.MutuallyExclusive)
+            yield return new ValidationResult("GRN and MRN cannot be mutually exclusive when both document types are required.",
+                new[] { nameof(DocumentType), nameof(CoexistenceRule) });
+        if (DocumentType != ProcurementReceiptDocumentType.GrnAndMrn &&
+            CoexistenceRule != ProcurementReceiptCoexistenceRule.MutuallyExclusive)
+            yield return new ValidationResult("A single configured receipt-document type must use the mutually-exclusive coexistence rule.",
+                new[] { nameof(DocumentType), nameof(CoexistenceRule) });
+
+        if (DocumentType is ProcurementReceiptDocumentType.Grn or ProcurementReceiptDocumentType.GrnAndMrn &&
+            string.IsNullOrWhiteSpace(ResolveTemplateReference(ProcurementReceiptDocumentType.Grn)))
+            yield return new ValidationResult("A GRN template reference is required.", new[] { nameof(TemplateReference) });
+        if (DocumentType is ProcurementReceiptDocumentType.Mrn or ProcurementReceiptDocumentType.GrnAndMrn &&
+            string.IsNullOrWhiteSpace(ResolveTemplateReference(ProcurementReceiptDocumentType.Mrn)))
+            yield return new ValidationResult("An MRN template reference is required.", new[] { nameof(TemplateReference) });
+        if (DocumentType == ProcurementReceiptDocumentType.GrnAndMrn &&
+            string.Equals(ResolveTemplateReference(ProcurementReceiptDocumentType.Grn), ResolveTemplateReference(ProcurementReceiptDocumentType.Mrn), StringComparison.OrdinalIgnoreCase))
+            yield return new ValidationResult("GRN and MRN central DMS template references must resolve to distinct values.",
+                new[] { nameof(GrnTemplateReference), nameof(MrnTemplateReference), nameof(TemplateReference) });
+
+        var roles = SignatureRequirements.Select(item => item.Trim()).Where(item => item.Length > 0).ToList();
+        if (roles.Count != roles.Distinct(StringComparer.OrdinalIgnoreCase).Count())
+            yield return new ValidationResult("Signature requirements must be unique.", new[] { nameof(SignatureRequirements) });
+    }
+
+    public string ResolveNumberFormat(ProcurementReceiptDocumentType type)
+    {
+        var specific = type == ProcurementReceiptDocumentType.Mrn ? MrnNumberFormat : GrnNumberFormat;
+        return (!string.IsNullOrWhiteSpace(specific) ? specific : NumberFormat)
+            .Replace("{TYPE}", type == ProcurementReceiptDocumentType.Mrn ? "MRN" : "GRN", StringComparison.OrdinalIgnoreCase)
+            .Trim();
+    }
+
+    public string ResolveTemplateReference(ProcurementReceiptDocumentType type)
+    {
+        var specific = type == ProcurementReceiptDocumentType.Mrn ? MrnTemplateReference : GrnTemplateReference;
+        return (!string.IsNullOrWhiteSpace(specific) ? specific : TemplateReference)
+            .Replace("{TYPE}", type == ProcurementReceiptDocumentType.Mrn ? "MRN" : "GRN", StringComparison.OrdinalIgnoreCase)
+            .Trim();
+    }
+
+    private static IEnumerable<ValidationResult> ValidateFormat(string format, string member)
+    {
+        if (string.IsNullOrWhiteSpace(format) ||
+            (!format.Contains("{SEQ}", StringComparison.OrdinalIgnoreCase) &&
+             !System.Text.RegularExpressions.Regex.IsMatch(format, @"\{#+\}")))
+            yield return new ValidationResult("Each receipt-document number format must contain {SEQ} or a {####} sequence token.", new[] { member });
+    }
 }
 
 public sealed class ProcurementNonFunctionalDecisionValueDto : EffectiveDatedDecisionValueDto
