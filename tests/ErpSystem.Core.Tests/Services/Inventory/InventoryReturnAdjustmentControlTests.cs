@@ -171,6 +171,19 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
         source.Should().Contain("NegativeStockOverrideId = negativeStockOverrideIds.GetValueOrDefault(item.Id)");
     }
 
+    [Fact]
+    public void Controlled_returns_validate_bins_by_effective_inventory_warehouse()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
+            "InventoryReturnControlService.cs"));
+        var start = source.IndexOf("private async Task ValidateLocationAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("private async Task<List<(CentralDocumentVersion", start, StringComparison.Ordinal);
+        var validation = source[start..end];
+
+        validation.Should().Contain("location.InventoryWarehouseId != warehouseId");
+        validation.Should().NotContain("location.WarehouseId != warehouseId");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

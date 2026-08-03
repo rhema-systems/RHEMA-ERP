@@ -233,14 +233,15 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             var reason = Required(request.Reason, 1000, "Release reason");
             var key = Required(request.IdempotencyKey, 100, "Idempotency key");
             var correlation = Correlation(request.CorrelationId);
-            var allocation = await LoadForMutationAsync(id, request.RowVersion, cancellationToken);
+            var allocation = await LoadForMutationAsync(id, cancellationToken);
             var payloadHash = Hash(new { id, request.Quantity, reason });
+            await RequireCapabilityAsync(allocation, correlation, cancellationToken);
             if (await ReplayActionAsync(allocation.Id, key, payloadHash, cancellationToken))
                 return await LoadDtoAsync(id, cancellationToken);
+            EnsureRowVersion(allocation.RowVersion, request.RowVersion);
             EnsureOpen(allocation);
             if (request.Quantity > allocation.RemainingQuantity)
                 throw Error("INV_PROJECT_RESERVATION_RELEASE_EXCEEDED", "Release quantity exceeds the remaining reservation.");
-            await RequireCapabilityAsync(allocation, correlation, cancellationToken);
             var previous = Status(allocation);
             var scope = await LoadStockScopeAsync(allocation.TenantId, allocation.WarehouseId,
                 allocation.LocationId!.Value, allocation.InventoryItemId, 0, correlation,
@@ -281,17 +282,20 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             var reason = Required(request.Reason, 1000, "Substitution reason");
             var key = Required(request.IdempotencyKey, 100, "Idempotency key");
             var correlation = Correlation(request.CorrelationId);
-            var allocation = await LoadForMutationAsync(id, request.RowVersion, cancellationToken);
+            var allocation = await LoadForMutationAsync(id, cancellationToken);
             var payloadHash = Hash(new { id, request.ReplacementInventoryItemId, request.ExpiresAtUtc, reason });
+            await RequireCapabilityAsync(allocation, correlation, cancellationToken);
             var replay = await Allocations.AsNoTracking().SingleOrDefaultAsync(value =>
                 value.TenantId == allocation.TenantId && value.IdempotencyKey == key, cancellationToken);
             if (replay is not null)
             {
-                if (!string.Equals(replay.PayloadHash, payloadHash, StringComparison.OrdinalIgnoreCase))
+                if (replay.AllocatedById != _currentUser.UserId ||
+                    !string.Equals(replay.PayloadHash, payloadHash, StringComparison.OrdinalIgnoreCase))
                     throw Error("INV_PROJECT_RESERVATION_IDEMPOTENCY_CONFLICT",
                         "The idempotency key already identifies a different substitution.");
                 return await LoadDtoAsync(replay.Id, cancellationToken);
             }
+            EnsureRowVersion(allocation.RowVersion, request.RowVersion);
             EnsureOpen(allocation);
             if (allocation.ConsumedQuantity > 0)
                 throw Error("INV_PROJECT_RESERVATION_SUBSTITUTE_AFTER_FULFILLMENT",
@@ -299,7 +303,6 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             if (allocation.InventoryItemId == request.ReplacementInventoryItemId)
                 throw Error("INV_PROJECT_RESERVATION_SUBSTITUTE_SAME_ITEM",
                     "The replacement item must differ from the currently reserved item.");
-            await RequireCapabilityAsync(allocation, correlation, cancellationToken);
 
             var line = await _unitOfWork.Repository<InventoryRequisitionItem>().GetQueryable(value =>
                     value.Id == allocation.InventoryRequisitionItemId && value.TenantId == allocation.TenantId && !value.IsDeleted)
@@ -663,7 +666,6 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
 
     private async Task<InventoryAllocation> LoadForMutationAsync(
         Guid id,
-        string rowVersion,
         CancellationToken cancellationToken)
     {
         await _unitOfWork.AcquireTransactionLockAsync(
@@ -672,7 +674,6 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             item.Id == id && item.TenantId == _currentUser.TenantId, cancellationToken)
             ?? throw new InventoryProjectReservationNotFoundException(
                 "The project reservation was not found in the current tenant.");
-        EnsureRowVersion(value.RowVersion, rowVersion);
         return value;
     }
 
@@ -1010,7 +1011,8 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
                 value.InventoryAllocationId == allocationId && value.IdempotencyKey == key && !value.IsDeleted)
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
         if (action is null) return false;
-        if (!string.Equals(action.PayloadHash, payloadHash, StringComparison.OrdinalIgnoreCase))
+        if (action.ActorUserId != _currentUser.UserId ||
+            !string.Equals(action.PayloadHash, payloadHash, StringComparison.OrdinalIgnoreCase))
             throw Error("INV_PROJECT_RESERVATION_IDEMPOTENCY_CONFLICT",
                 "The idempotency key already identifies a different reservation action.");
         return true;

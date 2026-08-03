@@ -521,21 +521,41 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
         requestedReturn.Status.Should().Be(InventoryReturnVoucherStatus.PendingApproval.ToString());
 
         _currentUser.Switch(_returnApproverId, "stores.return-approver");
-        var approvedReturn = await _returns.DecideAsync(requestedReturn.Id, new DecideInventoryReturnVoucherRequest
+        var decisionRequest = new DecideInventoryReturnVoucherRequest
         {
             Approved = true,
             Comment = "Independent approval of unused project stock return.",
             IdempotencyKey = "e2e-010-return-approve",
             RowVersion = requestedReturn.RowVersion
-        });
+        };
+        var approvedReturn = await _returns.DecideAsync(requestedReturn.Id, decisionRequest);
         approvedReturn.Status.Should().Be(InventoryReturnVoucherStatus.Approved.ToString());
 
-        var postedReturn = await _returns.PostAsync(approvedReturn.Id, new PostInventoryReturnVoucherRequest
+        _context.ChangeTracker.Clear();
+        var approvedEntity = await _context.Set<InventoryReturnVoucher>().SingleAsync(value => value.Id == requestedReturn.Id);
+        approvedEntity.RowVersion = [31, 32, 33, 34];
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        var decisionReplay = await _returns.DecideAsync(requestedReturn.Id, decisionRequest);
+        decisionReplay.Status.Should().Be(InventoryReturnVoucherStatus.Approved.ToString(),
+            "an identical decision retry must be recognized before its stale row version");
+
+        var postRequest = new PostInventoryReturnVoucherRequest
         {
             IdempotencyKey = "e2e-010-return-post",
-            RowVersion = approvedReturn.RowVersion
-        });
+            RowVersion = decisionReplay.RowVersion
+        };
+        var postedReturn = await _returns.PostAsync(approvedReturn.Id, postRequest);
         postedReturn.Status.Should().Be(InventoryReturnVoucherStatus.Posted.ToString());
+
+        _context.ChangeTracker.Clear();
+        var postedEntity = await _context.Set<InventoryReturnVoucher>().SingleAsync(value => value.Id == requestedReturn.Id);
+        postedEntity.RowVersion = [41, 42, 43, 44];
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        var postingReplay = await _returns.PostAsync(approvedReturn.Id, postRequest);
+        postingReplay.Status.Should().Be(InventoryReturnVoucherStatus.Posted.ToString(),
+            "an identical posting retry must be recognized before its stale row version");
 
         _context.ChangeTracker.Clear();
         var finalLine = await _context.Set<InventoryRequisitionItem>()

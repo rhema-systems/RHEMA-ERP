@@ -204,7 +204,7 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
             value.FirstCountQuantity == 7m && value.VarianceQuantity == -3m && value.RequiresRecount);
 
         _currentUser.Switch(_recountUserId, "cycle.recounter");
-        await _counts.RecordRecountAsync(created.Id, _recountUserId, new RecordPhysicalCountRecountRequest
+        var recountRequest = new RecordPhysicalCountRecountRequest
         {
             PhysicalCountItemId = line.Id,
             RecountedQuantity = 8m,
@@ -214,7 +214,8 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
             IdempotencyKey = "e2e-012-recount",
             CorrelationId = "e2e-012",
             Comment = "Submit confirmed variance for independent decisions."
-        });
+        };
+        await _counts.RecordRecountAsync(created.Id, _recountUserId, recountRequest);
         var recounted = await LoadCountAsync(created.Id);
         recounted.Status.Should().Be("PendingStoresApproval");
         recounted.TotalVarianceQuantity.Should().Be(-2m);
@@ -225,6 +226,32 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         _createdAdjustment.Items.Should().ContainSingle().Which.Should().Match<CreateStockAdjustmentItemDto>(value =>
             value.InventoryItemId == _itemId && value.LocationId == _locationId &&
             value.AdjustmentQuantity == -2m && value.UnitCost == 10m);
+
+        recounted.RowVersion = [20, 21, 22, 23];
+        recounted.Items.Single().RowVersion = [24, 25, 26, 27];
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        (await _counts.RecordRecountAsync(created.Id, _recountUserId, recountRequest)).Should().BeTrue(
+            "an identical retry must replay before evaluating its now-stale row versions");
+        var changedReplay = async () => await _counts.RecordRecountAsync(created.Id, _recountUserId,
+            new RecordPhysicalCountRecountRequest
+            {
+                PhysicalCountItemId = line.Id,
+                RecountedQuantity = 9m,
+                InvestigationNotes = recountRequest.InvestigationNotes,
+                RowVersion = recountRequest.RowVersion,
+                ItemRowVersion = recountRequest.ItemRowVersion,
+                IdempotencyKey = recountRequest.IdempotencyKey,
+                CorrelationId = recountRequest.CorrelationId,
+                Comment = recountRequest.Comment
+            });
+        await changedReplay.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*idempotency key*payload or actor*");
+        var restored = await LoadCountAsync(created.Id);
+        restored.RowVersion = _countRowVersion;
+        restored.Items.Single().RowVersion = _lineRowVersion;
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
 
         _currentUser.Switch(_storesApproverId, "stores.approver", "TDC_STORES_MANAGER");
         await _counts.ApproveStoresAsync(created.Id, _storesApproverId, Decision("e2e-012-stores"));

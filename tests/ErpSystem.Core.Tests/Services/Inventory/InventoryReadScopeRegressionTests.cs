@@ -1,7 +1,10 @@
+using System.Reflection;
+using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -10,6 +13,7 @@ using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -115,8 +119,80 @@ public sealed class InventoryReadScopeRegressionTests
             It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtLeast(2));
     }
 
+    [Fact]
+    public async Task Project_reservation_release_replays_before_stale_row_version_and_verifies_payload_actor()
+    {
+        await using var context = Context();
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var actor = User(tenantId, userId);
+        var warehouse = Warehouse(tenantId, "PROJECT-REPLAY");
+        var location = Location(tenantId, warehouse, "REPLAY-01");
+        var item = Item(tenantId, "PROJECT-REPLAY-ITEM");
+        var allocation = Allocation(tenantId, actor, warehouse, location, item, "RES-REPLAY");
+        allocation.RowVersion = [2];
+        var request = new ReleaseInventoryProjectReservationRequest
+        {
+            Quantity = 1m,
+            Reason = "Release unused project stock",
+            IdempotencyKey = "project-release-replay",
+            CorrelationId = "project-release-replay",
+            RowVersion = Convert.ToBase64String([1])
+        };
+        var hashMethod = typeof(InventoryProjectReservationService).GetMethod(
+            "Hash", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var payloadHash = (string)hashMethod.Invoke(null, new object[]
+        {
+            new { id = allocation.Id, request.Quantity, reason = request.Reason }
+        })!;
+        var action = new InventoryProjectReservationAction
+        {
+            TenantId = tenantId,
+            InventoryAllocationId = allocation.Id,
+            InventoryAllocation = allocation,
+            Sequence = 1,
+            ActionType = InventoryProjectReservationActionType.Released,
+            PreviousStatus = InventoryProjectReservationStatus.Reserved,
+            NewStatus = InventoryProjectReservationStatus.Reserved,
+            Quantity = request.Quantity,
+            ActorUserId = userId,
+            ActorUser = actor,
+            OccurredAtUtc = DateTime.UtcNow,
+            IdempotencyKey = request.IdempotencyKey,
+            PayloadHash = payloadHash,
+            CorrelationId = request.CorrelationId,
+            Reason = request.Reason,
+            IntegrityHash = new string('F', 64)
+        };
+        context.AddRange(actor, warehouse, location, item, allocation, action);
+        await context.SaveChangesAsync();
+        using var unitOfWork = new UnitOfWork(context);
+        var current = CurrentUser(tenantId, userId);
+        var access = ScopedAccess(warehouse.Id, location.Id);
+        var service = new InventoryProjectReservationService(unitOfWork, current.Object, access.Object,
+            Mock.Of<IProcurementControlEventService>(), Mock.Of<INotificationService>(), UserManager(context).Object,
+            NullLogger<InventoryProjectReservationService>.Instance);
+
+        var replay = await service.ReleaseAsync(allocation.Id, request);
+        var changedPayload = () => service.ReleaseAsync(allocation.Id, new ReleaseInventoryProjectReservationRequest
+        {
+            Quantity = 2m,
+            Reason = request.Reason,
+            IdempotencyKey = request.IdempotencyKey,
+            CorrelationId = request.CorrelationId,
+            RowVersion = request.RowVersion
+        });
+
+        replay.Id.Should().Be(allocation.Id);
+        replay.RemainingQuantity.Should().Be(5m);
+        await changedPayload.Should().ThrowAsync<InventoryProjectReservationControlException>()
+            .Where(error => error.Code == "INV_PROJECT_RESERVATION_IDEMPOTENCY_CONFLICT");
+    }
+
     private static ApplicationDbContext Context() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
-        .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
+        .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+        .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+        .Options);
 
     private static Mock<ICurrentUserProvider> CurrentUser(Guid tenantId, Guid userId)
     {
@@ -132,18 +208,25 @@ public sealed class InventoryReadScopeRegressionTests
     private static Mock<IProcurementAccessControlService> ScopedAccess(Guid warehouseId, Guid? locationId = null)
     {
         var access = new Mock<IProcurementAccessControlService>();
+        ProcurementAccessCapabilityDecisionDto Decide(
+            ProcurementAccessCapabilityRequest request,
+            string correlation) => new()
+        {
+            Allowed = request.WarehouseId == warehouseId &&
+                (!locationId.HasValue || request.LocationId == locationId || !request.RequireLocationScope),
+            PermissionCode = request.PermissionCode,
+            WarehouseId = request.WarehouseId,
+            LocationId = request.LocationId,
+            CorrelationId = correlation
+        };
         access.Setup(value => value.CheckCapabilityAsync(
                 It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ProcurementAccessCapabilityRequest request, string correlation, CancellationToken _) =>
-                new ProcurementAccessCapabilityDecisionDto
-                {
-                    Allowed = request.WarehouseId == warehouseId &&
-                        (!locationId.HasValue || request.LocationId == locationId),
-                    PermissionCode = request.PermissionCode,
-                    WarehouseId = request.WarehouseId,
-                    LocationId = request.LocationId,
-                    CorrelationId = correlation
-                });
+                Decide(request, correlation));
+        access.Setup(value => value.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementAccessCapabilityRequest request, string correlation, CancellationToken _) =>
+                Decide(request, correlation));
         return access;
     }
 

@@ -27,9 +27,11 @@ public partial class PhysicalCountService
         var count = await LoadControlledCountAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
         await EnsureAccessAsync(count, "procurement.inventory.count");
-        EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the recount.");
-        if (await HasCountActionAsync(count.Id, PhysicalCountActionType.RecountRecorded, request.IdempotencyKey))
+        if (await ReplayCountActionAsync(count.Id, PhysicalCountActionType.RecountRecorded,
+                request.IdempotencyKey, userId, "IndependentCounter", request.InvestigationNotes,
+                new { Id = request.PhysicalCountItemId, request.RecountedQuantity }))
             return true;
+        EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the recount.");
         if (count.Status != "RecountRequired")
             throw new InvalidOperationException("A recount can only be recorded when the count requires recount.");
         if (count.CountedById == userId || count.InitiatedById == userId)
@@ -85,9 +87,11 @@ public partial class PhysicalCountService
         var count = await LoadControlledCountAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
         await EnsureAccessAsync(count, "procurement.inventory.adjust.approve");
-        EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the Stores decision.");
         var action = request.Approved ? PhysicalCountActionType.StoresApproved : PhysicalCountActionType.Rejected;
-        if (await HasCountActionAsync(count.Id, action, request.IdempotencyKey)) return true;
+        var comment = request.Approved ? request.Comment : request.Reason ?? request.Comment;
+        if (await ReplayCountActionAsync(count.Id, action, request.IdempotencyKey, userId,
+                StoresManagerRole, comment, new { request.Approved })) return true;
+        EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the Stores decision.");
         if (count.Status != "PendingStoresApproval")
             throw new InvalidOperationException("The count is not awaiting Stores approval.");
         EnsureIndependentActor(count, userId, includeFinance: false, includeAudit: false);
@@ -145,9 +149,11 @@ public partial class PhysicalCountService
         var count = await LoadControlledCountAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
         await EnsureAccessAsync(count, "procurement.inventory.adjust.approve");
-        EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the Finance decision.");
         var action = request.Approved ? PhysicalCountActionType.FinanceApproved : PhysicalCountActionType.Rejected;
-        if (await HasCountActionAsync(count.Id, action, request.IdempotencyKey)) return true;
+        var comment = request.Approved ? request.Comment : request.Reason ?? request.Comment;
+        if (await ReplayCountActionAsync(count.Id, action, request.IdempotencyKey, userId,
+                FinanceReviewerRole, comment, new { request.Approved })) return true;
+        EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the Finance decision.");
         if (count.Status != "PendingFinanceApproval")
             throw new InvalidOperationException("The count is not awaiting Finance approval.");
         EnsureIndependentActor(count, userId, includeFinance: false, includeAudit: false);
@@ -184,9 +190,11 @@ public partial class PhysicalCountService
         var count = await LoadControlledCountAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
         await EnsureAccessAsync(count, "procurement.inventory.read");
-        EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the audit attestation.");
         var action = request.Approved ? PhysicalCountActionType.AuditAttested : PhysicalCountActionType.Rejected;
-        if (await HasCountActionAsync(count.Id, action, request.IdempotencyKey)) return true;
+        var comment = request.Approved ? request.Comment : request.Reason ?? request.Comment;
+        if (await ReplayCountActionAsync(count.Id, action, request.IdempotencyKey, userId,
+                ProcurementAccessControlRegistry.InternalAuditRole, comment, new { request.Approved })) return true;
+        EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the audit attestation.");
         if (count.Status != "PendingAuditAttestation")
             throw new InvalidOperationException("The count is not awaiting Internal Audit attestation.");
         EnsureIndependentActor(count, userId, includeFinance: true, includeAudit: false);
@@ -222,8 +230,10 @@ public partial class PhysicalCountService
         var count = await LoadControlledCountAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
         await EnsureAccessAsync(count, "procurement.inventory.adjust.approve");
+        if (await ReplayCountActionAsync(count.Id, PhysicalCountActionType.Posted,
+                request.IdempotencyKey, userId, FinanceReviewerRole, request.Comment, payload: null))
+            return true;
         EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry posting.");
-        if (await HasCountActionAsync(count.Id, PhysicalCountActionType.Posted, request.IdempotencyKey)) return true;
         if (count.Status != "ReadyToPost")
             throw new InvalidOperationException("The count must complete Stores, Finance, and Internal Audit stages before posting.");
         if (count.CutoffAtUtc.HasValue && DateTime.UtcNow > count.CutoffAtUtc.Value)
@@ -563,7 +573,8 @@ public partial class PhysicalCountService
             count.StockAdjustmentId,
             Payload = payload
         }, CountJsonOptions);
-        var payloadHash = Hash($"{actionType}|{key}|{comment}|{snapshot}");
+        var normalizedComment = Normalize(comment, 2000);
+        var payloadHash = Hash($"{actionType}|{key}|{normalizedComment}|{snapshot}");
         var occurred = DateTime.UtcNow;
         await actionRepo.AddAsync(new PhysicalCountAction
         {
@@ -577,18 +588,66 @@ public partial class PhysicalCountService
             IdempotencyKey = key,
             PayloadHash = payloadHash,
             CorrelationId = Normalize(correlationId, 100) ?? $"physical-count:{count.Id:N}",
-            Comment = Normalize(comment, 2000),
+            Comment = normalizedComment,
             SnapshotJson = snapshot,
             IntegrityHash = Hash($"{previous?.IntegrityHash}|{count.TenantId:N}|{count.Id:N}|{(int)actionType}|{actorUserId:N}|{occurred:O}|{payloadHash}")
         });
     }
 
-    private async Task<bool> HasCountActionAsync(Guid countId, PhysicalCountActionType actionType, string key)
+    private async Task<bool> ReplayCountActionAsync(
+        Guid countId,
+        PhysicalCountActionType actionType,
+        string key,
+        Guid actorUserId,
+        string actorRole,
+        string? comment,
+        object? payload)
     {
         var normalized = Required(key, "An idempotency key is required.", 100);
-        return await _unitOfWork.Repository<PhysicalCountAction>().ExistsAsync(x =>
+        var action = await _unitOfWork.Repository<PhysicalCountAction>().GetQueryable(x =>
             x.TenantId == RequiredTenantId() && x.PhysicalCountId == countId && x.ActionType == actionType &&
-            x.IdempotencyKey == normalized && !x.IsDeleted);
+            x.IdempotencyKey == normalized && !x.IsDeleted).AsNoTracking().SingleOrDefaultAsync();
+        if (action is null) return false;
+
+        var recordedHash = Hash($"{action.ActionType}|{action.IdempotencyKey}|{action.Comment}|{action.SnapshotJson}");
+        if (action.ActorUserId != actorUserId ||
+            !string.Equals(action.ActorRole, actorRole, StringComparison.Ordinal) ||
+            !string.Equals(action.Comment, Normalize(comment, 2000), StringComparison.Ordinal) ||
+            !string.Equals(action.PayloadHash, recordedHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "The physical-count idempotency key already identifies a different action payload or actor.");
+
+        if (payload is not null)
+        {
+            using var snapshot = JsonDocument.Parse(action.SnapshotJson);
+            if (!snapshot.RootElement.TryGetProperty("payload", out var recordedPayload))
+                throw new InvalidOperationException("The recorded physical-count action payload is invalid.");
+            using var expected = JsonDocument.Parse(JsonSerializer.Serialize(payload, CountJsonOptions));
+            if (!JsonContains(recordedPayload, expected.RootElement))
+                throw new InvalidOperationException(
+                    "The physical-count idempotency key already identifies a different action payload or actor.");
+        }
+        return true;
+    }
+
+    private static bool JsonContains(JsonElement recorded, JsonElement expected)
+    {
+        if (recorded.ValueKind != expected.ValueKind) return false;
+        if (expected.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in expected.EnumerateObject())
+                if (!recorded.TryGetProperty(property.Name, out var recordedProperty) ||
+                    !JsonContains(recordedProperty, property.Value)) return false;
+            return true;
+        }
+        if (expected.ValueKind == JsonValueKind.Array)
+        {
+            var recordedItems = recorded.EnumerateArray().ToList();
+            var expectedItems = expected.EnumerateArray().ToList();
+            return recordedItems.Count == expectedItems.Count &&
+                recordedItems.Zip(expectedItems).All(pair => JsonContains(pair.First, pair.Second));
+        }
+        return string.Equals(recorded.GetRawText(), expected.GetRawText(), StringComparison.Ordinal);
     }
 
     private async Task RecordCountControlEventAsync(

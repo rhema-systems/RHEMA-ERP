@@ -1357,14 +1357,18 @@ public class InventoryTransferService : IInventoryTransferService
                     var toSource = resolutionCode == InventoryTransferDiscrepancyResolutionCodes.ReturnedToSource;
                     var warehouseId = toSource ? transfer.SourceWarehouseId : transfer.DestinationWarehouseId;
                     var locationId = toSource ? item.SourceLocationId : item.DestinationLocationId;
-                    if (locationId.HasValue) await EnsureLocationBelongsToWarehouseAsync(locationId.Value, warehouseId, toSource ? "SourceLocationId" : "DestinationLocationId");
-                    var quantityRecord = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(warehouseId, item.InventoryItemId);
+                    var location = locationId.HasValue
+                        ? await EnsureLocationBelongsToWarehouseAsync(locationId.Value, warehouseId,
+                            toSource ? "SourceLocationId" : "DestinationLocationId")
+                        : null;
+                    var inventoryWarehouseId = location?.InventoryWarehouseId ?? warehouseId;
+                    var quantityRecord = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(inventoryWarehouseId, item.InventoryItemId);
                     if (quantityRecord is null)
                     {
                         quantityRecord = new WarehouseQuantity
                         {
                             TenantId = transfer.TenantId,
-                            WarehouseId = warehouseId,
+                            WarehouseId = inventoryWarehouseId,
                             InventoryItemId = item.InventoryItemId
                         };
                         await _warehouseQuantityRepository.AddAsync(quantityRecord);
@@ -1393,7 +1397,7 @@ public class InventoryTransferService : IInventoryTransferService
                         ReferenceType = ReferenceType.Transfer,
                         ReferenceId = transfer.Id,
                         ReferenceNumber = transfer.TransferNumber,
-                        WarehouseId = warehouseId,
+                        WarehouseId = inventoryWarehouseId,
                         LocationId = locationId,
                         Notes = $"Controlled discrepancy resolution {action.Sequence}: {resolutionCode}",
                         ProcessedById = userId,

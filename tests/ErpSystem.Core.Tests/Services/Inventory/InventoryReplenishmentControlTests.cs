@@ -33,6 +33,18 @@ public sealed class InventoryReplenishmentControlTests : IDisposable
     private readonly ApplicationDbContext _context = new(new DbContextOptionsBuilder<ApplicationDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
 
+    [Theory]
+    [InlineData("TransferOut")]
+    [InlineData("TRANSFER-OUT")]
+    [InlineData("TRANSFER_OUT")]
+    public void Transfer_out_movement_spellings_are_included_in_replenishment_demand(string movementType)
+    {
+        var method = typeof(InventoryReplenishmentService).GetMethod(
+            "IsOutbound", BindingFlags.Static | BindingFlags.NonPublic)!;
+
+        ((bool)method.Invoke(null, new object[] { movementType })!).Should().BeTrue();
+    }
+
     [Fact]
     public void Recommendation_register_is_tenant_safe_concurrent_and_append_only()
     {
@@ -298,18 +310,37 @@ public sealed class InventoryReplenishmentControlTests : IDisposable
         (await staleSubmit.Should().ThrowAsync<InventoryReplenishmentControlException>())
             .Which.Code.Should().Be("INV_REPLENISHMENT_CONCURRENCY_CONFLICT");
 
-        var submitted = await service.SubmitAsync(recommendation.Id, new SubmitInventoryReplenishmentRequest
+        var submitRequest = new SubmitInventoryReplenishmentRequest
         {
             Reason = "Calculated demand requires replenishment", IdempotencyKey = "submit-lifecycle",
             CorrelationId = "tdc0612-submit", RowVersion = current.RowVersion
-        });
+        };
+        var submitted = await service.SubmitAsync(recommendation.Id, submitRequest);
         submitted.Status.Should().Be(InventoryReplenishmentRecommendationStatus.PendingApproval);
         submitted.WorkflowInstanceId.Should().Be(workflowInstanceId);
+
+        context.ChangeTracker.Clear();
+        var submittedEntity = await context.InventoryReplenishmentRecommendations.SingleAsync();
+        submittedEntity.RowVersion = [3];
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+        var submitReplay = await service.SubmitAsync(recommendation.Id, submitRequest);
+        submitReplay.Status.Should().Be(InventoryReplenishmentRecommendationStatus.PendingApproval,
+            "an identical submit retry must be recognized before its stale row version");
+        var changedSubmit = () => service.SubmitAsync(recommendation.Id, new SubmitInventoryReplenishmentRequest
+        {
+            Reason = "Different replenishment request",
+            IdempotencyKey = submitRequest.IdempotencyKey,
+            CorrelationId = submitRequest.CorrelationId,
+            RowVersion = submitRequest.RowVersion
+        });
+        (await changedSubmit.Should().ThrowAsync<InventoryReplenishmentControlException>())
+            .Which.Code.Should().Be("INV_REPLENISHMENT_IDEMPOTENCY_CONFLICT");
 
         var selfApproval = async () => await service.DecideAsync(recommendation.Id, new DecideInventoryReplenishmentRequest
         {
             Approved = true, Comment = "Self approval must fail", IdempotencyKey = "self-approval",
-            CorrelationId = "tdc0612-sod", RowVersion = submitted.RowVersion
+            CorrelationId = "tdc0612-sod", RowVersion = submitReplay.RowVersion
         });
         (await selfApproval.Should().ThrowAsync<InventoryReplenishmentControlException>())
             .Which.Code.Should().Be("INV_REPLENISHMENT_SOD_VIOLATION");
@@ -318,7 +349,7 @@ public sealed class InventoryReplenishmentControlTests : IDisposable
         var approved = await service.DecideAsync(recommendation.Id, new DecideInventoryReplenishmentRequest
         {
             Approved = true, Comment = "Independent replenishment approval", IdempotencyKey = "approve-lifecycle",
-            CorrelationId = "tdc0612-approve", RowVersion = submitted.RowVersion
+            CorrelationId = "tdc0612-approve", RowVersion = submitReplay.RowVersion
         });
         approved.Status.Should().Be(InventoryReplenishmentRecommendationStatus.Approved);
 
@@ -342,7 +373,11 @@ public sealed class InventoryReplenishmentControlTests : IDisposable
             It.Is<SavePurchaseRequisitionLinkageRequest>(request => request.RequisitionType == PurchaseRequisitionType.StockReplenishment),
             It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
 
-        conversionRequest.RowVersion = converted.RowVersion;
+        context.ChangeTracker.Clear();
+        var convertedEntity = await context.InventoryReplenishmentRecommendations.SingleAsync();
+        convertedEntity.RowVersion = [4];
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
         var replay = await service.ConvertToPurchaseRequisitionAsync(recommendation.Id, conversionRequest);
         replay.PurchaseRequisitionId.Should().Be(converted.PurchaseRequisitionId);
         requisitions.Verify(value => value.CreateRequisitionAsync(It.IsAny<PurchaseRequisition>()), Times.Once);

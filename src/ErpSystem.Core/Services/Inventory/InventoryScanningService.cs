@@ -348,10 +348,23 @@ public sealed class InventoryScanningService : IInventoryScanningService
     {
         EnsureActor();
         take = Math.Clamp(take, 1, 250);
-        var ids = await Batches.Where(item => item.TenantId == TenantId && !item.IsDeleted)
-            .OrderByDescending(item => item.CapturedAtUtc).Select(item => item.Id).Take(take).ToListAsync(cancellationToken);
-        var result = new List<InventoryScanBatchDto>(ids.Count);
-        foreach (var id in ids) result.Add(await MapBatchAsync(id, cancellationToken));
+        var result = new List<InventoryScanBatchDto>(take);
+        var skip = 0;
+        var pageSize = Math.Max(50, take);
+        while (result.Count < take)
+        {
+            var page = await BatchQuery()
+                .OrderByDescending(item => item.CapturedAtUtc).ThenByDescending(item => item.Id)
+                .Skip(skip).Take(pageSize).ToListAsync(cancellationToken);
+            if (page.Count == 0) break;
+            skip += page.Count;
+            foreach (var batch in page)
+            {
+                if (!await CanReadBatchAsync(batch, auditDenied: false, cancellationToken)) continue;
+                result.Add(ToBatchDto(batch));
+                if (result.Count == take) break;
+            }
+        }
         return result;
     }
 
@@ -748,32 +761,80 @@ public sealed class InventoryScanningService : IInventoryScanningService
 
     private async Task<InventoryScanBatchDto> MapBatchAsync(Guid id, CancellationToken cancellationToken)
     {
-        var batch = await Batches.Where(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
+        var batch = await BatchQuery().Where(item => item.Id == id)
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new InventoryScanningException("INV_SCAN_BATCH_NOT_FOUND", "The scan batch was not found in the current tenant.");
+        if (!await CanReadBatchAsync(batch, auditDenied: true, cancellationToken))
+            throw new InventoryScanningAuthorizationException(
+                "The current actor is not assigned to the warehouse and location scope of this scan batch.");
+        return ToBatchDto(batch);
+    }
+
+    private IQueryable<InventoryScanBatch> BatchQuery() =>
+        Batches.Where(item => item.TenantId == TenantId && !item.IsDeleted)
             .AsNoTracking().Include(item => item.Warehouse)
             .Include(item => item.Lines).ThenInclude(item => item.InventoryItem)
             .Include(item => item.Lines).ThenInclude(item => item.Location)
-            .SingleOrDefaultAsync(cancellationToken)
-            ?? throw new InventoryScanningException("INV_SCAN_BATCH_NOT_FOUND", "The scan batch was not found in the current tenant.");
-        return new InventoryScanBatchDto
+            .AsSplitQuery();
+
+    private async Task<bool> CanReadBatchAsync(
+        InventoryScanBatch batch,
+        bool auditDenied,
+        CancellationToken cancellationToken)
+    {
+        var locationIds = batch.Lines.Select(item => item.LocationId).Distinct().ToList();
+        if (locationIds.Count == 0) locationIds.Add(null);
+        foreach (var locationId in locationIds)
         {
-            Id = batch.Id, DeviceId = batch.DeviceId, IdempotencyKey = batch.IdempotencyKey, Operation = batch.Operation,
-            DocumentId = batch.DocumentId, DocumentReference = batch.DocumentReference, WarehouseId = batch.WarehouseId,
-            WarehouseName = batch.Warehouse.Name, ApplyTransaction = batch.ApplyTransaction, Status = batch.Status,
-            CapturedAtUtc = batch.CapturedAtUtc, ProcessedAtUtc = batch.ProcessedAtUtc, FailureCode = batch.FailureCode,
-            FailureMessage = batch.FailureMessage, Reconciliation = string.IsNullOrWhiteSpace(batch.ReconciliationJson) ? null :
-                JsonSerializer.Deserialize<InventoryScanReconciliationDto>(batch.ReconciliationJson),
-            Lines = batch.Lines.OrderBy(item => item.Sequence).Select(item => new InventoryScanLineDto
-            {
-                ClientLineId = item.ClientLineId, RawIdentifier = item.RawIdentifier, IdentifierKind = item.IdentifierKind,
-                InventoryItemId = item.InventoryItemId, ItemCode = item.InventoryItem.ItemCode, ItemName = item.InventoryItem.Name,
-                DocumentLineId = item.DocumentLineId, ScannedQuantity = item.ScannedQuantity, ConversionToBase = item.ConversionToBase,
-                BaseQuantity = item.BaseQuantity, LocationId = item.LocationId, LocationName = item.Location?.Name,
-                LocationIdentifier = item.LocationIdentifier, LotNumber = item.LotNumber, BatchNumber = item.BatchNumber,
-                SerialNumber = item.SerialNumber, ManufactureDate = item.ManufactureDate, ExpiryDate = item.ExpiryDate,
-                InventoryTrackingExceptionId = item.InventoryTrackingExceptionId, ScannedAtUtc = item.ScannedAtUtc
-            }).ToList()
-        };
+            var requireLocation = locationId.HasValue;
+            var operationRequest = BatchReadRequest(PermissionFor(batch.Operation), batch, locationId, requireLocation);
+            var correlation = $"inventory-scan-read:{batch.Id:N}:{locationId?.ToString("N") ?? "warehouse"}";
+            var operationDecision = await _access.CheckCapabilityAsync(operationRequest, correlation, cancellationToken);
+            if (operationDecision.Allowed) continue;
+
+            var readRequest = BatchReadRequest("procurement.inventory.read", batch, locationId, requireLocation);
+            var readDecision = await _access.CheckCapabilityAsync(readRequest, correlation, cancellationToken);
+            if (readDecision.Allowed) continue;
+            if (auditDenied)
+                await _access.EnforceCapabilityAsync(readRequest, correlation, cancellationToken);
+            return false;
+        }
+        return true;
     }
+
+    private static ProcurementAccessCapabilityRequest BatchReadRequest(
+        string permission,
+        InventoryScanBatch batch,
+        Guid? locationId,
+        bool requireLocationScope) => new()
+    {
+        PermissionCode = permission,
+        WarehouseId = batch.WarehouseId,
+        LocationId = locationId,
+        RequireLocationScope = requireLocationScope,
+        SourceType = "InventoryMobileScanBatch",
+        SourceReference = batch.DocumentReference
+    };
+
+    private static InventoryScanBatchDto ToBatchDto(InventoryScanBatch batch) => new()
+    {
+        Id = batch.Id, DeviceId = batch.DeviceId, IdempotencyKey = batch.IdempotencyKey, Operation = batch.Operation,
+        DocumentId = batch.DocumentId, DocumentReference = batch.DocumentReference, WarehouseId = batch.WarehouseId,
+        WarehouseName = batch.Warehouse.Name, ApplyTransaction = batch.ApplyTransaction, Status = batch.Status,
+        CapturedAtUtc = batch.CapturedAtUtc, ProcessedAtUtc = batch.ProcessedAtUtc, FailureCode = batch.FailureCode,
+        FailureMessage = batch.FailureMessage, Reconciliation = string.IsNullOrWhiteSpace(batch.ReconciliationJson) ? null :
+            JsonSerializer.Deserialize<InventoryScanReconciliationDto>(batch.ReconciliationJson),
+        Lines = batch.Lines.OrderBy(item => item.Sequence).Select(item => new InventoryScanLineDto
+        {
+            ClientLineId = item.ClientLineId, RawIdentifier = item.RawIdentifier, IdentifierKind = item.IdentifierKind,
+            InventoryItemId = item.InventoryItemId, ItemCode = item.InventoryItem.ItemCode, ItemName = item.InventoryItem.Name,
+            DocumentLineId = item.DocumentLineId, ScannedQuantity = item.ScannedQuantity, ConversionToBase = item.ConversionToBase,
+            BaseQuantity = item.BaseQuantity, LocationId = item.LocationId, LocationName = item.Location?.Name,
+            LocationIdentifier = item.LocationIdentifier, LotNumber = item.LotNumber, BatchNumber = item.BatchNumber,
+            SerialNumber = item.SerialNumber, ManufactureDate = item.ManufactureDate, ExpiryDate = item.ExpiryDate,
+            InventoryTrackingExceptionId = item.InventoryTrackingExceptionId, ScannedAtUtc = item.ScannedAtUtc
+        }).ToList()
+    };
 
     private async Task<InventoryLabelPrintEventDto> MapPrintAsync(Guid id, CancellationToken cancellationToken) =>
         await PrintEvents.Where(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted).AsNoTracking()

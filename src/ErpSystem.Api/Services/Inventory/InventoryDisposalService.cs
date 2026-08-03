@@ -140,13 +140,16 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
                 if (input.InventoryItemId == Guid.Empty || input.LocationId == Guid.Empty || input.Quantity <= 0m)
                     throw Error("INV_DISPOSAL_LINE_INVALID", "Every disposal line requires an item, exact location and positive quantity.");
                 var location = await _db.WarehouseLocations.SingleOrDefaultAsync(value => value.TenantId == item.TenantId &&
-                    value.Id == input.LocationId && value.WarehouseId == item.WarehouseId && value.IsActive && !value.IsDeleted,
+                    value.Id == input.LocationId && value.IsActive && !value.IsDeleted &&
+                    ((value.IsConsignmentBin && value.ConsignmentWarehouseId == item.WarehouseId) ||
+                     (!value.IsConsignmentBin && value.WarehouseId == item.WarehouseId)),
                     cancellationToken) ?? throw Error("INV_DISPOSAL_LOCATION_INVALID", "A disposal location is inactive or outside the selected warehouse.");
+                var inventoryWarehouseId = location.InventoryWarehouseId;
                 var inventoryItem = await _db.InventoryItems.SingleOrDefaultAsync(value => value.TenantId == item.TenantId &&
                     value.Id == input.InventoryItemId && !value.IsDeleted, cancellationToken)
                     ?? throw Error("INV_DISPOSAL_ITEM_INVALID", "A disposal item was not found in the current tenant.");
                 var balance = await _db.InventoryBalances.AsNoTracking().SingleOrDefaultAsync(value => value.TenantId == item.TenantId &&
-                    value.InventoryItemId == input.InventoryItemId && value.WarehouseId == item.WarehouseId &&
+                    value.InventoryItemId == input.InventoryItemId && value.WarehouseId == inventoryWarehouseId &&
                     value.LocationId == input.LocationId && !value.IsDeleted, cancellationToken);
                 if (balance is null || balance.QuantityAvailable < input.Quantity)
                     throw Error("INV_DISPOSAL_STOCK_UNAVAILABLE", $"Exact-location available stock is insufficient for {inventoryItem.ItemCode}.");

@@ -60,6 +60,30 @@ public sealed class InventoryDisposalServiceTests
     }
 
     [Fact, Trait("Batch", "TDC-0615")]
+    public async Task Identification_accepts_a_consignment_bin_and_values_the_effective_ownership_balance()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var physicalHost = new Warehouse
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.Warehouse.TenantId,
+            Code = "WH-HOST", Name = "Physical host warehouse", IsActive = true
+        };
+        fixture.Db.Warehouses.Add(physicalHost);
+        fixture.Location.WarehouseId = physicalHost.Id;
+        fixture.Location.Warehouse = physicalHost;
+        fixture.Location.IsConsignmentBin = true;
+        fixture.Location.ConsignmentWarehouseId = fixture.Warehouse.Id;
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+
+        var identified = await fixture.Service.CreateAsync(fixture.Request("identify-consignment"));
+
+        identified.WarehouseId.Should().Be(fixture.Warehouse.Id);
+        identified.Lines.Should().ContainSingle().Which.Should().Match<InventoryDisposalLineDto>(line =>
+            line.LocationId == fixture.Location.Id && line.UnitCost == 12.5m && line.TotalValue == 50m);
+    }
+
+    [Fact, Trait("Batch", "TDC-0615")]
     public async Task Identification_rejects_evidence_without_a_clean_central_scan()
     {
         await using var fixture = await Fixture.CreateAsync();

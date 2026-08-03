@@ -314,14 +314,15 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
             var key = Required(request.IdempotencyKey, 100, "Idempotency key");
             var reason = Required(request.Reason, 1000, "Submission reason");
             var payloadHash = Hash(new { id, reason });
-            var value = await LoadForMutationAsync(id, request.RowVersion, cancellationToken);
+            var value = await LoadForMutationAsync(id, cancellationToken);
+            await RequireCapabilityAsync("procurement.requisition.create", value.WarehouseId,
+                value.RecommendationNumber, correlation, cancellationToken);
             if (await ReplayActionAsync(value.Id, key, payloadHash, cancellationToken))
                 return await LoadDtoAsync(value.Id, cancellationToken);
+            EnsureRowVersion(value.RowVersion, request.RowVersion);
             if (value.Status != InventoryReplenishmentRecommendationStatus.Draft)
                 throw Error("INV_REPLENISHMENT_STATUS_INVALID", "Only a Draft recommendation can be submitted.");
             EnsureCurrent(value);
-            await RequireCapabilityAsync("procurement.requisition.create", value.WarehouseId,
-                value.RecommendationNumber, correlation, cancellationToken);
             WorkflowIntegrationResult result;
             try { result = await _workflow.SubmitAsync(EntityType, value.Id); }
             catch (Exception exception)
@@ -365,9 +366,12 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
             var key = Required(request.IdempotencyKey, 100, "Idempotency key");
             var comment = Required(request.Comment, 1000, "Decision comment");
             var payloadHash = Hash(new { id, request.Approved, comment });
-            var value = await LoadForMutationAsync(id, request.RowVersion, cancellationToken);
+            var value = await LoadForMutationAsync(id, cancellationToken);
+            await RequireCapabilityAsync("procurement.requisition.approve", value.WarehouseId,
+                value.RecommendationNumber, correlation, cancellationToken);
             if (await ReplayActionAsync(value.Id, key, payloadHash, cancellationToken))
                 return await LoadDtoAsync(value.Id, cancellationToken);
+            EnsureRowVersion(value.RowVersion, request.RowVersion);
             if (value.Status != InventoryReplenishmentRecommendationStatus.PendingApproval ||
                 !value.WorkflowInstanceId.HasValue)
                 throw Error("INV_REPLENISHMENT_STATUS_INVALID",
@@ -375,8 +379,6 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
             if (value.GeneratedById == _currentUser.UserId || value.SubmittedById == _currentUser.UserId)
                 throw Error("INV_REPLENISHMENT_SOD_VIOLATION",
                     "The generator or submitter cannot approve or reject the same recommendation.");
-            await RequireCapabilityAsync("procurement.requisition.approve", value.WarehouseId,
-                value.RecommendationNumber, correlation, cancellationToken);
             if (!await _workflow.CanUserApproveAsync(EntityType, value.Id, _currentUser.UserId))
                 throw new InventoryReplenishmentAuthorizationException(
                     "The current user is not the assigned approver for this workflow step.");
@@ -442,15 +444,16 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
             var key = Required(request.IdempotencyKey, 100, "Idempotency key");
             var justification = Required(request.Justification, 2000, "Purchase justification");
             var payloadHash = Hash(new { id, request.Department, request.CostCenter, justification });
-            var value = await LoadForMutationAsync(id, request.RowVersion, cancellationToken);
+            var value = await LoadForMutationAsync(id, cancellationToken);
+            await RequireCapabilityAsync("procurement.requisition.create", value.WarehouseId,
+                value.RecommendationNumber, correlation, cancellationToken);
             if (await ReplayActionAsync(value.Id, key, payloadHash, cancellationToken))
                 return await LoadDtoAsync(value.Id, cancellationToken);
+            EnsureRowVersion(value.RowVersion, request.RowVersion);
             if (value.Status != InventoryReplenishmentRecommendationStatus.Approved)
                 throw Error("INV_REPLENISHMENT_STATUS_INVALID",
                     "Only an independently approved recommendation can create a purchase requisition.");
             EnsureCurrent(value);
-            await RequireCapabilityAsync("procurement.requisition.create", value.WarehouseId,
-                value.RecommendationNumber, correlation, cancellationToken);
             await _unitOfWork.AcquireTransactionLockAsync(
                 $"inventory-replenishment-convert:{value.TenantId:N}:{value.WarehouseId:N}:{value.InventoryItemId:N}",
                 cancellationToken);
@@ -563,7 +566,6 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
 
     private async Task<InventoryReplenishmentRecommendation> LoadForMutationAsync(
         Guid id,
-        string rowVersion,
         CancellationToken cancellationToken)
     {
         await _unitOfWork.AcquireTransactionLockAsync(
@@ -572,7 +574,6 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
             item.Id == id && item.TenantId == _currentUser.TenantId, cancellationToken)
             ?? throw new InventoryReplenishmentNotFoundException(
                 "The replenishment recommendation was not found in the current tenant.");
-        EnsureRowVersion(value.RowVersion, rowVersion);
         return value;
     }
 
@@ -744,7 +745,8 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
                 value.RecommendationId == recommendationId && value.IdempotencyKey == key && !value.IsDeleted)
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
         if (action is null) return false;
-        if (!string.Equals(action.PayloadHash, payloadHash, StringComparison.OrdinalIgnoreCase))
+        if (action.ActorUserId != _currentUser.UserId ||
+            !string.Equals(action.PayloadHash, payloadHash, StringComparison.OrdinalIgnoreCase))
             throw Error("INV_REPLENISHMENT_IDEMPOTENCY_CONFLICT",
                 "The idempotency key already identifies a different recommendation action.");
         return true;
@@ -951,9 +953,10 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
     private static bool IsOutbound(string value)
     {
         var normalized = value.Trim().Replace("_", "-").ToUpperInvariant();
+        var compact = normalized.Replace("-", string.Empty);
         return normalized.Contains("ISSUE") || normalized.Contains("SALE") ||
                normalized.Contains("CONSUMPTION") || normalized.Contains("WASTE") ||
-               normalized.Contains("TRANSFER-OUT") || normalized.Contains("ADJUSTMENT-");
+               compact.Contains("TRANSFEROUT") || normalized.Contains("ADJUSTMENT-");
     }
 
     private static decimal RoundUp(decimal quantity, decimal multiple) =>

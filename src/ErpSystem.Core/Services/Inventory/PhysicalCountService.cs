@@ -220,11 +220,13 @@ public partial class PhysicalCountService : IPhysicalCountService
             item.LocationId ?? count.LocationId,
             count.CountNumber);
 
+        if (await ReplayCountActionAsync(count.Id, PhysicalCountActionType.CountRecorded,
+                dto.IdempotencyKey, userId, "Counter", dto.Notes,
+                new { Id = dto.PhysicalCountItemId, dto.CountedQuantity }))
+            return true;
         if (count.Status != "InProgress")
             throw new InvalidOperationException("First-count quantities can only be recorded while the count is In Progress.");
         EnsureRowVersion(item.RowVersion, dto.RowVersion, "The count line changed. Reload and retry.");
-        if (await HasCountActionAsync(count.Id, PhysicalCountActionType.CountRecorded, dto.IdempotencyKey))
-            return true;
 
         item.CountedQuantity = dto.CountedQuantity;
         item.FirstCountQuantity = dto.CountedQuantity;

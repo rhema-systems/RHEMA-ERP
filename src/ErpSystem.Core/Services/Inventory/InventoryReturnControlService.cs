@@ -249,12 +249,16 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         var key = Required(request.IdempotencyKey, "INV_RETURN_DECISION_KEY_REQUIRED", "A decision idempotency key is required.", 100);
         return await ExecuteAsync(voucherId, async voucher =>
         {
+            var actionType = request.Approved ? InventoryReturnVoucherActionType.Approved : InventoryReturnVoucherActionType.Rejected;
+            await RequireAccessAsync("procurement.inventory.adjust.approve", voucher.WarehouseId,
+                voucher.Lines.Select(x => x.LocationId), voucher.VoucherNumber, cancellationToken);
+            var replayHash = ReturnActionPayloadHash(voucher.Id, actionType, _currentUser.UserId, request.Comment);
+            if (await ReplayActionAsync(voucher, key, actionType, replayHash, cancellationToken)) return voucher;
             EnsureRowVersion(voucher.RowVersion, request.RowVersion, "INV_RETURN_STALE");
             if (voucher.Status != InventoryReturnVoucherStatus.PendingApproval)
-                return await ReplayOrConflictAsync(voucher, key, request.Approved ? InventoryReturnVoucherActionType.Approved : InventoryReturnVoucherActionType.Rejected, cancellationToken);
+                throw Conflict("INV_RETURN_STATE_CONFLICT", $"The Store Return Voucher is already {voucher.Status}.");
             if (voucher.RequestedById == _currentUser.UserId)
                 throw new InventoryReturnAuthorizationException("The return requester cannot approve or reject the same return.");
-            await RequireAccessAsync("procurement.inventory.adjust.approve", voucher.WarehouseId, voucher.Lines.Select(x => x.LocationId), voucher.VoucherNumber, cancellationToken);
             await _sod.EnforceAsync(new ProcurementSodGuardRequest
             {
                 ControlCode = "SOD-INITIATOR-APPROVER",
@@ -290,7 +294,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                 voucher.RejectionReason = Required(request.Comment, "INV_RETURN_REJECTION_REASON_REQUIRED", "A rejection reason is required.", 1000);
             }
             voucher.IntegrityHash = VoucherHash(voucher);
-            await AddActionAsync(voucher, request.Approved ? InventoryReturnVoucherActionType.Approved : InventoryReturnVoucherActionType.Rejected, key, request.Comment, cancellationToken);
+            await AddActionAsync(voucher, actionType, key, request.Comment, cancellationToken);
             await AddAuditAsync(request.Approved ? "Approve" : "Reject", voucher, before, Snapshot(voucher), cancellationToken);
             await RecordEventAsync(voucher, request.Approved ? "Approve" : "Reject",
                 request.Approved ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.Rejected, before, Snapshot(voucher), cancellationToken);
@@ -302,12 +306,17 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         ExecuteAsync(voucherId, async voucher =>
         {
             var key = Required(request.IdempotencyKey, "INV_RETURN_POST_KEY_REQUIRED", "A posting idempotency key is required.", 100);
+            await RequireAccessAsync("procurement.inventory.adjust.approve", voucher.WarehouseId,
+                voucher.Lines.Select(x => x.LocationId), voucher.VoucherNumber, cancellationToken);
+            var replayHash = ReturnActionPayloadHash(voucher.Id, InventoryReturnVoucherActionType.Posted,
+                _currentUser.UserId, "Returned stock posted.");
+            if (await ReplayActionAsync(voucher, key, InventoryReturnVoucherActionType.Posted, replayHash, cancellationToken))
+                return voucher;
             EnsureRowVersion(voucher.RowVersion, request.RowVersion, "INV_RETURN_STALE");
             if (voucher.Status != InventoryReturnVoucherStatus.Approved)
-                return await ReplayOrConflictAsync(voucher, key, InventoryReturnVoucherActionType.Posted, cancellationToken);
+                throw Conflict("INV_RETURN_STATE_CONFLICT", $"The Store Return Voucher is already {voucher.Status}.");
             if (voucher.RequestedById == _currentUser.UserId)
                 throw new InventoryReturnAuthorizationException("The return requester cannot post the same return.");
-            await RequireAccessAsync("procurement.inventory.adjust.approve", voucher.WarehouseId, voucher.Lines.Select(x => x.LocationId), voucher.VoucherNumber, cancellationToken);
             await RevalidateEvidenceAsync(voucher, cancellationToken);
             var requisition = await _requisitions.GetWithItemsAsync(voucher.InventoryRequisitionId)
                 ?? throw NotFound("INV_RETURN_REQUISITION_NOT_FOUND", "The return source requisition no longer exists.");
@@ -334,12 +343,17 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         {
             var key = Required(request.IdempotencyKey, "INV_RETURN_REVERSAL_KEY_REQUIRED", "A reversal idempotency key is required.", 100);
             var reason = Required(request.Reason, "INV_RETURN_REVERSAL_REASON_REQUIRED", "A reversal reason is required.", 1000);
+            await RequireAccessAsync("procurement.inventory.adjust.approve", voucher.WarehouseId,
+                voucher.Lines.Select(x => x.LocationId), voucher.VoucherNumber, cancellationToken);
+            var replayHash = ReturnActionPayloadHash(voucher.Id, InventoryReturnVoucherActionType.Reversed,
+                _currentUser.UserId, reason);
+            if (await ReplayActionAsync(voucher, key, InventoryReturnVoucherActionType.Reversed, replayHash, cancellationToken))
+                return voucher;
             EnsureRowVersion(voucher.RowVersion, request.RowVersion, "INV_RETURN_STALE");
             if (voucher.Status != InventoryReturnVoucherStatus.Posted)
-                return await ReplayOrConflictAsync(voucher, key, InventoryReturnVoucherActionType.Reversed, cancellationToken);
+                throw Conflict("INV_RETURN_STATE_CONFLICT", $"The Store Return Voucher is already {voucher.Status}.");
             if (voucher.RequestedById == _currentUser.UserId)
                 throw new InventoryReturnAuthorizationException("The return requester cannot reverse the same return.");
-            await RequireAccessAsync("procurement.inventory.adjust.approve", voucher.WarehouseId, voucher.Lines.Select(x => x.LocationId), voucher.VoucherNumber, cancellationToken);
             var requisition = await _requisitions.GetWithItemsAsync(voucher.InventoryRequisitionId)
                 ?? throw NotFound("INV_RETURN_REQUISITION_NOT_FOUND", "The return source requisition no longer exists.");
             var before = Snapshot(voucher);
@@ -372,7 +386,6 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                 var voucher = await Query().FirstOrDefaultAsync(x => x.Id == voucherId, cancellationToken)
                     ?? throw NotFound("INV_RETURN_VOUCHER_NOT_FOUND", "The Store Return Voucher was not found in the current tenant.");
                 voucher = await action(voucher);
-                await _unitOfWork.Repository<InventoryReturnVoucher>().UpdateAsync(voucher);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await _unitOfWork.CommitAsync(cancellationToken);
                 return Map(await Query().AsNoTracking().FirstAsync(x => x.Id == voucher.Id, cancellationToken));
@@ -525,7 +538,8 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         if (!locationId.HasValue || locationId == Guid.Empty)
             throw Validation("INV_RETURN_LOCATION_REQUIRED", "A controlled return location is required.");
         var location = await _locations.GetByIdAsync(locationId.Value);
-        if (location is null || location.TenantId != _currentUser.TenantId || location.WarehouseId != warehouseId || !location.IsActive)
+        if (location is null || location.TenantId != _currentUser.TenantId ||
+            location.InventoryWarehouseId != warehouseId || !location.IsActive)
             throw Validation("INV_RETURN_LOCATION_INVALID", "The return location is inactive or outside the requisition warehouse.");
     }
 
@@ -594,12 +608,24 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         await _unitOfWork.Repository<InventoryReturnVoucherAction>().AddAsync(action);
     }
 
-    private async Task<InventoryReturnVoucher> ReplayOrConflictAsync(InventoryReturnVoucher voucher, string key, InventoryReturnVoucherActionType type, CancellationToken cancellationToken)
+    private async Task<bool> ReplayActionAsync(
+        InventoryReturnVoucher voucher,
+        string key,
+        InventoryReturnVoucherActionType type,
+        string payloadHash,
+        CancellationToken cancellationToken)
     {
         var replay = await _unitOfWork.Repository<InventoryReturnVoucherAction>().GetQueryable().AsNoTracking()
-            .AnyAsync(x => x.InventoryReturnVoucherId == voucher.Id && x.IdempotencyKey == key && x.ActionType == type, cancellationToken);
-        if (replay) return voucher;
-        throw Conflict("INV_RETURN_STATE_CONFLICT", $"The Store Return Voucher is already {voucher.Status}.");
+            .SingleOrDefaultAsync(x => x.TenantId == voucher.TenantId && x.IdempotencyKey == key, cancellationToken);
+        if (replay is null) return false;
+        var recordedHash = ReturnActionPayloadHash(replay.InventoryReturnVoucherId, replay.ActionType,
+            replay.ActorUserId, replay.Comment);
+        if (replay.InventoryReturnVoucherId != voucher.Id || replay.ActionType != type ||
+            !CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(recordedHash), Convert.FromHexString(payloadHash)))
+            throw Conflict("INV_RETURN_IDEMPOTENCY_CONFLICT",
+                "The idempotency key already identifies a different return action payload or actor.");
+        return true;
     }
 
     private async Task AddAuditAsync(string action, InventoryReturnVoucher voucher, object? before, object after, CancellationToken cancellationToken) =>
@@ -661,6 +687,14 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
 
     private static string LineHash(InventoryReturnVoucherLine line) => Hash($"{line.InventoryRequisitionItemId:N}|{line.InventoryItemId:N}|{line.LocationId:N}|{line.Quantity}|{line.UnitCost}|{line.TotalValue}|{line.LotNumber}|{line.BatchNumber}|{line.SerialNumber}|{line.ExpiryDate:O}");
     private static string VoucherHash(InventoryReturnVoucher voucher) => Hash($"{voucher.Id:N}|{voucher.TenantId:N}|{voucher.VoucherNumber}|{voucher.InventoryRequisitionId:N}|{voucher.WarehouseId:N}|{voucher.RequestedById:N}|{(int)voucher.Status}|{voucher.ReasonCode}|{voucher.Reason}|{voucher.TotalValue}|{voucher.IdempotencyKey}|{voucher.PayloadHash}|{voucher.ApprovedById:N}|{voucher.PostedById:N}|{voucher.ReversedById:N}");
+    private static string ReturnActionPayloadHash(Guid voucherId, InventoryReturnVoucherActionType type,
+        Guid actorUserId, string? comment) => Hash(JsonSerializer.Serialize(new
+        {
+            VoucherId = voucherId,
+            ActionType = type,
+            ActorUserId = actorUserId,
+            Comment = Normalize(comment, 1000)
+        }));
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static void EnsureRowVersion(byte[] current, string supplied, string code)

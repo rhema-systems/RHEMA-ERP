@@ -162,6 +162,86 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Scan_batch_reads_filter_list_and_deny_direct_cross_location_access()
+    {
+        var item = new InventoryItem
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, ItemCode = "SCAN-SCOPE", Name = "Scoped scan item"
+        };
+        var allowedWarehouse = new Warehouse
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, Code = "SCAN-A", Name = "Allowed scan warehouse", IsActive = true
+        };
+        var deniedWarehouse = new Warehouse
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, Code = "SCAN-B", Name = "Denied scan warehouse", IsActive = true
+        };
+        var allowedLocation = new WarehouseLocation
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, WarehouseId = allowedWarehouse.Id,
+            Warehouse = allowedWarehouse, LocationCode = "A-01", Name = "Allowed bin", IsActive = true
+        };
+        var deniedLocation = new WarehouseLocation
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, WarehouseId = deniedWarehouse.Id,
+            Warehouse = deniedWarehouse, LocationCode = "B-01", Name = "Denied bin", IsActive = true
+        };
+        var allowed = Batch(allowedWarehouse, allowedLocation, "SCAN-ALLOWED", DateTime.UtcNow);
+        var denied = Batch(deniedWarehouse, deniedLocation, "SCAN-DENIED", DateTime.UtcNow.AddMinutes(-1));
+        await _context.AddRangeAsync(item, allowedWarehouse, deniedWarehouse, allowedLocation, deniedLocation, allowed, denied);
+        await _context.SaveChangesAsync();
+
+        _access.Reset();
+        _access.Setup(service => service.CheckCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementAccessCapabilityRequest request, string correlation, CancellationToken _) =>
+                new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = request.PermissionCode == "procurement.inventory.read" &&
+                        request.WarehouseId == allowedWarehouse.Id && request.LocationId == allowedLocation.Id,
+                    PermissionCode = request.PermissionCode,
+                    WarehouseId = request.WarehouseId,
+                    LocationId = request.LocationId,
+                    CorrelationId = correlation
+                });
+        _access.Setup(service => service.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = false });
+
+        var visible = await _service.GetRecentBatchesAsync(10);
+        var direct = () => _service.GetBatchAsync(denied.Id);
+
+        visible.Should().ContainSingle().Which.Id.Should().Be(allowed.Id);
+        await direct.Should().ThrowAsync<InventoryScanningAuthorizationException>();
+        _access.Verify(service => service.CheckCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request => request.RequireLocationScope &&
+                request.LocationId == allowedLocation.Id && request.PermissionCode == "procurement.inventory.read"),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        InventoryScanBatch Batch(Warehouse warehouse, WarehouseLocation location, string reference, DateTime captured)
+        {
+            var batch = new InventoryScanBatch
+            {
+                Id = Guid.NewGuid(), TenantId = _tenantId, DeviceId = "scope-scanner",
+                IdempotencyKey = reference, PayloadHash = new string('A', 64),
+                Operation = InventoryScanOperation.RequisitionIssue, DocumentId = Guid.NewGuid(),
+                DocumentReference = reference, WarehouseId = warehouse.Id, Warehouse = warehouse,
+                ActorUserId = _userId, CapturedAtUtc = captured, CorrelationId = reference,
+                Status = InventoryScanBatchStatus.Captured
+            };
+            batch.Lines.Add(new InventoryScanLine
+            {
+                TenantId = _tenantId, ScanBatchId = batch.Id, ScanBatch = batch, ClientLineId = Guid.NewGuid(),
+                Sequence = 1, RawIdentifier = item.ItemCode, IdentifierKind = "PrimaryBarcode",
+                InventoryItemId = item.Id, InventoryItem = item, DocumentLineId = Guid.NewGuid(),
+                ScannedQuantity = 1, ConversionToBase = 1, BaseQuantity = 1,
+                LocationId = location.Id, Location = location, ScannedAtUtc = captured
+            });
+            return batch;
+        }
+    }
+
+    [Fact]
     public void Ef_model_enforces_profile_idempotency_and_scan_evidence_constraints()
     {
         var profile = _context.Model.FindEntityType(typeof(InventoryLabelProfile))!;

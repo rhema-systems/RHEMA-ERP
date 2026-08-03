@@ -115,6 +115,21 @@ public sealed class InventoryTransferControlTests : IDisposable
         source.Should().Contain("_unitOfWork.ClearTrackedChanges();");
     }
 
+    [Fact]
+    public void Discrepancy_stock_and_movement_use_the_selected_bins_effective_inventory_warehouse()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory", "InventoryTransferService.cs"));
+        var start = source.IndexOf("public async Task<bool> ResolveDiscrepanciesAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("public async Task<bool> CloseAsync", start, StringComparison.Ordinal);
+        var resolution = source[start..end];
+
+        resolution.Should().Contain("var inventoryWarehouseId = location?.InventoryWarehouseId ?? warehouseId;");
+        resolution.Should().Contain("GetByWarehouseAndItemAsync(inventoryWarehouseId, item.InventoryItemId)");
+        resolution.Should().Contain("WarehouseId = inventoryWarehouseId");
+        resolution.Should().NotContain("GetByWarehouseAndItemAsync(warehouseId, item.InventoryItemId)");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
