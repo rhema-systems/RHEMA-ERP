@@ -180,7 +180,23 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
                 throw new InventoryTrackingControlException("INV_TRACKING_SERIAL_DUPLICATE", "The serial number is already on hand in this tenant.");
         }
 
-        if (!initialReceipt)
+        // Historical, genuinely untracked stock predates the canonical trace ledger. Do not
+        // make ordinary (non lot/batch/serial/FIFO) stock unusable merely because TDC-0603
+        // deliberately did not synthesize inbound provenance. As soon as tracking metadata or
+        // a tracking policy applies, canonical history remains mandatory.
+        var requiresCanonicalHistory = requirements.RequiresLot ||
+            requirements.RequiresBatch ||
+            requirements.RequiresSerial ||
+            requirements.RequiresManufactureDate ||
+            requirements.RequiresExpiryDate ||
+            requirements.EnforcesFifoIssue ||
+            !string.IsNullOrWhiteSpace(request.LotNumber) ||
+            !string.IsNullOrWhiteSpace(request.BatchNumber) ||
+            !string.IsNullOrWhiteSpace(request.SerialNumber) ||
+            request.ManufactureDate.HasValue ||
+            request.ExpiryDate.HasValue;
+
+        if (!initialReceipt && requiresCanonicalHistory)
         {
             var canonical = allEvents.FirstOrDefault(value => IsInbound(value.Direction) && TrackingKeyMatches(value, request));
             if (canonical is null)
@@ -204,7 +220,7 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
                 violations.Add("INV_TRACKING_MINIMUM_SHELF_LIFE");
         }
 
-        if (!inbound)
+        if (!inbound && requiresCanonicalHistory)
         {
             var scoped = allEvents.Where(value => value.WarehouseId == request.WarehouseId &&
                 (!request.LocationId.HasValue || value.LocationId == request.LocationId) && TrackingKeyMatches(value, request));

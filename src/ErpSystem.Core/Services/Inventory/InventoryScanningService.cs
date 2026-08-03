@@ -216,13 +216,20 @@ public sealed class InventoryScanningService : IInventoryScanningService
     {
         EnsureActor();
         take = Math.Clamp(take, 1, 100);
-        var candidates = await LoadDocumentSummariesAsync(operation, take * 3, cancellationToken);
-        var allowed = new List<InventoryScanDocumentSummaryDto>();
-        foreach (var document in candidates)
+        var allowed = new List<InventoryScanDocumentSummaryDto>(take);
+        var offset = 0;
+        var pageSize = Math.Max(take, 50);
+        while (allowed.Count < take)
         {
-            if (await HasCapabilityAsync(operation, document.WarehouseId, document.DocumentReference, false, cancellationToken))
-                allowed.Add(document);
-            if (allowed.Count == take) break;
+            var candidates = await LoadDocumentSummariesAsync(operation, offset, pageSize, cancellationToken);
+            foreach (var document in candidates)
+            {
+                if (await HasCapabilityAsync(operation, document.WarehouseId, document.DocumentReference, false, cancellationToken))
+                    allowed.Add(document);
+                if (allowed.Count == take) break;
+            }
+            offset += candidates.Count;
+            if (candidates.Count < pageSize) break;
         }
         return allowed;
     }
@@ -590,6 +597,7 @@ public sealed class InventoryScanningService : IInventoryScanningService
 
     private async Task<IReadOnlyList<InventoryScanDocumentSummaryDto>> LoadDocumentSummariesAsync(
         InventoryScanOperation operation,
+        int skip,
         int take,
         CancellationToken cancellationToken)
     {
@@ -597,14 +605,14 @@ public sealed class InventoryScanningService : IInventoryScanningService
         {
             InventoryScanOperation.GoodsReceipt => await _unitOfWork.Repository<GoodsReceiptNote>().GetQueryable(item =>
                     item.TenantId == TenantId && !item.IsDeleted && !item.StockUpdated && item.Status != GRNStatus.Cancelled)
-                .AsNoTracking().Include(item => item.Warehouse).OrderByDescending(item => item.ReceiptDate).Take(take)
+                .AsNoTracking().Include(item => item.Warehouse).OrderByDescending(item => item.ReceiptDate).ThenByDescending(item => item.Id).Skip(skip).Take(take)
                 .Select(item => Summary(item.Id, item.GRNNumber, item.Status.ToString(), item.WarehouseId, item.Warehouse.Name, item.ReceiptDate)).ToListAsync(cancellationToken),
-            InventoryScanOperation.RequisitionIssue => await RequisitionSummaries(item => item.Status == RequisitionStatus.Approved || item.Status == RequisitionStatus.InProgress || item.Status == RequisitionStatus.PartiallyIssued, take, cancellationToken),
-            InventoryScanOperation.RequisitionReturn => await RequisitionSummaries(item => item.Status == RequisitionStatus.PartiallyIssued || item.Status == RequisitionStatus.Issued || item.Status == RequisitionStatus.Completed, take, cancellationToken),
-            InventoryScanOperation.TransferShipment => await TransferSummaries(item => item.Status == TransferStatus.Approved || item.Status == TransferStatus.InTransit, true, take, cancellationToken),
-            InventoryScanOperation.TransferReceipt => await TransferSummaries(item => item.Status == TransferStatus.InTransit, false, take, cancellationToken),
+            InventoryScanOperation.RequisitionIssue => await RequisitionSummaries(item => item.Status == RequisitionStatus.Approved || item.Status == RequisitionStatus.InProgress || item.Status == RequisitionStatus.PartiallyIssued, skip, take, cancellationToken),
+            InventoryScanOperation.RequisitionReturn => await RequisitionSummaries(item => item.Status == RequisitionStatus.PartiallyIssued || item.Status == RequisitionStatus.Issued || item.Status == RequisitionStatus.Completed, skip, take, cancellationToken),
+            InventoryScanOperation.TransferShipment => await TransferSummaries(item => item.Status == TransferStatus.Approved || item.Status == TransferStatus.InTransit, true, skip, take, cancellationToken),
+            InventoryScanOperation.TransferReceipt => await TransferSummaries(item => item.Status == TransferStatus.InTransit, false, skip, take, cancellationToken),
             InventoryScanOperation.PhysicalCount => await _unitOfWork.Repository<PhysicalCount>().GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted && item.Status == "InProgress")
-                .AsNoTracking().Include(item => item.Warehouse).OrderByDescending(item => item.CountDate).Take(take)
+                .AsNoTracking().Include(item => item.Warehouse).OrderByDescending(item => item.CountDate).ThenByDescending(item => item.Id).Skip(skip).Take(take)
                 .Select(item => Summary(item.Id, item.CountNumber, item.Status, item.WarehouseId, item.Warehouse.Name, item.CountDate)).ToListAsync(cancellationToken),
             _ => throw new InventoryScanningException("INV_SCAN_OPERATION_UNSUPPORTED", "The scan operation is not supported.")
         };
@@ -612,20 +620,22 @@ public sealed class InventoryScanningService : IInventoryScanningService
 
     private async Task<List<InventoryScanDocumentSummaryDto>> RequisitionSummaries(
         System.Linq.Expressions.Expression<Func<InventoryRequisition, bool>> predicate,
+        int skip,
         int take,
         CancellationToken cancellationToken) =>
         await _unitOfWork.Repository<InventoryRequisition>().GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted)
-            .Where(predicate).AsNoTracking().Include(item => item.Warehouse).OrderByDescending(item => item.RequestDate).Take(take)
+            .Where(predicate).AsNoTracking().Include(item => item.Warehouse).OrderByDescending(item => item.RequestDate).ThenByDescending(item => item.Id).Skip(skip).Take(take)
             .Select(item => Summary(item.Id, item.RequisitionNumber, item.Status.ToString(), item.WarehouseId, item.Warehouse.Name, item.RequestDate)).ToListAsync(cancellationToken);
 
     private async Task<List<InventoryScanDocumentSummaryDto>> TransferSummaries(
         System.Linq.Expressions.Expression<Func<InventoryTransfer, bool>> predicate,
         bool source,
+        int skip,
         int take,
         CancellationToken cancellationToken) =>
         await _unitOfWork.Repository<InventoryTransfer>().GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted)
             .Where(predicate).AsNoTracking().Include(item => item.SourceWarehouse).Include(item => item.DestinationWarehouse)
-            .OrderByDescending(item => item.RequestDate).Take(take)
+            .OrderByDescending(item => item.RequestDate).ThenByDescending(item => item.Id).Skip(skip).Take(take)
             .Select(item => Summary(item.Id, item.TransferNumber, item.Status.ToString(), source ? item.SourceWarehouseId : item.DestinationWarehouseId,
                 source ? item.SourceWarehouse.Name : item.DestinationWarehouse.Name, item.RequestDate)).ToListAsync(cancellationToken);
 

@@ -1940,7 +1940,7 @@ public class InventoryTransferService : IInventoryTransferService
 
     private async Task<bool> CanReadAsync(InventoryTransfer transfer)
     {
-        return await CanAccessDirectionAsync(transfer, TransferAccessDirection.Source) ||
+        return await CanAccessDirectionAsync(transfer, TransferAccessDirection.Source) &&
                await CanAccessDirectionAsync(transfer, TransferAccessDirection.Destination);
     }
 
@@ -1971,20 +1971,22 @@ public class InventoryTransferService : IInventoryTransferService
                         locationId,
                         $"{transfer.TransferNumber}:{direction.ToString().ToLowerInvariant()}"),
                     Guid.NewGuid().ToString("N"));
-                if (decision.Allowed)
-                    return true;
+                if (!decision.Allowed)
+                    return false;
             }
             catch (ProcurementAccessAuthorizationException)
             {
                 // A read list omits transfers outside the actor's effective store scope.
+                return false;
             }
             catch (ProcurementAccessValidationException)
             {
                 // Invalid or foreign scope is indistinguishable from a missing record on reads.
+                return false;
             }
         }
 
-        return false;
+        return true;
     }
 
     private async Task EnsureTransferAccessAsync(

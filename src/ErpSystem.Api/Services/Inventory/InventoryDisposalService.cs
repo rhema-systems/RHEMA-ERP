@@ -66,11 +66,20 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
         var query = FullQuery().AsNoTracking().Where(value => value.TenantId == _currentUser.TenantId && !value.IsDeleted);
         if (status.HasValue) query = query.Where(value => value.Status == status.Value);
         if (warehouseId.HasValue) query = query.Where(value => value.WarehouseId == warehouseId.Value);
-        var candidates = await query.OrderByDescending(value => value.RequestedAtUtc).Take(take).ToListAsync(cancellationToken);
-        var allowed = new List<InventoryDisposalDto>(candidates.Count);
-        foreach (var item in candidates)
+        var allowed = new List<InventoryDisposalDto>(take);
+        var offset = 0;
+        var pageSize = Math.Max(take, 50);
+        while (allowed.Count < take)
         {
-            if (await HasAccessAsync("procurement.inventory.read", item, cancellationToken)) allowed.Add(Map(item));
+            var candidates = await query.OrderByDescending(value => value.RequestedAtUtc).ThenByDescending(value => value.Id)
+                .Skip(offset).Take(pageSize).ToListAsync(cancellationToken);
+            foreach (var item in candidates)
+            {
+                if (await HasAccessAsync("procurement.inventory.read", item, cancellationToken)) allowed.Add(Map(item));
+                if (allowed.Count == take) break;
+            }
+            offset += candidates.Count;
+            if (candidates.Count < pageSize) break;
         }
         return allowed;
     }
@@ -110,7 +119,13 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
             var warehouse = await _db.Warehouses.SingleOrDefaultAsync(value => value.TenantId == _currentUser.TenantId &&
                 value.Id == request.WarehouseId && value.IsActive && !value.IsDeleted, cancellationToken)
                 ?? throw Error("INV_DISPOSAL_WAREHOUSE_INVALID", "The selected active warehouse was not found in the current tenant.");
-            var duplicateKeys = request.Lines.GroupBy(value => new { value.InventoryItemId, value.LocationId, value.LotNumber, value.SerialNumber })
+            var duplicateKeys = request.Lines.GroupBy(value => new
+                {
+                    value.InventoryItemId,
+                    value.LocationId,
+                    LotNumber = TrackingKey(value.LotNumber),
+                    SerialNumber = TrackingKey(value.SerialNumber)
+                })
                 .Where(value => value.Count() > 1).ToList();
             if (duplicateKeys.Count != 0) throw Error("INV_DISPOSAL_LINE_DUPLICATE", "The same item/location/tracking line cannot be identified twice.");
 
@@ -486,8 +501,19 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
         {
             var mappedOverrides = adjustment.Items.ToDictionary(
                 line => line.Id,
-                line => item.Lines.Where(source => source.InventoryItemId == line.InventoryItemId && source.LocationId == line.LocationId)
-                    .Select(source => request.NegativeStockOverrideIds.GetValueOrDefault(source.Id)).FirstOrDefault());
+                line =>
+                {
+                    var sources = item.Lines.Where(source =>
+                            source.InventoryItemId == line.InventoryItemId &&
+                            source.LocationId == line.LocationId &&
+                            TrackingKey(source.LotNumber) == TrackingKey(line.LotNumber) &&
+                            TrackingKey(source.SerialNumber) == TrackingKey(line.SerialNumber))
+                        .ToList();
+                    if (sources.Count != 1)
+                        throw Error("INV_DISPOSAL_ADJUSTMENT_LINEAGE_INVALID",
+                            "Every staged adjustment line must map to exactly one disposal item/location/lot/serial line.");
+                    return request.NegativeStockOverrideIds.GetValueOrDefault(sources[0].Id);
+                });
             adjustment = await _adjustments.PostAsync(adjustment.Id, _currentUser.UserId, new StockAdjustmentActionRequest
             {
                 RowVersion = adjustment.RowVersion,
@@ -853,6 +879,9 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
         var trimmed = value.Trim();
         return trimmed.Length <= max ? trimmed : trimmed[..max];
     }
+
+    private static string TrackingKey(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToUpperInvariant();
     private static string Hash(object value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, JsonOptions))));
     private static InventoryDisposalException Error(string code, string message) => new(code, message);
     private static InventoryDisposalException State(InventoryDisposalCase item, string message) =>

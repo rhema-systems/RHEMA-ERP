@@ -3,6 +3,9 @@ using System.Reflection;
 using ErpSystem.Core.DTOs.Documents;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Inventory;
 using ErpSystem.Data;
 using ErpSystem.Data.Migrations;
@@ -12,6 +15,8 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Inventory;
@@ -108,6 +113,60 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
     public void Store_return_voucher_uses_shared_document_output_type()
     {
         DocumentTypes.InventoryStoreReturnVoucher.Should().Be("Inventory.StoreReturnVoucher");
+    }
+
+    [Fact]
+    public async Task Governed_adjustment_updates_authoritative_balance_and_immutable_movement()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var category = new InventoryCategory
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "ADJ", Name = "Adjustments"
+        };
+        var item = new InventoryItem
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CategoryId = category.Id, Category = category,
+            ItemCode = "ADJ-001", Name = "Adjustment item", UnitOfMeasure = "EA",
+            ValuationMethod = ValuationMethod.WeightedAverage, AverageCost = 10m
+        };
+        var warehouse = new Warehouse
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "ADJ-WH", Name = "Adjustment warehouse", IsActive = true
+        };
+        var location = new WarehouseLocation
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, WarehouseId = warehouse.Id, Warehouse = warehouse,
+            LocationCode = "ADJ-01", Name = "Adjustment bin", IsActive = true
+        };
+        _context.AddRange(category, item, warehouse, location);
+        await _context.SaveChangesAsync();
+        var current = new Mock<ICurrentUserProvider>();
+        current.SetupGet(value => value.TenantId).Returns(tenantId);
+        current.SetupGet(value => value.UserId).Returns(userId);
+        var unitOfWork = new UnitOfWork(_context);
+        var service = new InventoryValuationService(unitOfWork,
+            NullLogger<InventoryValuationService>.Instance, current.Object,
+            Mock.Of<IProcurementReceiptSourceControlService>());
+        var referenceId = Guid.NewGuid();
+
+        await service.ProcessAdjustmentAsync(item.Id, warehouse.Id, location.Id,
+            5m, 10m, 0m, false, "ADJ-TEST", referenceId);
+        await unitOfWork.SaveChangesAsync();
+        await service.ProcessAdjustmentAsync(item.Id, warehouse.Id, location.Id,
+            -2m, 10m, 5m, false, "ADJ-TEST", referenceId);
+        await unitOfWork.SaveChangesAsync();
+
+        var balance = await _context.InventoryBalances.SingleAsync();
+        balance.QuantityOnHand.Should().Be(3m);
+        balance.QuantityAvailable.Should().Be(3m);
+        balance.TotalValue.Should().Be(30m);
+        var movements = await _context.InventoryMovements.OrderBy(value => value.MovementDate).ToListAsync();
+        movements.Should().HaveCount(2);
+        movements.Select(value => value.MovementType).Should().Equal(
+            InventoryMovementType.AdjustmentIn, InventoryMovementType.AdjustmentOut);
+        movements.Sum(value => value.Direction == MovementDirection.In ? value.TotalValue : -value.TotalValue)
+            .Should().Be(30m);
     }
 
     [Fact]

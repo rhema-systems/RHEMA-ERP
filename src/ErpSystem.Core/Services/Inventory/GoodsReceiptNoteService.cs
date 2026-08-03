@@ -79,7 +79,7 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
     {
         var start = fromDate ?? DateTime.UtcNow.AddMonths(-3);
         var end = toDate ?? DateTime.UtcNow;
-        var grns = await GrnQuery()
+        var grns = await GrnQuery(includeItems: true)
             .Where(item => item.ReceiptDate >= start && item.ReceiptDate <= end)
             .OrderByDescending(item => item.ReceiptDate)
             .ToListAsync();
@@ -88,7 +88,7 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
 
     public async Task<IEnumerable<GoodsReceiptNoteDto>> GetByWarehouseAsync(Guid warehouseId)
     {
-        var grns = await GrnQuery()
+        var grns = await GrnQuery(includeItems: true)
             .Where(item => item.WarehouseId == warehouseId)
             .OrderByDescending(item => item.ReceiptDate)
             .ToListAsync();
@@ -97,7 +97,7 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
 
     public async Task<IEnumerable<GoodsReceiptNoteDto>> GetBySupplierAsync(Guid supplierId)
     {
-        var grns = await GrnQuery()
+        var grns = await GrnQuery(includeItems: true)
             .Where(item => item.SupplierId == supplierId)
             .OrderByDescending(item => item.ReceiptDate)
             .ToListAsync();
@@ -1211,18 +1211,33 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
     {
         try
         {
-            var decision = await _accessControl.CheckCapabilityAsync(
-                new ProcurementAccessCapabilityRequest
-                {
-                    PermissionCode = "procurement.inventory.read",
-                    SourceType = "GoodsReceiptNote",
-                    SourceReference = grn.GRNNumber,
-                    WarehouseId = grn.WarehouseId,
-                    LocationId = grn.ReceivingLocationId,
-                    RequireLocationScope = true
-                },
-                NormalizeCorrelation(null));
-            return decision.Allowed;
+            var locationIds = grn.Items
+                .Where(item => !item.IsDeleted)
+                .Select(item => item.StorageLocationId)
+                .Append(grn.ReceivingLocationId)
+                .Distinct()
+                .ToList();
+            if (locationIds.Count == 0)
+                locationIds.Add(null);
+
+            foreach (var locationId in locationIds)
+            {
+                var decision = await _accessControl.CheckCapabilityAsync(
+                    new ProcurementAccessCapabilityRequest
+                    {
+                        PermissionCode = "procurement.inventory.read",
+                        SourceType = "GoodsReceiptNote",
+                        SourceReference = grn.GRNNumber,
+                        WarehouseId = grn.WarehouseId,
+                        LocationId = locationId,
+                        RequireLocationScope = true
+                    },
+                    NormalizeCorrelation(null));
+                if (!decision.Allowed)
+                    return false;
+            }
+
+            return true;
         }
         catch (ProcurementAccessAuthorizationException)
         {

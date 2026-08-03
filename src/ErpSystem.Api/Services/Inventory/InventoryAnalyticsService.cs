@@ -78,7 +78,9 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
                     PermissionCode = "procurement.inventory.read",
                     WarehouseId = scope.WarehouseId,
                     LocationId = scope.LocationId,
-                    RequireLocationScope = scope.LocationId.HasValue,
+                    // A warehouse-only row aggregates every bin. Restricted-location actors
+                    // must therefore hold the all-locations assignment, not merely warehouse access.
+                    RequireLocationScope = true,
                     SourceType = "InventoryAnalytics",
                     SourceReference = $"analytics:{scope.WarehouseId:N}:{scope.LocationId?.ToString("N") ?? "warehouse"}"
                 }, $"inventory-analytics-{_currentUser.UserId:N}", cancellationToken);

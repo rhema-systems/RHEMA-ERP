@@ -447,6 +447,35 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         warehouseQuantity.CurrentStock += delta;
         warehouseQuantity.AvailableStock += delta;
         await _warehouseQuantities.UpdateAsync(warehouseQuantity);
+        var exactLocationId = line.LocationId
+            ?? throw Conflict("INV_RETURN_LOCATION_REQUIRED", "A Store Return Voucher line requires an exact stock location.");
+        var inventoryLocationRepository = _unitOfWork.Repository<InventoryLocation>();
+        var inventoryLocation = await inventoryLocationRepository.GetQueryable(value =>
+                value.TenantId == voucher.TenantId &&
+                value.InventoryItemId == line.InventoryItemId &&
+                value.LocationId == exactLocationId && !value.IsDeleted)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (inventoryLocation is null)
+        {
+            if (reverse)
+                throw Conflict("INV_RETURN_LOCATION_STOCK_MISSING", $"Exact-location stock is missing for {source.ItemCode}.");
+            inventoryLocation = new InventoryLocation
+            {
+                TenantId = voucher.TenantId,
+                InventoryItemId = line.InventoryItemId,
+                LocationId = exactLocationId,
+                AverageCost = line.UnitCost,
+                CreatedById = _currentUser.UserId
+            };
+            await inventoryLocationRepository.AddAsync(inventoryLocation);
+        }
+        if (reverse && inventoryLocation.AvailableQuantity < quantity)
+            throw Conflict("INV_RETURN_LOCATION_STOCK_UNAVAILABLE", $"Available exact-location stock is insufficient to reverse {source.ItemCode}.");
+        inventoryLocation.Quantity += delta;
+        inventoryLocation.AvailableQuantity = inventoryLocation.Quantity - inventoryLocation.AllocatedQuantity;
+        inventoryLocation.AverageCost = line.UnitCost;
+        inventoryLocation.LastMovementDate = DateTime.UtcNow;
+        await inventoryLocationRepository.UpdateAsync(inventoryLocation);
         if (!warehouse.IsConsignmentWarehouse)
         {
             var inventoryItem = await _items.GetByIdAsync(line.InventoryItemId)

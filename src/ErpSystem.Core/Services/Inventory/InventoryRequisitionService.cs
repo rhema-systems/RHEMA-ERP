@@ -100,43 +100,43 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         var requisitions = await _requisitionRepository.GetByDateRangeAsync(
             fromDate ?? DateTime.UtcNow.AddMonths(-3),
             toDate ?? DateTime.UtcNow);
-        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
+        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetByProjectAsync(Guid projectId)
     {
         var requisitions = await _requisitionRepository.GetByProjectAsync(projectId);
-        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
+        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetByWarehouseAsync(Guid warehouseId)
     {
         var requisitions = await _requisitionRepository.GetByWarehouseAsync(warehouseId);
-        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
+        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetByDepartmentAsync(Guid departmentId)
     {
         var requisitions = await _requisitionRepository.GetByDepartmentAsync(departmentId);
-        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
+        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetPendingApprovalAsync()
     {
         var requisitions = await _requisitionRepository.GetPendingApprovalAsync();
-        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
+        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetPendingIssueAsync()
     {
         var requisitions = await _requisitionRepository.GetPendingIssueAsync();
-        return (await ApplyStoreReadScopeAsync(requisitions)).Select(MapToDto);
+        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
     }
 
     public async Task<InventoryRequisitionDetailDto?> GetByIdAsync(Guid id)
     {
         var requisition = await _requisitionRepository.GetWithItemsAsync(id);
-        return requisition != null && (!IsStoresUser || await CanReadStoreRequisitionAsync(requisition))
+        return requisition != null && await CanReadRequisitionAsync(requisition)
             ? MapToDetailDto(requisition)
             : null;
     }
@@ -146,7 +146,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         var requisition = await _requisitionRepository.GetByRequisitionNumberAsync(requisitionNumber);
         if (requisition == null) return null;
         var fullRequisition = await _requisitionRepository.GetWithItemsAsync(requisition.Id);
-        return fullRequisition != null && (!IsStoresUser || await CanReadStoreRequisitionAsync(fullRequisition))
+        return fullRequisition != null && await CanReadRequisitionAsync(fullRequisition)
             ? MapToDetailDto(fullRequisition)
             : null;
     }
@@ -1259,7 +1259,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             _currentUserProvider.UserId == requisition.ApprovedById ||
             _currentUserProvider.UserId == requisition.IssuedById)
             return true;
-        return !IsStoresUser || await CanReadStoreRequisitionAsync(requisition);
+        return await CanReadRequisitionAsync(requisition);
     }
 
     private async Task<InventoryIssueVoucher?> LoadIssueVoucherAsync(
@@ -1498,29 +1498,27 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 $"The {resource} changed after it was loaded. Refresh and retry.");
     }
 
-    private bool IsStoresUser => _currentUserProvider.Roles.Any(role =>
-        role.Equals("TDC_STORES_OFFICER", StringComparison.OrdinalIgnoreCase) ||
-        role.Equals("TDC_STORES_MANAGER", StringComparison.OrdinalIgnoreCase));
-
-    private async Task<IReadOnlyList<InventoryRequisition>> ApplyStoreReadScopeAsync(
+    private async Task<IReadOnlyList<InventoryRequisition>> ApplyReadScopeAsync(
         IEnumerable<InventoryRequisition> requisitions)
     {
         var candidates = requisitions.ToList();
-        if (!IsStoresUser)
-            return candidates;
-
         var readable = new List<InventoryRequisition>();
         foreach (var requisition in candidates)
         {
-            if (await CanReadStoreRequisitionAsync(requisition))
+            if (await CanReadRequisitionAsync(requisition))
                 readable.Add(requisition);
         }
 
         return readable;
     }
 
-    private async Task<bool> CanReadStoreRequisitionAsync(InventoryRequisition requisition)
+    private async Task<bool> CanReadRequisitionAsync(InventoryRequisition requisition)
     {
+        // Requesters retain access to their own resource; every other actor must hold
+        // the inventory-read capability in the exact warehouse/location scope.
+        if (requisition.RequestedById == _currentUserProvider.UserId)
+            return true;
+
         try
         {
             var decision = await _accessControl.CheckCapabilityAsync(

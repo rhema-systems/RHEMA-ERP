@@ -169,6 +169,26 @@ public sealed class InventoryTrackingControlServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Legacy_untracked_stock_can_issue_without_synthetic_inbound_history()
+    {
+        var category = Category("LEGACY-UNTRACKED");
+        var item = Item(category.Id);
+        var warehouse = Warehouse();
+        await _context.AddRangeAsync(category, item, warehouse);
+        await _context.SaveChangesAsync();
+
+        await _service.StageEventAsync(Request(
+            item.Id,
+            warehouse.Id,
+            InventoryTrackingDirection.Issue,
+            eventKey: "legacy-untracked-issue"));
+
+        _context.Set<InventoryTraceabilityEvent>().Local.Should().ContainSingle(value =>
+            value.EventKey == "legacy-untracked-issue" &&
+            value.Direction == InventoryTrackingDirection.Issue);
+    }
+
+    [Fact]
     public async Task Reads_are_tenant_scoped_and_external_actors_are_denied()
     {
         var category = Category("TENANT");

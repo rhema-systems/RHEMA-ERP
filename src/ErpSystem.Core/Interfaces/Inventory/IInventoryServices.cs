@@ -289,6 +289,24 @@ public interface IInventoryValuationService
         Guid? referenceId,
         string? lotNumber = null,
         string? serialNumber = null);
+
+    /// <summary>
+    /// Posts an approved adjustment to the authoritative inventory subledger.
+    /// Opening quantity supports lazy adoption of historical exact-bin stock.
+    /// </summary>
+    Task<decimal> ProcessAdjustmentAsync(
+        Guid inventoryItemId,
+        Guid warehouseId,
+        Guid locationId,
+        decimal quantityDelta,
+        decimal unitCost,
+        decimal openingQuantity,
+        bool allowNegative,
+        string? referenceNumber,
+        Guid referenceId,
+        string? lotNumber = null,
+        string? serialNumber = null,
+        DateTime? expirationDate = null);
 }
 
 /// <summary>

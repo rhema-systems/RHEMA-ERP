@@ -143,14 +143,21 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
         if (taskType.HasValue) query = query.Where(value => value.TaskType == taskType);
         if (status.HasValue) query = query.Where(value => value.Status == status);
 
-        var ids = await query.OrderByDescending(value => value.AssignedAtUtc)
-            .Select(value => value.Id).Take(take).ToListAsync(cancellationToken);
-        var result = new List<InventoryDirectedTaskDto>();
-        foreach (var id in ids)
+        var result = new List<InventoryDirectedTaskDto>(take);
+        var offset = 0;
+        var pageSize = Math.Max(take, 50);
+        while (result.Count < take)
         {
-            var task = await LoadTaskAsync(id, tracked: false, cancellationToken);
-            if (task is not null && await CanAccessTaskAsync(task, cancellationToken))
-                result.Add(Map(task));
+            var ids = await query.OrderByDescending(value => value.AssignedAtUtc).ThenByDescending(value => value.Id)
+                .Select(value => value.Id).Skip(offset).Take(pageSize).ToListAsync(cancellationToken);
+            foreach (var id in ids)
+            {
+                var task = await LoadTaskAsync(id, tracked: false, cancellationToken);
+                if (task is not null && await CanAccessTaskAsync(task, cancellationToken)) result.Add(Map(task));
+                if (result.Count == take) break;
+            }
+            offset += ids.Count;
+            if (ids.Count < pageSize) break;
         }
         return result;
     }

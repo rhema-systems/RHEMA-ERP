@@ -39,6 +39,7 @@ public class StockAdjustmentService : IStockAdjustmentService
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IInventoryAdjustmentFinancePostingService _financePosting;
+    private readonly IInventoryValuationService _valuation;
     private readonly ILogger<StockAdjustmentService> _logger;
 
     public StockAdjustmentService(
@@ -58,6 +59,7 @@ public class StockAdjustmentService : IStockAdjustmentService
         IWorkflowIntegrationService workflow,
         IProcurementControlEventService controlEvents,
         IInventoryAdjustmentFinancePostingService financePosting,
+        IInventoryValuationService valuation,
         ILogger<StockAdjustmentService> logger)
     {
         _adjustmentRepository = adjustmentRepository;
@@ -76,6 +78,7 @@ public class StockAdjustmentService : IStockAdjustmentService
         _workflow = workflow;
         _controlEvents = controlEvents;
         _financePosting = financePosting;
+        _valuation = valuation;
         _logger = logger;
     }
 
@@ -115,9 +118,13 @@ public class StockAdjustmentService : IStockAdjustmentService
                 adjustments = adjustments.Where(a => a.ReasonCode.Equals(reasonCode, StringComparison.OrdinalIgnoreCase));
             }
 
-            return adjustments
-                .OrderByDescending(a => a.AdjustmentDate)
-                .Select(MapToDto);
+            var readable = new List<StockAdjustmentDto>();
+            foreach (var adjustment in adjustments.OrderByDescending(a => a.AdjustmentDate))
+            {
+                var full = adjustment.Items.Count > 0 ? adjustment : await LoadAsync(adjustment.Id);
+                if (full != null && await CanReadAsync(full)) readable.Add(MapToDto(full));
+            }
+            return readable;
         }
         catch (Exception ex)
         {
@@ -139,7 +146,7 @@ public class StockAdjustmentService : IStockAdjustmentService
                 return null;
             }
 
-            return MapToDetailDto(adjustment);
+            return await CanReadAsync(adjustment) ? MapToDetailDto(adjustment) : null;
         }
         catch (Exception ex)
         {
@@ -161,7 +168,7 @@ public class StockAdjustmentService : IStockAdjustmentService
                 return null;
             }
 
-            return MapToDetailDto(adjustment);
+            return await CanReadAsync(adjustment) ? MapToDetailDto(adjustment) : null;
         }
         catch (Exception ex)
         {
@@ -178,7 +185,13 @@ public class StockAdjustmentService : IStockAdjustmentService
         try
         {
             var adjustments = await _adjustmentRepository.GetPendingAdjustmentsAsync();
-            return adjustments.Select(MapToDto);
+            var readable = new List<StockAdjustmentDto>();
+            foreach (var adjustment in adjustments)
+            {
+                var full = adjustment.Items.Count > 0 ? adjustment : await LoadAsync(adjustment.Id);
+                if (full != null && await CanReadAsync(full)) readable.Add(MapToDto(full));
+            }
+            return readable;
         }
         catch (Exception ex)
         {
@@ -904,10 +917,13 @@ public class StockAdjustmentService : IStockAdjustmentService
                 ?? throw new ArgumentException($"Inventory item {input.InventoryItemId} not found.");
             if (inventoryItem.TenantId != adjustment.TenantId)
                 throw new ArgumentException($"Inventory item {input.InventoryItemId} not found.");
-            var quantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(location.InventoryWarehouseId, input.InventoryItemId);
-            var systemQuantity = quantity?.CurrentStock ?? 0m;
-            var unitCost = inventoryItem.AverageCost > 0 ? inventoryItem.AverageCost
-                : inventoryItem.StandardCost > 0 ? inventoryItem.StandardCost : inventoryItem.LastPurchaseCost;
+            var exactBalance = await _unitOfWork.Repository<InventoryLocation>().GetQueryable(value =>
+                    value.TenantId == adjustment.TenantId && value.InventoryItemId == input.InventoryItemId &&
+                    value.LocationId == location.Id && !value.IsDeleted)
+                .AsNoTracking().SingleOrDefaultAsync();
+            var systemQuantity = exactBalance?.Quantity ?? 0m;
+            var unitCost = await ResolveAdjustmentUnitCostAsync(
+                inventoryItem, location.InventoryWarehouseId, location.Id, input.AdjustmentQuantity);
             if (unitCost <= 0) throw new InvalidOperationException($"A server-derived inventory cost is required for {inventoryItem.ItemCode}.");
             var line = new StockAdjustmentItem
             {
@@ -949,6 +965,69 @@ public class StockAdjustmentService : IStockAdjustmentService
             }, adjustment.CorrelationId ?? Guid.NewGuid().ToString("N"));
             if (!decision.Allowed) throw new InvalidOperationException(decision.Message);
         }
+    }
+
+    private async Task<decimal> ResolveAdjustmentUnitCostAsync(
+        InventoryItem inventoryItem,
+        Guid warehouseId,
+        Guid locationId,
+        decimal quantityDelta)
+    {
+        var fallback = inventoryItem.AverageCost > 0 ? inventoryItem.AverageCost
+            : inventoryItem.StandardCost > 0 ? inventoryItem.StandardCost : inventoryItem.LastPurchaseCost;
+        if (inventoryItem.ValuationMethod == ValuationMethod.StandardCost)
+            return inventoryItem.StandardCost;
+
+        var balance = await _unitOfWork.Repository<InventoryBalance>().GetQueryable(value =>
+                value.TenantId == inventoryItem.TenantId && value.InventoryItemId == inventoryItem.Id &&
+                value.WarehouseId == warehouseId && value.LocationId == locationId && !value.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync();
+        if (inventoryItem.ValuationMethod == ValuationMethod.WeightedAverage)
+            return balance?.AverageUnitCost > 0 ? balance.AverageUnitCost : fallback;
+        if (quantityDelta >= 0)
+            return balance?.AverageUnitCost > 0 ? balance.AverageUnitCost : fallback;
+
+        var remaining = Math.Abs(quantityDelta);
+        decimal total = 0;
+        var layers = await _unitOfWork.Repository<InventoryLayer>().GetQueryable(value =>
+                value.TenantId == inventoryItem.TenantId && value.InventoryItemId == inventoryItem.Id &&
+                value.WarehouseId == warehouseId && value.LocationId == locationId &&
+                !value.IsFullyConsumed && value.RemainingQuantity > 0)
+            .AsNoTracking().OrderBy(value => value.LayerDate).ThenBy(value => value.CreatedAt).ToListAsync();
+        foreach (var layer in layers)
+        {
+            if (remaining <= 0) break;
+            var consumed = Math.Min(remaining, layer.RemainingQuantity);
+            total += consumed * layer.UnitCost;
+            remaining -= consumed;
+        }
+        total += remaining * fallback;
+        return total / Math.Abs(quantityDelta);
+    }
+
+    private async Task<bool> CanReadAsync(StockAdjustment adjustment)
+    {
+        var locations = adjustment.Items.Where(x => !x.IsDeleted).Select(x => x.LocationId).Distinct().ToList();
+        if (locations.Count == 0) locations.Add(null);
+        foreach (var locationId in locations)
+        {
+            try
+            {
+                var decision = await _accessControl.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+                {
+                    PermissionCode = "procurement.inventory.read",
+                    WarehouseId = adjustment.WarehouseId,
+                    LocationId = locationId,
+                    RequireLocationScope = true,
+                    SourceType = "StockAdjustment",
+                    SourceReference = adjustment.AdjustmentNumber
+                }, adjustment.CorrelationId ?? Guid.NewGuid().ToString("N"));
+                if (!decision.Allowed) return false;
+            }
+            catch (ProcurementAccessAuthorizationException) { return false; }
+            catch (ProcurementAccessValidationException) { return false; }
+        }
+        return true;
     }
 
     private async Task AddEvidenceAsync(StockAdjustment adjustment, IReadOnlyCollection<InventoryControlEvidenceRequest> requests, bool required)
@@ -1070,6 +1149,57 @@ public class StockAdjustmentService : IStockAdjustmentService
             SerialNumber = item.SerialNumber,
             CorrelationId = adjustment.CorrelationId ?? $"stock-adjustment:{adjustment.Id:N}"
         });
+        var inventoryLocationRepository = _unitOfWork.Repository<InventoryLocation>();
+        var inventoryLocation = await inventoryLocationRepository.GetQueryable(value =>
+                value.TenantId == adjustment.TenantId &&
+                value.InventoryItemId == item.InventoryItemId &&
+                value.LocationId == location.Id && !value.IsDeleted)
+            .SingleOrDefaultAsync();
+        if (inventoryLocation is null)
+        {
+            if (delta < 0 && decreaseAuthorization?.EmergencyOverrideApplied != true)
+                throw new InvalidOperationException($"Exact-bin stock is unavailable for {inventoryItem.ItemCode}.");
+            inventoryLocation = new InventoryLocation
+            {
+                TenantId = adjustment.TenantId,
+                InventoryItemId = item.InventoryItemId,
+                LocationId = location.Id,
+                AverageCost = item.UnitCost,
+                CreatedById = userId
+            };
+            await inventoryLocationRepository.AddAsync(inventoryLocation);
+        }
+        var openingLocationQuantity = inventoryLocation.Quantity;
+        var openingLocationAverageCost = inventoryLocation.AverageCost;
+        if (delta < 0 && inventoryLocation.AvailableQuantity < Math.Abs(delta) &&
+            decreaseAuthorization?.EmergencyOverrideApplied != true)
+            throw new InvalidOperationException($"Available exact-bin stock is insufficient for {inventoryItem.ItemCode}.");
+
+        var authoritativeValue = await _valuation.ProcessAdjustmentAsync(
+            item.InventoryItemId,
+            warehouseId,
+            location.Id,
+            delta,
+            item.UnitCost,
+            openingLocationQuantity,
+            decreaseAuthorization?.EmergencyOverrideApplied == true,
+            adjustment.AdjustmentNumber,
+            adjustment.Id,
+            item.LotNumber,
+            item.SerialNumber);
+        if (decimal.Round(authoritativeValue, 2) != decimal.Round(Math.Abs(item.AdjustmentValue), 2))
+            throw new InvalidOperationException(
+                $"The authoritative valuation for {inventoryItem.ItemCode} changed after the adjustment was drafted. Refresh the adjustment before posting.");
+        inventoryLocation.Quantity += delta;
+        inventoryLocation.AvailableQuantity = inventoryLocation.Quantity - inventoryLocation.AllocatedQuantity;
+        if (inventoryLocation.Quantity <= 0)
+            inventoryLocation.AverageCost = 0;
+        else if (delta > 0)
+            inventoryLocation.AverageCost =
+                ((openingLocationQuantity * (openingLocationAverageCost > 0 ? openingLocationAverageCost : item.UnitCost)) + authoritativeValue) /
+                inventoryLocation.Quantity;
+        inventoryLocation.LastMovementDate = DateTime.UtcNow;
+        await inventoryLocationRepository.UpdateAsync(inventoryLocation);
         warehouseQuantity.CurrentStock += delta;
         warehouseQuantity.AvailableStock = warehouseQuantity.CurrentStock - warehouseQuantity.AllocatedStock;
         warehouseQuantity.LastMovementDate = DateTime.UtcNow;
