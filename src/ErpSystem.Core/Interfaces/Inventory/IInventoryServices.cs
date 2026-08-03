@@ -306,7 +306,8 @@ public interface IInventoryValuationService
         Guid referenceId,
         string? lotNumber = null,
         string? serialNumber = null,
-        DateTime? expirationDate = null);
+        DateTime? expirationDate = null,
+        Guid? reversalSourceId = null);
 }
 
 /// <summary>

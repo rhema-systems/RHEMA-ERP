@@ -217,7 +217,7 @@ public sealed class E2E013InventoryDisposalLifecycleTests
             .ReturnsAsync(new ProcurementControlEventDto { Id = Guid.NewGuid(), TenantId = tenantId });
 
         var service = new InventoryDisposalService(db, current, access.Object, sod.Object, workflow.Object,
-            adjustments.Object, finance.Object, controlEvents.Object);
+            adjustments.Object, finance.Object, Mock.Of<IInventoryTrackingControlService>(), controlEvents.Object);
         var identified = await service.CreateAsync(new CreateInventoryDisposalRequest
         {
             WarehouseId = warehouse.Id,

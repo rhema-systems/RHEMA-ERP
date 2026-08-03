@@ -241,6 +241,7 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
     public async Task<IActionResult> Export(CancellationToken cancellationToken)
     {
         if (!TryGetTenantId(out var tenantId)) return Forbid();
+        if (!await HasExportPermissionAsync(cancellationToken)) return Forbid();
         var items = await Items
             .Where(item => item.TenantId == tenantId && !item.IsDeleted)
             .AsNoTracking()
@@ -474,6 +475,28 @@ public sealed class InventoryItemIdentifiersController : ControllerBase
             SourceReference = sourceReference
         }, HttpContext.TraceIdentifier, cancellationToken);
         return decision.Allowed;
+    }
+
+    private async Task<bool> HasExportPermissionAsync(CancellationToken cancellationToken)
+    {
+        foreach (var permission in new[] { "procurement.inventory.read", "procurement.inventory.master-data.manage" })
+        {
+            var decision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = permission,
+                SourceType = "InventoryItemIdentifier",
+                SourceReference = "identifier-export"
+            }, HttpContext.TraceIdentifier, cancellationToken);
+            if (decision.Allowed) return true;
+        }
+
+        var denial = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = "procurement.inventory.read",
+            SourceType = "InventoryItemIdentifier",
+            SourceReference = "identifier-export"
+        }, HttpContext.TraceIdentifier, cancellationToken);
+        return denial.Allowed;
     }
 
     private async Task QueueAuditAsync(string action, Guid resourceId, object? before, object? after)

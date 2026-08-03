@@ -33,6 +33,7 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IStockAdjustmentService _adjustments;
     private readonly IFinancePostingEngine _finance;
+    private readonly IInventoryTrackingControlService _trackingControls;
     private readonly IProcurementControlEventService _controlEvents;
 
     public InventoryDisposalService(
@@ -43,6 +44,7 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
         IWorkflowIntegrationService workflow,
         IStockAdjustmentService adjustments,
         IFinancePostingEngine finance,
+        IInventoryTrackingControlService trackingControls,
         IProcurementControlEventService controlEvents)
     {
         _db = db;
@@ -52,6 +54,7 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
         _workflow = workflow;
         _adjustments = adjustments;
         _finance = finance;
+        _trackingControls = trackingControls;
         _controlEvents = controlEvents;
     }
 
@@ -159,6 +162,8 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
                     ((value.IsConsignmentBin && value.ConsignmentWarehouseId == item.WarehouseId) ||
                      (!value.IsConsignmentBin && value.WarehouseId == item.WarehouseId)),
                     cancellationToken) ?? throw Error("INV_DISPOSAL_LOCATION_INVALID", "A disposal location is inactive or outside the selected warehouse.");
+                await RequireLocationAccessAsync("procurement.inventory.disposal.request", item.WarehouseId,
+                    location.Id, item.DisposalNumber, item.CorrelationId, cancellationToken);
                 var inventoryWarehouseId = location.InventoryWarehouseId;
                 var inventoryItem = await _db.InventoryItems.SingleOrDefaultAsync(value => value.TenantId == item.TenantId &&
                     value.Id == input.InventoryItemId && !value.IsDeleted, cancellationToken)
@@ -168,6 +173,8 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
                     value.LocationId == input.LocationId && !value.IsDeleted, cancellationToken);
                 if (balance is null || balance.QuantityAvailable < input.Quantity)
                     throw Error("INV_DISPOSAL_STOCK_UNAVAILABLE", $"Exact-location available stock is insufficient for {inventoryItem.ItemCode}.");
+                await _trackingControls.ValidateAvailabilityAsync(input.InventoryItemId, inventoryWarehouseId,
+                    input.LocationId, input.Quantity, input.LotNumber, null, input.SerialNumber, cancellationToken);
                 var activeQuantity = await _db.InventoryDisposalLines.AsNoTracking().Where(value => value.TenantId == item.TenantId &&
                         value.InventoryItemId == input.InventoryItemId && value.LocationId == input.LocationId && !value.IsDeleted &&
                         value.InventoryDisposalCase.Status != InventoryDisposalStatus.Completed &&
@@ -195,7 +202,6 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
             }
             item.TotalQuantity = item.Lines.Sum(value => value.Quantity);
             item.TotalValue = item.Lines.Sum(value => value.TotalValue);
-            await RequireAccessAsync("procurement.inventory.disposal.request", item, cancellationToken);
             await AddEvidenceAsync(item, request.Evidence, "Identification", required: true, cancellationToken);
             item.IntegrityHash = CaseHash(item);
             _db.InventoryDisposalCases.Add(item);
@@ -878,6 +884,22 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
         if (string.IsNullOrWhiteSpace(value)) return null;
         var trimmed = value.Trim();
         return trimmed.Length <= max ? trimmed : trimmed[..max];
+    }
+
+    private async Task RequireLocationAccessAsync(
+        string permission,
+        Guid warehouseId,
+        Guid locationId,
+        string sourceReference,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        var decision = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = permission, WarehouseId = warehouseId, LocationId = locationId,
+            RequireLocationScope = true, SourceType = EntityType, SourceReference = sourceReference
+        }, correlationId, cancellationToken);
+        if (!decision.Allowed) throw new InventoryDisposalAuthorizationException(decision.Message);
     }
 
     private static string TrackingKey(string? value) =>

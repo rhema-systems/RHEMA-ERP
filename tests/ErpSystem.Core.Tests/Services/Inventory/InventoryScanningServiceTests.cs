@@ -469,6 +469,75 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Location_identifier_resolution_is_scoped_to_the_document_warehouse()
+    {
+        var item = new InventoryItem
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, CategoryId = Guid.NewGuid(),
+            ItemCode = "SCAN-LOCATION", Name = "Location scoped item"
+        };
+        var documentWarehouse = new Warehouse
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, Code = "SCAN-DOC-WH", Name = "Document warehouse", IsActive = true
+        };
+        var otherWarehouse = new Warehouse
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, Code = "SCAN-OTHER-WH", Name = "Other warehouse", IsActive = true
+        };
+        var expectedLocation = new WarehouseLocation
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, WarehouseId = documentWarehouse.Id,
+            Warehouse = documentWarehouse, LocationCode = "SHARED-BIN", Name = "Document bin", IsActive = true
+        };
+        var unrelatedLocation = new WarehouseLocation
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, WarehouseId = otherWarehouse.Id,
+            Warehouse = otherWarehouse, LocationCode = "SHARED-BIN", Name = "Other bin", IsActive = true
+        };
+        var count = new PhysicalCount
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, WarehouseId = documentWarehouse.Id,
+            Warehouse = documentWarehouse, CountNumber = "COUNT-LOCATION-SCOPE",
+            Status = "InProgress", CountDate = DateTime.UtcNow,
+            Items =
+            {
+                new PhysicalCountItem
+                {
+                    TenantId = _tenantId, InventoryItemId = item.Id, InventoryItem = item,
+                    ItemCode = item.ItemCode, ItemName = item.Name, SystemQuantity = 1m
+                }
+            }
+        };
+        await _context.AddRangeAsync(item, documentWarehouse, otherWarehouse,
+            expectedLocation, unrelatedLocation, count);
+        await _context.SaveChangesAsync();
+        _identifiers.Setup(value => value.ResolveAsync(_tenantId, item.ItemCode, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InventoryIdentifierMatchDto
+            {
+                InventoryItemId = item.Id, ItemCode = item.ItemCode, ItemName = item.Name,
+                Identifier = item.ItemCode, IdentifierKind = "ItemCode", ConversionToBase = 1m
+            });
+
+        var result = await _service.SynchronizeAsync(new SynchronizeInventoryScanBatchRequest
+        {
+            DeviceId = "warehouse-scoped-scanner", IdempotencyKey = "warehouse-scoped-location",
+            Operation = InventoryScanOperation.PhysicalCount, DocumentId = count.Id,
+            WarehouseId = documentWarehouse.Id, ApplyTransaction = false,
+            Lines =
+            {
+                new InventoryScanInputDto
+                {
+                    ClientLineId = Guid.NewGuid(), RawIdentifier = item.ItemCode,
+                    DocumentLineId = count.Items.Single().Id, LocationIdentifier = "shared-bin",
+                    Quantity = 1m, ScannedAtUtc = DateTime.UtcNow
+                }
+            }
+        }, "corr-location-scope");
+
+        result.Lines.Should().ContainSingle().Which.LocationId.Should().Be(expectedLocation.Id);
+    }
+
+    [Fact]
     [Trait("Batch", "E2E-024")]
     public async Task Required_mobile_operations_synchronize_once_in_capture_order_and_replay_idempotently()
     {

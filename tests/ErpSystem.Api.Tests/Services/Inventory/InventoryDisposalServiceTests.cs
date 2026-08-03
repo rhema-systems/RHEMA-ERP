@@ -42,6 +42,9 @@ public sealed class InventoryDisposalServiceTests
             It.Is<ProcurementControlEventWriteRequest>(request => request.RuleCode == "INV-020" &&
                 request.DecisionKeys.Count == 14 && request.Evidence.Count == 1),
             It.IsAny<CancellationToken>()), Times.Once);
+        fixture.TrackingControls.Verify(value => value.ValidateAvailabilityAsync(
+            fixture.Item.Id, fixture.Warehouse.Id, fixture.Location.Id, 4m,
+            null, null, null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact, Trait("Batch", "TDC-0615")]
@@ -98,6 +101,25 @@ public sealed class InventoryDisposalServiceTests
     }
 
     [Fact, Trait("Batch", "TDC-0615")]
+    public async Task Identification_rejects_insufficient_exact_tracked_stock()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.TrackingControls.Setup(value => value.ValidateAvailabilityAsync(
+                fixture.Item.Id, fixture.Warehouse.Id, fixture.Location.Id, 4m,
+                "LOT-LOW", null, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InventoryTrackingControlException(
+                "INV_TRACKING_LOT_INSUFFICIENT", "The selected lot has only two units."));
+        var request = fixture.Request("identify-tracked-insufficient");
+        request.Lines.Single().LotNumber = "LOT-LOW";
+
+        var action = () => fixture.Service.CreateAsync(request);
+
+        await action.Should().ThrowAsync<InventoryTrackingControlException>()
+            .Where(value => value.Code == "INV_TRACKING_LOT_INSUFFICIENT");
+        (await fixture.Db.InventoryDisposalCases.CountAsync()).Should().Be(0);
+    }
+
+    [Fact, Trait("Batch", "TDC-0615")]
     public async Task Committee_schedule_requires_three_independent_active_users_with_the_disposal_role()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -142,7 +164,9 @@ public sealed class InventoryDisposalServiceTests
     private sealed class Fixture : IAsyncDisposable
     {
         private Fixture(ApplicationDbContext db, InventoryDisposalService service, MutableCurrentUser current,
-            Mock<IProcurementControlEventService> controlEvents, Warehouse warehouse, WarehouseLocation location,
+            Mock<IProcurementControlEventService> controlEvents,
+            Mock<IInventoryTrackingControlService> trackingControls,
+            Warehouse warehouse, WarehouseLocation location,
             InventoryItem item, CentralDocumentVersion version, FileUploadRecord upload, Guid auditorId,
             IReadOnlyList<Guid> committeeMemberIds)
         {
@@ -150,6 +174,7 @@ public sealed class InventoryDisposalServiceTests
             Service = service;
             Current = current;
             ControlEvents = controlEvents;
+            TrackingControls = trackingControls;
             Warehouse = warehouse;
             Location = location;
             Item = item;
@@ -163,6 +188,7 @@ public sealed class InventoryDisposalServiceTests
         public InventoryDisposalService Service { get; }
         public MutableCurrentUser Current { get; }
         public Mock<IProcurementControlEventService> ControlEvents { get; }
+        public Mock<IInventoryTrackingControlService> TrackingControls { get; }
         public Warehouse Warehouse { get; }
         public WarehouseLocation Location { get; }
         public InventoryItem Item { get; }
@@ -289,10 +315,16 @@ public sealed class InventoryDisposalServiceTests
             events.Setup(value => value.RecordAsync(It.IsAny<ProcurementControlEventWriteRequest>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new ProcurementControlEventDto());
+            var trackingControls = new Mock<IInventoryTrackingControlService>();
+            trackingControls.Setup(value => value.ValidateAvailabilityAsync(
+                    It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<decimal>(),
+                    It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
             var service = new InventoryDisposalService(db, current, access.Object,
                 Mock.Of<IProcurementSodGuardService>(), Mock.Of<IWorkflowIntegrationService>(),
-                Mock.Of<IStockAdjustmentService>(), Mock.Of<IFinancePostingEngine>(), events.Object);
-            return new Fixture(db, service, current, events, warehouse, location, item, version, upload,
+                Mock.Of<IStockAdjustmentService>(), Mock.Of<IFinancePostingEngine>(),
+                trackingControls.Object, events.Object);
+            return new Fixture(db, service, current, events, trackingControls, warehouse, location, item, version, upload,
                 auditorId, memberIds);
         }
 

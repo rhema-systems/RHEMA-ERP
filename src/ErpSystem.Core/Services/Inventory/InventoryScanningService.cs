@@ -531,12 +531,14 @@ public sealed class InventoryScanningService : IInventoryScanningService
             {
                 var normalizedLocation = locationIdentifier.ToUpperInvariant();
                 var locationMatches = await Locations.Where(item => item.TenantId == TenantId && !item.IsDeleted && item.IsActive &&
+                        (item.WarehouseId == context.WarehouseId ||
+                         (item.IsConsignmentBin && item.ConsignmentWarehouseId == context.WarehouseId)) &&
                         (item.LocationBarcode == normalizedLocation || item.LocationCode == normalizedLocation))
                     .Select(item => item.Id).Take(2).ToListAsync(cancellationToken);
                 if (locationMatches.Count == 0)
-                    throw new InventoryScanningException("INV_SCAN_LOCATION_NOT_FOUND", $"Location identifier '{locationIdentifier}' is not assigned in the current tenant.");
+                    throw new InventoryScanningException("INV_SCAN_LOCATION_NOT_FOUND", $"Location identifier '{locationIdentifier}' is not assigned in the transaction warehouse.");
                 if (locationMatches.Count > 1)
-                    throw new InventoryScanningException("INV_SCAN_LOCATION_AMBIGUOUS", $"Location identifier '{locationIdentifier}' is ambiguous in the current tenant.");
+                    throw new InventoryScanningException("INV_SCAN_LOCATION_AMBIGUOUS", $"Location identifier '{locationIdentifier}' is ambiguous in the transaction warehouse.");
                 locationId = locationMatches[0];
             }
             locationId ??= documentLine.LocationId;

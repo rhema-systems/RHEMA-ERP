@@ -193,6 +193,65 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
     }
 
     [Fact]
+    public async Task Fifo_positive_adjustment_reversal_consumes_only_its_original_cost_layer()
+    {
+        var tenantId = Guid.NewGuid();
+        var category = new InventoryCategory
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "FIFO-ADJ", Name = "FIFO adjustments"
+        };
+        var item = new InventoryItem
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CategoryId = category.Id, Category = category,
+            ItemCode = "FIFO-ADJ-001", Name = "FIFO adjustment item", UnitOfMeasure = "EA",
+            ValuationMethod = ValuationMethod.FIFO
+        };
+        var warehouse = new Warehouse
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "FIFO-WH", Name = "FIFO warehouse", IsActive = true
+        };
+        var location = new WarehouseLocation
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, WarehouseId = warehouse.Id, Warehouse = warehouse,
+            LocationCode = "FIFO-01", Name = "FIFO bin", IsActive = true
+        };
+        _context.AddRange(category, item, warehouse, location);
+        await _context.SaveChangesAsync();
+        var current = new Mock<ICurrentUserProvider>();
+        current.SetupGet(value => value.TenantId).Returns(tenantId);
+        current.SetupGet(value => value.UserId).Returns(Guid.NewGuid());
+        var unitOfWork = new UnitOfWork(_context);
+        var service = new InventoryValuationService(unitOfWork,
+            NullLogger<InventoryValuationService>.Instance, current.Object,
+            Mock.Of<IProcurementReceiptSourceControlService>());
+        var olderSourceId = Guid.NewGuid();
+        var adjustmentSourceId = Guid.NewGuid();
+
+        await service.ProcessAdjustmentAsync(item.Id, warehouse.Id, location.Id,
+            1m, 10m, 0m, false, "OLDER-STOCK", olderSourceId);
+        await unitOfWork.SaveChangesAsync();
+        await service.ProcessAdjustmentAsync(item.Id, warehouse.Id, location.Id,
+            1m, 15m, 1m, false, "ADJ-FIFO", adjustmentSourceId);
+        await unitOfWork.SaveChangesAsync();
+        var reversedValue = await service.ProcessAdjustmentAsync(item.Id, warehouse.Id, location.Id,
+            -1m, 15m, 2m, false, "ADJ-FIFO", adjustmentSourceId,
+            reversalSourceId: adjustmentSourceId);
+        await unitOfWork.SaveChangesAsync();
+
+        reversedValue.Should().Be(15m);
+        var layers = await _context.InventoryLayers.OrderBy(value => value.LayerDate).ToListAsync();
+        layers.Single(value => value.SourceId == olderSourceId).RemainingQuantity.Should().Be(1m);
+        layers.Single(value => value.SourceId == adjustmentSourceId).RemainingQuantity.Should().Be(0m);
+        var balance = await _context.InventoryBalances.SingleAsync();
+        balance.QuantityOnHand.Should().Be(1m);
+        balance.TotalValue.Should().Be(10m);
+        var reversalMovement = await _context.InventoryMovements
+            .OrderByDescending(value => value.MovementDate).FirstAsync();
+        reversalMovement.TotalValue.Should().Be(15m);
+        reversalMovement.CostLayerId.Should().Be(layers.Single(value => value.SourceId == adjustmentSourceId).Id);
+    }
+
+    [Fact]
     public void Adjustment_creation_replay_hash_includes_evidence_and_normalized_line_payload()
     {
         var method = typeof(StockAdjustmentService).GetMethod(

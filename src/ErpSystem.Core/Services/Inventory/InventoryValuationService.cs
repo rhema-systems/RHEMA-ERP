@@ -882,7 +882,8 @@ public class InventoryValuationService : IInventoryValuationService
         Guid referenceId,
         string? lotNumber = null,
         string? serialNumber = null,
-        DateTime? expirationDate = null)
+        DateTime? expirationDate = null,
+        Guid? reversalSourceId = null)
     {
         if (quantityDelta == 0)
             throw new ArgumentOutOfRangeException(nameof(quantityDelta), "An adjustment quantity cannot be zero.");
@@ -917,6 +918,7 @@ public class InventoryValuationService : IInventoryValuationService
 
         decimal totalValue;
         decimal movementUnitCost;
+        Guid? movementCostLayerId = null;
         if (quantityDelta > 0)
         {
             movementUnitCost = item.ValuationMethod == ValuationMethod.StandardCost
@@ -927,10 +929,11 @@ public class InventoryValuationService : IInventoryValuationService
             totalValue = quantity * movementUnitCost;
             if (item.ValuationMethod == ValuationMethod.FIFO)
             {
-                await CreateFIFOLayerAsync(
+                var layer = await CreateFIFOLayerAsync(
                     inventoryItemId, warehouseId, locationId, quantity, movementUnitCost,
                     ReferenceType.Adjustment.ToString(), referenceNumber, referenceId,
                     lotNumber, expirationDate);
+                movementCostLayerId = layer.Id;
             }
             balance.QuantityOnHand += quantity;
             balance.TotalValue += totalValue;
@@ -941,6 +944,17 @@ public class InventoryValuationService : IInventoryValuationService
             {
                 case ValuationMethod.FIFO:
                 {
+                    if (reversalSourceId.HasValue)
+                    {
+                        var reversal = await ConsumeAdjustmentReversalLayersAsync(
+                            inventoryItemId, warehouseId, locationId, quantity,
+                            reversalSourceId.Value, unitCost, lotNumber);
+                        totalValue = reversal.TotalCost;
+                        movementUnitCost = totalValue / quantity;
+                        movementCostLayerId = reversal.CostLayerId;
+                        break;
+                    }
+
                     var activeLayerQuantity = await _unitOfWork.Repository<InventoryLayer>()
                         .GetQueryable(value => value.TenantId == _currentUserProvider.TenantId &&
                             value.InventoryItemId == inventoryItemId && value.WarehouseId == warehouseId &&
@@ -998,7 +1012,53 @@ public class InventoryValuationService : IInventoryValuationService
         // This path mutates the balance before recording its immutable movement.
         movement.RunningBalance = balance.QuantityOnHand;
         movement.RunningValue = balance.TotalValue;
+        movement.CostLayerId = movementCostLayerId;
         return totalValue;
+    }
+
+    private async Task<(decimal TotalCost, Guid? CostLayerId)> ConsumeAdjustmentReversalLayersAsync(
+        Guid inventoryItemId,
+        Guid warehouseId,
+        Guid locationId,
+        decimal quantity,
+        Guid reversalSourceId,
+        decimal unitCost,
+        string? lotNumber)
+    {
+        var normalizedLot = string.IsNullOrWhiteSpace(lotNumber) ? null : lotNumber.Trim();
+        var layers = await _unitOfWork.Repository<InventoryLayer>()
+            .GetQueryable(value => value.TenantId == _currentUserProvider.TenantId &&
+                value.InventoryItemId == inventoryItemId && value.WarehouseId == warehouseId &&
+                value.LocationId == locationId && value.SourceType == ReferenceType.Adjustment.ToString() &&
+                value.SourceId == reversalSourceId && value.UnitCost == unitCost &&
+                !value.IsFullyConsumed && value.RemainingQuantity > 0)
+            .OrderBy(value => value.LayerDate)
+            .ThenBy(value => value.CreatedAt)
+            .ToListAsync();
+        layers = layers.Where(value => string.Equals(value.LotNumber?.Trim(), normalizedLot,
+            StringComparison.OrdinalIgnoreCase)).ToList();
+
+        var available = layers.Sum(value => value.RemainingQuantity);
+        if (available < quantity)
+            throw new InvalidOperationException(
+                $"The original FIFO adjustment layer has only {available} units remaining; {quantity} units cannot be reversed without consuming unrelated stock.");
+
+        var remaining = quantity;
+        var totalCost = 0m;
+        Guid? firstLayerId = null;
+        foreach (var layer in layers)
+        {
+            if (remaining <= 0) break;
+            var consumed = Math.Min(remaining, layer.RemainingQuantity);
+            firstLayerId ??= layer.Id;
+            layer.RemainingQuantity -= consumed;
+            layer.RemainingValue = layer.RemainingQuantity * layer.UnitCost;
+            layer.IsFullyConsumed = layer.RemainingQuantity == 0;
+            totalCost += consumed * layer.UnitCost;
+            remaining -= consumed;
+        }
+
+        return (totalCost, firstLayerId);
     }
 
     /// <summary>

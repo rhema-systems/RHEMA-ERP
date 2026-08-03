@@ -1231,7 +1231,8 @@ public class StockAdjustmentService : IStockAdjustmentService
             adjustment.AdjustmentNumber,
             adjustment.Id,
             item.LotNumber,
-            item.SerialNumber);
+            item.SerialNumber,
+            reversalSourceId: reverse && item.AdjustmentQuantity > 0 ? adjustment.Id : null);
         if (decimal.Round(authoritativeValue, 2) != decimal.Round(Math.Abs(item.AdjustmentValue), 2))
             throw new InvalidOperationException(
                 $"The authoritative valuation for {inventoryItem.ItemCode} changed after the adjustment was drafted. Refresh the adjustment before posting.");

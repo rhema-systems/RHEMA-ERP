@@ -189,6 +189,33 @@ public sealed class InventoryTrackingControlServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Availability_validation_does_not_aggregate_other_lots_in_the_same_bin()
+    {
+        var category = Category("LOT-AVAILABILITY", configure: value => value.DefaultLotTracking = true);
+        var item = Item(category.Id);
+        var warehouse = Warehouse();
+        var location = new WarehouseLocation
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, WarehouseId = warehouse.Id,
+            Warehouse = warehouse, LocationCode = "LOT-BIN", Name = "Lot bin", IsActive = true
+        };
+        var selected = Event(item.Id, warehouse.Id, InventoryTrackingDirection.Receipt,
+            "lot-selected", "LOT-A", null, 2m);
+        selected.LocationId = location.Id;
+        var other = Event(item.Id, warehouse.Id, InventoryTrackingDirection.Receipt,
+            "lot-other", "LOT-B", null, 10m);
+        other.LocationId = location.Id;
+        await _context.AddRangeAsync(category, item, warehouse, location, selected, other);
+        await _context.SaveChangesAsync();
+
+        var action = () => _service.ValidateAvailabilityAsync(
+            item.Id, warehouse.Id, location.Id, 3m, lotNumber: "lot-a");
+
+        await action.Should().ThrowAsync<InventoryTrackingControlException>()
+            .Where(value => value.Code == "INV_TRACKING_LOT_INSUFFICIENT");
+    }
+
+    [Fact]
     public async Task Reads_are_tenant_scoped_and_external_actors_are_denied()
     {
         var category = Category("TENANT");

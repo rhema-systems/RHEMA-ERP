@@ -895,15 +895,16 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         EnsureIssueActor();
         var requisition = await _requisitionRepository.GetWithItemsAsync(requisitionId)
             ?? throw new InventoryIssueNotFoundException("The requisition was not found in the current tenant.");
-        var isReceiver = await IssueVouchers.AsNoTracking().AnyAsync(value =>
-            value.TenantId == _currentUserProvider.TenantId && value.InventoryRequisitionId == requisitionId &&
-            value.ReceiverUserId == _currentUserProvider.UserId && !value.IsDeleted, cancellationToken);
-        if (!isReceiver && !await CanReadIssueEvidenceAsync(requisition))
-            throw new InventoryIssueAuthorizationException("You cannot view issue vouchers outside your assigned warehouse location.");
-        var ids = await IssueVouchers.AsNoTracking()
+        var canReadAll = await CanReadIssueEvidenceAsync(requisition);
+        var query = IssueVouchers.AsNoTracking()
             .Where(value => value.TenantId == _currentUserProvider.TenantId &&
-                            value.InventoryRequisitionId == requisitionId && !value.IsDeleted)
+                            value.InventoryRequisitionId == requisitionId && !value.IsDeleted);
+        if (!canReadAll)
+            query = query.Where(value => value.ReceiverUserId == _currentUserProvider.UserId);
+        var ids = await query
             .OrderByDescending(value => value.IssuedAtUtc).Select(value => value.Id).ToListAsync(cancellationToken);
+        if (!canReadAll && ids.Count == 0)
+            throw new InventoryIssueAuthorizationException("You cannot view issue vouchers outside your assigned warehouse location.");
         var result = new List<InventoryIssueVoucherDto>(ids.Count);
         foreach (var voucherId in ids)
         {

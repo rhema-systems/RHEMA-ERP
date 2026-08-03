@@ -5,6 +5,9 @@ namespace ErpSystem.Core.Interfaces.Inventory;
 public interface IInventoryTrackingControlService
 {
     Task<InventoryTrackingRequirementsDto> GetRequirementsAsync(Guid inventoryItemId, CancellationToken cancellationToken = default);
+    Task ValidateAvailabilityAsync(Guid inventoryItemId, Guid warehouseId, Guid locationId, decimal quantity,
+        string? lotNumber = null, string? batchNumber = null, string? serialNumber = null,
+        CancellationToken cancellationToken = default);
     Task ValidateAsync(InventoryTrackingMutationRequest request, CancellationToken cancellationToken = default);
     Task StageEventAsync(InventoryTrackingMutationRequest request, CancellationToken cancellationToken = default);
     Task<InventoryTrackingExceptionDto> RegisterApprovedExceptionAsync(RegisterInventoryTrackingExceptionRequest request, string correlationId, CancellationToken cancellationToken = default);

@@ -96,6 +96,64 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
         await ValidateCoreAsync(request, stage: false, cancellationToken);
     }
 
+    /// <summary>
+    /// Validates exact tracked-stock availability without applying transaction-specific
+    /// expiry, FIFO, exception, or permission rules. The calling domain service must
+    /// authorize its own operation before invoking this shared control.
+    /// </summary>
+    public async Task ValidateAvailabilityAsync(
+        Guid inventoryItemId,
+        Guid warehouseId,
+        Guid locationId,
+        decimal quantity,
+        string? lotNumber = null,
+        string? batchNumber = null,
+        string? serialNumber = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureActor();
+        if (quantity <= 0)
+            throw new InventoryTrackingControlException("INV_TRACKING_QUANTITY_INVALID", "Tracking quantity must be greater than zero.");
+
+        lotNumber = NormalizeValue(lotNumber);
+        batchNumber = NormalizeValue(batchNumber);
+        serialNumber = NormalizeValue(serialNumber);
+        var requirements = await GetRequirementsAsync(inventoryItemId, cancellationToken);
+        await EnsureWarehouseAndLocationAsync(warehouseId, locationId, cancellationToken);
+        Require(lotNumber, requirements.RequiresLot, "INV_TRACKING_LOT_REQUIRED", "A lot number is required by the item's category tracking policy.");
+        Require(batchNumber, requirements.RequiresBatch, "INV_TRACKING_BATCH_REQUIRED", "A batch number is required by the item's category tracking policy.");
+        Require(serialNumber, requirements.RequiresSerial, "INV_TRACKING_SERIAL_REQUIRED", "A serial number is required by the item's category tracking policy.");
+        if (requirements.RequiresSerial && quantity != 1m)
+            throw new InventoryTrackingControlException("INV_TRACKING_SERIAL_QUANTITY_INVALID", "Serial-tracked inventory must be identified as one unit per tracking line.");
+
+        var requiresCanonicalHistory = requirements.RequiresLot || requirements.RequiresBatch || requirements.RequiresSerial ||
+            requirements.RequiresManufactureDate || requirements.RequiresExpiryDate || requirements.EnforcesFifoIssue ||
+            lotNumber is not null || batchNumber is not null || serialNumber is not null;
+        if (!requiresCanonicalHistory) return;
+        if (lotNumber is null && batchNumber is null && serialNumber is null)
+            throw new InventoryTrackingControlException("INV_TRACKING_IDENTIFIER_REQUIRED",
+                "Tracked stock must be identified by an exact lot, batch, or serial number.");
+
+        var persisted = await Events
+            .Where(value => value.TenantId == TenantId && value.InventoryItemId == inventoryItemId && !value.IsDeleted)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var scoped = persisted.Concat(_pendingEvents.Where(value => value.InventoryItemId == inventoryItemId))
+            .Where(value => value.WarehouseId == warehouseId && value.LocationId == locationId &&
+                (lotNumber is null || Same(value.LotNumber, lotNumber)) &&
+                (batchNumber is null || Same(value.BatchNumber, batchNumber)) &&
+                (serialNumber is null || Same(value.SerialNumber, serialNumber)))
+            .ToList();
+        if (!scoped.Any(value => IsInbound(value.Direction)))
+            throw new InventoryTrackingControlException("INV_TRACKING_LOT_NOT_FOUND",
+                "The requested lot, batch, or serial has no traceable inbound history in the exact warehouse location.");
+
+        var available = Balance(scoped);
+        if (available < quantity)
+            throw new InventoryTrackingControlException("INV_TRACKING_LOT_INSUFFICIENT",
+                $"The selected tracked stock has {available.ToString(CultureInfo.InvariantCulture)} units available in the exact location, below the requested {quantity.ToString(CultureInfo.InvariantCulture)}.");
+    }
+
     public async Task StageEventAsync(InventoryTrackingMutationRequest request, CancellationToken cancellationToken = default)
     {
         await ValidateCoreAsync(request, stage: true, cancellationToken);
