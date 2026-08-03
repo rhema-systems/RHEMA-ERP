@@ -151,6 +151,117 @@ public sealed class InventoryTransferControlTests : IDisposable
         capacity.Should().Contain("location.MaxItems");
     }
 
+    [Fact]
+    public void Transfer_receipt_rejects_duplicate_line_ids_before_creating_the_append_only_action()
+    {
+        var source = ReadTransferService();
+        var receiveStart = source.IndexOf("public async Task<bool> ReceiveAsync", StringComparison.Ordinal);
+        var receiveEnd = source.IndexOf("private async Task<bool> ReceiveCoreAsync", receiveStart, StringComparison.Ordinal);
+        var receive = source[receiveStart..receiveEnd];
+
+        receive.Should().Contain("receivedItems.Select(value => value.Id).Distinct().Count() != receivedItems.Count");
+        receive.Should().Contain("throw new InvalidOperationException(\"Duplicate transfer receipt line IDs are not allowed.\")");
+        receive.IndexOf("Duplicate transfer receipt line IDs", StringComparison.Ordinal)
+            .Should().BeLessThan(receive.IndexOf("AddActionAsync", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Transfer_receipt_keeps_the_dispatch_tracking_identity_immutable()
+    {
+        var source = ReadTransferService();
+        var receiveStart = source.IndexOf("public async Task<bool> ReceiveAsync", StringComparison.Ordinal);
+        var receiveEnd = source.IndexOf("public async Task<bool> ResolveDiscrepanciesAsync", receiveStart, StringComparison.Ordinal);
+        var receive = source[receiveStart..receiveEnd];
+        var guardStart = source.IndexOf("private static void EnsureReceiptTrackingIdentity", StringComparison.Ordinal);
+        var guardEnd = source.IndexOf("private async Task<string> GenerateTransferNumberAsync", guardStart, StringComparison.Ordinal);
+        var guard = source[guardStart..guardEnd];
+
+        receive.Should().Contain("EnsureReceiptTrackingIdentity(item, line);");
+        receive.IndexOf("EnsureReceiptTrackingIdentity", StringComparison.Ordinal)
+            .Should().BeLessThan(receive.IndexOf("AddActionAsync", StringComparison.Ordinal));
+        receive.Should().NotContain("item.LotNumber = receivedLine.LotNumber");
+        receive.Should().NotContain("item.BatchNumber = receivedLine.BatchNumber");
+        receive.Should().NotContain("item.SerialNumber = receivedLine.SerialNumber");
+        guard.Should().Contain("TrackingValueChanged(receipt.LotNumber, item.LotNumber)");
+        guard.Should().Contain("TrackingValueChanged(receipt.BatchNumber, item.BatchNumber)");
+        guard.Should().Contain("TrackingValueChanged(receipt.SerialNumber, item.SerialNumber)");
+        guard.Should().Contain("receipt.InventoryTrackingExceptionId != item.InventoryTrackingExceptionId");
+    }
+
+    [Fact]
+    public void Transfer_receipt_tracking_guard_accepts_equivalent_formatting_and_rejects_replacement()
+    {
+        var guard = typeof(ErpSystem.Core.Services.Inventory.InventoryTransferService)
+            .GetMethod("EnsureReceiptTrackingIdentity", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var exceptionId = Guid.NewGuid();
+        var item = new InventoryTransferItem
+        {
+            LotNumber = "LOT-01",
+            BatchNumber = "BATCH-01",
+            SerialNumber = "SERIAL-01",
+            ManufactureDate = DateTime.SpecifyKind(new DateTime(2026, 1, 1), DateTimeKind.Utc),
+            ExpiryDate = DateTime.SpecifyKind(new DateTime(2027, 1, 1), DateTimeKind.Utc),
+            InventoryTrackingExceptionId = exceptionId
+        };
+        var equivalent = new InventoryTransferItemDto
+        {
+            LotNumber = " lot-01 ",
+            BatchNumber = "batch-01",
+            SerialNumber = "SERIAL-01",
+            ManufactureDate = item.ManufactureDate,
+            ExpiryDate = item.ExpiryDate,
+            InventoryTrackingExceptionId = exceptionId
+        };
+
+        Action equivalentAction = () => guard.Invoke(null, new object[] { item, equivalent });
+        equivalentAction.Should().NotThrow();
+
+        equivalent.SerialNumber = "SERIAL-02";
+        Action replacementAction = () => guard.Invoke(null, new object[] { item, equivalent });
+        replacementAction.Should().Throw<TargetInvocationException>()
+            .Which.InnerException.Should().BeOfType<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void Discrepancy_restoration_revalidates_capacity_and_stages_exact_tracking_before_stock()
+    {
+        var source = ReadTransferService();
+        var start = source.IndexOf("public async Task<bool> ResolveDiscrepanciesAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("public async Task<bool> CloseAsync", start, StringComparison.Ordinal);
+        var resolution = source[start..end];
+
+        resolution.Should().Contain("await RevalidateLocationCapacityAsync(");
+        resolution.Should().Contain("\"discrepancy resolution\"");
+        resolution.IndexOf("RevalidateLocationCapacityAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(resolution.IndexOf("AddActionAsync", StringComparison.Ordinal));
+        resolution.Should().Contain("Direction = InventoryTrackingDirection.TransferIn");
+        resolution.Should().Contain(":discrepancy:{discrepancy.Id:N}:{resolutionCode.ToLowerInvariant()}");
+        resolution.Should().Contain("LotNumber = item.LotNumber");
+        resolution.Should().Contain("SerialNumber = item.SerialNumber");
+        resolution.IndexOf("_trackingControls.StageEventAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(resolution.IndexOf("quantityRecord.CurrentStock += quantity", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Shipment_reversal_restores_the_exact_tracking_ledger_before_stock()
+    {
+        var source = ReadTransferService();
+        var start = source.IndexOf("public async Task<bool> ReverseShipmentAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("#region Private Methods", start, StringComparison.Ordinal);
+        var reversal = source[start..end];
+
+        reversal.Should().Contain("Direction = InventoryTrackingDirection.TransferIn");
+        reversal.Should().Contain(":shipment-reversal\"");
+        reversal.Should().Contain("LotNumber = item.LotNumber");
+        reversal.Should().Contain("BatchNumber = item.BatchNumber");
+        reversal.Should().Contain("SerialNumber = item.SerialNumber");
+        reversal.IndexOf("_trackingControls.StageEventAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(reversal.IndexOf("sourceQty.CurrentStock += item.ShippedQuantity", StringComparison.Ordinal));
+    }
+
+    private static string ReadTransferService() => File.ReadAllText(Path.Combine(
+        FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory", "InventoryTransferService.cs"));
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

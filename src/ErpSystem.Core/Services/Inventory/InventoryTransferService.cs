@@ -1018,6 +1018,9 @@ public class InventoryTransferService : IInventoryTransferService
                 ?? throw new ArgumentException($"Transfer {transferId} not found");
             await EnsureTransferAccessAsync(transfer, TransferAccessDirection.Destination, "receive");
 
+            if (receivedItems is not null && receivedItems.Select(value => value.Id).Distinct().Count() != receivedItems.Count)
+                throw new InvalidOperationException("Duplicate transfer receipt line IDs are not allowed.");
+
             var payloadHash = Hash(JsonSerializer.Serialize(new
             {
                 transferId,
@@ -1060,6 +1063,7 @@ public class InventoryTransferService : IInventoryTransferService
             foreach (var line in normalizedLines)
             {
                 var item = transfer.Items.Single(value => value.Id == line.Id);
+                EnsureReceiptTrackingIdentity(item, line);
                 var outstanding = item.ShippedQuantity - item.ReceivedQuantity - item.DamagedQuantity - item.ShortageQuantity;
                 var accounted = line.ReceivedQuantity + line.DamagedQuantity + line.ShortageQuantity;
                 if (line.ReceivedQuantity < 0 || line.DamagedQuantity < 0 || line.ShortageQuantity < 0 || accounted > outstanding)
@@ -1151,12 +1155,6 @@ public class InventoryTransferService : IInventoryTransferService
             var shortageQty = receivedLine.ShortageQuantity;
             var accountedQty = receivedQty + damagedQty + shortageQty;
             item.DestinationLocationId = receivedLine.DestinationLocationId ?? item.DestinationLocationId;
-            item.LotNumber = receivedLine.LotNumber ?? item.LotNumber;
-            item.BatchNumber = receivedLine.BatchNumber ?? item.BatchNumber;
-            item.SerialNumber = receivedLine.SerialNumber ?? item.SerialNumber;
-            item.ManufactureDate = receivedLine.ManufactureDate ?? item.ManufactureDate;
-            item.ExpiryDate = receivedLine.ExpiryDate ?? item.ExpiryDate;
-            item.InventoryTrackingExceptionId = receivedLine.InventoryTrackingExceptionId ?? item.InventoryTrackingExceptionId;
 
             WarehouseLocation? sourceLocation = null;
             if (item.SourceLocationId.HasValue && item.SourceLocationId.Value != Guid.Empty)
@@ -1344,6 +1342,21 @@ public class InventoryTransferService : IInventoryTransferService
                 throw new ArgumentException("One or more open discrepancies were not found in the current tenant transfer.");
             var resolutionEvidence = await ValidateTransferEvidenceAsync(request.Evidence, true);
             var correlationId = Normalize(request.CorrelationId, 100) ?? $"transfer-discrepancy:{transfer.Id:N}:{Guid.NewGuid():N}";
+            if (resolutionCode is InventoryTransferDiscrepancyResolutionCodes.ReturnedToSource or InventoryTransferDiscrepancyResolutionCodes.ReplacementReceived)
+            {
+                var toSource = resolutionCode == InventoryTransferDiscrepancyResolutionCodes.ReturnedToSource;
+                await RevalidateLocationCapacityAsync(
+                    transfer.TenantId,
+                    discrepancies
+                        .Select(discrepancy => new LocationCapacityAddition(
+                            toSource ? transfer.SourceWarehouseId : transfer.DestinationWarehouseId,
+                            toSource ? discrepancy.InventoryTransferItem.SourceLocationId : discrepancy.InventoryTransferItem.DestinationLocationId,
+                            discrepancy.InventoryTransferItem.InventoryItemId,
+                            discrepancy.DamagedQuantity + discrepancy.ShortageQuantity))
+                        .Where(value => value.LocationId.HasValue && value.LocationId.Value != Guid.Empty)
+                        .ToList(),
+                    "discrepancy resolution");
+            }
             var action = await AddActionAsync(transfer, InventoryTransferActionType.DiscrepancyResolved, userId, key, payloadHash, correlationId,
                 request.ResolutionNotes, discrepancies.GroupBy(value => value.InventoryTransferItemId)
                     .Select(values => new TransferActionLineInput(values.Key, 0, 0, values.Sum(value => value.DamagedQuantity), values.Sum(value => value.ShortageQuantity))).ToList(),
@@ -1375,6 +1388,27 @@ public class InventoryTransferService : IInventoryTransferService
                         };
                         await _warehouseQuantityRepository.AddAsync(quantityRecord);
                     }
+                    var trackingSequence = item.TrackingSequence + 1;
+                    await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+                    {
+                        InventoryItemId = item.InventoryItemId,
+                        WarehouseId = inventoryWarehouseId,
+                        LocationId = locationId,
+                        Direction = InventoryTrackingDirection.TransferIn,
+                        Quantity = quantity,
+                        ReferenceType = "InventoryTransfer",
+                        ReferenceNumber = transfer.TransferNumber,
+                        ReferenceId = transfer.Id,
+                        ReferenceLineId = item.Id,
+                        EventKey = $"transfer:{transfer.Id:N}:{item.Id:N}:discrepancy:{discrepancy.Id:N}:{resolutionCode.ToLowerInvariant()}",
+                        LotNumber = item.LotNumber,
+                        BatchNumber = item.BatchNumber,
+                        SerialNumber = item.SerialNumber,
+                        ManufactureDate = item.ManufactureDate,
+                        ExpiryDate = item.ExpiryDate,
+                        TrackingExceptionId = item.InventoryTrackingExceptionId,
+                        CorrelationId = correlationId
+                    });
                     quantityRecord.CurrentStock += quantity;
                     quantityRecord.AvailableStock += quantity;
                     quantityRecord.LastMovementDate = DateTime.UtcNow;
@@ -1401,10 +1435,18 @@ public class InventoryTransferService : IInventoryTransferService
                         ReferenceNumber = transfer.TransferNumber,
                         WarehouseId = inventoryWarehouseId,
                         LocationId = locationId,
+                        LotNumber = item.LotNumber,
+                        BatchNumber = item.BatchNumber,
+                        SerialNumber = item.SerialNumber,
+                        ManufactureDate = item.ManufactureDate,
+                        ExpirationDate = item.ExpiryDate,
+                        InventoryTrackingExceptionId = item.InventoryTrackingExceptionId,
                         Notes = $"Controlled discrepancy resolution {action.Sequence}: {resolutionCode}",
                         ProcessedById = userId,
                         RunningBalance = quantityRecord.CurrentStock
                     });
+                    item.TrackingSequence = trackingSequence;
+                    await _transferItemRepository.UpdateAsync(item);
                 }
 
                 discrepancy.Status = InventoryTransferDiscrepancyStatus.Resolved;
@@ -1645,6 +1687,28 @@ public class InventoryTransferService : IInventoryTransferService
 
             var effectiveSourceWarehouseId = sourceLocation?.InventoryWarehouseId ?? transfer.SourceWarehouseId;
 
+            var trackingSequence = item.TrackingSequence + 1;
+            await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+            {
+                InventoryItemId = item.InventoryItemId,
+                WarehouseId = effectiveSourceWarehouseId,
+                LocationId = item.SourceLocationId,
+                Direction = InventoryTrackingDirection.TransferIn,
+                Quantity = item.ShippedQuantity,
+                ReferenceType = "InventoryTransfer",
+                ReferenceNumber = transfer.TransferNumber,
+                ReferenceId = transfer.Id,
+                ReferenceLineId = item.Id,
+                EventKey = $"transfer:{transfer.Id:N}:{item.Id:N}:shipment-reversal",
+                LotNumber = item.LotNumber,
+                BatchNumber = item.BatchNumber,
+                SerialNumber = item.SerialNumber,
+                ManufactureDate = item.ManufactureDate,
+                ExpiryDate = item.ExpiryDate,
+                TrackingExceptionId = item.InventoryTrackingExceptionId,
+                CorrelationId = correlationId
+            });
+
             var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveSourceWarehouseId, item.InventoryItemId);
             if (sourceQty != null)
             {
@@ -1675,6 +1739,12 @@ public class InventoryTransferService : IInventoryTransferService
                 ReferenceId = transfer.Id,
                 WarehouseId = effectiveSourceWarehouseId,
                 LocationId = item.SourceLocationId,
+                LotNumber = item.LotNumber,
+                BatchNumber = item.BatchNumber,
+                SerialNumber = item.SerialNumber,
+                ManufactureDate = item.ManufactureDate,
+                ExpirationDate = item.ExpiryDate,
+                InventoryTrackingExceptionId = item.InventoryTrackingExceptionId,
                 Notes = $"Controlled shipment reversal {action.Sequence}: {normalizedReason}",
                 ProcessedById = userId,
                 RunningBalance = sourceQty?.CurrentStock ?? 0,
@@ -1685,6 +1755,7 @@ public class InventoryTransferService : IInventoryTransferService
 
             // Reset shipped quantity
             item.ShippedQuantity = 0;
+            item.TrackingSequence = trackingSequence;
             await _transferItemRepository.UpdateAsync(item);
         }
 
@@ -1720,6 +1791,12 @@ public class InventoryTransferService : IInventoryTransferService
         decimal ReceivedQuantity,
         decimal DamagedQuantity,
         decimal ShortageQuantity);
+
+    private sealed record LocationCapacityAddition(
+        Guid WarehouseId,
+        Guid? LocationId,
+        Guid InventoryItemId,
+        decimal Quantity);
 
     private async Task<bool> ExecuteControlledMutationAsync(Func<Task<bool>> operation)
     {
@@ -2155,37 +2232,49 @@ public class InventoryTransferService : IInventoryTransferService
         InventoryTransfer transfer,
         IReadOnlyCollection<InventoryTransferItemDto> receivedLines)
     {
-        var incomingByLocation = receivedLines
-            .Where(line => line.ReceivedQuantity > 0)
-            .Select(line =>
-            {
-                var transferItem = transfer.Items.Single(item => item.Id == line.Id);
-                return new
+        await RevalidateLocationCapacityAsync(
+            transfer.TenantId,
+            receivedLines
+                .Where(line => line.ReceivedQuantity > 0)
+                .Select(line =>
                 {
-                    LocationId = line.DestinationLocationId ?? transferItem.DestinationLocationId,
-                    transferItem.InventoryItemId,
-                    Quantity = line.ReceivedQuantity
-                };
-            })
-            .Where(value => value.LocationId.HasValue && value.LocationId.Value != Guid.Empty)
-            .GroupBy(value => value.LocationId!.Value)
+                    var transferItem = transfer.Items.Single(item => item.Id == line.Id);
+                    return new LocationCapacityAddition(
+                        transfer.DestinationWarehouseId,
+                        line.DestinationLocationId ?? transferItem.DestinationLocationId,
+                        transferItem.InventoryItemId,
+                        line.ReceivedQuantity);
+                })
+                .Where(value => value.LocationId.HasValue && value.LocationId.Value != Guid.Empty)
+                .ToList(),
+            "receipt");
+    }
+
+    private async Task RevalidateLocationCapacityAsync(
+        Guid tenantId,
+        IReadOnlyCollection<LocationCapacityAddition> additions,
+        string operation)
+    {
+        var incomingByLocation = additions
+            .Where(value => value.Quantity > 0 && value.LocationId.HasValue && value.LocationId.Value != Guid.Empty)
+            .GroupBy(value => new { value.WarehouseId, LocationId = value.LocationId!.Value })
             .ToList();
 
         foreach (var locationGroup in incomingByLocation)
         {
             var location = await EnsureLocationBelongsToWarehouseAsync(
-                locationGroup.Key, transfer.DestinationWarehouseId, "DestinationLocationId");
+                locationGroup.Key.LocationId, locationGroup.Key.WarehouseId, "LocationId");
             if (!location.IsActive)
-                throw new InvalidOperationException("The destination location is inactive and cannot receive stock.");
+                throw new InvalidOperationException($"The location is inactive and cannot receive stock during {operation}.");
 
             var incoming = locationGroup.GroupBy(value => value.InventoryItemId)
                 .Select(group => new { InventoryItemId = group.Key, Quantity = group.Sum(value => value.Quantity) })
                 .ToList();
             if (location.DedicatedItemId.HasValue && incoming.Any(value => value.InventoryItemId != location.DedicatedItemId.Value))
-                throw new InvalidOperationException("The destination location is dedicated to another inventory item.");
+                throw new InvalidOperationException($"The location is dedicated to another inventory item and cannot accept this {operation}.");
 
             var balances = await _unitOfWork.Repository<InventoryLocation>().GetQueryable(value =>
-                    value.TenantId == transfer.TenantId && value.LocationId == location.Id &&
+                    value.TenantId == tenantId && value.LocationId == location.Id &&
                     value.Quantity > 0 && !value.IsDeleted && !value.InventoryItem.IsDeleted)
                 .AsNoTracking()
                 .Select(value => new
@@ -2198,7 +2287,7 @@ public class InventoryTransferService : IInventoryTransferService
                 .ToListAsync();
             var incomingIds = incoming.Select(value => value.InventoryItemId).ToList();
             var incomingItems = await _unitOfWork.Repository<InventoryItem>().GetQueryable(value =>
-                    value.TenantId == transfer.TenantId && incomingIds.Contains(value.Id) && !value.IsDeleted)
+                    value.TenantId == tenantId && incomingIds.Contains(value.Id) && !value.IsDeleted)
                 .AsNoTracking()
                 .Select(value => new
                 {
@@ -2218,13 +2307,35 @@ public class InventoryTransferService : IInventoryTransferService
             var incomingSlots = incoming.Count(value => !stockedItemIds.Contains(value.InventoryItemId));
 
             if (location.MaxWeight.HasValue && usedWeight + incomingWeight > location.MaxWeight.Value)
-                throw new InvalidOperationException("The destination maximum weight would be exceeded at receipt.");
+                throw new InvalidOperationException($"The location maximum weight would be exceeded during {operation}.");
             if (location.MaxVolume.HasValue && usedVolume + incomingVolume > location.MaxVolume.Value)
-                throw new InvalidOperationException("The destination maximum volume would be exceeded at receipt.");
+                throw new InvalidOperationException($"The location maximum volume would be exceeded during {operation}.");
             if (location.MaxItems.HasValue && stockedItemIds.Count + incomingSlots > location.MaxItems.Value)
-                throw new InvalidOperationException("The destination maximum distinct-item capacity would be exceeded at receipt.");
+                throw new InvalidOperationException($"The location maximum distinct-item capacity would be exceeded during {operation}.");
         }
     }
+
+    private static void EnsureReceiptTrackingIdentity(
+        InventoryTransferItem item,
+        InventoryTransferItemDto receipt)
+    {
+        var changed = TrackingValueChanged(receipt.LotNumber, item.LotNumber) ||
+            TrackingValueChanged(receipt.BatchNumber, item.BatchNumber) ||
+            TrackingValueChanged(receipt.SerialNumber, item.SerialNumber) ||
+            TrackingDateChanged(receipt.ManufactureDate, item.ManufactureDate) ||
+            TrackingDateChanged(receipt.ExpiryDate, item.ExpiryDate) ||
+            (receipt.InventoryTrackingExceptionId.HasValue && receipt.InventoryTrackingExceptionId != item.InventoryTrackingExceptionId);
+        if (changed)
+            throw new InvalidOperationException("Receipt tracking identity must match the lot, batch, serial and tracking metadata captured at dispatch.");
+    }
+
+    private static bool TrackingValueChanged(string? supplied, string? dispatched) =>
+        !string.IsNullOrWhiteSpace(supplied) &&
+        !string.Equals(supplied.Trim(), dispatched?.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool TrackingDateChanged(DateTime? supplied, DateTime? dispatched) =>
+        supplied.HasValue &&
+        (!dispatched.HasValue || supplied.Value.ToUniversalTime() != dispatched.Value.ToUniversalTime());
 
     private async Task<string> GenerateTransferNumberAsync()
     {
