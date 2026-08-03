@@ -142,6 +142,38 @@ public sealed class VendorInvoiceMatchExceptionServiceTests
     }
 
     [Fact]
+    public async Task IdempotencyReplayIgnoresEvidenceAddedByCorrectiveCompletion()
+    {
+        await using var fixture = new Fixture(canManage: true);
+        var invoice = fixture.NewInvoice();
+        var purchaseOrder = fixture.NewPurchaseOrder();
+        invoice.PurchaseOrderId = purchaseOrder.Id;
+        var request = ValidRequest("replay-after-corrective-completion");
+        var existing = fixture.NewException(invoice, purchaseOrder, request);
+        existing.Evidence.Add(new VendorInvoiceMatchExceptionEvidence
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            MatchExceptionId = existing.Id,
+            RequirementKey = VendorInvoiceMatchExceptionRules.CorrectiveCompletionEvidenceKey,
+            ReferenceKind = VendorInvoiceMatchExceptionEvidenceKind.CentralDocument,
+            FileUploadRecordId = Guid.NewGuid(),
+            EvidenceReference = "Corrective action completion evidence",
+            EvidenceHash = new string('c', 64),
+            CreatedAt = DateTime.UtcNow.AddMinutes(1)
+        });
+        fixture.Context.AddRange(purchaseOrder, invoice, existing);
+        await fixture.Context.SaveChangesAsync();
+
+        var replay = await fixture.Service.RequestAsync(
+            invoice.Id,
+            request,
+            "correlation-after-corrective-completion");
+
+        replay.Id.Should().Be(existing.Id);
+    }
+
+    [Fact]
     public async Task IdempotencyReplayForSameInvoiceRejectsChangedRequestPayload()
     {
         await using var fixture = new Fixture(canManage: true);

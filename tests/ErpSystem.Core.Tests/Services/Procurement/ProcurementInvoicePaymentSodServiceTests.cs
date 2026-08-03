@@ -80,6 +80,27 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
             !item.ProhibitedActorUserIds.Contains(readiness.CurrentActorUserId));
     }
 
+    [Fact]
+    public async Task QueueReadinessUsesOneCoverageEvaluationForTheRequestedPage()
+    {
+        await using var fixture = await Fixture.CreateAsync(sameActor: false);
+
+        var readiness = await fixture.Service.GetQueueReadinessAsync(
+            new[] { fixture.PaymentId, fixture.PaymentId },
+            Array.Empty<Guid>(),
+            "tdc0506-paged-queue");
+
+        readiness.Payments.Should().ContainSingle();
+        readiness.Payments[fixture.PaymentId].CanApprove.Should().BeTrue();
+        fixture.SodGuard.Verify(service => service.GetCoverageAsync(
+            It.IsAny<DateTime>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        fixture.SodGuard.Verify(service => service.CheckAsync(
+            It.IsAny<ProcurementSodGuardRequest>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly ApplicationDbContext _context;
@@ -91,6 +112,7 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
             ProcurementInvoicePaymentSodService service,
             Guid paymentId,
             Guid eventId,
+            Mock<IProcurementSodGuardService> sodGuard,
             List<ProcurementSodGuardRequest> enforcedRequests,
             List<ProcurementControlEventWriteRequest> events)
         {
@@ -99,6 +121,7 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
             Service = service;
             PaymentId = paymentId;
             EventId = eventId;
+            SodGuard = sodGuard;
             EnforcedRequests = enforcedRequests;
             Events = events;
         }
@@ -106,6 +129,7 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
         public ProcurementInvoicePaymentSodService Service { get; }
         public Guid PaymentId { get; }
         public Guid EventId { get; }
+        public Mock<IProcurementSodGuardService> SodGuard { get; }
         public List<ProcurementSodGuardRequest> EnforcedRequests { get; }
         public List<ProcurementControlEventWriteRequest> Events { get; }
 
@@ -208,6 +232,30 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
 
             var enforcedRequests = new List<ProcurementSodGuardRequest>();
             var sod = new Mock<IProcurementSodGuardService>();
+            sod.Setup(item => item.GetCoverageAsync(
+                    It.IsAny<DateTime>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementSodCoverageDto
+                {
+                    EvaluatedAtUtc = DateTime.UtcNow,
+                    CurrentActorUserId = actorId,
+                    IsComplete = true,
+                    PolicySetId = Guid.NewGuid(),
+                    PolicyCode = "TDC-PROCUREMENT",
+                    PolicyVersion = 1,
+                    Controls =
+                    [
+                        new ProcurementSodRequiredControlDto
+                        {
+                            Code = ProcurementInvoicePaymentSodRules.ControlCode,
+                            IsConfigured = true,
+                            IsEffective = true,
+                            IsHardStop = true,
+                            RuleId = Guid.NewGuid(),
+                            RuleCode = ProcurementInvoicePaymentSodRules.ControlCode
+                        }
+                    ]
+                });
             sod.Setup(item => item.EnforceAsync(
                     It.IsAny<ProcurementSodGuardRequest>(),
                     It.IsAny<string>(),
@@ -248,7 +296,7 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
                 sod.Object,
                 controlEvents.Object,
                 NullLogger<ProcurementInvoicePaymentSodService>.Instance);
-            return new Fixture(context, unitOfWork, service, paymentId, eventId, enforcedRequests, events);
+            return new Fixture(context, unitOfWork, service, paymentId, eventId, sod, enforcedRequests, events);
         }
 
         public async ValueTask DisposeAsync()

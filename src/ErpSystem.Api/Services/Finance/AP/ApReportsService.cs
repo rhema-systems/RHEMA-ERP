@@ -630,6 +630,22 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var paymentIds = allocations.Select(item => item.VendorPaymentId).Distinct().ToList();
             var allocationIds = allocations.Select(item => item.Id).Distinct().ToList();
+            var paymentAllocationHistory = paymentIds.Count == 0
+                ? new List<VendorPaymentAllocation>()
+                : await _unitOfWork.Repository<VendorPaymentAllocation>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted &&
+                        paymentIds.Contains(item.VendorPaymentId) &&
+                        item.AllocationDate.Date <= date)
+                    .Include(item => item.VendorPayment)
+                    .ToListAsync(cancellationToken);
+            var effectivePaymentSettlementById = GetEffectiveAllocationsAsOf(paymentAllocationHistory)
+                .GroupBy(item => item.VendorPaymentId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => RoundMoney(group.Sum(item =>
+                        item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount)));
             var postingEvents = await _unitOfWork.Repository<FinancePostingEvent>()
                 .GetQueryable(item =>
                     item.TenantId == tenantId &&
@@ -791,8 +807,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                             payment.Id);
                         if (paymentPosting == null) return 0m;
 
-                        var paymentSettlement = RoundMoney(
-                            payment.TotalAmount + payment.DiscountTaken + payment.WithholdingTaxAmount);
+                        var paymentSettlement = effectivePaymentSettlementById
+                            .GetValueOrDefault(payment.Id);
                         if (paymentSettlement <= 0m) return 0m;
                         var orderSettlement = RoundMoney(group.Sum(item =>
                             item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount));
@@ -2512,7 +2528,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ApprovedCount = rows.Count(row => row.Status == VendorInvoiceMatchExceptionStatus.Approved),
                 ExpiredCount = rows.Count(row => row.Status == VendorInvoiceMatchExceptionStatus.Expired),
                 OpenCorrectiveActionCount = rows.Count(row =>
-                    row.CorrectiveActionStatus == VendorInvoiceMatchCorrectiveActionStatus.Planned),
+                    VendorInvoiceMatchExceptionRules.CanCompleteCorrectiveAction(
+                        row.Status,
+                        row.CorrectiveActionStatus,
+                        row.ExpiresAtUtc,
+                        now)),
                 Rows = rows
             };
             await RecordReportAuditAsync(FinanceAuditEvents.ApMatchExceptionsGenerated, report, cancellationToken);

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Inventory;
@@ -112,8 +113,21 @@ public class FinanceApprovalsController : ControllerBase
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
     [HttpGet("pending")]
-    public async Task<ActionResult<IReadOnlyList<FinanceApprovalQueueItemDto>>> GetPending(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<FinanceApprovalQueueItemDto>>> GetPending(
+        CancellationToken cancellationToken,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 100)
     {
+        if (page < 1 || pageSize is < 1 or > 100)
+        {
+            return BadRequest("Page must be at least 1 and pageSize must be between 1 and 100.");
+        }
+        if (page > (int.MaxValue / pageSize) + 1)
+        {
+            return BadRequest("The requested approval page is outside the supported range.");
+        }
+        var skip = (page - 1) * pageSize;
+
         var currentUserId = GetCurrentUserId();
         if (!currentUserId.HasValue)
         {
@@ -129,12 +143,68 @@ public class FinanceApprovalsController : ControllerBase
         var canRejectByPermission = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.WorkflowReject)).Succeeded;
 
-        var approvals = await QueryPendingApprovals(tenantId)
+        var currentRoles = roleSet.ToArray();
+        var pageRows = await QueryPendingApprovals(tenantId)
+            .Where(approval =>
+                approval.ApproverId == currentUserId.Value ||
+                (approval.ApproverRole != null && currentRoles.Contains(approval.ApproverRole)))
             .AsNoTracking()
+            .OrderBy(approval => approval.StepInstance.WorkflowInstance.StartedDate ??
+                                 approval.StepInstance.WorkflowInstance.CreatedDate)
+            .ThenBy(approval => approval.Id)
+            .Skip(skip)
+            .Take(pageSize + 1)
             .ToListAsync(cancellationToken);
+        Response.Headers["X-Page"] = page.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Response.Headers["X-Page-Size"] = pageSize.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Response.Headers["X-Has-More"] = (pageRows.Count > pageSize).ToString().ToLowerInvariant();
+        var approvals = pageRows
+            .Take(pageSize)
+            .Where(approval => CanActOnApproval(approval, currentUserId.Value, roleSet))
+            .Where(approval => IsFinanceEntity(
+                approval.StepInstance.WorkflowInstance.EntityType.Code ??
+                approval.StepInstance.WorkflowInstance.EntityType.Name))
+            .ToList();
+
+        ProcurementInvoicePaymentSodQueueReadinessDto? queueReadiness = null;
+        string? queueReadinessFailure = null;
+        if (canApproveApPayments && _invoicePaymentSod != null)
+        {
+            var paymentIds = approvals
+                .Where(approval => Normalize(
+                    approval.StepInstance.WorkflowInstance.EntityType.Code ??
+                    approval.StepInstance.WorkflowInstance.EntityType.Name) == Normalize("VendorPayment"))
+                .Select(approval => approval.StepInstance.WorkflowInstance.EntityId)
+                .Distinct()
+                .ToArray();
+            var batchIds = approvals
+                .Where(approval => Normalize(
+                    approval.StepInstance.WorkflowInstance.EntityType.Code ??
+                    approval.StepInstance.WorkflowInstance.EntityType.Name) == Normalize("PaymentBatch"))
+                .Select(approval => approval.StepInstance.WorkflowInstance.EntityId)
+                .Distinct()
+                .ToArray();
+            if (paymentIds.Length > 0 || batchIds.Length > 0)
+            {
+                try
+                {
+                    queueReadiness = await _invoicePaymentSod.GetQueueReadinessAsync(
+                        paymentIds,
+                        batchIds,
+                        HttpContext.TraceIdentifier,
+                        cancellationToken);
+                }
+                catch (Exception exception)
+                {
+                    queueReadinessFailure = exception.Message;
+                    _logger.LogWarning(exception,
+                        "Unable to evaluate the paged Finance payment approval queue SOD readiness.");
+                }
+            }
+        }
 
         var results = new List<FinanceApprovalQueueItemDto>();
-        foreach (var approval in approvals.Where(a => CanActOnApproval(a, currentUserId.Value, roleSet)))
+        foreach (var approval in approvals)
         {
             var instance = approval.StepInstance.WorkflowInstance;
             var entityType = instance.EntityType.Code ?? instance.EntityType.Name;
@@ -165,18 +235,24 @@ public class FinanceApprovalsController : ControllerBase
                 }
                 else
                 {
-                    try
-                    {
-                        var sod = Normalize(entityType) == Normalize("VendorPayment")
-                            ? await _invoicePaymentSod.GetPaymentReadinessAsync(instance.EntityId, HttpContext.TraceIdentifier, cancellationToken)
-                            : await _invoicePaymentSod.GetBatchReadinessAsync(instance.EntityId, HttpContext.TraceIdentifier, cancellationToken);
-                        paymentSodBlocked = !sod.CanApprove;
-                        paymentSodReason = paymentSodBlocked ? sod.Message : null;
-                    }
-                    catch (Exception exception)
+                    ProcurementInvoicePaymentSodReadinessDto? sod = null;
+                    var readinessFound = Normalize(entityType) == Normalize("VendorPayment")
+                        ? queueReadiness?.Payments.TryGetValue(instance.EntityId, out sod) == true
+                        : queueReadiness?.Batches.TryGetValue(instance.EntityId, out sod) == true;
+                    if (!string.IsNullOrWhiteSpace(queueReadinessFailure))
                     {
                         paymentSodBlocked = true;
-                        paymentSodReason = exception.Message;
+                        paymentSodReason = queueReadinessFailure;
+                    }
+                    else if (!readinessFound || sod == null)
+                    {
+                        paymentSodBlocked = true;
+                        paymentSodReason = "The payment approval source was not found in the current tenant.";
+                    }
+                    else
+                    {
+                        paymentSodBlocked = !sod.CanApprove;
+                        paymentSodReason = paymentSodBlocked ? sod.Message : null;
                     }
                 }
             }

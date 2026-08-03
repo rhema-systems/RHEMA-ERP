@@ -31,3 +31,11 @@ public sealed class ProcurementInvoicePaymentSodInvoiceDto
     public bool ProcessorLineagePresent { get; init; }
     public bool ConflictsWithCurrentActor { get; init; }
 }
+
+public sealed class ProcurementInvoicePaymentSodQueueReadinessDto
+{
+    public IReadOnlyDictionary<Guid, ProcurementInvoicePaymentSodReadinessDto> Payments { get; init; } =
+        new Dictionary<Guid, ProcurementInvoicePaymentSodReadinessDto>();
+    public IReadOnlyDictionary<Guid, ProcurementInvoicePaymentSodReadinessDto> Batches { get; init; } =
+        new Dictionary<Guid, ProcurementInvoicePaymentSodReadinessDto>();
+}

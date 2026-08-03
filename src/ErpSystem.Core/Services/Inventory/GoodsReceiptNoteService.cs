@@ -500,22 +500,21 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                     ItemCode = item.ItemCode,
                     ItemName = item.Name,
                     OrderedQuantity =
-                        purchaseOrderItem.OrderedQuantity,
+                        purchaseOrderItem.OrderedQuantity * conversion,
                     ReceivedQuantity = itemDto.ReceivedQuantity * conversion,
                     PreviouslyReceiptedQuantitySnapshot =
-                        sourceLine.PreviouslyReceiptedQuantity,
+                        sourceLine.PreviouslyReceiptedQuantity * conversion,
                     ToleranceQuantitySnapshot =
-                        sourceLine.ToleranceQuantity,
+                        sourceLine.ToleranceQuantity * conversion,
                     MaximumReceivableQuantitySnapshot =
-                        sourceLine.MaximumReceivableQuantity,
+                        sourceLine.MaximumReceivableQuantity * conversion,
                     RemainingQuantityBeforeReceiptSnapshot =
-                        sourceLine.RemainingQuantity,
+                        sourceLine.RemainingQuantity * conversion,
                     ReceiptLineIntegrityHash =
                         sourceLine.IntegrityHash,
                     AcceptedQuantity = 0,
                     RejectedQuantity = 0,
-                    UnitOfMeasure =
-                        purchaseOrderItem.UnitOfMeasure,
+                    UnitOfMeasure = item.UnitOfMeasure,
                     UnitCost = unitCost / conversion,
                     LineValue =
                         itemDto.ReceivedQuantity * unitCost,
@@ -523,7 +522,7 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                     SerialNumber = itemDto.SerialNumber,
                     ExpiryDate = itemDto.ExpiryDate,
                     StorageLocationId =
-                        itemDto.StorageLocationId,
+                        itemDto.StorageLocationId ?? dto.ReceivingLocationId,
                     InspectionResult = InspectionResult.Pending,
                     Notes = itemDto.Notes
                 };

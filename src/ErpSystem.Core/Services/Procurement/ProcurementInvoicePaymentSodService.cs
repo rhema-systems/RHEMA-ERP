@@ -43,6 +43,67 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
         CancellationToken cancellationToken = default) =>
         EvaluateBatchAsync(batchId, correlationId, enforce: false, cancellationToken);
 
+    public async Task<ProcurementInvoicePaymentSodQueueReadinessDto> GetQueueReadinessAsync(
+        IReadOnlyCollection<Guid> paymentIds,
+        IReadOnlyCollection<Guid> batchIds,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureTenantAndActor();
+        _ = NormalizeCorrelation(correlationId);
+        var normalizedPaymentIds = paymentIds.Where(id => id != Guid.Empty).Distinct().ToArray();
+        var normalizedBatchIds = batchIds.Where(id => id != Guid.Empty).Distinct().ToArray();
+
+        var payments = normalizedPaymentIds.Length == 0
+            ? new List<VendorPayment>()
+            : await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    normalizedPaymentIds.Contains(item.Id) &&
+                    !item.IsDeleted)
+                .Include(item => item.Allocations.Where(allocation => !allocation.IsDeleted))
+                    .ThenInclude(allocation => allocation.VendorInvoice)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+        var batches = normalizedBatchIds.Length == 0
+            ? new List<PaymentBatch>()
+            : await _unitOfWork.Repository<PaymentBatch>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    normalizedBatchIds.Contains(item.Id) &&
+                    !item.IsDeleted)
+                .Include(item => item.Items)
+                    .ThenInclude(item => item.Invoices)
+                        .ThenInclude(item => item.VendorInvoice)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+        var coverage = await _sodGuard.GetCoverageAsync(DateTime.UtcNow, cancellationToken);
+        return new ProcurementInvoicePaymentSodQueueReadinessDto
+        {
+            Payments = payments.ToDictionary(
+                payment => payment.Id,
+                payment => BuildQueueReadiness(
+                    ProcurementInvoicePaymentSodRules.PaymentSourceType,
+                    payment.Id,
+                    payment.PaymentNumber,
+                    GetEffectiveAllocations(payment.Allocations)
+                        .Select(allocation => allocation.VendorInvoice)
+                        .ToList(),
+                    coverage)),
+            Batches = batches.ToDictionary(
+                batch => batch.Id,
+                batch => BuildQueueReadiness(
+                    ProcurementInvoicePaymentSodRules.BatchSourceType,
+                    batch.Id,
+                    batch.BatchNumber,
+                    batch.Items.SelectMany(item => item.Invoices)
+                        .Select(item => item.VendorInvoice)
+                        .ToList(),
+                    coverage))
+        };
+    }
+
     public Task<ProcurementInvoicePaymentSodReadinessDto> EnforcePaymentApprovalAsync(
         Guid paymentId,
         string correlationId,
@@ -135,6 +196,86 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
             correlationId,
             enforce,
             cancellationToken);
+    }
+
+    private ProcurementInvoicePaymentSodReadinessDto BuildQueueReadiness(
+        string sourceType,
+        Guid sourceId,
+        string sourceReference,
+        IReadOnlyCollection<VendorInvoice> sourceInvoices,
+        ProcurementSodCoverageDto coverage)
+    {
+        var actorId = CurrentActorId;
+        var invoices = sourceInvoices
+            .Where(item => item != null && !item.IsDeleted)
+            .GroupBy(item => item.Id)
+            .Select(group => group.First())
+            .OrderBy(item => item.InvoiceNumber)
+            .Select(item => new ProcurementInvoicePaymentSodInvoiceDto
+            {
+                VendorInvoiceId = item.Id,
+                InvoiceNumber = item.InvoiceNumber,
+                InvoiceProcessorUserId = item.SubmittedById,
+                SubmittedAtUtc = item.SubmittedDate,
+                ProcessorLineagePresent = item.SubmittedById.HasValue && item.SubmittedById.Value != Guid.Empty,
+                ConflictsWithCurrentActor = ProcurementInvoicePaymentSodRules.HasConflict(item.SubmittedById, actorId)
+            })
+            .ToList();
+        var missingLineage = invoices.Any(item => !item.ProcessorLineagePresent);
+        var hasConflict = invoices.Any(item => item.ConflictsWithCurrentActor);
+        var control = coverage.Controls.SingleOrDefault(item =>
+            string.Equals(item.Code, ProcurementInvoicePaymentSodRules.ControlCode, StringComparison.OrdinalIgnoreCase));
+
+        bool allowed;
+        string code;
+        string message;
+        if (missingLineage)
+        {
+            allowed = false;
+            code = ProcurementInvoicePaymentSodRules.LineageCode;
+            message = "Every selected invoice must retain its server-owned submitting processor before payment approval.";
+        }
+        else if (control == null || !control.IsConfigured || !control.IsEffective || !control.IsHardStop)
+        {
+            allowed = false;
+            code = "SOD_POLICY_INCOMPLETE";
+            message = control?.ConfigurationIssue ??
+                      "The invoice-processor versus payment-approver hard stop is not effective.";
+        }
+        else if (hasConflict)
+        {
+            allowed = false;
+            code = ProcurementInvoicePaymentSodRules.ConflictCode;
+            message = "The current actor cannot approve a payment for an invoice they processed.";
+        }
+        else
+        {
+            allowed = true;
+            code = "SOD_ALLOWED";
+            message = invoices.Count == 0
+                ? "No invoice is allocated, so there is no invoice-processor identity conflict; the required hard-stop policy is effective."
+                : "The current actor is independent of the recorded invoice processor participant(s).";
+        }
+
+        return new ProcurementInvoicePaymentSodReadinessDto
+        {
+            SourceType = sourceType,
+            SourceId = sourceId,
+            SourceReference = sourceReference,
+            CurrentActorUserId = actorId,
+            CanApprove = allowed,
+            HasInvoiceProcessorLineage = !missingLineage,
+            Code = code,
+            Message = message,
+            EvaluatedAtUtc = coverage.EvaluatedAtUtc,
+            PolicySetId = coverage.PolicySetId,
+            PolicyCode = coverage.PolicyCode,
+            PolicyVersion = coverage.PolicyVersion,
+            RuleId = control?.RuleId,
+            RuleCode = control?.RuleCode,
+            DecisionKeys = ProcurementInvoicePaymentSodRules.DecisionKeys,
+            Invoices = invoices
+        };
     }
 
     private async Task<ProcurementInvoicePaymentSodReadinessDto> EvaluateBatchAsync(

@@ -84,6 +84,76 @@ public sealed class ProcurementFinanceReconciliationTests
 
     [Fact]
     [Trait("Batch", "TDC-0508")]
+    public async Task Reconciliation_ShouldWeightPaymentPostingByAllEffectiveAllocations()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenantId);
+        var selectedAllocation = fixture.Payment.Allocations.Single();
+        selectedAllocation.AllocatedAmount = 50m;
+        selectedAllocation.WithholdingTaxAmount = 10m;
+        fixture.Payment.TotalAmount = 90m;
+        fixture.Payment.AllocatedAmount = 90m;
+        fixture.Payment.WithholdingTaxAmount = 0m;
+
+        var otherPurchaseOrder = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            OrderNumber = "PO-0508-OTHER",
+            BusinessPartnerId = fixture.PurchaseOrder.BusinessPartnerId,
+            OrderDate = new DateTime(2026, 7, 1),
+            Status = "Approved",
+            ApprovedAt = new DateTime(2026, 7, 1),
+            TotalAmount = 40m,
+            Currency = "GHS",
+            CreatedAt = new DateTime(2026, 7, 1),
+            CreatedBy = "seed"
+        };
+        var otherInvoice = new VendorInvoice
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            InvoiceNumber = "VI-0508-OTHER",
+            SupplierId = fixture.Payment.SupplierId,
+            SupplierName = "TDC Supplier",
+            PurchaseOrderId = otherPurchaseOrder.Id,
+            InvoiceDate = new DateTime(2026, 7, 3),
+            TotalAmount = 40m,
+            PaidAmount = 40m,
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            BaseCurrencyAmount = 40m,
+            Status = VendorInvoiceStatus.Paid,
+            ApprovalStatus = "Approved",
+            SubmittedDate = new DateTime(2026, 7, 3),
+            ApprovedDate = new DateTime(2026, 7, 3),
+            CreatedAt = new DateTime(2026, 7, 3),
+            CreatedBy = "seed"
+        };
+        fixture.Payment.Allocations.Add(new VendorPaymentAllocation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            VendorPaymentId = fixture.Payment.Id,
+            VendorInvoiceId = otherInvoice.Id,
+            AllocatedAmount = 40m,
+            AllocationDate = fixture.Payment.PaymentDate,
+            CreatedAt = fixture.Payment.PaymentDate,
+            CreatedBy = "seed"
+        });
+        db.AddRange(otherPurchaseOrder, otherInvoice);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var report = await service.GetProcurementFinanceReconciliationAsync(
+            new DateTime(2026, 8, 31), fixture.PurchaseOrder.Id);
+
+        report.Rows.Single().PaymentPostedAmount.Should().Be(60m);
+    }
+
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
     public async Task Reconciliation_ShouldExplainUnbalancedAndUncontrolledReversalGaps()
     {
         var tenantId = Guid.NewGuid();

@@ -14,6 +14,12 @@ public interface IProcurementInvoicePaymentSodService
         string correlationId,
         CancellationToken cancellationToken = default);
 
+    Task<ProcurementInvoicePaymentSodQueueReadinessDto> GetQueueReadinessAsync(
+        IReadOnlyCollection<Guid> paymentIds,
+        IReadOnlyCollection<Guid> batchIds,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
     Task<ProcurementInvoicePaymentSodReadinessDto> EnforcePaymentApprovalAsync(
         Guid paymentId,
         string correlationId,

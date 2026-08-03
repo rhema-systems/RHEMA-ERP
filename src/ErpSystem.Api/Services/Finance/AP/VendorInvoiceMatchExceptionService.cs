@@ -517,6 +517,9 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
                 "Only the assigned corrective-action owner or a tenant administrator can complete it.");
         var completionEvidence = await ValidateEvidenceAsync(item.VendorInvoice, request.Evidence, cancellationToken);
         EnsureRequiredEvidence(completionEvidence, new[] { VendorInvoiceMatchExceptionRules.CorrectiveCompletionEvidenceKey });
+        EnsureOnlyEvidenceKeys(
+            completionEvidence,
+            new[] { VendorInvoiceMatchExceptionRules.CorrectiveCompletionEvidenceKey });
         var existingEvidenceKeys = item.Evidence
             .Where(evidence => !evidence.IsDeleted)
             .Select(evidence => evidence.RequirementKey)
@@ -980,6 +983,23 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
                 $"Required controlled evidence is missing: {string.Join(", ", missing)}.");
     }
 
+    private static void EnsureOnlyEvidenceKeys(
+        IEnumerable<VendorInvoiceMatchExceptionEvidence> evidence,
+        IEnumerable<string> allowed)
+    {
+        var allowedKeys = allowed.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unexpected = evidence
+            .Select(item => item.RequirementKey)
+            .Where(key => !allowedKeys.Contains(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (unexpected.Length > 0)
+            throw Validation(
+                "AP_MATCH_EXCEPTION_EVIDENCE_UNEXPECTED",
+                $"Unexpected evidence requirements were supplied for this action: {string.Join(", ", unexpected)}.");
+    }
+
     private void EnsureAuthenticatedActor()
     {
         if (!_currentUser.IsAuthenticated || ActorId == Guid.Empty)
@@ -1074,6 +1094,10 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
             CorrectiveActionDueAtUtc = EnsureUtc(item.CorrectiveActionDueAtUtc),
             ExpiresAtUtc = EnsureUtc(item.ExpiresAtUtc),
             Evidence = item.Evidence
+                .Where(evidence => !string.Equals(
+                    evidence.RequirementKey,
+                    VendorInvoiceMatchExceptionRules.CorrectiveCompletionEvidenceKey,
+                    StringComparison.OrdinalIgnoreCase))
                 .Select(evidence => new
                 {
                     RequirementKey = evidence.RequirementKey.Trim().ToUpperInvariant(),
