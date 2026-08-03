@@ -260,6 +260,13 @@ public sealed class InventoryNegativeStockControlService : IInventoryNegativeSto
         if (warehouseQuantity is null)
             throw Error("INV_NEGATIVE_BALANCE_NOT_FOUND",
                 "The warehouse item balance must exist before a controlled stock decrease can be prepared.");
+        var inventoryLocation = request.LocationId.HasValue
+            ? await _unitOfWork.Repository<InventoryLocation>()
+                .GetQueryable(value => value.TenantId == TenantId &&
+                    value.InventoryItemId == request.InventoryItemId &&
+                    value.LocationId == request.LocationId.Value && !value.IsDeleted)
+                .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            : null;
         var warehouseWouldBeNegative =
             (request.DecreaseCurrentStock && warehouseQuantity.CurrentStock - request.Quantity < 0) ||
             (request.DecreaseAvailableStock && warehouseQuantity.AvailableStock - request.Quantity < 0);
@@ -267,7 +274,11 @@ public sealed class InventoryNegativeStockControlService : IInventoryNegativeSto
             (
             (request.DecreaseCurrentStock && inventoryItem.CurrentStock - request.Quantity < 0) ||
             (request.DecreaseAvailableStock && inventoryItem.AvailableStock - request.Quantity < 0));
-        if (!warehouseWouldBeNegative && !itemWouldBeNegative)
+        var locationWouldBeNegative = request.LocationId.HasValue &&
+            (inventoryLocation is null ||
+             (request.DecreaseCurrentStock && inventoryLocation.Quantity - request.Quantity < 0) ||
+             (request.DecreaseAvailableStock && inventoryLocation.AvailableQuantity - request.Quantity < 0));
+        if (!warehouseWouldBeNegative && !itemWouldBeNegative && !locationWouldBeNegative)
             return new InventoryStockDecreaseAuthorization();
 
         var effective = await ResolvePolicyAsync(DateTime.UtcNow, cancellationToken);

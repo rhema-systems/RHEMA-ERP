@@ -1,5 +1,6 @@
 using System.Reflection;
 using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Services.Inventory;
 using FluentAssertions;
 using Xunit;
@@ -8,6 +9,39 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class GoodsReceiptNoteIdempotencyTests
 {
+    [Fact]
+    public void Inventory_posting_uses_and_updates_the_receiving_bin_before_directed_putaway()
+    {
+        var receivingLocationId = Guid.NewGuid();
+        var storageLocationId = Guid.NewGuid();
+        var grn = new GoodsReceiptNote { ReceivingLocationId = receivingLocationId };
+        var line = new GoodsReceiptNoteItem
+        {
+            StorageLocationId = storageLocationId,
+            AcceptedQuantity = 3m,
+            UnitCost = 10m
+        };
+        var location = new InventoryLocation
+        {
+            LocationId = receivingLocationId,
+            Quantity = 2m,
+            AllocatedQuantity = 1m,
+            AvailableQuantity = 1m,
+            AverageCost = 4m
+        };
+        var movementAtUtc = new DateTime(2026, 8, 3, 18, 30, 0, DateTimeKind.Utc);
+
+        GoodsReceiptNoteService.ResolveReceiptLocation(grn, line)
+            .Should().Be(receivingLocationId);
+        GoodsReceiptNoteService.ApplyReceiptToInventoryLocation(
+            location, line.AcceptedQuantity, line.UnitCost, movementAtUtc);
+
+        location.Quantity.Should().Be(5m);
+        location.AvailableQuantity.Should().Be(4m);
+        location.AverageCost.Should().Be(7.6m);
+        location.LastMovementDate.Should().Be(movementAtUtc);
+    }
+
     [Fact]
     public void DerivedReceiptKeyHashesTheCompleteSourceKeyWithoutTruncationCollisions()
     {

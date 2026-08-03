@@ -67,6 +67,10 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
     [Fact]
     public async Task Label_profile_lifecycle_is_tenant_scoped_default_safe_and_audited()
     {
+        await _context.Set<Warehouse>().AddAsync(new Warehouse
+        {
+            TenantId = _tenantId, Code = "WH-LABEL", Name = "Label warehouse", IsActive = true
+        });
         var foreignProfile = new InventoryLabelProfile
         {
             TenantId = Guid.NewGuid(), Name = "Other tenant", Symbology = "QR", IsActive = true, IsDefault = true
@@ -109,6 +113,37 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
         var delete = () => _service.DeleteLabelProfileAsync(second.Id, "corr-3");
         await delete.Should().ThrowAsync<InventoryScanningException>()
             .Where(error => error.Code == "INV_LABEL_DEFAULT_DELETE_BLOCKED");
+    }
+
+    [Fact]
+    public async Task Label_profile_mutations_require_an_inventory_operating_capability()
+    {
+        await _context.Set<Warehouse>().AddAsync(new Warehouse
+        {
+            TenantId = _tenantId, Code = "WH-LABEL-DENIED", Name = "Denied label warehouse", IsActive = true
+        });
+        await _context.SaveChangesAsync();
+        _access.Setup(item => item.CheckCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = false });
+        _access.Setup(item => item.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = false, Message = "No inventory assignment." });
+
+        var save = () => _service.SaveLabelProfileAsync(null, Request("Unauthorized", false), "corr-denied");
+
+        await save.Should().ThrowAsync<InventoryScanningAuthorizationException>();
+        (await _context.Set<InventoryLabelProfile>().CountAsync()).Should().Be(0);
+        _access.Verify(item => item.CheckCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request => request.WarehouseId.HasValue &&
+                (request.PermissionCode == "procurement.inventory.receive" ||
+                 request.PermissionCode == "procurement.inventory.issue" ||
+                 request.PermissionCode == "procurement.inventory.transfer" ||
+                 request.PermissionCode == "procurement.inventory.count")),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(4));
+        _access.Verify(item => item.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request => request.PermissionCode == "procurement.inventory.receive"),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

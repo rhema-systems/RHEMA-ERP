@@ -64,6 +64,7 @@ public sealed class InventoryScanningService : IInventoryScanningService
         CancellationToken cancellationToken = default)
     {
         EnsureActor();
+        await RequireLabelProfileMutationCapabilityAsync(correlationId, cancellationToken);
         var name = request.Name.Trim();
         var duplicate = await Profiles.AnyAsync(item => item.TenantId == TenantId && !item.IsDeleted &&
             item.Name == name && (!id.HasValue || item.Id != id.Value), cancellationToken);
@@ -127,6 +128,7 @@ public sealed class InventoryScanningService : IInventoryScanningService
     public async Task DeleteLabelProfileAsync(Guid id, string correlationId, CancellationToken cancellationToken = default)
     {
         EnsureActor();
+        await RequireLabelProfileMutationCapabilityAsync(correlationId, cancellationToken);
         var profile = await Profiles.SingleOrDefaultAsync(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted, cancellationToken)
             ?? throw new InventoryScanningException("INV_LABEL_PROFILE_NOT_FOUND", "The label profile was not found in the current tenant.");
         if (profile.IsDefault) throw new InventoryScanningException("INV_LABEL_DEFAULT_DELETE_BLOCKED", "Select another default label profile before deleting this one.");
@@ -765,6 +767,49 @@ public sealed class InventoryScanningService : IInventoryScanningService
                 locationId, requireLocationScope))
             throw new InventoryScanningAuthorizationException(
                 "The current actor is not assigned to this warehouse, location, and scan duty.");
+    }
+
+    private async Task RequireLabelProfileMutationCapabilityAsync(
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        var warehouseIds = await _unitOfWork.Repository<Warehouse>().GetQueryable(item =>
+                item.TenantId == TenantId && item.IsActive && !item.IsDeleted)
+            .AsNoTracking().Select(item => item.Id).ToListAsync(cancellationToken);
+        var permissions = new[]
+        {
+            "procurement.inventory.receive",
+            "procurement.inventory.issue",
+            "procurement.inventory.transfer",
+            "procurement.inventory.count"
+        };
+        foreach (var warehouseId in warehouseIds)
+        {
+            foreach (var permission in permissions)
+            {
+                var decision = await _access.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+                {
+                    PermissionCode = permission,
+                    WarehouseId = warehouseId,
+                    SourceType = "InventoryLabelProfile",
+                    SourceReference = "tenant-label-profiles"
+                }, NormalizeCorrelation(correlationId), cancellationToken);
+                if (decision.Allowed) return;
+            }
+        }
+
+        if (warehouseIds.Count > 0)
+        {
+            await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = permissions[0],
+                WarehouseId = warehouseIds[0],
+                SourceType = "InventoryLabelProfile",
+                SourceReference = "tenant-label-profiles"
+            }, NormalizeCorrelation(correlationId), cancellationToken);
+        }
+        throw new InventoryScanningAuthorizationException(
+            "An active receive, issue, transfer, or count responsibility assignment is required to change label profiles.");
     }
 
     private async Task<bool> HasCapabilityAsync(

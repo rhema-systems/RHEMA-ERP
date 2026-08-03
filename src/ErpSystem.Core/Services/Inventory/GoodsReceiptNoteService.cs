@@ -931,11 +931,12 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
             foreach (var item in grn.Items.Where(value =>
                          value.AcceptedQuantity > 0))
             {
+                var receiptLocationId = ResolveReceiptLocation(grn, item);
                 await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
                 {
                     InventoryItemId = item.InventoryItemId,
                     WarehouseId = grn.WarehouseId,
-                    LocationId = item.StorageLocationId,
+                    LocationId = receiptLocationId,
                     Direction = InventoryTrackingDirection.Receipt,
                     Quantity = item.AcceptedQuantity,
                     ReferenceType = "GoodsReceiptNote",
@@ -981,6 +982,32 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                 warehouseQty.LastMovementDate = DateTime.UtcNow;
                 await _warehouseQuantityRepository.UpdateAsync(
                     warehouseQty);
+
+                var inventoryLocationRepository = _unitOfWork.Repository<InventoryLocation>();
+                var inventoryLocation = await inventoryLocationRepository.GetQueryable(value =>
+                        value.TenantId == _currentUser.TenantId &&
+                        value.InventoryItemId == item.InventoryItemId &&
+                        value.LocationId == receiptLocationId &&
+                        !value.IsDeleted)
+                    .SingleOrDefaultAsync();
+                if (inventoryLocation is null)
+                {
+                    inventoryLocation = new InventoryLocation
+                    {
+                        TenantId = _currentUser.TenantId,
+                        InventoryItemId = item.InventoryItemId,
+                        LocationId = receiptLocationId,
+                        AverageCost = item.UnitCost,
+                        CreatedById = userId
+                    };
+                    await inventoryLocationRepository.AddAsync(inventoryLocation);
+                }
+                ApplyReceiptToInventoryLocation(
+                    inventoryLocation,
+                    item.AcceptedQuantity,
+                    item.UnitCost,
+                    DateTime.UtcNow);
+                await inventoryLocationRepository.UpdateAsync(inventoryLocation);
 
                 var invItem = await _unitOfWork
                     .Repository<InventoryItem>()
@@ -1030,7 +1057,7 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                     ReferenceNumber = grn.GRNNumber,
                     ReferenceId = grn.Id,
                     WarehouseId = grn.WarehouseId,
-                    LocationId = item.StorageLocationId,
+                    LocationId = receiptLocationId,
                     LotNumber = item.LotNumber,
                     BatchNumber = item.BatchNumber,
                     SerialNumber = item.SerialNumber,
@@ -1153,6 +1180,34 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
             grn.PurchaseOrderReceiptId.HasValue
                 ? "This GRN is governed by the shared procurement receipt-inspection lifecycle; use the linked receipt inspection control."
                 : "Historical GRNs are read-only and cannot bypass the shared procurement receipt-inspection lifecycle.");
+    }
+
+    internal static Guid ResolveReceiptLocation(
+        GoodsReceiptNote grn,
+        GoodsReceiptNoteItem item) =>
+        grn.ReceivingLocationId ?? item.StorageLocationId
+        ?? throw new ProcurementReceiptSourceValidationException(
+            "RCV_STOCK_LOCATION_REQUIRED",
+            "Every accepted goods-receipt line requires an exact receiving or storage location before inventory posting.");
+
+    internal static void ApplyReceiptToInventoryLocation(
+        InventoryLocation inventoryLocation,
+        decimal acceptedQuantity,
+        decimal unitCost,
+        DateTime movementAtUtc)
+    {
+        var openingQuantity = inventoryLocation.Quantity;
+        var openingAverageCost = inventoryLocation.AverageCost;
+        inventoryLocation.Quantity += acceptedQuantity;
+        inventoryLocation.AvailableQuantity =
+            inventoryLocation.Quantity - inventoryLocation.AllocatedQuantity;
+        inventoryLocation.AverageCost = inventoryLocation.Quantity <= 0
+            ? 0
+            : ((openingQuantity * (openingAverageCost > 0
+                    ? openingAverageCost
+                    : unitCost)) +
+               (acceptedQuantity * unitCost)) / inventoryLocation.Quantity;
+        inventoryLocation.LastMovementDate = movementAtUtc;
     }
 
     private async Task EnsureCapabilityAsync(

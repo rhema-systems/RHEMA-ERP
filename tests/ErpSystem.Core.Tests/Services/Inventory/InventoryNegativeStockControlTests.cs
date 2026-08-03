@@ -1,13 +1,24 @@
 using System.Reflection;
+using System.Text.Json;
+using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Inventory;
 using ErpSystem.Data;
 using ErpSystem.Data.Migrations;
+using ErpSystem.Data.Repositories;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Moq;
 using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Inventory;
@@ -103,6 +114,88 @@ public sealed class InventoryNegativeStockControlTests : IDisposable
         guard.Should().Contain("PermissionCode = permission");
         guard.Should().Contain("\"procurement.inventory.read\", \"Inventory.EmergencyOverride\"");
         guard.Should().Contain("CheckCapabilityAsync");
+    }
+
+    [Fact]
+    public async Task Exact_bin_shortage_is_governed_even_when_item_and_warehouse_aggregates_are_sufficient()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var warehouse = new Warehouse
+        {
+            TenantId = tenantId, Code = "NEG-BIN", Name = "Negative bin warehouse", IsActive = true
+        };
+        var location = new WarehouseLocation
+        {
+            TenantId = tenantId, WarehouseId = warehouse.Id, LocationCode = "NEG-BIN-01", IsActive = true
+        };
+        var item = new InventoryItem
+        {
+            TenantId = tenantId, CategoryId = Guid.NewGuid(), ItemCode = "NEG-BIN-ITEM", Name = "Exact-bin item",
+            CurrentStock = 100m, AvailableStock = 100m
+        };
+        await using var context = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning)).Options);
+        await context.AddRangeAsync(warehouse, location, item,
+            new WarehouseQuantity
+            {
+                TenantId = tenantId, WarehouseId = warehouse.Id, InventoryItemId = item.Id,
+                CurrentStock = 100m, AvailableStock = 100m
+            },
+            new InventoryLocation
+            {
+                TenantId = tenantId, LocationId = location.Id, InventoryItemId = item.Id,
+                Quantity = 2m, AvailableQuantity = 2m
+            });
+        await context.SaveChangesAsync();
+        using var unitOfWork = new UnitOfWork(context);
+        var current = new Mock<ICurrentUserProvider>();
+        current.SetupGet(value => value.IsAuthenticated).Returns(true);
+        current.SetupGet(value => value.IsExternalUser).Returns(false);
+        current.SetupGet(value => value.TenantId).Returns(tenantId);
+        current.SetupGet(value => value.UserId).Returns(userId);
+        var configuration = new Mock<IProcurementConfigurationService>();
+        configuration.Setup(value => value.GetEffectiveProfileAsync(
+                "TDC-PROCUREMENT", It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementConfigurationProfileDto
+            {
+                Id = Guid.NewGuid(), Version = 1,
+                Decisions = new[]
+                {
+                    new ProcurementConfigurationDecisionDto
+                    {
+                        Id = Guid.NewGuid(), DecisionKey = "DEC-010", IsComplete = true,
+                        Value = JsonSerializer.SerializeToElement(new ProcurementNegativeStockDecisionValueDto
+                        {
+                            DefaultPolicy = ProcurementNegativeStockPolicy.Prohibited,
+                            EmergencyOverrideEligible = false,
+                            OverridePermission = "Inventory.EmergencyOverride"
+                        })
+                    }
+                }
+            });
+        var mutationStore = new Mock<IInventoryNegativeStockMutationStore>();
+        mutationStore.SetupGet(value => value.HasRequiredTransaction).Returns(true);
+        var service = new InventoryNegativeStockControlService(unitOfWork, current.Object, configuration.Object,
+            Mock.Of<IProcurementAccessControlService>(), Mock.Of<IProcurementControlEventService>(), mutationStore.Object);
+        await unitOfWork.BeginTransactionAsync();
+
+        var prepare = () => service.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
+        {
+            InventoryItemId = item.Id,
+            WarehouseId = warehouse.Id,
+            LocationId = location.Id,
+            Quantity = 5m,
+            ReferenceId = Guid.NewGuid(),
+            ReferenceType = "StockAdjustment",
+            ReferenceNumber = "ADJ-NEG-BIN",
+            CorrelationId = "neg-bin"
+        });
+
+        await prepare.Should().ThrowAsync<InventoryNegativeStockControlException>()
+            .Where(error => error.Code == "INV_NEGATIVE_STOCK_PROHIBITED");
+        await unitOfWork.RollbackAsync();
     }
 
     [Fact]

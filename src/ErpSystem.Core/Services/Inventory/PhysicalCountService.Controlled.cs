@@ -98,7 +98,7 @@ public partial class PhysicalCountService
         EnsureIndependentActor(count, userId, includeFinance: false, includeAudit: false);
 
         StockAdjustmentDetailDto? adjustment = null;
-        if (count.TotalVarianceQuantity != 0)
+        if (HasLineVariance(count))
         {
             if (!count.StockAdjustmentId.HasValue)
                 throw new InvalidOperationException("The controlled stock adjustment is missing. The independent counter must retry submission.");
@@ -167,7 +167,9 @@ public partial class PhysicalCountService
         }
         else
         {
-            ReturnForRecount(count, Required(request.Reason ?? request.Comment, "A rejection reason is required.", 2000));
+            await RetireAdjustmentAndReturnForRecountAsync(count,
+                Required(request.Reason ?? request.Comment, "A rejection reason is required.", 2000),
+                userId, request.IdempotencyKey);
         }
         await _countRepository.UpdateAsync(count);
         await AddCountActionAsync(count, action, userId, request.IdempotencyKey,
@@ -208,7 +210,9 @@ public partial class PhysicalCountService
         }
         else
         {
-            ReturnForRecount(count, Required(request.Reason ?? request.Comment, "An audit exception reason is required.", 2000));
+            await RetireAdjustmentAndReturnForRecountAsync(count,
+                Required(request.Reason ?? request.Comment, "An audit exception reason is required.", 2000),
+                userId, request.IdempotencyKey);
         }
         await _countRepository.UpdateAsync(count);
         await AddCountActionAsync(count, action, userId, request.IdempotencyKey,
@@ -245,7 +249,7 @@ public partial class PhysicalCountService
             throw new InvalidOperationException("The initiator, counter, Stores approver, or Internal Audit attestor cannot post this count.");
 
         StockAdjustmentDetailDto? posted = null;
-        if (count.TotalVarianceQuantity != 0)
+        if (HasLineVariance(count))
         {
             if (!count.StockAdjustmentId.HasValue)
                 throw new InvalidOperationException("The count has a variance but no governed stock adjustment.");
@@ -492,7 +496,7 @@ public partial class PhysicalCountService
     {
         var count = await LoadControlledCountAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
-        if (count.TotalVarianceQuantity == 0) return;
+        if (!HasLineVariance(count)) return;
         StockAdjustmentDetailDto adjustment;
         if (count.StockAdjustmentId.HasValue)
         {
@@ -806,8 +810,51 @@ public partial class PhysicalCountService
         count.AuditAttestedById = null;
         count.AuditAttestedAtUtc = null;
         count.InvestigationSummary = $"{count.InvestigationSummary}\nControl-stage exception: {reason}".Trim();
-        foreach (var item in count.Items.Where(x => x.VarianceQuantity != 0)) item.RequiresRecount = true;
+        foreach (var item in count.Items.Where(x => x.VarianceQuantity != 0))
+        {
+            item.RequiresRecount = true;
+            item.RecountedQuantity = null;
+            item.RecountedAtUtc = null;
+            item.RecountedById = null;
+        }
     }
+
+    private async Task RetireAdjustmentAndReturnForRecountAsync(
+        PhysicalCount count,
+        string reason,
+        Guid userId,
+        string idempotencyKey)
+    {
+        if (count.StockAdjustmentId.HasValue)
+        {
+            var adjustment = await _stockAdjustmentService.GetByIdAsync(count.StockAdjustmentId.Value)
+                ?? throw new InvalidOperationException("The linked controlled stock adjustment was not found.");
+            if (adjustment.Status == "Approved")
+            {
+                adjustment = await _stockAdjustmentService.RetireApprovedForRecountAsync(
+                    adjustment.Id,
+                    userId,
+                    new StockAdjustmentActionRequest
+                    {
+                        RowVersion = adjustment.RowVersion,
+                        IdempotencyKey = $"pc-recount-retire:{idempotencyKey}"[..Math.Min(100,
+                            $"pc-recount-retire:{idempotencyKey}".Length)],
+                        Comment = reason
+                    });
+                if (adjustment.Status != "Cancelled")
+                    throw new InvalidOperationException("The approved adjustment was not retired before recount.");
+            }
+            else if (adjustment.Status != "Cancelled")
+            {
+                throw new InvalidOperationException(
+                    $"The linked adjustment cannot be returned for recount from status {adjustment.Status}.");
+            }
+        }
+        ReturnForRecount(count, reason);
+    }
+
+    private static bool HasLineVariance(PhysicalCount count) =>
+        count.Items.Any(item => item.IsCounted && item.VarianceQuantity != 0);
 
     private void EnsureActor(Guid userId)
     {

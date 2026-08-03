@@ -444,6 +444,176 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         _adjustments.Verify(service => service.PostAsync(It.IsAny<Guid>(), _financeApproverId, It.IsAny<StockAdjustmentActionRequest>()), Times.Once);
     }
 
+    [Fact]
+    [Trait("Batch", "E2E-012")]
+    public async Task Finance_rejection_retires_the_approved_adjustment_and_clears_prior_recount_markers()
+    {
+        var created = await _counts.CreateAsync(new CreatePhysicalCountDto
+        {
+            WarehouseId = _warehouseId,
+            LocationId = _locationId,
+            CountType = CountType.CycleCount,
+            ABCClass = "A",
+            Notes = "Finance rejection lifecycle."
+        }, _initiatorId);
+        await SetRowVersionsAsync(created.Id);
+
+        _currentUser.Switch(_counterId, "cycle.counter");
+        await _counts.StartCountAsync(created.Id, _counterId);
+        var line = (await LoadCountAsync(created.Id)).Items.Single();
+        await _counts.RecordCountItemAsync(new RecordCountItemDto
+        {
+            PhysicalCountItemId = line.Id,
+            CountedQuantity = 7m,
+            RowVersion = Convert.ToBase64String(_lineRowVersion),
+            IdempotencyKey = "finance-reject-first-count"
+        }, _counterId);
+        await _counts.CompleteCountAsync(created.Id, _counterId);
+
+        _currentUser.Switch(_recountUserId, "cycle.recounter");
+        await _counts.RecordRecountAsync(created.Id, _recountUserId,
+            new RecordPhysicalCountRecountRequest
+            {
+                PhysicalCountItemId = line.Id,
+                RecountedQuantity = 8m,
+                InvestigationNotes = "Independent recount confirmed the shortage.",
+                RowVersion = Convert.ToBase64String(_countRowVersion),
+                ItemRowVersion = Convert.ToBase64String(_lineRowVersion),
+                IdempotencyKey = "finance-reject-recount",
+                CorrelationId = "finance-reject"
+            });
+
+        _currentUser.Switch(_storesApproverId, "stores.approver", "TDC_STORES_MANAGER");
+        await _counts.ApproveStoresAsync(created.Id, _storesApproverId,
+            Decision("finance-reject-stores"));
+        var awaitingFinance = await LoadCountAsync(created.Id);
+        awaitingFinance.StockAdjustmentId.Should().Be(_adjustment!.Id);
+        awaitingFinance.Items.Single().RecountedQuantity.Should().Be(8m);
+        _adjustment.Status.Should().Be("Approved");
+
+        _currentUser.Switch(_financeApproverId, "finance.approver", "TDC_FINANCE_REVIEWER");
+        await _counts.ApproveFinanceAsync(created.Id, _financeApproverId,
+            new PhysicalCountDecisionRequest
+            {
+                Approved = false,
+                Reason = "The valuation evidence requires a fresh independent recount.",
+                RowVersion = Convert.ToBase64String(_countRowVersion),
+                IdempotencyKey = "finance-reject-decision",
+                CorrelationId = "finance-reject"
+            });
+
+        var returned = await LoadCountAsync(created.Id);
+        returned.Status.Should().Be("RecountRequired");
+        returned.StockAdjustmentId.Should().BeNull();
+        returned.Items.Single().Should().Match<PhysicalCountItem>(value =>
+            value.RequiresRecount && value.RecountedQuantity == null &&
+            value.RecountedAtUtc == null && value.RecountedById == null);
+        _adjustment!.Status.Should().Be("Cancelled");
+        _adjustments.Verify(service => service.RetireApprovedForRecountAsync(
+            It.IsAny<Guid>(), _financeApproverId,
+            It.Is<StockAdjustmentActionRequest>(request =>
+                request.IdempotencyKey.Contains("finance-reject-decision"))), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Batch", "E2E-012")]
+    public async Task Opposing_line_variances_with_zero_net_total_still_create_a_governed_adjustment()
+    {
+        var secondItemId = Guid.NewGuid();
+        var categoryId = await _context.Set<InventoryItem>()
+            .Where(value => value.Id == _itemId)
+            .Select(value => value.CategoryId)
+            .SingleAsync();
+        await _context.AddRangeAsync(
+            new InventoryItem
+            {
+                Id = secondItemId,
+                TenantId = _tenantId,
+                ItemCode = "ABC-A-002",
+                Name = "Offsetting ABC item",
+                CategoryId = categoryId,
+                UnitOfMeasure = "EA",
+                Status = ItemStatus.Active,
+                ABCClass = "A",
+                StandardCost = 10m,
+                AverageCost = 10m,
+                CurrentStock = 10m,
+                AvailableStock = 10m
+            },
+            new WarehouseQuantity
+            {
+                TenantId = _tenantId,
+                WarehouseId = _warehouseId,
+                InventoryItemId = secondItemId,
+                CurrentStock = 10m,
+                AvailableStock = 10m,
+                AverageCost = 10m
+            });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        var created = await _counts.CreateAsync(new CreatePhysicalCountDto
+        {
+            WarehouseId = _warehouseId,
+            LocationId = _locationId,
+            CountType = CountType.CycleCount,
+            ABCClass = "A",
+            Notes = "Zero-net, non-zero line variances."
+        }, _initiatorId);
+        await SetRowVersionsAsync(created.Id);
+
+        _currentUser.Switch(_counterId, "cycle.counter");
+        await _counts.StartCountAsync(created.Id, _counterId);
+        var lines = (await LoadCountAsync(created.Id)).Items
+            .OrderBy(value => value.ItemCode)
+            .ToList();
+        foreach (var (line, quantity, key) in new[]
+                 {
+                     (lines[0], 15m, "zero-net-first-plus"),
+                     (lines[1], 5m, "zero-net-first-minus")
+                 })
+        {
+            await _counts.RecordCountItemAsync(new RecordCountItemDto
+            {
+                PhysicalCountItemId = line.Id,
+                CountedQuantity = quantity,
+                RowVersion = Convert.ToBase64String(_lineRowVersion),
+                IdempotencyKey = key
+            }, _counterId);
+        }
+        await _counts.CompleteCountAsync(created.Id, _counterId);
+        (await LoadCountAsync(created.Id)).TotalVarianceQuantity.Should().Be(0m);
+
+        _currentUser.Switch(_recountUserId, "cycle.recounter");
+        foreach (var (line, quantity, key) in new[]
+                 {
+                     (lines[0], 15m, "zero-net-recount-plus"),
+                     (lines[1], 5m, "zero-net-recount-minus")
+                 })
+        {
+            await _counts.RecordRecountAsync(created.Id, _recountUserId,
+                new RecordPhysicalCountRecountRequest
+                {
+                    PhysicalCountItemId = line.Id,
+                    RecountedQuantity = quantity,
+                    InvestigationNotes = "Independent recount confirmed this line variance.",
+                    RowVersion = Convert.ToBase64String(_countRowVersion),
+                    ItemRowVersion = Convert.ToBase64String(_lineRowVersion),
+                    IdempotencyKey = key,
+                    CorrelationId = "zero-net-lines"
+                });
+        }
+
+        var submitted = await LoadCountAsync(created.Id);
+        submitted.Status.Should().Be("PendingStoresApproval");
+        submitted.TotalVarianceQuantity.Should().Be(0m);
+        submitted.StockAdjustmentId.Should().Be(_adjustment!.Id);
+        _createdAdjustment.Should().NotBeNull();
+        _createdAdjustment!.Items.Should().HaveCount(2);
+        _createdAdjustment.Items.Select(value => value.AdjustmentQuantity)
+            .Should().BeEquivalentTo([5m, -5m]);
+    }
+
     public Task DisposeAsync()
     {
         _unitOfWork.Dispose();
@@ -470,6 +640,9 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         _adjustments.Setup(service => service.PostAsync(
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<StockAdjustmentActionRequest>()))
             .ReturnsAsync(() => _adjustment = Adjustment("Posted", _postingEventId, _journalEntryId));
+        _adjustments.Setup(service => service.RetireApprovedForRecountAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<StockAdjustmentActionRequest>()))
+            .ReturnsAsync(() => _adjustment = Adjustment("Cancelled"));
     }
 
     private async Task<InventoryCycleCountSchedule> SeedDueScheduleAsync(DateTime now)
@@ -550,7 +723,7 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         var count = await _context.Set<PhysicalCount>().Include(value => value.Items)
             .SingleAsync(value => value.Id == countId);
         count.RowVersion = _countRowVersion;
-        count.Items.Single().RowVersion = _lineRowVersion;
+        foreach (var item in count.Items) item.RowVersion = _lineRowVersion;
         await _context.SaveChangesAsync();
         _context.ChangeTracker.Clear();
     }

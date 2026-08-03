@@ -967,6 +967,51 @@ public class StockAdjustmentService : IStockAdjustmentService
         }
     }
 
+    public async Task<StockAdjustmentDetailDto> RetireApprovedForRecountAsync(
+        Guid id,
+        Guid userId,
+        StockAdjustmentActionRequest request)
+    {
+        EnsureActor(userId);
+        var key = Required(request.IdempotencyKey, "An idempotency key is required.", 100);
+        var reason = Required(request.Comment, "A controlled recount retirement reason is required.", 1000);
+        return await ExecuteControlledMutationAsync(id, async adjustment =>
+        {
+            if (adjustment.Status == "Cancelled")
+            {
+                if (await HasActionAsync(adjustment.Id, "Cancelled", key)) return adjustment;
+                throw new InvalidOperationException("The approved adjustment was already retired by a different control action.");
+            }
+            if (adjustment.Status != "Approved")
+                throw new InvalidOperationException($"Only an approved, unposted adjustment can be retired for recount; current status is {adjustment.Status}.");
+            EnsureRowVersion(adjustment.RowVersion, request.RowVersion);
+
+            var linkedCount = await _unitOfWork.Repository<PhysicalCount>().GetQueryable(value =>
+                    value.TenantId == adjustment.TenantId && value.StockAdjustmentId == adjustment.Id &&
+                    !value.IsDeleted && (value.Status == "PendingFinanceApproval" ||
+                                         value.Status == "PendingAuditAttestation"))
+                .AsNoTracking().Select(value => new { value.Id, value.Status, value.CountNumber })
+                .SingleOrDefaultAsync()
+                ?? throw new InvalidOperationException(
+                    "An approved adjustment can be retired only while its physical count awaits Finance or Internal Audit review.");
+            await RequireAccessAsync(
+                linkedCount.Status == "PendingAuditAttestation"
+                    ? "procurement.inventory.read"
+                    : "procurement.inventory.adjust.approve",
+                adjustment,
+                linkedCount.CountNumber);
+
+            var before = Snapshot(adjustment);
+            adjustment.Status = "Cancelled";
+            adjustment.IntegrityHash = AdjustmentIntegrityHash(adjustment);
+            await AddActionAsync(adjustment, "Cancelled", key, reason);
+            await AddAuditAsync("RetireForRecount", adjustment, before, Snapshot(adjustment));
+            await RecordEventAsync(adjustment, "RetireForRecount", ProcurementControlEventResult.Rejected,
+                before, Snapshot(adjustment));
+            return adjustment;
+        });
+    }
+
     private async Task<decimal> ResolveAdjustmentUnitCostAsync(
         InventoryItem inventoryItem,
         Guid warehouseId,
@@ -1438,4 +1483,8 @@ public interface IStockAdjustmentService
     Task<StockAdjustmentDetailDto> PostAsync(Guid id, Guid userId, StockAdjustmentActionRequest request);
     Task<StockAdjustmentDetailDto> ReverseAsync(Guid id, Guid userId, ReverseStockAdjustmentRequest request);
     Task<StockAdjustmentDetailDto> CancelAsync(Guid id, Guid userId);
+    Task<StockAdjustmentDetailDto> RetireApprovedForRecountAsync(
+        Guid id,
+        Guid userId,
+        StockAdjustmentActionRequest request);
 }

@@ -110,6 +110,29 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
     }
 
     [Fact]
+    public void Recount_retirement_migration_allows_only_linked_approved_adjustments_in_review_stages()
+    {
+        var migration = new Phase6ReviewCycleCountAdjustmentRetirement();
+        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { up });
+        var upSql = string.Join(Environment.NewLine,
+            up.Operations.OfType<SqlOperation>().Select(value => value.Sql));
+
+        upSql.Should().Contain("d.Status = N'Approved' AND i.Status = N'Cancelled'");
+        upSql.Should().Contain("FROM PhysicalCounts c");
+        upSql.Should().Contain("c.StockAdjustmentId = i.Id");
+        upSql.Should().Contain("N'PendingFinanceApproval', N'PendingAuditAttestation'");
+
+        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Down", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { down });
+        var downSql = string.Join(Environment.NewLine,
+            down.Operations.OfType<SqlOperation>().Select(value => value.Sql));
+        downSql.Should().NotContain("d.Status = N'Approved' AND i.Status = N'Cancelled'");
+    }
+
+    [Fact]
     public void Store_return_voucher_uses_shared_document_output_type()
     {
         DocumentTypes.InventoryStoreReturnVoucher.Should().Be("Inventory.StoreReturnVoucher");
