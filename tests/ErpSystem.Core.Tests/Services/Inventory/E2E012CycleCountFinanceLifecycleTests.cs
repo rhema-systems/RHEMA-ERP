@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -163,6 +164,94 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
             });
         await _context.SaveChangesAsync();
         _context.ChangeTracker.Clear();
+    }
+
+    [Fact]
+    public async Task Scheduled_count_snapshots_exact_bin_quantity_and_fifo_layer_value()
+    {
+        var now = DateTime.UtcNow;
+        var schedule = await SeedDueScheduleAsync(now);
+        var item = await _context.Set<InventoryItem>().SingleAsync(value => value.Id == _itemId);
+        item.ValuationMethod = ValuationMethod.FIFO;
+        item.StandardCost = 1m;
+        item.AverageCost = 22m;
+        await _context.AddRangeAsync(
+            new InventoryLocation
+            {
+                TenantId = _tenantId, InventoryItemId = _itemId, LocationId = _locationId,
+                Quantity = 4m, AvailableQuantity = 4m, AverageCost = 23m
+            },
+            new InventoryBalance
+            {
+                TenantId = _tenantId, InventoryItemId = _itemId, WarehouseId = _warehouseId,
+                LocationId = _locationId, QuantityOnHand = 4m, QuantityAvailable = 4m,
+                TotalValue = 100m, AverageUnitCost = 25m
+            },
+            new InventoryLayer
+            {
+                TenantId = _tenantId, InventoryItemId = _itemId, WarehouseId = _warehouseId,
+                LocationId = _locationId, LayerDate = now.AddDays(-2), OriginalQuantity = 1m,
+                RemainingQuantity = 1m, UnitCost = 10m, RemainingValue = 10m
+            },
+            new InventoryLayer
+            {
+                TenantId = _tenantId, InventoryItemId = _itemId, WarehouseId = _warehouseId,
+                LocationId = _locationId, LayerDate = now.AddDays(-1), OriginalQuantity = 3m,
+                RemainingQuantity = 3m, UnitCost = 30m, RemainingValue = 90m
+            });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        var result = await _counts.GenerateDueCycleCountsAsync(_tenantId, now);
+
+        result.DueSchedules.Should().Be(1);
+        result.CountsCreated.Should().Be(1);
+        var count = await _context.Set<PhysicalCount>().AsNoTracking()
+            .Include(value => value.Items).Include(value => value.Actions).SingleAsync();
+        count.LocationId.Should().Be(_locationId);
+        count.TotalItems.Should().Be(1);
+        count.Items.Single().Should().Match<PhysicalCountItem>(value =>
+            value.LocationId == _locationId && value.SystemQuantity == 4m && value.UnitCost == 25m);
+        count.Actions.Should().ContainSingle(value => value.ActionType == PhysicalCountActionType.Scheduled);
+        var advanced = await _context.Set<InventoryCycleCountSchedule>().AsNoTracking()
+            .SingleAsync(value => value.Id == schedule.Id);
+        advanced.LastPhysicalCountId.Should().Be(count.Id);
+        advanced.LastGeneratedAtUtc.Should().Be(now);
+        advanced.NextDueAtUtc.Should().Be(schedule.NextDueAtUtc.AddDays(schedule.FrequencyDays));
+    }
+
+    [Fact]
+    public async Task Scheduled_count_failure_leaves_no_partial_header_and_does_not_advance_schedule()
+    {
+        var now = DateTime.UtcNow;
+        var schedule = await SeedDueScheduleAsync(now);
+        await _context.AddAsync(new InventoryLocation
+        {
+            TenantId = _tenantId, InventoryItemId = _itemId, LocationId = _locationId,
+            Quantity = 4m, AvailableQuantity = 4m, AverageCost = 10m
+        });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        var failingItems = new Mock<IPhysicalCountItemRepository>();
+        failingItems.Setup(value => value.AddAsync(It.IsAny<PhysicalCountItem>()))
+            .ThrowsAsync(new InvalidOperationException("Injected line population failure."));
+        var service = new PhysicalCountService(
+            new PhysicalCountRepository(_context), failingItems.Object,
+            new InventoryItemRepository(_context), new WarehouseRepository(_context),
+            new WarehouseQuantityRepository(_context), _unitOfWork, _currentUser,
+            Mock.Of<IProcurementAccessControlService>(), _adjustments.Object,
+            Mock.Of<IProcurementControlEventService>(), NullLogger<PhysicalCountService>.Instance);
+
+        var generate = () => service.GenerateDueCycleCountsAsync(_tenantId, now);
+
+        await generate.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Injected line population failure.");
+        (await _context.Set<PhysicalCount>().AsNoTracking().CountAsync()).Should().Be(0);
+        var unchanged = await _context.Set<InventoryCycleCountSchedule>().AsNoTracking()
+            .SingleAsync(value => value.Id == schedule.Id);
+        unchanged.NextDueAtUtc.Should().Be(schedule.NextDueAtUtc);
+        unchanged.LastGeneratedAtUtc.Should().BeNull();
+        unchanged.LastPhysicalCountId.Should().BeNull();
     }
 
     [Fact]
@@ -381,6 +470,55 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         _adjustments.Setup(service => service.PostAsync(
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<StockAdjustmentActionRequest>()))
             .ReturnsAsync(() => _adjustment = Adjustment("Posted", _postingEventId, _journalEntryId));
+    }
+
+    private async Task<InventoryCycleCountSchedule> SeedDueScheduleAsync(DateTime now)
+    {
+        var occurrence = new ProcurementCalendarOccurrence
+        {
+            TenantId = _tenantId,
+            OccurrenceKey = $"cycle-count-{Guid.NewGuid():N}",
+            ProfileId = Guid.NewGuid(),
+            ProfileKey = Guid.NewGuid(),
+            RuleId = Guid.NewGuid(),
+            RuleKey = Guid.NewGuid(),
+            ProfileVersion = 1,
+            EventType = ProcurementCalendarEventType.CycleCount,
+            CalendarYear = now.Year,
+            Title = "Scheduled cycle count",
+            DueAtUtc = now,
+            DueLocal = now,
+            TimeZoneId = "UTC",
+            OwnerUserId = _initiatorId,
+            OwnerName = "Cycle Initiator",
+            OwnerRoleName = "TDC_STORES_MANAGER",
+            EscalationUserId = _storesApproverId,
+            EscalationOwnerName = "Stores Approver",
+            StatutoryReference = "TDC-0609",
+            Status = ProcurementCalendarOccurrenceStatus.Due,
+            GeneratedAtUtc = now.AddDays(-1)
+        };
+        var schedule = new InventoryCycleCountSchedule
+        {
+            TenantId = _tenantId,
+            WarehouseId = _warehouseId,
+            LocationId = _locationId,
+            ABCClass = "A",
+            FrequencyDays = 30,
+            NextDueAtUtc = now.AddMinutes(-1),
+            CalendarOccurrenceId = occurrence.Id,
+            CutoffOccurrenceId = Guid.NewGuid(),
+            CutoffAtUtc = now.AddDays(90),
+            FreezeInventory = true,
+            BlindCount = true,
+            RecountQuantityThreshold = 1m,
+            RecountValueThreshold = 10m,
+            IsActive = true
+        };
+        await _context.AddRangeAsync(occurrence, schedule);
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        return schedule;
     }
 
     private StockAdjustmentDetailDto Adjustment(string status, Guid? postingEventId = null, Guid? journalEntryId = null) => new()

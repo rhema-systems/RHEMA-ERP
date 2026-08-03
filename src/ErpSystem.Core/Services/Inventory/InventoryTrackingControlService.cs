@@ -464,6 +464,7 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
             {
                 PermissionCode = "procurement.inventory.read",
                 WarehouseId = candidateId,
+                RequireLocationScope = true,
                 SourceType = "InventoryTrackingControl",
                 SourceReference = reference
             }, reference, cancellationToken);

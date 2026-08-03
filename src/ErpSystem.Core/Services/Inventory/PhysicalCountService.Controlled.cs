@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -358,73 +359,104 @@ public partial class PhysicalCountService
         if (tenantId == Guid.Empty) throw new ArgumentException("Tenant is required.", nameof(tenantId));
         var now = EnsureUtc(nowUtc);
         var scheduleRepo = _unitOfWork.Repository<InventoryCycleCountSchedule>();
-        var due = await scheduleRepo.GetQueryable(x => x.TenantId == tenantId && !x.IsDeleted && x.IsActive &&
+        var dueScheduleIds = await scheduleRepo.GetQueryable(x => x.TenantId == tenantId && !x.IsDeleted && x.IsActive &&
                 x.NextDueAtUtc <= now && x.CutoffAtUtc >= now)
-            .OrderBy(x => x.NextDueAtUtc).ThenBy(x => x.Id).ToListAsync();
-        var result = new CycleCountGenerationResultDto { DueSchedules = due.Count };
-        foreach (var schedule in due)
+            .AsNoTracking().OrderBy(x => x.NextDueAtUtc).ThenBy(x => x.Id)
+            .Select(x => x.Id).ToListAsync();
+        var result = new CycleCountGenerationResultDto { DueSchedules = dueScheduleIds.Count };
+        foreach (var scheduleId in dueScheduleIds)
         {
-            var scheduledFor = schedule.NextDueAtUtc;
-            var exists = await _unitOfWork.Repository<PhysicalCount>().ExistsAsync(x =>
-                x.TenantId == tenantId && x.CycleCountScheduleId == schedule.Id && x.ScheduledForUtc == scheduledFor && !x.IsDeleted);
-            if (!exists)
+            var outcome = await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
-                var occurrence = await _unitOfWork.Repository<ProcurementCalendarOccurrence>().GetQueryable(x =>
-                        x.Id == schedule.CalendarOccurrenceId && x.TenantId == tenantId && !x.IsDeleted)
-                    .AsNoTracking().SingleAsync();
-                var count = new PhysicalCount
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+                try
                 {
-                    TenantId = tenantId,
-                    CountNumber = await GenerateCountNumberAsync(),
-                    WarehouseId = schedule.WarehouseId,
-                    LocationId = schedule.LocationId,
-                    CountType = CountType.CycleCount,
-                    CountDate = now,
-                    ScheduledForUtc = scheduledFor,
-                    CutoffAtUtc = schedule.CutoffAtUtc,
-                    CycleCountScheduleId = schedule.Id,
-                    CalendarOccurrenceId = schedule.CalendarOccurrenceId,
-                    CutoffOccurrenceId = schedule.CutoffOccurrenceId,
-                    ABCClass = schedule.ABCClass,
-                    FreezeInventory = true,
-                    BlindCount = true,
-                    Status = "Draft",
-                    InitiatedById = occurrence.OwnerUserId,
-                    Notes = $"Automatically generated ABC-{schedule.ABCClass} cycle count from calendar occurrence {occurrence.OccurrenceKey}."
-                };
-                await _countRepository.AddAsync(count);
-                await _unitOfWork.SaveChangesAsync();
-                await PopulateScheduledCountItemsAsync(count, schedule.ABCClass);
-                if (count.TotalItems == 0)
-                {
-                    count.Status = "Cancelled";
-                    count.CancellationReason = $"No active ABC-{schedule.ABCClass} inventory was available at generation time.";
-                    count.FreezeReleasedAtUtc = now;
-                    result.EmptySchedules++;
+                    await _unitOfWork.AcquireTransactionLockAsync($"physical-count-generation:{tenantId:N}");
+                    var schedule = await scheduleRepo.GetQueryable(x => x.Id == scheduleId && x.TenantId == tenantId &&
+                            !x.IsDeleted && x.IsActive && x.NextDueAtUtc <= now && x.CutoffAtUtc >= now)
+                        .SingleOrDefaultAsync();
+                    if (schedule is null)
+                    {
+                        await _unitOfWork.CommitAsync();
+                        return (CountId: (Guid?)null, Empty: false);
+                    }
+
+                    var scheduledFor = schedule.NextDueAtUtc;
+                    var exists = await _unitOfWork.Repository<PhysicalCount>().ExistsAsync(x =>
+                        x.TenantId == tenantId && x.CycleCountScheduleId == schedule.Id &&
+                        x.ScheduledForUtc == scheduledFor && !x.IsDeleted);
+                    Guid? countId = null;
+                    var empty = false;
+                    if (!exists)
+                    {
+                        var occurrence = await _unitOfWork.Repository<ProcurementCalendarOccurrence>().GetQueryable(x =>
+                                x.Id == schedule.CalendarOccurrenceId && x.TenantId == tenantId && !x.IsDeleted)
+                            .AsNoTracking().SingleAsync();
+                        var count = new PhysicalCount
+                        {
+                            TenantId = tenantId,
+                            CountNumber = await GenerateCountNumberAsync(),
+                            WarehouseId = schedule.WarehouseId,
+                            LocationId = schedule.LocationId,
+                            CountType = CountType.CycleCount,
+                            CountDate = now,
+                            ScheduledForUtc = scheduledFor,
+                            CutoffAtUtc = schedule.CutoffAtUtc,
+                            CycleCountScheduleId = schedule.Id,
+                            CalendarOccurrenceId = schedule.CalendarOccurrenceId,
+                            CutoffOccurrenceId = schedule.CutoffOccurrenceId,
+                            ABCClass = schedule.ABCClass,
+                            FreezeInventory = true,
+                            BlindCount = true,
+                            Status = "Draft",
+                            InitiatedById = occurrence.OwnerUserId,
+                            Notes = $"Automatically generated ABC-{schedule.ABCClass} cycle count from calendar occurrence {occurrence.OccurrenceKey}."
+                        };
+                        await _countRepository.AddAsync(count);
+                        await PopulateScheduledCountItemsAsync(count, schedule.ABCClass);
+                        if (count.TotalItems == 0)
+                        {
+                            count.Status = "Cancelled";
+                            count.CancellationReason = $"No active ABC-{schedule.ABCClass} inventory was available at generation time.";
+                            count.FreezeReleasedAtUtc = now;
+                            empty = true;
+                        }
+                        await AddCountActionAsync(count, PhysicalCountActionType.Scheduled, occurrence.OwnerUserId,
+                            $"schedule:{schedule.Id:N}:{scheduledFor:yyyyMMddHHmm}", count.Notes,
+                            new { schedule.Id, schedule.ABCClass, scheduledFor, schedule.CutoffAtUtc },
+                            occurrence.OwnerRoleName ?? "CalendarOwner", $"cycle-schedule:{schedule.Id:N}");
+                        countId = count.Id;
+                        schedule.LastPhysicalCountId = count.Id;
+                    }
+
+                    schedule.LastGeneratedAtUtc = now;
+                    var next = scheduledFor.AddDays(schedule.FrequencyDays);
+                    if (next > schedule.CutoffAtUtc)
+                    {
+                        schedule.IsActive = false;
+                        schedule.NextDueAtUtc = schedule.CutoffAtUtc;
+                    }
+                    else
+                    {
+                        schedule.NextDueAtUtc = next;
+                    }
+                    await scheduleRepo.UpdateAsync(schedule);
+                    await _unitOfWork.CommitAsync();
+                    return (CountId: countId, Empty: empty);
                 }
-                await AddCountActionAsync(count, PhysicalCountActionType.Scheduled, occurrence.OwnerUserId,
-                    $"schedule:{schedule.Id:N}:{scheduledFor:yyyyMMddHHmm}", count.Notes,
-                    new { schedule.Id, schedule.ABCClass, scheduledFor, schedule.CutoffAtUtc },
-                    occurrence.OwnerRoleName ?? "CalendarOwner", $"cycle-schedule:{schedule.Id:N}");
-                await _countRepository.UpdateAsync(count);
-                await _unitOfWork.SaveChangesAsync();
+                catch
+                {
+                    if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
+                    _unitOfWork.ClearTrackedChanges();
+                    throw;
+                }
+            });
+            if (outcome.CountId.HasValue)
+            {
                 result.CountsCreated++;
-                result.PhysicalCountIds.Add(count.Id);
-                schedule.LastPhysicalCountId = count.Id;
+                result.PhysicalCountIds.Add(outcome.CountId.Value);
+                if (outcome.Empty) result.EmptySchedules++;
             }
-            schedule.LastGeneratedAtUtc = now;
-            var next = scheduledFor.AddDays(schedule.FrequencyDays);
-            if (next > schedule.CutoffAtUtc)
-            {
-                schedule.IsActive = false;
-                schedule.NextDueAtUtc = schedule.CutoffAtUtc;
-            }
-            else
-            {
-                schedule.NextDueAtUtc = next;
-            }
-            await scheduleRepo.UpdateAsync(schedule);
-            await _unitOfWork.SaveChangesAsync();
         }
         return result;
     }
@@ -517,15 +549,35 @@ public partial class PhysicalCountService
 
     private async Task PopulateScheduledCountItemsAsync(PhysicalCount count, string abcClass)
     {
-        var warehouseQuantities = await _warehouseQuantityRepository.GetByWarehouseAsync(count.WarehouseId);
-        var itemIds = warehouseQuantities.Select(x => x.InventoryItemId).Distinct().ToList();
+        if (!count.LocationId.HasValue)
+            throw new InvalidOperationException("A scheduled cycle count requires an exact warehouse location.");
+        var locationQuantities = await _unitOfWork.Repository<InventoryLocation>().GetQueryable(x =>
+                x.TenantId == count.TenantId && x.LocationId == count.LocationId.Value && !x.IsDeleted)
+            .AsNoTracking().ToListAsync();
+        var itemIds = locationQuantities.Select(x => x.InventoryItemId).Distinct().ToList();
         var items = await _unitOfWork.Repository<InventoryItem>().GetQueryable(x =>
                 x.TenantId == count.TenantId && itemIds.Contains(x.Id) && !x.IsDeleted && x.ABCClass == abcClass)
             .AsNoTracking().ToDictionaryAsync(x => x.Id);
+        var countedItemIds = items.Keys.ToList();
+        var balances = await _unitOfWork.Repository<InventoryBalance>().GetQueryable(x =>
+                x.TenantId == count.TenantId && x.WarehouseId == count.WarehouseId &&
+                x.LocationId == count.LocationId.Value && countedItemIds.Contains(x.InventoryItemId) && !x.IsDeleted)
+            .AsNoTracking().ToListAsync();
+        var balancesByItem = balances.GroupBy(x => x.InventoryItemId).ToDictionary(x => x.Key, x => x.First());
+        var fifoItemIds = items.Values.Where(x => x.ValuationMethod == ValuationMethod.FIFO).Select(x => x.Id).ToList();
+        var layers = await _unitOfWork.Repository<InventoryLayer>().GetQueryable(x =>
+                x.TenantId == count.TenantId && x.WarehouseId == count.WarehouseId &&
+                x.LocationId == count.LocationId.Value && fifoItemIds.Contains(x.InventoryItemId) &&
+                !x.IsDeleted && x.IsActive && !x.IsFullyConsumed && x.RemainingQuantity > 0)
+            .AsNoTracking().ToListAsync();
+        var fifoCosts = layers.GroupBy(x => x.InventoryItemId).ToDictionary(x => x.Key, x =>
+            x.Sum(layer => layer.RemainingQuantity * layer.UnitCost) / x.Sum(layer => layer.RemainingQuantity));
         var total = 0;
-        foreach (var quantity in warehouseQuantities.Where(x => items.ContainsKey(x.InventoryItemId)))
+        foreach (var quantity in locationQuantities.Where(x => items.ContainsKey(x.InventoryItemId)))
         {
             var item = items[quantity.InventoryItemId];
+            balancesByItem.TryGetValue(item.Id, out var balance);
+            fifoCosts.TryGetValue(item.Id, out var fifoCost);
             await _countItemRepository.AddAsync(new PhysicalCountItem
             {
                 TenantId = count.TenantId,
@@ -535,14 +587,33 @@ public partial class PhysicalCountService
                 ItemCode = item.ItemCode,
                 ItemName = item.Name,
                 UnitOfMeasure = item.UnitOfMeasure,
-                SystemQuantity = quantity.CurrentStock,
-                UnitCost = item.StandardCost
+                SystemQuantity = quantity.Quantity,
+                UnitCost = ResolveCycleCountUnitCost(item, quantity, balance, fifoCost)
             });
             total++;
         }
         count.TotalItems = total;
-        await _countRepository.UpdateAsync(count);
-        await _unitOfWork.SaveChangesAsync();
+    }
+
+    private static decimal ResolveCycleCountUnitCost(
+        InventoryItem item,
+        InventoryLocation location,
+        InventoryBalance? balance,
+        decimal fifoCost)
+    {
+        var fallback = location.AverageCost > 0 ? location.AverageCost
+            : item.AverageCost > 0 ? item.AverageCost
+            : item.StandardCost > 0 ? item.StandardCost
+            : item.LastPurchaseCost;
+        var value = item.ValuationMethod switch
+        {
+            ValuationMethod.StandardCost => item.StandardCost,
+            ValuationMethod.FIFO when fifoCost > 0 => fifoCost,
+            ValuationMethod.FIFO => balance?.AverageUnitCost > 0 ? balance.AverageUnitCost : fallback,
+            ValuationMethod.WeightedAverage => balance?.AverageUnitCost > 0 ? balance.AverageUnitCost : fallback,
+            _ => fallback
+        };
+        return Math.Round(value, 4, MidpointRounding.AwayFromZero);
     }
 
     private async Task AddCountActionAsync(

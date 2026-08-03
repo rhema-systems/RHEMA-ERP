@@ -53,6 +53,46 @@ public sealed class InventoryReadScopeRegressionTests
     }
 
     [Fact]
+    public async Task Replenishment_aggregate_reads_and_mutations_require_all_location_scope()
+    {
+        await using var context = Context();
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var warehouse = Warehouse(tenantId, "RESTRICTED-BIN");
+        var actor = User(tenantId, userId);
+        var recommendation = Recommendation(tenantId, warehouse, actor, "IRR-RESTRICTED-BIN");
+        context.AddRange(actor, warehouse, recommendation.WarehouseQuantity,
+            recommendation.InventoryItem, recommendation);
+        await context.SaveChangesAsync();
+        using var unitOfWork = new UnitOfWork(context);
+        var current = CurrentUser(tenantId, userId);
+        var access = ScopedAccess(warehouse.Id, Guid.NewGuid());
+        var service = new InventoryReplenishmentService(unitOfWork, current.Object, access.Object,
+            Mock.Of<IProcurementControlEventService>(), Mock.Of<INotificationService>(),
+            Mock.Of<IWorkflowIntegrationService>(), Mock.Of<IProcurementRequisitionLinkageService>(),
+            Mock.Of<IPurchaseRequisitionRepository>(), Mock.Of<IPurchaseRequisitionItemRepository>(),
+            NullLogger<InventoryReplenishmentService>.Instance);
+
+        var visible = await service.GetAsync(null, null, 10);
+        var direct = () => service.GetByIdAsync(recommendation.Id);
+        var generate = () => service.GenerateAsync(new GenerateInventoryReplenishmentRequest
+        {
+            WarehouseId = warehouse.Id,
+            DemandWindowDays = 30,
+            IdempotencyKey = "restricted-location-generate",
+            CorrelationId = "restricted-location-generate"
+        });
+
+        visible.Should().BeEmpty();
+        await direct.Should().ThrowAsync<InventoryReplenishmentAuthorizationException>();
+        await generate.Should().ThrowAsync<InventoryReplenishmentAuthorizationException>();
+        access.Verify(value => value.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request => request.WarehouseId == warehouse.Id &&
+                request.RequireLocationScope && request.LocationId == null),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Project_reservation_reads_filter_by_the_exact_warehouse_and_location_scope()
     {
         await using var context = Context();

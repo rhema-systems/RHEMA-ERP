@@ -763,7 +763,7 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
         {
             PermissionCode = permission,
             WarehouseId = warehouseId,
-            RequireLocationScope = false,
+            RequireLocationScope = true,
             SourceType = EntityType,
             SourceReference = reference
         }, correlation, cancellationToken);
@@ -778,7 +778,7 @@ public sealed class InventoryReplenishmentService : IInventoryReplenishmentServi
         {
             PermissionCode = "procurement.inventory.read",
             WarehouseId = value.WarehouseId,
-            RequireLocationScope = false,
+            RequireLocationScope = true,
             SourceType = EntityType,
             SourceReference = value.RecommendationNumber
         }, $"inventory-replenishment-read:{value.Id:N}", cancellationToken);

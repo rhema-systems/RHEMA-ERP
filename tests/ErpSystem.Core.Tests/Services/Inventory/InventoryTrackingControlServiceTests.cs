@@ -232,6 +232,28 @@ public sealed class InventoryTrackingControlServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Warehouse_wide_tracking_registers_require_an_all_locations_assignment()
+    {
+        var warehouse = Warehouse();
+        await _context.AddAsync(warehouse);
+        await _context.SaveChangesAsync();
+        _access.Setup(value => value.CheckCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementAccessCapabilityRequest request, string _, CancellationToken __) =>
+                new ProcurementAccessCapabilityDecisionDto { Allowed = !request.RequireLocationScope });
+
+        var events = () => _service.GetEventsAsync();
+        var exceptions = () => _service.GetExceptionsAsync();
+
+        await events.Should().ThrowAsync<InventoryTrackingAuthorizationException>();
+        await exceptions.Should().ThrowAsync<InventoryTrackingAuthorizationException>();
+        _access.Verify(value => value.CheckCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.WarehouseId == warehouse.Id && request.RequireLocationScope),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtLeast(2));
+    }
+
+    [Fact]
     public void Ef_model_has_tenant_idempotency_exception_lineage_and_quantity_guards()
     {
         var exception = _context.Model.FindEntityType(typeof(InventoryTrackingException))!;
