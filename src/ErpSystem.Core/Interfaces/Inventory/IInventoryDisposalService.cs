@@ -17,6 +17,14 @@ public interface IInventoryDisposalService
     Task<InventoryDisposalDto> CompleteAsync(Guid id, CompleteInventoryDisposalRequest request, CancellationToken cancellationToken = default);
 }
 
+public interface IInventoryDisposalReportSource
+{
+    Task<IReadOnlyList<InventoryDisposalDto>> GetReportSourceAsync(
+        InventoryDisposalStatus? status,
+        Guid? warehouseId,
+        CancellationToken cancellationToken = default);
+}
+
 public class InventoryDisposalException(string code, string message) : Exception(message)
 {
     public string Code { get; } = code;

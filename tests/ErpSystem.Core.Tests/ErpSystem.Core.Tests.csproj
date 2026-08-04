@@ -45,6 +45,7 @@
     <Compile Include="Services\Inventory\InventoryReplenishmentControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryScanningServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryItemProfileServiceTests.cs" />
+    <Compile Include="Services\Inventory\InventoryStatutoryReportServiceTests.cs" />
     <Compile Include="Services\Inventory\E2E010ProjectMaterialLifecycleTests.cs" />
     <Compile Include="Services\Inventory\E2E012CycleCountFinanceLifecycleTests.cs" />
   </ItemGroup>

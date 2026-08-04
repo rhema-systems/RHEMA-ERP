@@ -553,6 +553,16 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.IDashboardService, ErpSystem.Data.Services.DashboardService>();
 
             // Reports service
+            services.AddScoped<ErpSystem.Core.Services.Procurement.ProcurementStatutoryReportService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementStatutoryReportService>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Procurement.ProcurementStatutoryReportService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Procurement.ProcurementStatutoryReportService>());
+            services.AddScoped<ErpSystem.Core.Services.Inventory.InventoryStatutoryReportService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryStatutoryReportService>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Inventory.InventoryStatutoryReportService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Inventory.InventoryStatutoryReportService>());
             services.AddScoped<IReportsService, ErpSystem.Data.Services.DatabaseReportsService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentOutputService, ErpSystem.Api.Services.Documents.DocumentOutputService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.JournalVoucherDocumentBuilder>();
@@ -662,9 +672,21 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryAdjustmentFinancePostingService, ErpSystem.Api.Services.Finance.InventoryAdjustmentFinancePostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryReceiptFinancePostingService, ErpSystem.Api.Services.Finance.InventoryReceiptFinancePostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryLandedCostFinancePostingService, ErpSystem.Api.Services.Finance.InventoryLandedCostFinancePostingService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationReconciliationService, ErpSystem.Api.Services.Finance.InventoryValuationReconciliationService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryAnalyticsService, ErpSystem.Api.Services.Inventory.InventoryAnalyticsService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryDisposalService, ErpSystem.Api.Services.Inventory.InventoryDisposalService>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.InventoryValuationReconciliationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationReconciliationService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Finance.InventoryValuationReconciliationService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationReconciliationReportSource>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Finance.InventoryValuationReconciliationService>());
+            services.AddScoped<ErpSystem.Api.Services.Inventory.InventoryAnalyticsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryAnalyticsService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Inventory.InventoryAnalyticsService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryAnalyticsReportSource>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Inventory.InventoryAnalyticsService>());
+            services.AddScoped<ErpSystem.Api.Services.Inventory.InventoryDisposalService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryDisposalService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Inventory.InventoryDisposalService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryDisposalReportSource>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Inventory.InventoryDisposalService>());
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService, ErpSystem.Core.Services.Inventory.InventoryValuationService>();
 
             // Price List repositories
@@ -959,6 +981,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementMasterDataChangeService, ErpSystem.Core.Services.Procurement.ProcurementMasterDataChangeService>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementConfigurationProfileSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementAccessControlSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.ProcurementStatutoryReportSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.InventoryStatutoryReportSeeder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Crm.ICrmService, ErpSystem.Core.Services.Crm.CrmService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAgreementService, ErpSystem.Api.Services.Sales.SalesAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();

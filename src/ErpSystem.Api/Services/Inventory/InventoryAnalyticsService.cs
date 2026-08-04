@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Inventory;
 
-public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
+public sealed class InventoryAnalyticsService : IInventoryAnalyticsService, IInventoryAnalyticsReportSource
 {
     private const int DemandWindowDays = 90;
     private static readonly BandDefinition[] Bands =
@@ -37,21 +37,41 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
         _access = access;
     }
 
-    public async Task<InventoryAnalyticsDto> GetAsync(
+    public Task<InventoryAnalyticsDto> GetAsync(
         Guid? warehouseId,
         Guid? categoryId,
         int slowMovingDays,
         int nonMovingDays,
         int expiryWarningDays,
         int take,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        BuildAsync(warehouseId, categoryId, slowMovingDays, nonMovingDays, expiryWarningDays,
+            Math.Clamp(take, 1, 2000), cancellationToken);
+
+    public Task<InventoryAnalyticsDto> GetReportSourceAsync(
+        Guid? warehouseId,
+        Guid? categoryId,
+        int slowMovingDays,
+        int nonMovingDays,
+        int expiryWarningDays,
+        CancellationToken cancellationToken = default) =>
+        BuildAsync(warehouseId, categoryId, slowMovingDays, nonMovingDays, expiryWarningDays,
+            null, cancellationToken);
+
+    private async Task<InventoryAnalyticsDto> BuildAsync(
+        Guid? warehouseId,
+        Guid? categoryId,
+        int slowMovingDays,
+        int nonMovingDays,
+        int expiryWarningDays,
+        int? take,
+        CancellationToken cancellationToken)
     {
         EnsureActor();
         if (slowMovingDays is < 1 or > 3650 || nonMovingDays <= slowMovingDays || nonMovingDays > 3650 ||
             expiryWarningDays is < 1 or > 730)
             throw Error("INV_ANALYTICS_THRESHOLDS_INVALID",
                 "Slow-moving days must be 1-3650, non-moving days must be greater and at most 3650, and expiry warning days must be 1-730.");
-        take = Math.Clamp(take, 1, 2000);
         var now = DateTime.UtcNow;
 
         var balanceQuery = _db.InventoryBalances.AsNoTracking()
@@ -185,7 +205,8 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
                 QuantityOnOrder = balance.QuantityOnOrder, InventoryValue = Round(balance.TotalValue),
                 AverageUnitCost = Round(balance.AverageUnitCost), ReorderLevel = balance.InventoryItem.ReorderLevel,
                 LastMovementDateUtc = balance.LastMovementDate, LastReceiptDateUtc = balance.LastReceiptDate,
-                LastIssueDateUtc = balance.LastIssueDate, DaysSinceActivity = daysSinceActivity,
+                LastIssueDateUtc = balance.LastIssueDate, LastCountDateUtc = balance.LastCountDate,
+                DaysSinceActivity = daysSinceActivity,
                 ActivityClassification = classification,
                 CurrentStockoutDays = isStockout ? Days(now, balance.LastIssueDate ?? balance.LastMovementDate ?? anchor) : null,
                 AverageDailyDemand = averageDailyDemand,
@@ -216,10 +237,11 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
             ItemLocationCount = rows.Count(value =>
                 value.AgeingBands.Single(band => band.Key == definition.Key).Quantity > 0m)
         }).ToList();
-        var ordered = rows.OrderByDescending(value => value.ExpiredQuantity > 0m)
+        var orderedQuery = rows.OrderByDescending(value => value.ExpiredQuantity > 0m)
             .ThenByDescending(value => value.ActivityClassification)
             .ThenByDescending(value => value.InventoryValue)
-            .ThenBy(value => value.ItemCode).ThenBy(value => value.LocationCode).Take(take).ToList();
+            .ThenBy(value => value.ItemCode).ThenBy(value => value.LocationCode);
+        var ordered = take.HasValue ? orderedQuery.Take(take.Value).ToList() : orderedQuery.ToList();
         return new InventoryAnalyticsDto
         {
             AsOfUtc = now, SlowMovingDays = slowMovingDays, NonMovingDays = nonMovingDays,

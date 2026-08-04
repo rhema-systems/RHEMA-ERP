@@ -66,6 +66,8 @@ export interface ExecuteReportDto {
   endDate?: string;
   maxRows?: number;
   includeMetadata?: boolean;
+  page?: number;
+  pageSize?: number;
 }
 
 export interface ReportResult {
@@ -78,6 +80,11 @@ export interface ReportResult {
   data: Record<string, any>[];
   metadata?: ReportMetadata;
   chartData?: ReportChartData[];
+  currentPage: number;
+  pageSize: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
 }
 
 export interface ReportMetadata {
@@ -351,7 +358,9 @@ class ReportsService {
       const url = `${baseUrl}/reports/${reportId}/export`;
       
       // Get auth token for headers
-      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+      const token = typeof window !== 'undefined'
+        ? localStorage.getItem('token') || localStorage.getItem('authToken')
+        : null;
       
       const response = await fetch(url, {
         method: 'POST',

@@ -18,7 +18,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance;
 
-public sealed class InventoryValuationReconciliationService : IInventoryValuationReconciliationService
+public sealed class InventoryValuationReconciliationService : IInventoryValuationReconciliationService,
+    IInventoryValuationReconciliationReportSource
 {
     private const string EntityType = "InventoryValuationReconciliation";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -52,6 +53,20 @@ public sealed class InventoryValuationReconciliationService : IInventoryValuatio
         if (status.HasValue) query = query.Where(value => value.Status == status.Value);
         var rows = await query.AsNoTracking().OrderByDescending(value => value.GeneratedAtUtc)
             .Take(take).ToListAsync(cancellationToken);
+        return rows.Select(Map).ToList();
+    }
+
+    public async Task<IReadOnlyList<InventoryValuationReconciliationDto>> GetReportSourceAsync(
+        Guid? fiscalPeriodId,
+        InventoryValuationReconciliationStatus? status,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureActor();
+        var query = FullQuery().Where(value => value.TenantId == _currentUser.TenantId && !value.IsDeleted);
+        if (fiscalPeriodId.HasValue) query = query.Where(value => value.FiscalPeriodId == fiscalPeriodId.Value);
+        if (status.HasValue) query = query.Where(value => value.Status == status.Value);
+        var rows = await query.AsNoTracking().OrderByDescending(value => value.GeneratedAtUtc)
+            .ToListAsync(cancellationToken);
         return rows.Select(Map).ToList();
     }
 
