@@ -133,3 +133,17 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260729124416_TDC0402FrameworkCallOffs")] partial class TDC0402FrameworkCallOffs { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260730132714_TDC0407ContractActivationGate")] partial class TDC0407ContractActivationGate { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260731140000_TDC0502ReceiptInspectionClosure")] partial class TDC0502ReceiptInspectionClosure { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260801204023_TDC0602InventoryMobileScanning")] partial class TDC0602InventoryMobileScanning { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802002739_TDC0603InventoryTrackingControls")] partial class TDC0603InventoryTrackingControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802012523_TDC0604InventoryAccessLocations")] partial class TDC0604InventoryAccessLocations { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802023830_TDC0605DirectedWarehouseOperations")] partial class TDC0605DirectedWarehouseOperations { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802033223_TDC0606ControlledInventoryIssue")] partial class TDC0606ControlledInventoryIssue { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments")] partial class TDC0607ControlledInventoryReturnsAndAdjustments { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802095353_TDC0608ControlledInventoryTransfers")] partial class TDC0608ControlledInventoryTransfers { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802105457_TDC0609ControlledCycleCounts")] partial class TDC0609ControlledCycleCounts { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802160000_TDC0611ProjectInventoryReservations")] partial class TDC0611ProjectInventoryReservations { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802162449_TDC0612InventoryReplenishment")] partial class TDC0612InventoryReplenishment { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802171742_TDC0613InventoryValuationReconciliation")] partial class TDC0613InventoryValuationReconciliation { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802190244_TDC0615InventoryDisposalLifecycle")] partial class TDC0615InventoryDisposalLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802202554_TDC0616ItemMasterProfile")] partial class TDC0616ItemMasterProfile { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260803233103_Phase6ReviewInventoryTrackingHardening")] partial class Phase6ReviewInventoryTrackingHardening { }

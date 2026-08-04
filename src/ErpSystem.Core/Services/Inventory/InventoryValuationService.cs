@@ -782,13 +782,19 @@ public class InventoryValuationService : IInventoryValuationService
                 break;
         }
 
-        // Create movement record
-        await CreateMovementAsync(
+        // The immutable movement must carry the value actually held in the inventory
+        // subledger. Standard-cost receipts therefore use standard cost and retain the
+        // actual-versus-standard difference separately for the Finance variance line.
+        var movementUnitCost = item.ValuationMethod == ValuationMethod.StandardCost
+            ? item.StandardCost
+            : unitCost;
+        var movement = await CreateMovementAsync(
             inventoryItemId, warehouseId, locationId,
             InventoryMovementType.PurchaseReceipt, MovementDirection.In,
-            quantity, unitCost,
+            quantity, movementUnitCost,
             referenceType, referenceNumber, referenceId,
             lotNumber, serialNumber, expirationDate);
+        movement.VarianceAmount = variance;
 
         return variance;
     }
@@ -862,6 +868,197 @@ public class InventoryValuationService : IInventoryValuationService
             lotNumber, serialNumber, null);
 
         return totalCost;
+    }
+
+    public async Task<decimal> ProcessAdjustmentAsync(
+        Guid inventoryItemId,
+        Guid warehouseId,
+        Guid locationId,
+        decimal quantityDelta,
+        decimal unitCost,
+        decimal openingQuantity,
+        bool allowNegative,
+        string? referenceNumber,
+        Guid referenceId,
+        string? lotNumber = null,
+        string? serialNumber = null,
+        DateTime? expirationDate = null,
+        Guid? reversalSourceId = null)
+    {
+        if (quantityDelta == 0)
+            throw new ArgumentOutOfRangeException(nameof(quantityDelta), "An adjustment quantity cannot be zero.");
+        if (unitCost <= 0)
+            throw new ArgumentOutOfRangeException(nameof(unitCost), "An adjustment requires a positive server-derived unit cost.");
+
+        var item = await _unitOfWork.Repository<InventoryItem>()
+            .GetQueryable(value => value.TenantId == _currentUserProvider.TenantId &&
+                value.Id == inventoryItemId && !value.IsDeleted)
+            .SingleOrDefaultAsync()
+            ?? throw new KeyNotFoundException($"Inventory item {inventoryItemId} not found");
+        if (!item.IsValuationLocked)
+        {
+            item.IsValuationLocked = true;
+            await _unitOfWork.Repository<InventoryItem>().UpdateAsync(item);
+        }
+
+        var balance = await GetOrCreateBalanceAsync(inventoryItemId, warehouseId, locationId);
+        // TDC-0603 deliberately did not manufacture legacy movement history. Adopt an
+        // exact-bin opening value only while this authoritative scope is still pristine.
+        if (!balance.LastMovementDate.HasValue && balance.QuantityOnHand == 0 && openingQuantity != 0)
+        {
+            balance.QuantityOnHand = openingQuantity;
+            balance.TotalValue = openingQuantity * unitCost;
+            balance.AverageUnitCost = unitCost;
+        }
+
+        var quantity = Math.Abs(quantityDelta);
+        if (quantityDelta < 0 && balance.QuantityOnHand < quantity && !allowNegative)
+            throw new InvalidOperationException(
+                $"Insufficient authoritative inventory balance. Available: {balance.QuantityOnHand}, Requested: {quantity}");
+
+        decimal totalValue;
+        decimal movementUnitCost;
+        Guid? movementCostLayerId = null;
+        if (quantityDelta > 0)
+        {
+            movementUnitCost = item.ValuationMethod == ValuationMethod.StandardCost
+                ? item.StandardCost
+                : unitCost;
+            if (movementUnitCost <= 0)
+                throw new InvalidOperationException($"A valid {item.ValuationMethod} cost is required for {item.ItemCode}.");
+            totalValue = quantity * movementUnitCost;
+            if (item.ValuationMethod == ValuationMethod.FIFO)
+            {
+                var layer = await CreateFIFOLayerAsync(
+                    inventoryItemId, warehouseId, locationId, quantity, movementUnitCost,
+                    ReferenceType.Adjustment.ToString(), referenceNumber, referenceId,
+                    lotNumber, expirationDate);
+                movementCostLayerId = layer.Id;
+            }
+            balance.QuantityOnHand += quantity;
+            balance.TotalValue += totalValue;
+        }
+        else
+        {
+            switch (item.ValuationMethod)
+            {
+                case ValuationMethod.FIFO:
+                {
+                    if (reversalSourceId.HasValue)
+                    {
+                        var reversal = await ConsumeAdjustmentReversalLayersAsync(
+                            inventoryItemId, warehouseId, locationId, quantity,
+                            reversalSourceId.Value, unitCost, lotNumber);
+                        totalValue = reversal.TotalCost;
+                        movementUnitCost = totalValue / quantity;
+                        movementCostLayerId = reversal.CostLayerId;
+                        break;
+                    }
+
+                    var activeLayerQuantity = await _unitOfWork.Repository<InventoryLayer>()
+                        .GetQueryable(value => value.TenantId == _currentUserProvider.TenantId &&
+                            value.InventoryItemId == inventoryItemId && value.WarehouseId == warehouseId &&
+                            value.LocationId == locationId && !value.IsFullyConsumed && value.RemainingQuantity > 0)
+                        .SumAsync(value => (decimal?)value.RemainingQuantity) ?? 0;
+                    // Legacy exact-bin stock can predate the valuation layer ledger. Adopt
+                    // only the missing opening quantity and retain explicit source lineage.
+                    var missingOpeningLayer = Math.Max(0, openingQuantity - activeLayerQuantity);
+                    if (missingOpeningLayer > 0)
+                    {
+                        await CreateFIFOLayerAsync(
+                            inventoryItemId, warehouseId, locationId, missingOpeningLayer, unitCost,
+                            "LegacyExactBinAdoption", referenceNumber, referenceId, lotNumber, expirationDate);
+                    }
+                    var coveredQuantity = allowNegative
+                        ? Math.Min(quantity, activeLayerQuantity + missingOpeningLayer)
+                        : quantity;
+                    totalValue = coveredQuantity > 0
+                        ? await ConsumeFIFOLayersAsync(
+                            inventoryItemId, warehouseId, locationId, coveredQuantity, new List<InventoryMovement>())
+                        : 0;
+                    totalValue += (quantity - coveredQuantity) * unitCost;
+                    movementUnitCost = totalValue / quantity;
+                    break;
+                }
+                case ValuationMethod.StandardCost:
+                    movementUnitCost = item.StandardCost;
+                    if (movementUnitCost <= 0)
+                        throw new InvalidOperationException($"A standard cost is required for {item.ItemCode}.");
+                    totalValue = quantity * movementUnitCost;
+                    break;
+                default:
+                    movementUnitCost = balance.AverageUnitCost > 0 ? balance.AverageUnitCost : unitCost;
+                    totalValue = quantity * movementUnitCost;
+                    break;
+            }
+            balance.QuantityOnHand -= quantity;
+            balance.TotalValue -= totalValue;
+        }
+
+        if (balance.QuantityOnHand == 0) balance.TotalValue = 0;
+        balance.AverageUnitCost = balance.QuantityOnHand > 0 ? balance.TotalValue / balance.QuantityOnHand : 0;
+        balance.QuantityAvailable = balance.QuantityOnHand - balance.QuantityAllocated;
+        balance.LastMovementDate = DateTime.UtcNow;
+        if (quantityDelta > 0) balance.LastReceiptDate = DateTime.UtcNow;
+        else balance.LastIssueDate = DateTime.UtcNow;
+        balance.LastRecalculatedAt = DateTime.UtcNow;
+
+        var movement = await CreateMovementAsync(
+            inventoryItemId, warehouseId, locationId,
+            quantityDelta > 0 ? InventoryMovementType.AdjustmentIn : InventoryMovementType.AdjustmentOut,
+            quantityDelta > 0 ? MovementDirection.In : MovementDirection.Out,
+            quantity, movementUnitCost, ReferenceType.Adjustment, referenceNumber, referenceId,
+            lotNumber, serialNumber, expirationDate, "Governed stock-adjustment posting");
+        // This path mutates the balance before recording its immutable movement.
+        movement.RunningBalance = balance.QuantityOnHand;
+        movement.RunningValue = balance.TotalValue;
+        movement.CostLayerId = movementCostLayerId;
+        return totalValue;
+    }
+
+    private async Task<(decimal TotalCost, Guid? CostLayerId)> ConsumeAdjustmentReversalLayersAsync(
+        Guid inventoryItemId,
+        Guid warehouseId,
+        Guid locationId,
+        decimal quantity,
+        Guid reversalSourceId,
+        decimal unitCost,
+        string? lotNumber)
+    {
+        var normalizedLot = string.IsNullOrWhiteSpace(lotNumber) ? null : lotNumber.Trim();
+        var layers = await _unitOfWork.Repository<InventoryLayer>()
+            .GetQueryable(value => value.TenantId == _currentUserProvider.TenantId &&
+                value.InventoryItemId == inventoryItemId && value.WarehouseId == warehouseId &&
+                value.LocationId == locationId && value.SourceType == ReferenceType.Adjustment.ToString() &&
+                value.SourceId == reversalSourceId && value.UnitCost == unitCost &&
+                !value.IsFullyConsumed && value.RemainingQuantity > 0)
+            .OrderBy(value => value.LayerDate)
+            .ThenBy(value => value.CreatedAt)
+            .ToListAsync();
+        layers = layers.Where(value => string.Equals(value.LotNumber?.Trim(), normalizedLot,
+            StringComparison.OrdinalIgnoreCase)).ToList();
+
+        var available = layers.Sum(value => value.RemainingQuantity);
+        if (available < quantity)
+            throw new InvalidOperationException(
+                $"The original FIFO adjustment layer has only {available} units remaining; {quantity} units cannot be reversed without consuming unrelated stock.");
+
+        var remaining = quantity;
+        var totalCost = 0m;
+        Guid? firstLayerId = null;
+        foreach (var layer in layers)
+        {
+            if (remaining <= 0) break;
+            var consumed = Math.Min(remaining, layer.RemainingQuantity);
+            firstLayerId ??= layer.Id;
+            layer.RemainingQuantity -= consumed;
+            layer.RemainingValue = layer.RemainingQuantity * layer.UnitCost;
+            layer.IsFullyConsumed = layer.RemainingQuantity == 0;
+            totalCost += consumed * layer.UnitCost;
+            remaining -= consumed;
+        }
+
+        return (totalCost, firstLayerId);
     }
 
     /// <summary>

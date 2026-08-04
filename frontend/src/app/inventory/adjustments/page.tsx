@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   Plus, Search, Eye, ClipboardList, CheckCircle,
-  Clock, XCircle, Pencil, ArrowUpCircle, FileCheck, Package
+  Clock, XCircle, Pencil, ArrowUpCircle, FileCheck, Send, RotateCcw
 } from 'lucide-react';
 import {
   stockAdjustmentService,
@@ -22,7 +22,7 @@ import { InventoryReceiptDialog } from '@/components/inventory/InventoryReceiptD
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 
-export default function InventoryReceiptsPage() {
+export default function StockAdjustmentsPage() {
   const { toast } = useToast();
   const [receipts, setReceipts] = useState<StockAdjustmentDto[]>([]);
   const [filteredReceipts, setFilteredReceipts] = useState<StockAdjustmentDto[]>([]);
@@ -43,6 +43,8 @@ export default function InventoryReceiptsPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [actionReceiptId, setActionReceiptId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [decisionApproved, setDecisionApproved] = useState(true);
+  const [actionComment, setActionComment] = useState('');
 
   const fetchData = async () => {
     try {
@@ -52,7 +54,7 @@ export default function InventoryReceiptsPage() {
       setReceipts(data);
     } catch (err: unknown) {
       console.error('Error fetching data:', err);
-      setError('Failed to load inventory receipts');
+      setError('Failed to load controlled stock adjustments');
     } finally {
       setLoading(false);
     }
@@ -97,26 +99,41 @@ export default function InventoryReceiptsPage() {
     setDialogOpen(true);
   };
 
-  const handleApproveClick = (id: string) => {
+  const handleApproveClick = (id: string, approved: boolean) => {
     setActionReceiptId(id);
+    setDecisionApproved(approved);
+    setActionComment('');
     setShowApproveDialog(true);
   };
 
   const confirmApprove = async () => {
     if (!actionReceiptId) return;
+    if (!actionComment.trim()) return false;
     try {
       setActionLoading(true);
-      await stockAdjustmentService.approve(actionReceiptId);
-      toast({ title: 'Success', description: 'Receipt approved successfully' });
+      await stockAdjustmentService.decide(actionReceiptId, decisionApproved, actionComment.trim());
+      toast({ title: 'Control decision recorded', description: `Adjustment ${decisionApproved ? 'approved' : 'rejected'} successfully.` });
       fetchData();
     } catch (err) {
       console.error('Error:', err);
-      toast({ title: 'Error', description: 'Failed to approve receipt', variant: 'destructive' });
+      toast({ title: 'Action blocked', description: 'The controlled decision could not be recorded.', variant: 'destructive' });
     } finally {
       setActionLoading(false);
       setShowApproveDialog(false);
       setActionReceiptId(null);
     }
+  };
+
+  const handleSubmit = async (id: string) => {
+    try {
+      setActionLoading(true);
+      await stockAdjustmentService.submit(id);
+      toast({ title: 'Submitted', description: 'The adjustment is pending independent approval; stock and Finance are unchanged.' });
+      await fetchData();
+    } catch (err) {
+      console.error('Error:', err);
+      toast({ title: 'Submission blocked', description: 'The adjustment could not enter the configured workflow.', variant: 'destructive' });
+    } finally { setActionLoading(false); }
   };
 
   const handlePostClick = (id: string) => {
@@ -129,7 +146,7 @@ export default function InventoryReceiptsPage() {
     try {
       setActionLoading(true);
       await stockAdjustmentService.post(actionReceiptId);
-      toast({ title: 'Success', description: 'Receipt posted to inventory successfully' });
+      toast({ title: 'Posted', description: 'The approved adjustment was posted atomically to inventory and Finance.' });
       fetchData();
     } catch (err) {
       console.error('Error:', err);
@@ -143,6 +160,7 @@ export default function InventoryReceiptsPage() {
 
   const handleCancelClick = (id: string) => {
     setActionReceiptId(id);
+    setActionComment('');
     setShowCancelDialog(true);
   };
 
@@ -150,12 +168,13 @@ export default function InventoryReceiptsPage() {
     if (!actionReceiptId) return;
     try {
       setActionLoading(true);
-      await stockAdjustmentService.cancel(actionReceiptId);
-      toast({ title: 'Success', description: 'Receipt cancelled successfully' });
+      if (!actionComment.trim()) return false;
+      await stockAdjustmentService.reverse(actionReceiptId, actionComment.trim());
+      toast({ title: 'Reversed', description: 'Inventory and Finance reversal entries were posted atomically.' });
       fetchData();
     } catch (err) {
       console.error('Error:', err);
-      toast({ title: 'Error', description: 'Failed to cancel receipt', variant: 'destructive' });
+      toast({ title: 'Reversal blocked', description: 'The posted adjustment could not be reversed.', variant: 'destructive' });
     } finally {
       setActionLoading(false);
       setShowCancelDialog(false);
@@ -195,7 +214,7 @@ export default function InventoryReceiptsPage() {
   };
 
   const draftCount = receipts.filter((r: StockAdjustmentDto) => r.status === 'Draft').length;
-  const approvedCount = receipts.filter((r: StockAdjustmentDto) => r.status === 'Approved').length;
+  const approvedCount = receipts.filter((r: StockAdjustmentDto) => r.status === 'PendingApproval').length;
   const postedCount = receipts.filter((r: StockAdjustmentDto) => r.status === 'Posted').length;
 
   // Calculate total receipt value (always positive)
@@ -208,10 +227,10 @@ export default function InventoryReceiptsPage() {
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Inventory Receipts</h1>
-          <p className="text-muted-foreground">Receive inventory into your warehouses</p>
+          <h1 className="text-3xl font-bold tracking-tight">Controlled Stock Adjustments</h1>
+          <p className="text-muted-foreground">Maker-checker adjustments with exact locations, central-DMS evidence, audit, and Finance posting</p>
         </div>
-        <Button onClick={openCreateDialog}><Plus className="mr-2 h-4 w-4" />New Receipt</Button>
+        <Button onClick={openCreateDialog}><Plus className="mr-2 h-4 w-4" />New Adjustment</Button>
       </div>
 
       {/* Breadcrumbs */}
@@ -221,7 +240,7 @@ export default function InventoryReceiptsPage() {
           <BreadcrumbSeparator />
           <BreadcrumbItem><BreadcrumbLink href="/inventory">Inventory</BreadcrumbLink></BreadcrumbItem>
           <BreadcrumbSeparator />
-          <BreadcrumbItem><BreadcrumbPage>Inventory Receipts</BreadcrumbPage></BreadcrumbItem>
+          <BreadcrumbItem><BreadcrumbPage>Stock Adjustments</BreadcrumbPage></BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
@@ -229,7 +248,7 @@ export default function InventoryReceiptsPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card><CardContent className="pt-6">
           <div className="flex items-center justify-between">
-            <div><p className="text-2xl font-bold">{receipts.length}</p><p className="text-sm text-muted-foreground">Total Receipts</p></div>
+            <div><p className="text-2xl font-bold">{receipts.length}</p><p className="text-sm text-muted-foreground">Total Adjustments</p></div>
             <ClipboardList className="h-8 w-8 text-blue-500" />
           </div>
         </CardContent></Card>
@@ -241,13 +260,13 @@ export default function InventoryReceiptsPage() {
         </CardContent></Card>
         <Card><CardContent className="pt-6">
           <div className="flex items-center justify-between">
-            <div><p className="text-2xl font-bold text-blue-600">{approvedCount}</p><p className="text-sm text-muted-foreground">Approved</p></div>
+            <div><p className="text-2xl font-bold text-amber-600">{approvedCount}</p><p className="text-sm text-muted-foreground">Pending Approval</p></div>
             <CheckCircle className="h-8 w-8 text-blue-500" />
           </div>
         </CardContent></Card>
         <Card><CardContent className="pt-6">
           <div className="flex items-center justify-between">
-            <div><p className="text-2xl font-bold text-green-600">${totalReceiptValue.toFixed(2)}</p><p className="text-sm text-muted-foreground">Total Received Value</p></div>
+            <div><p className="text-2xl font-bold text-green-600">${totalReceiptValue.toFixed(2)}</p><p className="text-sm text-muted-foreground">Posted Absolute Value</p></div>
             <ArrowUpCircle className="h-8 w-8 text-green-500" />
           </div>
         </CardContent></Card>
@@ -267,13 +286,16 @@ export default function InventoryReceiptsPage() {
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="Draft">Draft</SelectItem>
+                <SelectItem value="PendingApproval">Pending Approval</SelectItem>
                 <SelectItem value="Approved">Approved</SelectItem>
+                <SelectItem value="Rejected">Rejected</SelectItem>
                 <SelectItem value="Posted">Posted</SelectItem>
+                <SelectItem value="Reversed">Reversed</SelectItem>
                 <SelectItem value="Cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
             <Select value={reasonFilter} onValueChange={setReasonFilter}>
-              <SelectTrigger><SelectValue placeholder="Receipt Reason" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Adjustment Reason" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Reasons</SelectItem>
                 {Object.entries(StockAdjustmentReasonCodes).map(([code, label]) => (
@@ -287,7 +309,7 @@ export default function InventoryReceiptsPage() {
 
       {/* Receipts Table */}
       <Card>
-        <CardHeader><CardTitle>Inventory Receipts</CardTitle><CardDescription>List of all inventory receipts</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Adjustment register</CardTitle><CardDescription>Immutable lifecycle and posting status for controlled inventory adjustments</CardDescription></CardHeader>
         <CardContent>
           {loading ? (
             <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>
@@ -300,9 +322,9 @@ export default function InventoryReceiptsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left py-3 px-2">Receipt #</th>
+                    <th className="text-left py-3 px-2">Adjustment #</th>
                     <th className="text-left py-3 px-2">Date</th>
-                    <th className="text-left py-3 px-2">Receipt Reason</th>
+                    <th className="text-left py-3 px-2">Reason</th>
                     <th className="text-left py-3 px-2">Description</th>
                     <th className="text-right py-3 px-2">Items</th>
                     <th className="text-right py-3 px-2">Value</th>
@@ -328,16 +350,21 @@ export default function InventoryReceiptsPage() {
                           {receipt.status === 'Draft' && (
                             <>
                               <Button variant="ghost" size="sm" onClick={() => openEditDialog(receipt)} title="Edit"><Pencil className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="sm" className="text-blue-600" onClick={() => handleApproveClick(receipt.id)} title="Approve"><CheckCircle className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="sm" className="text-green-600" onClick={() => handlePostClick(receipt.id)} title="Post to Inventory"><FileCheck className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" className="text-blue-600" disabled={actionLoading} onClick={() => void handleSubmit(receipt.id)} title="Submit for approval"><Send className="h-4 w-4" /></Button>
                               <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleDeleteClick(receipt.id)} title="Delete"><XCircle className="h-4 w-4" /></Button>
                             </>
                           )}
-                          {receipt.status === 'Approved' && (
+                          {receipt.status === 'PendingApproval' && (
                             <>
-                              <Button variant="ghost" size="sm" className="text-green-600" onClick={() => handlePostClick(receipt.id)} title="Post to Inventory"><FileCheck className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleCancelClick(receipt.id)} title="Cancel"><XCircle className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" className="text-green-600" onClick={() => handleApproveClick(receipt.id, true)} title="Approve"><CheckCircle className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleApproveClick(receipt.id, false)} title="Reject"><XCircle className="h-4 w-4" /></Button>
                             </>
+                          )}
+                          {receipt.status === 'Approved' && (
+                            <Button variant="ghost" size="sm" className="text-green-600" onClick={() => handlePostClick(receipt.id)} title="Post to Inventory and Finance"><FileCheck className="h-4 w-4" /></Button>
+                          )}
+                          {receipt.status === 'Posted' && (
+                            <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleCancelClick(receipt.id)} title="Reverse inventory and Finance"><RotateCcw className="h-4 w-4" /></Button>
                           )}
                         </div>
                       </td>
@@ -363,20 +390,22 @@ export default function InventoryReceiptsPage() {
       <ConfirmationDialog
         open={showApproveDialog}
         onOpenChange={setShowApproveDialog}
-        title="Approve Receipt"
-        description="Are you sure you want to approve this inventory receipt?"
-        confirmText="Approve"
+        title={decisionApproved ? 'Approve stock adjustment' : 'Reject stock adjustment'}
+        description="This decision is recorded against the shared workflow and segregation-of-duties controls."
+        confirmText={decisionApproved ? 'Approve' : 'Reject'}
+        variant={decisionApproved ? 'default' : 'destructive'}
         onConfirm={confirmApprove}
         isLoading={actionLoading}
-      />
+        confirmDisabled={!actionComment.trim()}
+      ><Input value={actionComment} onChange={(event) => setActionComment(event.target.value)} placeholder="Required decision comment" /></ConfirmationDialog>
 
       {/* Post Confirmation */}
       <ConfirmationDialog
         open={showPostDialog}
         onOpenChange={setShowPostDialog}
-        title="Post Receipt"
-        description="Are you sure you want to post this receipt? This will add the items to inventory and cannot be undone."
-        confirmText="Post to Inventory"
+        title="Post approved adjustment"
+        description="This atomically changes stock and creates the balanced Finance posting."
+        confirmText="Post Inventory and Finance"
         onConfirm={confirmPost}
         isLoading={actionLoading}
       />
@@ -385,20 +414,21 @@ export default function InventoryReceiptsPage() {
       <ConfirmationDialog
         open={showCancelDialog}
         onOpenChange={setShowCancelDialog}
-        title="Cancel Receipt"
-        description="Are you sure you want to cancel this receipt?"
-        confirmText="Cancel Receipt"
+        title="Reverse posted adjustment"
+        description="This creates compensating inventory movements and a Finance reversal; the original record remains immutable."
+        confirmText="Reverse"
         variant="destructive"
         onConfirm={confirmCancel}
         isLoading={actionLoading}
-      />
+        confirmDisabled={!actionComment.trim()}
+      ><Input value={actionComment} onChange={(event) => setActionComment(event.target.value)} placeholder="Required reversal reason" /></ConfirmationDialog>
 
       {/* Delete Confirmation */}
       <ConfirmationDialog
         open={showDeleteDialog}
         onOpenChange={setShowDeleteDialog}
-        title="Delete Receipt"
-        description="Are you sure you want to delete this receipt? This action cannot be undone."
+        title="Delete Draft Adjustment"
+        description="Only an unsubmitted Draft can be deleted."
         confirmText="Delete"
         variant="destructive"
         onConfirm={confirmDelete}

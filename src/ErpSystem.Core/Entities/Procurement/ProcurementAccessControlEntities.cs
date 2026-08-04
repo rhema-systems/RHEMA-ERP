@@ -10,6 +10,7 @@ public sealed class ProcurementResponsibilityAssignment : TenantEntity
     [Required] public Guid RoleId { get; set; }
     [Required, StringLength(100)] public string RoleName { get; set; } = string.Empty;
     public ProcurementWarehouseScopeMode WarehouseScopeMode { get; set; }
+    public ProcurementLocationScopeMode LocationScopeMode { get; set; }
     public DateTime EffectiveFrom { get; set; } = DateTime.UtcNow.Date;
     public DateTime? EffectiveTo { get; set; }
     public bool IsActive { get; set; } = true;
@@ -19,6 +20,7 @@ public sealed class ProcurementResponsibilityAssignment : TenantEntity
     public ApplicationUser User { get; set; } = null!;
     public ApplicationRole Role { get; set; } = null!;
     public ICollection<ProcurementResponsibilityWarehouse> Warehouses { get; set; } = new List<ProcurementResponsibilityWarehouse>();
+    public ICollection<ProcurementResponsibilityLocation> Locations { get; set; } = new List<ProcurementResponsibilityLocation>();
     public ICollection<ProcurementCommitteeMember> CommitteeMemberships { get; set; } = new List<ProcurementCommitteeMember>();
 }
 
@@ -29,6 +31,17 @@ public sealed class ProcurementResponsibilityWarehouse : TenantEntity
 
     public ProcurementResponsibilityAssignment Assignment { get; set; } = null!;
     public Warehouse Warehouse { get; set; } = null!;
+}
+
+public sealed class ProcurementResponsibilityLocation : TenantEntity
+{
+    [Required] public Guid AssignmentId { get; set; }
+    [Required] public Guid WarehouseId { get; set; }
+    [Required] public Guid WarehouseLocationId { get; set; }
+
+    public ProcurementResponsibilityAssignment Assignment { get; set; } = null!;
+    public Warehouse Warehouse { get; set; } = null!;
+    public WarehouseLocation WarehouseLocation { get; set; } = null!;
 }
 
 public sealed class ProcurementCommittee : TenantEntity

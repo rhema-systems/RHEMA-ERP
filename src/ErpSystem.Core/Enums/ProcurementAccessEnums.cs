@@ -7,6 +7,13 @@ public enum ProcurementWarehouseScopeMode
     Restricted = 2
 }
 
+public enum ProcurementLocationScopeMode
+{
+    None = 0,
+    All = 1,
+    Restricted = 2
+}
+
 public enum ProcurementCommitteeType
 {
     EntityTenderCommittee = 0,

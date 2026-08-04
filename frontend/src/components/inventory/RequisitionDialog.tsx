@@ -60,6 +60,7 @@ interface ItemFormData {
   locationId: string;
   requestedQuantity: number;
   lotNumber: string;
+  batchNumber: string;
   serialNumber: string;
   notes: string;
 }
@@ -141,6 +142,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
     locationId: '',
     requestedQuantity: 1,
     lotNumber: '',
+    batchNumber: '',
     serialNumber: '',
     notes: ''
   });
@@ -160,7 +162,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
       setPendingItems([]);
       setShowAddItem(false);
       setItemSearchTerm('');
-      setItemFormData({ inventoryItemId: '', locationId: '', requestedQuantity: 1, lotNumber: '', serialNumber: '', notes: '' });
+      setItemFormData({ inventoryItemId: '', locationId: '', requestedQuantity: 1, lotNumber: '', batchNumber: '', serialNumber: '', notes: '' });
       if (mode === 'create') {
         setFormData({
           departmentId: projectContext?.departmentId || '',
@@ -384,6 +386,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
             requestedQuantity: itemFormData.requestedQuantity,
             locationId: itemFormData.locationId || formData.locationId || undefined,
             lotNumber: itemFormData.lotNumber || undefined,
+            batchNumber: itemFormData.batchNumber || undefined,
             serialNumber: itemFormData.serialNumber || undefined,
             notes: itemFormData.notes || undefined
           }]);
@@ -393,6 +396,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
           requestedQuantity: itemFormData.requestedQuantity,
           locationId: itemFormData.locationId || formData.locationId || undefined,
           lotNumber: itemFormData.lotNumber || undefined,
+          batchNumber: itemFormData.batchNumber || undefined,
           serialNumber: itemFormData.serialNumber || undefined,
           notes: itemFormData.notes || undefined
         };
@@ -400,7 +404,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
         await loadRequisitionDetail();
         toast({ title: 'Success', description: 'Item added successfully' });
       }
-      setItemFormData({ inventoryItemId: '', locationId: formData.locationId || '', requestedQuantity: 1, lotNumber: '', serialNumber: '', notes: '' });
+      setItemFormData({ inventoryItemId: '', locationId: formData.locationId || '', requestedQuantity: 1, lotNumber: '', batchNumber: '', serialNumber: '', notes: '' });
       setShowAddItem(false);
     } catch (err) {
       console.error('Error adding item:', err);
@@ -725,6 +729,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                           <Input value={itemFormData.notes} onChange={(e) => setItemFormData({ ...itemFormData, notes: e.target.value })} />
                         </div>
                       </div>
+                      <div className="grid grid-cols-3 gap-2"><div className="space-y-2"><Label>Lot</Label><Input value={itemFormData.lotNumber} onChange={event => setItemFormData({ ...itemFormData, lotNumber: event.target.value })} /></div><div className="space-y-2"><Label>Batch</Label><Input value={itemFormData.batchNumber} onChange={event => setItemFormData({ ...itemFormData, batchNumber: event.target.value })} /></div><div className="space-y-2"><Label>Serial</Label><Input value={itemFormData.serialNumber} onChange={event => setItemFormData({ ...itemFormData, serialNumber: event.target.value })} /></div></div>
                       <Button size="sm" onClick={handleAddItem}>Add</Button>
                     </CardContent>
                   </Card>
@@ -734,6 +739,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item</TableHead>
+                      <TableHead>Tracking</TableHead>
                       <TableHead>Location</TableHead>
                       <TableHead>Requested</TableHead>
                       <TableHead>Approved</TableHead>
@@ -746,11 +752,12 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   </TableHeader>
                   <TableBody>
                     {displayItems.length === 0 ? (
-                      <TableRow><TableCell colSpan={canEdit ? 9 : 8} className="text-center text-muted-foreground">No items added</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={canEdit ? 10 : 9} className="text-center text-muted-foreground">No items added</TableCell></TableRow>
                     ) : (
                       displayItems.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell><div className="font-medium">{item.itemCode}</div><div className="text-sm text-muted-foreground">{item.itemName}</div></TableCell>
+                          <TableCell className="text-xs">{[item.lotNumber && `Lot ${item.lotNumber}`, item.batchNumber && `Batch ${item.batchNumber}`, item.serialNumber && `SN ${item.serialNumber}`].filter(Boolean).join(' · ') || '—'}</TableCell>
                           <TableCell>{item.locationName || (requisitionDetail?.locationName ?? 'Warehouse level')}</TableCell>
                           <TableCell>
                             {editingItemId === item.id ? (

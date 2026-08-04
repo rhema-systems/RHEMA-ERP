@@ -57,6 +57,10 @@ public class OptimizedGenericRepository<T> : IGenericRepository<T> where T : Bas
         return await _dbSet.ToListAsync();
     }
 
+    public IReadOnlyCollection<T> GetAddedEntities() => _dbSet.Local
+        .Where(entity => _context.Entry(entity).State == EntityState.Added)
+        .ToList();
+
     public async Task<T> AddAsync(T entity, CancellationToken cancellationToken = default)
     {
         var result = await _dbSet.AddAsync(entity, cancellationToken);

@@ -7,7 +7,7 @@ const MOBILE_SHELL_CACHE_NAME = 'erp-mobile-shell-v2026-07-28-authenticated-api-
 const OFFLINE_PAGE = '/offline'
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
 const IS_LOCAL_DEV = LOCAL_DEV_HOSTS.has(self.location.hostname)
-const MOBILE_SHELL_ROUTES = ['/mobile', '/mobile/fleet/inspection']
+const MOBILE_SHELL_ROUTES = ['/mobile', '/mobile/fleet/inspection', '/inventory/mobile-scanning']
 
 // Define what to cache during install
 const STATIC_ASSETS = [

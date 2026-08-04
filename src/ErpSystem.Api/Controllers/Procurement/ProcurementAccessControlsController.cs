@@ -35,6 +35,10 @@ public sealed class ProcurementAccessControlsController : ControllerBase
     public Task<IActionResult> GetWarehouses(CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.GetWarehousesAsync(cancellationToken)));
 
+    [HttpGet("locations"), Authorize(Roles = Administrators)]
+    public Task<IActionResult> GetLocations(CancellationToken cancellationToken) =>
+        ExecuteAsync(async () => Ok(await _service.GetLocationsAsync(cancellationToken)));
+
     [HttpGet("assignments"), Authorize(Roles = Administrators)]
     public Task<IActionResult> GetAssignments(CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.GetAssignmentsAsync(cancellationToken)));

@@ -396,6 +396,54 @@ public enum RequisitionStatus
 }
 
 /// <summary>
+/// Lifecycle of stock reserved for an approved project requisition line.
+/// </summary>
+public enum InventoryProjectReservationStatus
+{
+    Reserved = 1,
+    PartiallyFulfilled = 2,
+    Fulfilled = 3,
+    Released = 4,
+    Expired = 5,
+    Substituted = 6
+}
+
+public enum InventoryProjectReservationActionType
+{
+    Reserved = 1,
+    PartiallyFulfilled = 2,
+    Fulfilled = 3,
+    Released = 4,
+    Expired = 5,
+    Substituted = 6,
+    NotificationCreated = 7
+}
+
+public enum InventoryReplenishmentRecommendationStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    Approved = 3,
+    Rejected = 4,
+    ConvertedToRequisition = 5,
+    Expired = 6,
+    Cancelled = 7
+}
+
+public enum InventoryReplenishmentActionType
+{
+    Generated = 1,
+    AlertSent = 2,
+    Submitted = 3,
+    Approved = 4,
+    Rejected = 5,
+    RequisitionCreated = 6,
+    Cancelled = 7,
+    Expired = 8,
+    ApprovalProgressed = 9
+}
+
+/// <summary>
 /// Types of inventory requisitions
 /// </summary>
 public enum RequisitionType

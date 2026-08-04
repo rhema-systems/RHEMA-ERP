@@ -36,6 +36,7 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
     private readonly IProcurementReceiptSourceControlService _receiptSourceControl;
     private readonly IProcurementReceiptInspectionService _receiptInspection;
     private readonly IProcurementReceiptDocumentService _receiptDocuments;
+    private readonly IInventoryTrackingControlService _trackingControls;
     private readonly ILogger<GoodsReceiptNoteService> _logger;
 
     public GoodsReceiptNoteService(
@@ -53,6 +54,7 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
         IProcurementReceiptSourceControlService receiptSourceControl,
         IProcurementReceiptInspectionService receiptInspection,
         IProcurementReceiptDocumentService receiptDocuments,
+        IInventoryTrackingControlService trackingControls,
         ILogger<GoodsReceiptNoteService> logger)
     {
         _grnRepository = grnRepository;
@@ -69,74 +71,64 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
         _receiptSourceControl = receiptSourceControl;
         _receiptInspection = receiptInspection;
         _receiptDocuments = receiptDocuments;
+        _trackingControls = trackingControls;
         _logger = logger;
     }
 
     public async Task<IEnumerable<GoodsReceiptNoteDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null)
     {
-        await EnsureCapabilityAsync("procurement.inventory.read", "grn-list");
         var start = fromDate ?? DateTime.UtcNow.AddMonths(-3);
         var end = toDate ?? DateTime.UtcNow;
-        var grns = await GrnQuery()
+        var grns = await GrnQuery(includeItems: true)
             .Where(item => item.ReceiptDate >= start && item.ReceiptDate <= end)
             .OrderByDescending(item => item.ReceiptDate)
             .ToListAsync();
-        return grns.Select(MapToDto);
+        return (await FilterReadableAsync(grns)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<GoodsReceiptNoteDto>> GetByWarehouseAsync(Guid warehouseId)
     {
-        await EnsureCapabilityAsync(
-            "procurement.inventory.read",
-            warehouseId.ToString(),
-            warehouseId);
-        var grns = await GrnQuery()
+        var grns = await GrnQuery(includeItems: true)
             .Where(item => item.WarehouseId == warehouseId)
             .OrderByDescending(item => item.ReceiptDate)
             .ToListAsync();
-        return grns.Select(MapToDto);
+        return (await FilterReadableAsync(grns)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<GoodsReceiptNoteDto>> GetBySupplierAsync(Guid supplierId)
     {
-        await EnsureCapabilityAsync(
-            "procurement.inventory.read",
-            supplierId.ToString());
-        var grns = await GrnQuery()
+        var grns = await GrnQuery(includeItems: true)
             .Where(item => item.SupplierId == supplierId)
             .OrderByDescending(item => item.ReceiptDate)
             .ToListAsync();
-        return grns.Select(MapToDto);
+        return (await FilterReadableAsync(grns)).Select(MapToDto);
     }
 
     public async Task<IEnumerable<GoodsReceiptNoteDto>> GetByPurchaseOrderAsync(Guid purchaseOrderId)
     {
-        await EnsureCapabilityAsync(
-            "procurement.inventory.read",
-            purchaseOrderId.ToString());
         var grns = await GrnQuery(includeItems: true)
             .Where(item => item.PurchaseOrderId == purchaseOrderId)
             .OrderByDescending(item => item.ReceiptDate)
             .ToListAsync();
-        return grns.Select(MapToDto);
+        return (await FilterReadableAsync(grns)).Select(MapToDto);
     }
 
     public async Task<GoodsReceiptNoteDetailDto?> GetByIdAsync(Guid id)
     {
-        await EnsureCapabilityAsync("procurement.inventory.read", id.ToString());
         var grn = await GrnQuery(includeItems: true)
             .SingleOrDefaultAsync(item => item.Id == id);
-        return grn != null ? MapToDetailDto(grn) : null;
+        return grn != null && await CanReadAsync(grn)
+            ? MapToDetailDto(grn)
+            : null;
     }
 
     public async Task<GoodsReceiptNoteDetailDto?> GetByGRNNumberAsync(string grnNumber)
     {
-        await EnsureCapabilityAsync(
-            "procurement.inventory.read",
-            grnNumber);
         var grn = await GrnQuery(includeItems: true)
             .SingleOrDefaultAsync(item => item.GRNNumber == grnNumber);
-        return grn != null ? MapToDetailDto(grn) : null;
+        return grn != null && await CanReadAsync(grn)
+            ? MapToDetailDto(grn)
+            : null;
     }
 
     public Task<GoodsReceiptNoteDto> CreateAsync(
@@ -257,6 +249,22 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                 }
             }
 
+            var requestedLocations = dto.Items
+                .Select(item => item.StorageLocationId ?? dto.ReceivingLocationId)
+                .Distinct()
+                .ToList();
+            if (requestedLocations.Count == 0)
+                requestedLocations.Add(dto.ReceivingLocationId);
+            foreach (var locationId in requestedLocations)
+            {
+                await EnsureCapabilityAsync(
+                    "procurement.inventory.receive",
+                    $"{idempotencyKey}:create",
+                    dto.WarehouseId,
+                    locationId,
+                    requireLocationScope: true);
+            }
+
             var grnId = Guid.NewGuid();
             var governedReceiptId = Guid.NewGuid();
             var sourceSnapshot =
@@ -375,7 +383,9 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                         ItemUnitOfMeasureId = purchaseOrderItem.ItemUnitOfMeasureId,
                         LocationId = itemDto.StorageLocationId ?? dto.ReceivingLocationId,
                         LotNumber = itemDto.LotNumber,
+                        BatchNumber = itemDto.BatchNumber,
                         SerialNumber = itemDto.SerialNumber,
+                        ManufactureDate = itemDto.ManufactureDate,
                         ExpirationDate = itemDto.ExpiryDate,
                         QualityStatus = "Pending",
                         Notes = itemDto.Notes,
@@ -519,8 +529,11 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                     LineValue =
                         itemDto.ReceivedQuantity * unitCost,
                     LotNumber = itemDto.LotNumber,
+                    BatchNumber = itemDto.BatchNumber,
                     SerialNumber = itemDto.SerialNumber,
+                    ManufactureDate = itemDto.ManufactureDate,
                     ExpiryDate = itemDto.ExpiryDate,
+                    InventoryTrackingExceptionId = itemDto.InventoryTrackingExceptionId,
                     StorageLocationId =
                         itemDto.StorageLocationId ?? dto.ReceivingLocationId,
                     InspectionResult = InspectionResult.Pending,
@@ -682,10 +695,13 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
 
     public async Task<bool> SubmitForInspectionAsync(Guid grnId, Guid userId)
     {
+        var grn = await LoadGrnAsync(grnId);
         await EnsureCapabilityAsync(
             "procurement.inventory.receive",
-            grnId.ToString());
-        var grn = await LoadGrnAsync(grnId);
+            grnId.ToString(),
+            grn.WarehouseId,
+            grn.ReceivingLocationId,
+            requireLocationScope: true);
         EnsureLegacyInspectionIsNotUsed(grn);
 
         if (grn.Status != GRNStatus.Draft)
@@ -705,10 +721,13 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
         UpdateGRNInspectionDto dto,
         Guid userId)
     {
+        var grn = await LoadGrnAsync(grnId);
         await EnsureCapabilityAsync(
             "procurement.inventory.receive",
-            grnId.ToString());
-        var grn = await LoadGrnAsync(grnId);
+            grnId.ToString(),
+            grn.WarehouseId,
+            grn.ReceivingLocationId,
+            requireLocationScope: true);
         EnsureLegacyInspectionIsNotUsed(grn);
         var grnItem = await _unitOfWork
             .Repository<GoodsReceiptNoteItem>()
@@ -745,14 +764,17 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
 
     public async Task<bool> CompleteInspectionAsync(Guid grnId, Guid userId)
     {
-        await EnsureCapabilityAsync(
-            "procurement.inventory.receive",
-            grnId.ToString());
         var grn = await GrnQuery(includeItems: true)
             .SingleOrDefaultAsync(item => item.Id == grnId)
             ?? throw new ProcurementReceiptSourceNotFoundException(
                 "RCV_GRN_NOT_FOUND",
                 "The goods receipt note was not found in the current tenant.");
+        await EnsureCapabilityAsync(
+            "procurement.inventory.receive",
+            grnId.ToString(),
+            grn.WarehouseId,
+            grn.ReceivingLocationId,
+            requireLocationScope: true);
         EnsureLegacyInspectionIsNotUsed(grn);
 
         if (grn.Status != GRNStatus.PendingInspection && grn.Status != GRNStatus.InspectionInProgress)
@@ -778,6 +800,68 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
             ? PostToInventoryCoreAsync(grnId, userId)
             : _unitOfWork.ExecuteInStrategyAsync(
                 () => PostToInventoryCoreAsync(grnId, userId));
+
+    public async Task ApplyScanMetadataAsync(
+        Guid grnId,
+        IReadOnlyList<InventoryTransactionScanLineDto> lines,
+        Guid userId)
+    {
+        EnsureTenant();
+        var grn = await GrnQuery(includeItems: true).SingleOrDefaultAsync(item => item.Id == grnId)
+            ?? throw new ProcurementReceiptSourceNotFoundException("RCV_GRN_NOT_FOUND", "The goods receipt note was not found in the current tenant.");
+        var requestedLocations = lines.Select(line => line.LocationId ?? grn.ReceivingLocationId).Distinct().ToList();
+        if (requestedLocations.Count == 0)
+            requestedLocations.Add(grn.ReceivingLocationId);
+        foreach (var locationId in requestedLocations)
+        {
+            await EnsureCapabilityAsync(
+                "procurement.inventory.receive",
+                grnId.ToString(),
+                grn.WarehouseId,
+                locationId,
+                requireLocationScope: true);
+        }
+        if (grn.Status == GRNStatus.Cancelled || grn.StockUpdated)
+            throw new InvalidOperationException("Scanned receipt metadata can only be applied before inventory posting.");
+
+        foreach (var scanGroup in lines.GroupBy(value => value.DocumentLineId))
+        {
+            var scans = scanGroup.OrderBy(value => value.SerialNumber).ToList();
+            var scan = scans[0];
+            var item = grn.Items.SingleOrDefault(value => value.Id == scan.DocumentLineId && value.InventoryItemId == scan.InventoryItemId)
+                ?? throw new ArgumentException($"GRN line {scan.DocumentLineId} was not found for the scanned item.");
+            var expected = item.AcceptedQuantity > 0 ? item.AcceptedQuantity : item.ReceivedQuantity;
+            if (scans.Sum(value => value.BaseQuantity) != expected)
+                throw new InvalidOperationException($"The complete accepted quantity for {item.ItemCode} must be scanned before receipt posting.");
+            if (scans.Any(value => value.InventoryItemId != item.InventoryItemId) ||
+                scans.Select(value => value.LocationId).Distinct().Count() > 1)
+                throw new InvalidOperationException($"Scanned tracking lines for {item.ItemCode} must retain one item and receipt location.");
+            if (scan.LocationId.HasValue)
+            {
+                var location = await _unitOfWork.Repository<WarehouseLocation>().GetQueryable(value =>
+                        value.TenantId == _currentUser.TenantId && value.Id == scan.LocationId.Value && !value.IsDeleted && value.IsActive)
+                    .AsNoTracking().SingleOrDefaultAsync()
+                    ?? throw new ArgumentException("The scanned receipt location was not found in the current tenant.");
+                var effectiveWarehouseId = location.IsConsignmentBin && location.ConsignmentWarehouseId.HasValue
+                    ? location.ConsignmentWarehouseId.Value
+                    : location.WarehouseId;
+                if (effectiveWarehouseId != grn.WarehouseId)
+                    throw new InvalidOperationException("The scanned receipt location does not belong to the GRN warehouse.");
+            }
+            item.StorageLocationId = scan.LocationId ?? item.StorageLocationId;
+            item.ScanTrackingLinesJson = JsonSerializer.Serialize(scans);
+            item.LotNumber = scans.Count == 1 ? scan.LotNumber?.Trim() : null;
+            item.BatchNumber = scans.Count == 1 ? scan.BatchNumber?.Trim() : null;
+            item.SerialNumber = scans.Count == 1 ? scan.SerialNumber?.Trim() : null;
+            item.ManufactureDate = scans.Count == 1 ? scan.ManufactureDate : null;
+            item.ExpiryDate = scans.Count == 1 ? scan.ExpiryDate : null;
+            item.InventoryTrackingExceptionId = scans.Count == 1 ? scan.InventoryTrackingExceptionId : null;
+            item.UpdatedAt = DateTime.UtcNow;
+            item.LastModifiedById = userId;
+            await _grnItemRepository.UpdateAsync(item);
+        }
+        await _unitOfWork.SaveChangesAsync();
+    }
 
     private async Task<bool> PostToInventoryCoreAsync(
         Guid grnId,
@@ -853,6 +937,36 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
             foreach (var item in grn.Items.Where(value =>
                          value.AcceptedQuantity > 0))
             {
+                var receiptLocationId = ResolveReceiptLocation(grn, item);
+                var trackingLines = ReadScanTrackingLines(item.ScanTrackingLinesJson, item.AcceptedQuantity,
+                    item.LotNumber, item.BatchNumber, item.SerialNumber, item.ManufactureDate, item.ExpiryDate,
+                    item.InventoryTrackingExceptionId);
+                if (trackingLines.Sum(value => value.BaseQuantity) != item.AcceptedQuantity)
+                    throw new InvalidOperationException($"Scanned tracking quantities for {item.ItemCode} no longer match the accepted receipt quantity.");
+                for (var trackingIndex = 0; trackingIndex < trackingLines.Count; trackingIndex++)
+                {
+                    var trackingLine = trackingLines[trackingIndex];
+                    await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+                    {
+                        InventoryItemId = item.InventoryItemId,
+                        WarehouseId = grn.WarehouseId,
+                        LocationId = receiptLocationId,
+                        Direction = InventoryTrackingDirection.Receipt,
+                        Quantity = trackingLine.BaseQuantity,
+                        ReferenceType = "GoodsReceiptNote",
+                        ReferenceNumber = grn.GRNNumber,
+                        ReferenceId = grn.Id,
+                        ReferenceLineId = item.Id,
+                        EventKey = $"grn:{grn.Id:N}:{item.Id:N}:receipt:{trackingIndex + 1}",
+                        LotNumber = trackingLine.LotNumber,
+                        BatchNumber = trackingLine.BatchNumber,
+                        SerialNumber = trackingLine.SerialNumber,
+                        ManufactureDate = trackingLine.ManufactureDate,
+                        ExpiryDate = trackingLine.ExpiryDate,
+                        TrackingExceptionId = trackingLine.InventoryTrackingExceptionId,
+                        CorrelationId = correlationId
+                    });
+                }
                 var warehouseQty = await _unitOfWork
                     .Repository<WarehouseQuantity>()
                     .GetQueryable(value =>
@@ -883,6 +997,32 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                 warehouseQty.LastMovementDate = DateTime.UtcNow;
                 await _warehouseQuantityRepository.UpdateAsync(
                     warehouseQty);
+
+                var inventoryLocationRepository = _unitOfWork.Repository<InventoryLocation>();
+                var inventoryLocation = await inventoryLocationRepository.GetQueryable(value =>
+                        value.TenantId == _currentUser.TenantId &&
+                        value.InventoryItemId == item.InventoryItemId &&
+                        value.LocationId == receiptLocationId &&
+                        !value.IsDeleted)
+                    .SingleOrDefaultAsync();
+                if (inventoryLocation is null)
+                {
+                    inventoryLocation = new InventoryLocation
+                    {
+                        TenantId = _currentUser.TenantId,
+                        InventoryItemId = item.InventoryItemId,
+                        LocationId = receiptLocationId,
+                        AverageCost = item.UnitCost,
+                        CreatedById = userId
+                    };
+                    await inventoryLocationRepository.AddAsync(inventoryLocation);
+                }
+                ApplyReceiptToInventoryLocation(
+                    inventoryLocation,
+                    item.AcceptedQuantity,
+                    item.UnitCost,
+                    DateTime.UtcNow);
+                await inventoryLocationRepository.UpdateAsync(inventoryLocation);
 
                 var invItem = await _unitOfWork
                     .Repository<InventoryItem>()
@@ -932,7 +1072,13 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                     ReferenceNumber = grn.GRNNumber,
                     ReferenceId = grn.Id,
                     WarehouseId = grn.WarehouseId,
-                    LocationId = item.StorageLocationId,
+                    LocationId = receiptLocationId,
+                    LotNumber = item.LotNumber,
+                    BatchNumber = item.BatchNumber,
+                    SerialNumber = item.SerialNumber,
+                    ManufactureDate = item.ManufactureDate,
+                    ExpirationDate = item.ExpiryDate,
+                    InventoryTrackingExceptionId = item.InventoryTrackingExceptionId,
                     Notes =
                         $"Received from GRN {grn.GRNNumber}",
                     ProcessedById = _currentUser.UserId,
@@ -969,10 +1115,13 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
 
     public async Task<bool> CancelAsync(Guid grnId, string reason, Guid userId)
     {
+        var grn = await LoadGrnAsync(grnId);
         await EnsureCapabilityAsync(
             "procurement.inventory.receive",
-            grnId.ToString());
-        var grn = await LoadGrnAsync(grnId);
+            grnId.ToString(),
+            grn.WarehouseId,
+            grn.ReceivingLocationId,
+            requireLocationScope: true);
 
         if (grn.Status == GRNStatus.StockUpdated)
             throw new InvalidOperationException("Cannot cancel a posted GRN");
@@ -992,16 +1141,13 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
 
     public async Task<IEnumerable<GoodsReceiptNoteDto>> GetPendingInspectionAsync()
     {
-        await EnsureCapabilityAsync(
-            "procurement.inventory.read",
-            "pending-inspection");
         var grns = await GrnQuery(includeItems: true)
             .Where(item =>
                 item.Status == GRNStatus.PendingInspection ||
                 item.Status == GRNStatus.InspectionInProgress)
             .OrderBy(item => item.ReceiptDate)
             .ToListAsync();
-        return grns.Select(MapToDto);
+        return (await FilterReadableAsync(grns)).Select(MapToDto);
     }
 
     #region Private Methods
@@ -1051,10 +1197,40 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                 : "Historical GRNs are read-only and cannot bypass the shared procurement receipt-inspection lifecycle.");
     }
 
+    internal static Guid ResolveReceiptLocation(
+        GoodsReceiptNote grn,
+        GoodsReceiptNoteItem item) =>
+        grn.ReceivingLocationId ?? item.StorageLocationId
+        ?? throw new ProcurementReceiptSourceValidationException(
+            "RCV_STOCK_LOCATION_REQUIRED",
+            "Every accepted goods-receipt line requires an exact receiving or storage location before inventory posting.");
+
+    internal static void ApplyReceiptToInventoryLocation(
+        InventoryLocation inventoryLocation,
+        decimal acceptedQuantity,
+        decimal unitCost,
+        DateTime movementAtUtc)
+    {
+        var openingQuantity = inventoryLocation.Quantity;
+        var openingAverageCost = inventoryLocation.AverageCost;
+        inventoryLocation.Quantity += acceptedQuantity;
+        inventoryLocation.AvailableQuantity =
+            inventoryLocation.Quantity - inventoryLocation.AllocatedQuantity;
+        inventoryLocation.AverageCost = inventoryLocation.Quantity <= 0
+            ? 0
+            : ((openingQuantity * (openingAverageCost > 0
+                    ? openingAverageCost
+                    : unitCost)) +
+               (acceptedQuantity * unitCost)) / inventoryLocation.Quantity;
+        inventoryLocation.LastMovementDate = movementAtUtc;
+    }
+
     private async Task EnsureCapabilityAsync(
         string permission,
         string sourceReference,
-        Guid? warehouseId = null)
+        Guid? warehouseId = null,
+        Guid? locationId = null,
+        bool requireLocationScope = false)
     {
         EnsureTenant();
         try
@@ -1065,7 +1241,9 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                     PermissionCode = permission,
                     SourceType = "ProcurementReceiptSourceControl",
                     SourceReference = sourceReference,
-                    WarehouseId = warehouseId
+                    WarehouseId = warehouseId,
+                    LocationId = locationId,
+                    RequireLocationScope = requireLocationScope
                 },
                 NormalizeCorrelation(null));
             if (!decision.Allowed)
@@ -1083,6 +1261,61 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
         {
             throw new ProcurementReceiptSourceAuthorizationException(
                 exception.Message);
+        }
+    }
+
+    private async Task<IReadOnlyList<GoodsReceiptNote>> FilterReadableAsync(
+        IEnumerable<GoodsReceiptNote> grns)
+    {
+        var readable = new List<GoodsReceiptNote>();
+        foreach (var grn in grns)
+        {
+            if (await CanReadAsync(grn))
+                readable.Add(grn);
+        }
+
+        return readable;
+    }
+
+    private async Task<bool> CanReadAsync(GoodsReceiptNote grn)
+    {
+        try
+        {
+            var locationIds = grn.Items
+                .Where(item => !item.IsDeleted)
+                .Select(item => item.StorageLocationId)
+                .Append(grn.ReceivingLocationId)
+                .Distinct()
+                .ToList();
+            if (locationIds.Count == 0)
+                locationIds.Add(null);
+
+            foreach (var locationId in locationIds)
+            {
+                var decision = await _accessControl.CheckCapabilityAsync(
+                    new ProcurementAccessCapabilityRequest
+                    {
+                        PermissionCode = "procurement.inventory.read",
+                        SourceType = "GoodsReceiptNote",
+                        SourceReference = grn.GRNNumber,
+                        WarehouseId = grn.WarehouseId,
+                        LocationId = locationId,
+                        RequireLocationScope = true
+                    },
+                    NormalizeCorrelation(null));
+                if (!decision.Allowed)
+                    return false;
+            }
+
+            return true;
+        }
+        catch (ProcurementAccessAuthorizationException)
+        {
+            return false;
+        }
+        catch (ProcurementAccessValidationException)
+        {
+            return false;
         }
     }
 
@@ -1180,6 +1413,43 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
         };
     }
 
+    private static List<InventoryTransactionScanLineDto> ReadScanTrackingLines(
+        string? json,
+        decimal quantity,
+        string? lotNumber,
+        string? batchNumber,
+        string? serialNumber,
+        DateTime? manufactureDate,
+        DateTime? expiryDate,
+        Guid? exceptionId)
+    {
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            try
+            {
+                var values = JsonSerializer.Deserialize<List<InventoryTransactionScanLineDto>>(json);
+                if (values is { Count: > 0 }) return values;
+            }
+            catch (JsonException)
+            {
+                throw new InvalidOperationException("The persisted GRN scan-tracking snapshot is invalid.");
+            }
+        }
+        return
+        [
+            new InventoryTransactionScanLineDto
+            {
+                BaseQuantity = quantity,
+                LotNumber = lotNumber,
+                BatchNumber = batchNumber,
+                SerialNumber = serialNumber,
+                ManufactureDate = manufactureDate,
+                ExpiryDate = expiryDate,
+                InventoryTrackingExceptionId = exceptionId
+            }
+        ];
+    }
+
     private static GoodsReceiptNoteDetailDto MapToDetailDto(GoodsReceiptNote grn)
     {
         return new GoodsReceiptNoteDetailDto
@@ -1227,8 +1497,11 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                 UnitCost = i.UnitCost,
                 TotalCost = i.LineValue,
                 LotNumber = i.LotNumber,
+                BatchNumber = i.BatchNumber,
                 SerialNumber = i.SerialNumber,
+                ManufactureDate = i.ManufactureDate,
                 ExpiryDate = i.ExpiryDate,
+                InventoryTrackingExceptionId = i.InventoryTrackingExceptionId,
                 InspectionResult = i.InspectionResult,
                 InspectionNotes = i.InspectionNotes,
                 StorageLocationId = i.StorageLocationId,

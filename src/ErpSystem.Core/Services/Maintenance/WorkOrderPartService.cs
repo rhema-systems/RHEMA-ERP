@@ -1,3 +1,5 @@
+using System.Data;
+using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
@@ -14,6 +16,7 @@ public class WorkOrderPartService : IWorkOrderPartService
     private readonly ICurrentUserService _currentUserService;
     private readonly IWarehouseQuantityRepository _warehouseQuantityRepository;
     private readonly IWarehouseRepository _warehouseRepository;
+    private readonly IInventoryNegativeStockControlService _negativeStockControls;
     private readonly ILogger<WorkOrderPartService> _logger;
 
     public WorkOrderPartService(
@@ -21,12 +24,14 @@ public class WorkOrderPartService : IWorkOrderPartService
         ICurrentUserService currentUserService,
         IWarehouseQuantityRepository warehouseQuantityRepository,
         IWarehouseRepository warehouseRepository,
+        IInventoryNegativeStockControlService negativeStockControls,
         ILogger<WorkOrderPartService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
         _warehouseQuantityRepository = warehouseQuantityRepository;
         _warehouseRepository = warehouseRepository;
+        _negativeStockControls = negativeStockControls;
         _logger = logger;
     }
 
@@ -36,30 +41,40 @@ public class WorkOrderPartService : IWorkOrderPartService
         var userIdString = _currentUserService.UserId ?? throw new InvalidOperationException("UserId is required");
         var userId = Guid.Parse(userIdString);
 
-        // Verify warehouse exists
-        var warehouse = await _warehouseRepository.GetByIdAsync(createDto.WarehouseId) ?? throw new InvalidOperationException($"Warehouse {createDto.WarehouseId} not found");
-
-        // Check warehouse-level inventory availability
-        var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
-            createDto.WarehouseId, createDto.InventoryItemId) ?? throw new InvalidOperationException(
-                $"Item {createDto.InventoryItemId} not found in warehouse {warehouse.Name}");
-        if (warehouseQuantity.AvailableStock < createDto.QuantityRequired)
-        {
-            _logger.LogWarning(
-                "Insufficient stock in warehouse {Warehouse} for item {ItemCode}. Required: {Required}, Available: {Available}",
-                warehouse.Name, warehouseQuantity.InventoryItem.ItemCode,
-                createDto.QuantityRequired, warehouseQuantity.AvailableStock);
-            throw new InvalidOperationException(
-                $"Insufficient stock in {warehouse.Name} for {warehouseQuantity.InventoryItem.ItemCode}. " +
-                $"Available: {warehouseQuantity.AvailableStock}, Required: {createDto.QuantityRequired}");
-        }
-
-        await _unitOfWork.BeginTransactionAsync();
+        var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+        if (ownsTransaction) await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
+            var warehouse = await _warehouseRepository.GetByIdAsync(createDto.WarehouseId)
+                ?? throw new InvalidOperationException($"Warehouse {createDto.WarehouseId} not found");
+            var partId = Guid.NewGuid();
+            var decreaseAuthorization = await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
+            {
+                InventoryItemId = createDto.InventoryItemId,
+                WarehouseId = createDto.WarehouseId,
+                LocationId = createDto.WarehouseLocationId,
+                Quantity = createDto.QuantityRequired,
+                ReferenceType = "MaintenanceWorkOrderPartReservation",
+                ReferenceNumber = $"WO-{createDto.WorkOrderId:N}",
+                ReferenceId = createDto.WorkOrderId,
+                ReferenceLineId = partId,
+                NegativeStockOverrideId = createDto.NegativeStockOverrideId,
+                DecreaseCurrentStock = false,
+                CheckInventoryItemBalance = false,
+                CorrelationId = $"work-order:{createDto.WorkOrderId:N}:part:{partId:N}:reserve"
+            });
+            var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
+                createDto.WarehouseId, createDto.InventoryItemId) ?? throw new InvalidOperationException(
+                    $"Item {createDto.InventoryItemId} not found in warehouse {warehouse.Name}");
+            if (warehouseQuantity.AvailableStock < createDto.QuantityRequired &&
+                !decreaseAuthorization.EmergencyOverrideApplied)
+                throw new InvalidOperationException(
+                    $"Insufficient stock in {warehouse.Name} for {warehouseQuantity.InventoryItem.ItemCode}. " +
+                    $"Available: {warehouseQuantity.AvailableStock}, Required: {createDto.QuantityRequired}");
+
             var part = new WorkOrderPart
             {
-                Id = Guid.NewGuid(),
+                Id = partId,
                 TenantId = tenantId,
                 WorkOrderId = createDto.WorkOrderId,
                 InventoryItemId = createDto.InventoryItemId,
@@ -121,7 +136,13 @@ public class WorkOrderPartService : IWorkOrderPartService
             part.AllocationId = allocation.Id;
             await partRepo.UpdateAsync(part);
 
-            await _unitOfWork.CommitAsync();
+            if (decreaseAuthorization.EmergencyOverrideApplied)
+            {
+                await _unitOfWork.SaveChangesAsync();
+                await _negativeStockControls.ClearMutationContextAsync();
+            }
+
+            if (ownsTransaction) await _unitOfWork.CommitAsync();
 
             _logger.LogInformation(
                 "Allocated {Quantity} units of {ItemCode} from warehouse {Warehouse} for work order {WorkOrderId}",
@@ -132,7 +153,7 @@ public class WorkOrderPartService : IWorkOrderPartService
         }
         catch (Exception ex)
         {
-            await _unitOfWork.RollbackAsync();
+            if (ownsTransaction && _unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
             _logger.LogError(ex, "Error allocating part for work order {WorkOrderId}", createDto.WorkOrderId);
             throw;
         }
@@ -167,7 +188,7 @@ public class WorkOrderPartService : IWorkOrderPartService
                 if (newQuantityUsed > oldQuantityUsed && part.AllocationId.HasValue)
                 {
                     var quantityConsumed = newQuantityUsed - oldQuantityUsed;
-                    await UpdateInventoryConsumptionAsync(part, quantityConsumed);
+                    await UpdateInventoryConsumptionAsync(part, quantityConsumed, updateDto.NegativeStockOverrideId);
                 }
 
                 await partRepo.UpdateAsync(part);
@@ -248,7 +269,7 @@ public class WorkOrderPartService : IWorkOrderPartService
                     if (quantityUsed.Value > oldQuantityUsed && part.AllocationId.HasValue)
                     {
                         var quantityConsumed = quantityUsed.Value - oldQuantityUsed;
-                        await UpdateInventoryConsumptionAsync(part, quantityConsumed);
+                        await UpdateInventoryConsumptionAsync(part, quantityConsumed, null);
                     }
                 }
 
@@ -356,7 +377,7 @@ public class WorkOrderPartService : IWorkOrderPartService
         return MapToDto(part);
     }
 
-    private async Task UpdateInventoryConsumptionAsync(WorkOrderPart part, decimal quantityConsumed)
+    private async Task UpdateInventoryConsumptionAsync(WorkOrderPart part, decimal quantityConsumed, Guid? negativeStockOverrideId)
     {
         if (part.AllocationId.HasValue)
         {
@@ -369,7 +390,22 @@ public class WorkOrderPartService : IWorkOrderPartService
                 return;
             }
 
-            // Get warehouse quantity using WarehouseId from allocation
+            var decreaseAuthorization = await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
+            {
+                InventoryItemId = part.InventoryItemId,
+                WarehouseId = allocation.WarehouseId,
+                LocationId = allocation.LocationId,
+                Quantity = quantityConsumed,
+                ReferenceType = "MaintenanceWorkOrderPartConsumption",
+                ReferenceNumber = $"WO-{part.WorkOrderId:N}",
+                ReferenceId = part.WorkOrderId,
+                ReferenceLineId = part.Id,
+                NegativeStockOverrideId = negativeStockOverrideId,
+                DecreaseAvailableStock = false,
+                CheckInventoryItemBalance = false,
+                CorrelationId = $"work-order:{part.WorkOrderId:N}:part:{part.Id:N}:consume"
+            });
+            // Reload after the shared stock lock.
             var warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
                 allocation.WarehouseId, part.InventoryItemId);
 
@@ -398,6 +434,12 @@ public class WorkOrderPartService : IWorkOrderPartService
             await allocationRepo.UpdateAsync(allocation);
             await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
 
+            if (decreaseAuthorization.EmergencyOverrideApplied)
+            {
+                await _unitOfWork.SaveChangesAsync();
+                await _negativeStockControls.ClearMutationContextAsync();
+            }
+
             part.UsedAt = DateTime.UtcNow;
 
             _logger.LogInformation(
@@ -417,6 +459,23 @@ public class WorkOrderPartService : IWorkOrderPartService
                 return;
             }
 
+            var decreaseAuthorization = await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
+            {
+                InventoryItemId = part.InventoryItemId,
+                WarehouseId = warehouseQuantity.WarehouseId,
+                Quantity = quantityConsumed,
+                ReferenceType = "MaintenanceWorkOrderPartConsumption",
+                ReferenceNumber = $"WO-{part.WorkOrderId:N}",
+                ReferenceId = part.WorkOrderId,
+                ReferenceLineId = part.Id,
+                NegativeStockOverrideId = negativeStockOverrideId,
+                DecreaseAvailableStock = false,
+                CheckInventoryItemBalance = false,
+                CorrelationId = $"work-order:{part.WorkOrderId:N}:part:{part.Id:N}:consume"
+            });
+            warehouseQuantity = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(
+                warehouseQuantity.WarehouseId, part.InventoryItemId) ?? throw new InvalidOperationException("Warehouse quantity disappeared after stock locking.");
+
             // Update warehouse quantity - reduce current stock and allocated stock
             warehouseQuantity.CurrentStock -= quantityConsumed;
             warehouseQuantity.AllocatedStock -= quantityConsumed;
@@ -424,6 +483,12 @@ public class WorkOrderPartService : IWorkOrderPartService
             warehouseQuantity.UpdatedAt = DateTime.UtcNow;
 
             await _warehouseQuantityRepository.UpdateAsync(warehouseQuantity);
+
+            if (decreaseAuthorization.EmergencyOverrideApplied)
+            {
+                await _unitOfWork.SaveChangesAsync();
+                await _negativeStockControls.ClearMutationContextAsync();
+            }
 
             part.UsedAt = DateTime.UtcNow;
 
