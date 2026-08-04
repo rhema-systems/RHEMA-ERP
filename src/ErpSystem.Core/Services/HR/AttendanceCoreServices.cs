@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.StaffAttendance;
@@ -106,7 +106,8 @@ public class StaffAttendanceRecordService : IStaffAttendanceRecordService
     public async Task<PagedResult<StaffAttendanceRecordSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(r => r.TenantId == tenantId);
+        // EmployeeName is on the summary DTO, so Employee must be loaded.
+        var query = _repository.GetQueryable().Include(r => r.Employee).Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(r => r.Date)
@@ -306,10 +307,130 @@ public class StaffDailyAttendanceService : IStaffDailyAttendanceService
     public async Task<PagedResult<StaffDailyAttendanceSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(r => r.TenantId == tenantId);
+        // The summary DTO carries EmployeeName/EmployeeNumber, so Employee has to be loaded
+        // or every row comes back with a blank name.
+        var query = _repository.GetQueryable()
+            .Include(r => r.Employee)
+            .Where(r => r.TenantId == tenantId);
+
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(r => r.AttendanceDate)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        return new PagedResult<StaffDailyAttendanceSummaryDto>
+        {
+            Items = items.ToSummaryDtoList(),
+            TotalCount = totalCount,
+            Page = pageNumber,
+            PageSize = pageSize
+        };
+    }
+
+    /// <summary>
+    /// Tenant-wide filtered search. Filters compose with AND; a null or empty value leaves
+    /// that dimension unfiltered, so an empty <paramref name="filter"/> behaves like
+    /// <see cref="GetPagedAsync"/>.
+    /// </summary>
+    public async Task<PagedResult<StaffDailyAttendanceSummaryDto>> SearchAsync(
+        StaffDailyAttendanceSearchDto filter, int pageNumber, int pageSize, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+
+        var query = _repository.GetQueryable()
+            .Include(r => r.Employee)
+            .Where(r => r.TenantId == tenantId);
+
+        if (filter.EmployeeId.HasValue)
+            query = query.Where(r => r.EmployeeId == filter.EmployeeId.Value);
+
+        // The attendance row has no org unit of its own; it is a property of the employee.
+        if (filter.OrganizationUnitId.HasValue)
+            query = query.Where(r => r.Employee.OrganizationUnitId == filter.OrganizationUnitId.Value);
+
+        if (filter.LocationId.HasValue)
+            query = query.Where(r => r.LocationId == filter.LocationId.Value);
+
+        if (filter.WorkScheduleId.HasValue)
+            query = query.Where(r => r.WorkScheduleId == filter.WorkScheduleId.Value);
+
+        if (filter.PayPeriodId.HasValue)
+            query = query.Where(r => r.PayPeriodId == filter.PayPeriodId.Value);
+
+        if (filter.From.HasValue)
+            query = query.Where(r => r.AttendanceDate >= filter.From.Value);
+
+        if (filter.To.HasValue)
+            query = query.Where(r => r.AttendanceDate <= filter.To.Value);
+
+        if (filter.Statuses is { Count: > 0 })
+            query = query.Where(r => filter.Statuses.Contains(r.Status));
+
+        if (filter.IsLate.HasValue)
+            query = query.Where(r => r.IsLate == filter.IsLate.Value);
+
+        if (filter.IsEarlyDeparture.HasValue)
+            query = query.Where(r => r.IsEarlyDeparture == filter.IsEarlyDeparture.Value);
+
+        if (filter.IsOvertime.HasValue)
+            query = query.Where(r => r.IsOvertime == filter.IsOvertime.Value);
+
+        if (filter.IsRemoteWork.HasValue)
+            query = query.Where(r => r.IsRemoteWork == filter.IsRemoteWork.Value);
+
+        if (filter.HasException.HasValue)
+            query = query.Where(r => r.HasException == filter.HasException.Value);
+
+        if (filter.IsVerified.HasValue)
+            query = query.Where(r => r.IsVerified == filter.IsVerified.Value);
+
+        if (filter.RequiresVerification.HasValue)
+            query = query.Where(r => r.RequiresVerification == filter.RequiresVerification.Value);
+
+        if (filter.MinLateMinutes.HasValue)
+            query = query.Where(r => r.LateMinutes >= filter.MinLateMinutes.Value);
+
+        if (filter.MinOvertimeHours.HasValue)
+            query = query.Where(r => r.OvertimeHours >= filter.MinOvertimeHours.Value);
+
+        if (!string.IsNullOrWhiteSpace(filter.SearchTerm))
+        {
+            var term = filter.SearchTerm.Trim();
+            query = query.Where(r =>
+                EF.Functions.Like(r.Employee.FirstName, $"%{term}%") ||
+                EF.Functions.Like(r.Employee.LastName, $"%{term}%") ||
+                EF.Functions.Like(r.Employee.EmployeeNumber, $"%{term}%"));
+        }
+
+        var totalCount = await query.CountAsync(ct);
+
+        // A secondary sort on employee keeps paging stable when the primary key ties, which
+        // it always does for a date-sorted day of attendance.
+        query = (filter.SortBy?.Trim().ToLowerInvariant()) switch
+        {
+            "employee" => filter.SortDescending
+                ? query.OrderByDescending(r => r.Employee.LastName).ThenByDescending(r => r.Employee.FirstName)
+                : query.OrderBy(r => r.Employee.LastName).ThenBy(r => r.Employee.FirstName),
+            "status" => filter.SortDescending
+                ? query.OrderByDescending(r => r.Status).ThenByDescending(r => r.AttendanceDate)
+                : query.OrderBy(r => r.Status).ThenBy(r => r.AttendanceDate),
+            "workhours" => filter.SortDescending
+                ? query.OrderByDescending(r => r.ActualWorkHours).ThenByDescending(r => r.AttendanceDate)
+                : query.OrderBy(r => r.ActualWorkHours).ThenBy(r => r.AttendanceDate),
+            "overtime" => filter.SortDescending
+                ? query.OrderByDescending(r => r.OvertimeHours).ThenByDescending(r => r.AttendanceDate)
+                : query.OrderBy(r => r.OvertimeHours).ThenBy(r => r.AttendanceDate),
+            "lateminutes" => filter.SortDescending
+                ? query.OrderByDescending(r => r.LateMinutes).ThenByDescending(r => r.AttendanceDate)
+                : query.OrderBy(r => r.LateMinutes).ThenBy(r => r.AttendanceDate),
+            _ => filter.SortDescending
+                ? query.OrderByDescending(r => r.AttendanceDate).ThenBy(r => r.Employee.LastName)
+                : query.OrderBy(r => r.AttendanceDate).ThenBy(r => r.Employee.LastName),
+        };
+
+        var items = await query
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
@@ -489,7 +610,8 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
     public async Task<PagedResult<StaffAttendanceLogSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(l => l.TenantId == tenantId);
+        // EmployeeName is on the summary DTO, so Employee must be loaded.
+        var query = _repository.GetQueryable().Include(l => l.Employee).Where(l => l.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(l => l.LogDateTime)
@@ -757,9 +879,14 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
 
 public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizationService
 {
+    /// <summary>Workflow entity type; must match the catalog entry and the status adapter.</summary>
+    private const string EntityType = "StaffAttendanceRegularization";
+
     private readonly IStaffAttendanceRegularizationRepository _repository;
     private readonly IStaffDailyAttendanceRepository _dailyRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffAttendanceRegularizationService> _logger;
 
@@ -767,15 +894,30 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
         IStaffAttendanceRegularizationRepository repository,
         IStaffDailyAttendanceRepository dailyRepository,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
         ILogger<StaffAttendanceRegularizationService> logger)
     {
         _repository = repository;
         _dailyRepository = dailyRepository;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
+
+    /// <summary>
+    /// The workflow engine identifies approvers by ApplicationUser.Id, but every method on
+    /// this service receives the caller's *Employee* id (that is what
+    /// <c>AttendanceControllerBase</c> resolves from the token). The two are not
+    /// interchangeable here: <c>StaffAttendanceRegularization.ApprovedById</c> is a real FK
+    /// to <c>Employee</c>, unlike <c>LeaveRequest.ApprovedById</c> which is a bare Guid — so
+    /// storing a user id in it is a foreign-key violation. Workflow calls therefore use this
+    /// property, and the entity's own audit fields keep using the employee id.
+    /// </summary>
+    private Guid GetCurrentUserId() => _currentUserProvider.UserId;
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
@@ -854,7 +996,8 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
     public async Task<PagedResult<StaffAttendanceRegularizationSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(r => r.TenantId == tenantId);
+        // EmployeeName is on the summary DTO, so Employee must be loaded.
+        var query = _repository.GetQueryable().Include(r => r.Employee).Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(r => r.CreatedAt)
@@ -883,8 +1026,48 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
+        // AttendanceRegularizationStatus has no Draft member, so there is no separate submit
+        // step for the user to take — the approval workflow starts as soon as the request
+        // exists. The adapter decides the resulting status; a definition that auto-approves
+        // will land the row on Approved rather than Pending.
+        await StartApprovalWorkflowAsync(entity, ct);
+
         _logger.LogInformation("Regularization {Number} created for employee {EmployeeId}", entity.RegularizationNumber, entity.EmployeeId);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Starts the approval workflow for a newly created regularization. A missing or
+    /// unpublished workflow definition must not block the request from being raised, so a
+    /// failure here is logged and the row is left Pending for manual handling.
+    /// </summary>
+    private async Task StartApprovalWorkflowAsync(StaffAttendanceRegularization entity, CancellationToken ct)
+    {
+        try
+        {
+            var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+            if (!workflowResult.ExecutionResult.Success)
+            {
+                _logger.LogWarning(
+                    "Approval workflow did not start for regularization {Number}: {Message}",
+                    entity.RegularizationNumber,
+                    workflowResult.ExecutionResult.Message);
+                return;
+            }
+
+            var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
+            adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, entity.EmployeeId);
+
+            await _repository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to start the approval workflow for regularization {Number}; it remains pending.",
+                entity.RegularizationNumber);
+        }
     }
 
     public async Task<StaffAttendanceRegularizationDto> UpdateAsync(UpdateStaffAttendanceRegularizationDto dto, Guid userId, CancellationToken ct = default)
@@ -901,45 +1084,85 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
         return entity.ToDto();
     }
 
+    /// <summary>
+    /// Records an approval decision. The generic workflow engine owns the outcome — this
+    /// method only relays the decision and lets
+    /// <c>StaffAttendanceRegularizationWorkflowStatusAdapter</c> set the status, so a
+    /// multi-step definition leaves the row Pending until the final step passes.
+    /// </summary>
     public async Task<StaffAttendanceRegularizationDto> ApproveAsync(ApproveRegularizationDto dto, Guid userId, CancellationToken ct = default)
-    {
-        var entity = await GetOwnedAsync(dto.RegularizationId);
-
-        if (entity.Status != AttendanceRegularizationStatus.Pending)
-            throw new InvalidOperationException("Only pending regularizations can be approved.");
-
-        entity.Status = AttendanceRegularizationStatus.Approved;
-        entity.ApprovedById = userId;
-        entity.ApprovalDate = DateTime.UtcNow;
-        entity.ApprovalComments = dto.ApprovalComments;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
-
-        await _repository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(ct);
-
-        _logger.LogInformation("Regularization {Number} approved by {UserId}", entity.RegularizationNumber, userId);
-        return entity.ToDto();
-    }
+        => await ProcessDecisionAsync(dto.RegularizationId, "Approve", dto.ApprovalComments, userId, ct);
 
     public async Task<StaffAttendanceRegularizationDto> RejectAsync(RejectRegularizationDto dto, Guid userId, CancellationToken ct = default)
+        => await ProcessDecisionAsync(dto.RegularizationId, "Reject", dto.RejectionReason, userId, ct);
+
+    private async Task<StaffAttendanceRegularizationDto> ProcessDecisionAsync(
+        Guid regularizationId,
+        string action,
+        string? comments,
+        Guid employeeId,
+        CancellationToken ct)
     {
-        var entity = await GetOwnedAsync(dto.RegularizationId);
+        var entity = await GetOwnedAsync(regularizationId);
 
         if (entity.Status != AttendanceRegularizationStatus.Pending)
-            throw new InvalidOperationException("Only pending regularizations can be rejected.");
+            throw new InvalidOperationException("Only pending regularizations can be decided.");
 
-        entity.Status = AttendanceRegularizationStatus.Rejected;
-        entity.RejectedDate = DateTime.UtcNow;
-        entity.RejectionReason = dto.RejectionReason;
+        var isReject = string.Equals(action, "Reject", StringComparison.OrdinalIgnoreCase);
+        var decisionText = isReject && string.IsNullOrWhiteSpace(comments) ? "Rejected" : comments;
+
+        var currentUserId = GetCurrentUserId();
+        if (currentUserId == Guid.Empty)
+            throw new UnauthorizedAccessException("User not authenticated.");
+
+        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, currentUserId);
+        if (!canApprove)
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, currentUserId, action, decisionText);
+
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the decision.");
+
+        // The adapter is handed the *employee* id, not the user id — ApprovedById is an
+        // Employee foreign key on this entity.
+        var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
+        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, employeeId, isReject ? decisionText : null);
+
+        if (!isReject)
+            entity.ApprovalComments = comments;
+
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
+        entity.UpdatedBy = employeeId.ToString();
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Regularization {Number} rejected by {UserId}", entity.RegularizationNumber, userId);
-        return entity.ToDto();
+        _logger.LogInformation(
+            "Regularization {Number} decision '{Action}' processed by {UserId}; outcome {Outcome}",
+            entity.RegularizationNumber, action, currentUserId, workflowResult.Outcome);
+
+        return await ReadDetailAsync(entity.Id, ct) ?? entity.ToDto();
+    }
+
+    /// <summary>
+    /// Re-reads a regularization with its navigations loaded, for returning after a write.
+    ///
+    /// The tracked instance cannot be used: <c>ApprovedById</c> is assigned *after* the
+    /// entity was loaded, so its <c>ApprovedBy</c> navigation was never populated and the DTO
+    /// would report a blank approver name. AsNoTracking sidesteps the identity map and gives
+    /// a fresh graph.
+    /// </summary>
+    private async Task<StaffAttendanceRegularizationDto?> ReadDetailAsync(Guid id, CancellationToken ct)
+    {
+        var entity = await _repository.GetQueryable()
+            .AsNoTracking()
+            .Include(r => r.Employee)
+            .Include(r => r.ApprovedBy)
+            .FirstOrDefaultAsync(r => r.Id == id, ct);
+
+        return entity?.ToDto();
     }
 
     public async Task<bool> ApplyAsync(Guid regularizationId, Guid userId, CancellationToken ct = default)
@@ -962,6 +1185,10 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
         daily.UpdatedBy = userId.ToString();
 
         entity.Status = AttendanceRegularizationStatus.Applied;
+        // IsApplied/AppliedDate are what the DTO and the list screens read; without them a
+        // record could sit at status Applied while still reporting isApplied = false.
+        entity.IsApplied = true;
+        entity.AppliedDate = DateTime.UtcNow;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
 
@@ -1278,7 +1505,8 @@ public class StaffBulkAttendanceImportService : IStaffBulkAttendanceImportServic
     public async Task<PagedResult<StaffBulkAttendanceImportSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(i => i.TenantId == tenantId);
+        // ImportedByName is on the summary DTO, so ImportedBy must be loaded.
+        var query = _repository.GetQueryable().Include(i => i.ImportedBy).Where(i => i.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(i => i.CreatedAt)

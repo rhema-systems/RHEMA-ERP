@@ -87,6 +87,35 @@ export function DateField<T extends FieldValues>({ form, name, label, required }
   );
 }
 
+/**
+ * Native time input for the API's `TimeSpan` / `TimeOnly` fields.
+ *
+ * The wire format is `HH:mm:ss` but `<input type="time">` reads and writes `HH:mm`, so the
+ * seconds are trimmed on the way in and appended on the way out. Attendance times are never
+ * sub-minute, so nothing is lost.
+ */
+export function TimeField<T extends FieldValues>({ form, name, label, required }: BaseProps<T>) {
+  const raw = form.watch(name) as unknown as string | undefined;
+  const value = raw ? String(raw).slice(0, 5) : '';
+
+  return (
+    <div className="space-y-2">
+      <FieldLabel htmlFor={name} label={label} required={required} />
+      <Input
+        id={name}
+        type="time"
+        value={value}
+        onChange={(e) =>
+          form.setValue(name, (e.target.value ? `${e.target.value}:00` : '') as any, {
+            shouldValidate: true,
+          })
+        }
+      />
+      <FieldError form={form} name={name} />
+    </div>
+  );
+}
+
 export function TextareaField<T extends FieldValues>({
   form,
   name,

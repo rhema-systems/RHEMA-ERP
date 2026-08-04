@@ -28,6 +28,21 @@ public class StaffDailyAttendanceController : AttendanceControllerBase
         CancellationToken ct = default)
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, ct));
 
+    /// <summary>
+    /// Filtered, sorted, paged search across the tenant's daily attendance.
+    ///
+    /// POST rather than GET because the filter carries a status list and a dozen tri-state
+    /// flags; the page and size stay on the query string so a link can page without
+    /// re-posting the body. This mirrors <c>POST api/hr/Employees/paged</c>.
+    /// </summary>
+    [HttpPost("search")]
+    public async Task<ActionResult<PagedResult<StaffDailyAttendanceSummaryDto>>> Search(
+        [FromBody] StaffDailyAttendanceSearchDto filter,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
+        => Ok(await _service.SearchAsync(filter ?? new StaffDailyAttendanceSearchDto(), pageNumber, pageSize, ct));
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<StaffDailyAttendanceDto>> GetById(Guid id, CancellationToken ct = default)
         => Ok(await _service.GetByIdAsync(id, ct));

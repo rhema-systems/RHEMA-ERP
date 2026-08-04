@@ -1,7 +1,15 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Users, UserCheck, CreditCard, Settings } from 'lucide-react';
+import {
+  Users,
+  UserCheck,
+  CreditCard,
+  Settings,
+  CalendarDays,
+  Clock,
+  Briefcase,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/hr/common/PageHeader';
@@ -87,6 +95,24 @@ export default function HrHomePage() {
               description: 'Directory, profiles and lifecycle.',
               href: '/hr/employees',
               icon: Users,
+            },
+            {
+              title: 'Leave',
+              description: 'Requests, approvals, balances, plans and year-end.',
+              href: '/hr/leave',
+              icon: CalendarDays,
+            },
+            {
+              title: 'Attendance & Time',
+              description: 'Daily attendance, overtime, remote work, alerts and payroll exports.',
+              href: '/hr/attendance',
+              icon: Clock,
+            },
+            {
+              title: 'Consulting',
+              description: 'Client engagements, consultant timesheets and invoices.',
+              href: '/hr/consulting',
+              icon: Briefcase,
             },
             {
               title: 'Payroll',

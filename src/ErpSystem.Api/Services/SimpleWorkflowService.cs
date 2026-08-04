@@ -1241,6 +1241,79 @@ public class SimpleWorkflowService : IWorkflowService
             context["leaveRequestId"] = encashment.LeaveRequestId;
         }
 
+        if (IsEntityType(entityTypeRecord, "STAFF_ATTENDANCE_REGULARIZATION", "StaffAttendanceRegularization", "Attendance Regularization"))
+        {
+            var regularization = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.StaffAttendanceRegularization>()
+                .FirstOrDefaultAsync(r => r.Id == entityId)
+                ?? throw new InvalidOperationException("Attendance regularization not found");
+
+            context["regularizationNumber"] = regularization.RegularizationNumber;
+            context["employeeId"] = regularization.EmployeeId;
+            context["attendanceId"] = regularization.AttendanceId;
+            context["attendanceDate"] = regularization.AttendanceDate;
+            context["requestDate"] = regularization.RequestDate;
+            // Routing often differs by what is being corrected, and by how stale the day is.
+            context["regularizationType"] = regularization.Type.ToString();
+            context["daysSinceAttendance"] =
+                (DateOnly.FromDateTime(DateTime.UtcNow).DayNumber - regularization.AttendanceDate.DayNumber);
+            context["status"] = regularization.Status.ToString();
+            context["reason"] = regularization.Reason;
+            context["hasSupportingDocuments"] = !string.IsNullOrWhiteSpace(regularization.SupportingDocuments);
+        }
+
+        if (IsEntityType(entityTypeRecord, "STAFF_OVERTIME_REQUEST", "StaffOvertimeRequest", "Overtime Request"))
+        {
+            var overtime = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.StaffOvertimeRequest>()
+                .FirstOrDefaultAsync(o => o.Id == entityId)
+                ?? throw new InvalidOperationException("Overtime request not found");
+
+            context["requestNumber"] = overtime.RequestNumber;
+            context["employeeId"] = overtime.EmployeeId;
+            context["overtimeDate"] = overtime.OvertimeDate;
+            context["requestDate"] = overtime.RequestDate;
+            // Overtime thresholds are expressed in hours, so expose it plainly.
+            context["plannedOvertimeHours"] = overtime.PlannedOvertimeHours;
+            context["actualOvertimeHours"] = overtime.ActualOvertimeHours;
+            context["overtimeType"] = overtime.Type.ToString();
+            context["status"] = overtime.Status.ToString();
+            context["purpose"] = overtime.Purpose;
+        }
+
+        if (IsEntityType(entityTypeRecord, "REMOTE_WORK_REQUEST", "RemoteWorkRequest", "Remote Work Request"))
+        {
+            var remoteWork = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.RemoteWorkRequest>()
+                .FirstOrDefaultAsync(r => r.Id == entityId)
+                ?? throw new InvalidOperationException("Remote work request not found");
+
+            context["requestNumber"] = remoteWork.RequestNumber;
+            context["employeeId"] = remoteWork.EmployeeId;
+            context["startDate"] = remoteWork.StartDate;
+            context["endDate"] = remoteWork.EndDate;
+            // Longer stints usually need a higher approval tier.
+            context["requestedDays"] = remoteWork.RequestedDays;
+            context["status"] = remoteWork.Status.ToString();
+            context["reason"] = remoteWork.Reason;
+            context["remoteLocation"] = remoteWork.RemoteLocation;
+            context["equipmentConfirmed"] = remoteWork.EquipmentConfirmed;
+        }
+
+        if (IsEntityType(entityTypeRecord, "CONSULTANT_TIMESHEET", "ConsultantTimesheet", "Consultant Timesheet"))
+        {
+            var timesheet = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.ConsultantTimesheet>()
+                .FirstOrDefaultAsync(t => t.Id == entityId)
+                ?? throw new InvalidOperationException("Consultant timesheet not found");
+
+            context["timesheetNumber"] = timesheet.TimesheetNumber;
+            context["consultantId"] = timesheet.ConsultantId;
+            context["clientId"] = timesheet.ClientId;
+            context["engagementId"] = timesheet.EngagementId;
+            context["periodStartDate"] = timesheet.PeriodStartDate;
+            context["periodEndDate"] = timesheet.PeriodEndDate;
+            // Billable hours are the usual routing threshold here.
+            context["totalHours"] = timesheet.TotalHours;
+            context["status"] = timesheet.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "TRAINING_NOMINATION", "TrainingNomination", "Training Nomination"))
         {
             var nomination = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Training.TrainingNomination>()

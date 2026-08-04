@@ -48,6 +48,13 @@ public interface IStaffDailyAttendanceService
     Task<IEnumerable<StaffDailyAttendanceSummaryDto>> GetByPayPeriodIdAsync(Guid payPeriodId, CancellationToken ct = default);
     Task<PagedResult<StaffDailyAttendanceSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default);
 
+    /// <summary>
+    /// Tenant-wide filtered search. The narrow reads above each answer one question; this
+    /// composes them, which is what a filterable grid needs.
+    /// </summary>
+    Task<PagedResult<StaffDailyAttendanceSummaryDto>> SearchAsync(
+        StaffDailyAttendanceSearchDto filter, int pageNumber, int pageSize, CancellationToken ct = default);
+
     Task<StaffDailyAttendanceDto> CreateAsync(CreateStaffDailyAttendanceDto dto, Guid tenantId, Guid userId, CancellationToken ct = default);
     Task<StaffDailyAttendanceDto> UpdateAsync(UpdateStaffDailyAttendanceDto dto, Guid userId, CancellationToken ct = default);
     Task<StaffDailyAttendanceDto> VerifyAsync(VerifyAttendanceDto dto, Guid userId, CancellationToken ct = default);

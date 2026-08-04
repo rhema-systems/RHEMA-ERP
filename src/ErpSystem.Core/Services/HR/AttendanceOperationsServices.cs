@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.StaffAttendance;
@@ -173,22 +173,39 @@ public class GeofenceZoneService : IGeofenceZoneService
 
 public class RemoteWorkRequestService : IRemoteWorkRequestService
 {
+    /// <summary>Workflow entity type; must match the catalog entry and the status adapter.</summary>
+    private const string EntityType = "RemoteWorkRequest";
+
     private readonly IRemoteWorkRequestRepository _repository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<RemoteWorkRequestService> _logger;
 
     public RemoteWorkRequestService(
         IRemoteWorkRequestRepository repository,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
         ILogger<RemoteWorkRequestService> logger)
     {
         _repository = repository;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
+
+    /// <summary>
+    /// The workflow engine identifies approvers by ApplicationUser.Id, while this service is
+    /// handed the caller's *Employee* id by <c>AttendanceControllerBase</c>. Keep them
+    /// apart: <c>RemoteWorkRequest.ApprovedById</c> is a foreign key to <c>Employee</c>, so
+    /// writing a user id into it violates the constraint.
+    /// </summary>
+    private Guid GetCurrentUserId() => _currentUserProvider.UserId;
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
@@ -255,7 +272,8 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
     public async Task<PagedResult<RemoteWorkRequestSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(r => r.TenantId == tenantId);
+        // Navigation names appear on the summary DTO, so they must be loaded.
+        var query = _repository.GetQueryable().Include(r => r.Employee).Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(r => r.StartDate)
@@ -284,8 +302,45 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
+        // RemoteWorkRequestStatus has no Draft member, so the request is submitted for
+        // approval the moment it is created rather than on a separate action.
+        await StartApprovalWorkflowAsync(entity, ct);
+
         _logger.LogInformation("Remote work request {Number} created for employee {EmployeeId}", entity.RequestNumber, entity.EmployeeId);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Starts the approval workflow. A missing or unpublished definition must not stop an
+    /// employee raising the request, so failures are logged and the row stays Pending.
+    /// </summary>
+    private async Task StartApprovalWorkflowAsync(RemoteWorkRequest entity, CancellationToken ct)
+    {
+        try
+        {
+            var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+            if (!workflowResult.ExecutionResult.Success)
+            {
+                _logger.LogWarning(
+                    "Approval workflow did not start for remote work request {Number}: {Message}",
+                    entity.RequestNumber,
+                    workflowResult.ExecutionResult.Message);
+                return;
+            }
+
+            var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
+            adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, entity.EmployeeId);
+
+            await _repository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to start the approval workflow for remote work request {Number}; it remains pending.",
+                entity.RequestNumber);
+        }
     }
 
     public async Task<RemoteWorkRequestDto> UpdateAsync(UpdateRemoteWorkRequestDto dto, Guid userId, CancellationToken ct = default)
@@ -301,45 +356,80 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
         return entity.ToDto();
     }
 
+    /// <summary>
+    /// Relays an approval decision to the workflow engine. The engine owns the outcome and
+    /// <c>RemoteWorkRequestWorkflowStatusAdapter</c> applies it, so a multi-step definition
+    /// leaves the request Pending until its last step passes.
+    /// </summary>
     public async Task<RemoteWorkRequestDto> ApproveAsync(Guid requestId, string? comments, Guid userId, CancellationToken ct = default)
-    {
-        var entity = await GetOwnedAsync(requestId);
-
-        if (entity.Status != RemoteWorkRequestStatus.Pending)
-            throw new InvalidOperationException("Only pending remote work requests can be approved.");
-
-        entity.Status = RemoteWorkRequestStatus.Approved;
-        entity.ApprovedById = userId;
-        entity.ApprovalDate = DateTime.UtcNow;
-        entity.ApprovalComments = comments;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
-
-        await _repository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(ct);
-
-        _logger.LogInformation("Remote work request {Number} approved by {UserId}", entity.RequestNumber, userId);
-        return entity.ToDto();
-    }
+        => await ProcessDecisionAsync(requestId, "Approve", comments, userId, ct);
 
     public async Task<RemoteWorkRequestDto> RejectAsync(Guid requestId, string rejectionReason, Guid userId, CancellationToken ct = default)
+        => await ProcessDecisionAsync(requestId, "Reject", rejectionReason, userId, ct);
+
+    private async Task<RemoteWorkRequestDto> ProcessDecisionAsync(
+        Guid requestId,
+        string action,
+        string? comments,
+        Guid employeeId,
+        CancellationToken ct)
     {
         var entity = await GetOwnedAsync(requestId);
 
         if (entity.Status != RemoteWorkRequestStatus.Pending)
-            throw new InvalidOperationException("Only pending remote work requests can be rejected.");
+            throw new InvalidOperationException("Only pending remote work requests can be decided.");
 
-        entity.Status = RemoteWorkRequestStatus.Rejected;
-        entity.RejectedDate = DateTime.UtcNow;
-        entity.RejectionReason = rejectionReason;
+        var isReject = string.Equals(action, "Reject", StringComparison.OrdinalIgnoreCase);
+        var decisionText = isReject && string.IsNullOrWhiteSpace(comments) ? "Rejected" : comments;
+
+        var currentUserId = GetCurrentUserId();
+        if (currentUserId == Guid.Empty)
+            throw new UnauthorizedAccessException("User not authenticated.");
+
+        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, currentUserId);
+        if (!canApprove)
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, currentUserId, action, decisionText);
+
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the decision.");
+
+        // ApprovedById is an Employee foreign key, so the adapter gets the employee id.
+        var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
+        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, employeeId, isReject ? decisionText : null);
+
+        if (!isReject)
+            entity.ApprovalComments = comments;
+
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
+        entity.UpdatedBy = employeeId.ToString();
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Remote work request {Number} rejected by {UserId}", entity.RequestNumber, userId);
-        return entity.ToDto();
+        _logger.LogInformation(
+            "Remote work request {Number} decision '{Action}' processed by {UserId}; outcome {Outcome}",
+            entity.RequestNumber, action, currentUserId, workflowResult.Outcome);
+
+        return await ReadDetailAsync(entity.Id, ct) ?? entity.ToDto();
+    }
+
+    /// <summary>
+    /// Re-reads a remote work request with its navigations loaded, for returning after a
+    /// write. The tracked instance would report a blank approver name, because the approver
+    /// FK is assigned after the entity was loaded and its navigation was never populated.
+    /// </summary>
+    private async Task<RemoteWorkRequestDto?> ReadDetailAsync(Guid id, CancellationToken ct)
+    {
+        var entity = await _repository.GetQueryable()
+            .AsNoTracking()
+            .Include(r => r.Employee)
+            .Include(r => r.ApprovedBy)
+            .FirstOrDefaultAsync(r => r.Id == id, ct);
+
+        return entity?.ToDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
@@ -456,7 +546,8 @@ public class HolidayCalendarService : IHolidayCalendarService
     public async Task<PagedResult<HolidayCalendarSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(c => c.TenantId == tenantId);
+        // Navigation names appear on the summary DTO, so they must be loaded.
+        var query = _repository.GetQueryable().Include(c => c.Country).Include(c => c.PublicHolidays).Where(c => c.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderBy(c => c.CalendarName)
@@ -823,7 +914,8 @@ public class StaffAttendancePayrollExportService : IStaffAttendancePayrollExport
     public async Task<PagedResult<StaffAttendancePayrollExportSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(e => e.TenantId == tenantId);
+        // Navigation names appear on the summary DTO, so they must be loaded.
+        var query = _repository.GetQueryable().Include(e => e.PayPeriod).Include(e => e.ExportedBy).Where(e => e.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(e => e.ExportDate)

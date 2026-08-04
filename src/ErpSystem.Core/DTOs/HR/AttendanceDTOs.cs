@@ -312,6 +312,55 @@ public class UpdateStaffDailyAttendanceDto : UpdateDtoBase
     public string? Notes { get; set; }
 }
 
+/// <summary>
+/// Filter for the tenant-wide daily attendance search.
+///
+/// Every property is optional and they compose with AND, so the caller can express
+/// "late and unverified in August for this org unit" in one request. The narrow reads
+/// (by-date, by-status, late, overtime, remote, pending-verification) are kept for the
+/// callers that already use them, but this is the one a filterable grid should target.
+/// </summary>
+public class StaffDailyAttendanceSearchDto
+{
+    /// <summary>Matches employee name or employee number, case-insensitively.</summary>
+    public string? SearchTerm { get; set; }
+
+    public Guid? EmployeeId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public Guid? LocationId { get; set; }
+    public Guid? WorkScheduleId { get; set; }
+    public Guid? PayPeriodId { get; set; }
+
+    public DateOnly? From { get; set; }
+    public DateOnly? To { get; set; }
+
+    /// <summary>Statuses to include. Empty or null means all.</summary>
+    public List<StaffAttendanceStatus> Statuses { get; set; } = new();
+
+    // Tri-state flags: null leaves the dimension unfiltered.
+    public bool? IsLate { get; set; }
+    public bool? IsEarlyDeparture { get; set; }
+    public bool? IsOvertime { get; set; }
+    public bool? IsRemoteWork { get; set; }
+    public bool? HasException { get; set; }
+    public bool? IsVerified { get; set; }
+    public bool? RequiresVerification { get; set; }
+
+    /// <summary>Only days where the employee was at least this many minutes late.</summary>
+    public int? MinLateMinutes { get; set; }
+
+    /// <summary>Only days with at least this much overtime.</summary>
+    public decimal? MinOvertimeHours { get; set; }
+
+    /// <summary>
+    /// One of: date, employee, status, workhours, overtime, lateminutes. Anything else falls
+    /// back to date. Prefixing is not supported — use <see cref="SortDescending"/>.
+    /// </summary>
+    public string? SortBy { get; set; }
+
+    public bool SortDescending { get; set; } = true;
+}
+
 public class VerifyAttendanceDto
 {
     [Required]

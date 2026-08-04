@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
@@ -130,7 +130,8 @@ public class ConsultantClientService : IConsultantClientService
     public async Task<PagedResult<ConsultantClientSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(c => c.TenantId == tenantId);
+        // Navigation names appear on the summary DTO, so they must be loaded.
+        var query = _repository.GetQueryable().Include(c => c.Country).Include(c => c.Engagements).Where(c => c.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderBy(c => c.ClientName)
@@ -367,7 +368,8 @@ public class ClientEngagementService : IClientEngagementService
     public async Task<PagedResult<ClientEngagementSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(e => e.TenantId == tenantId);
+        // Navigation names appear on the summary DTO, so they must be loaded.
+        var query = _repository.GetQueryable().Include(e => e.Client).Include(e => e.Consultant).Where(e => e.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(e => e.StartDate)
@@ -538,10 +540,15 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 {
     private const int MaxEmailEntryRows = 15;
 
+    /// <summary>Workflow entity type; must match the catalog entry and the status adapter.</summary>
+    private const string EntityType = "ConsultantTimesheet";
+
     private readonly IConsultantTimesheetRepository _repository;
     private readonly IConsultantTimesheetEntryRepository _entryRepository;
     private readonly IClientTimesheetConfirmationRepository _confirmationRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ConsultantTimesheetService> _logger;
     private readonly IEmailService _email;
@@ -552,6 +559,8 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         IConsultantTimesheetEntryRepository entryRepository,
         IClientTimesheetConfirmationRepository confirmationRepository,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
         ILogger<ConsultantTimesheetService> logger,
         IEmailService email,
@@ -561,6 +570,8 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         _entryRepository = entryRepository;
         _confirmationRepository = confirmationRepository;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _unitOfWork = unitOfWork;
         _logger = logger;
         _email = email;
@@ -683,7 +694,8 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
     public async Task<PagedResult<ConsultantTimesheetSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(t => t.TenantId == tenantId);
+        // Navigation names appear on the summary DTO, so they must be loaded.
+        var query = _repository.GetQueryable().Include(t => t.Consultant).Include(t => t.Client).Where(t => t.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(t => t.PeriodStartDate)
@@ -726,6 +738,12 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         return entity.ToDto();
     }
 
+    /// <summary>
+    /// Starts the approval workflow. Unlike the attendance requests in this module, a
+    /// timesheet does have a Draft state, so submission is an explicit user action and the
+    /// engine's outcome — applied by <c>ConsultantTimesheetWorkflowStatusAdapter</c> —
+    /// decides whether it lands on Submitted or straight on Approved.
+    /// </summary>
     public async Task<ConsultantTimesheetDto> SubmitAsync(Guid timesheetId, Guid userId, CancellationToken ct = default)
     {
         var entity = await GetOwnedTimesheetAsync(timesheetId);
@@ -733,8 +751,19 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         if (entity.Status != TimesheetStatus.Draft && entity.Status != TimesheetStatus.Rejected)
             throw new InvalidOperationException("Only draft or rejected timesheets can be submitted.");
 
-        entity.Status = TimesheetStatus.Submitted;
-        entity.SubmittedDate = DateTime.UtcNow;
+        // Belt and braces: TotalHours is maintained on every entry change, but submission is
+        // the point where the figure starts to matter (it is what the client confirms and
+        // what gets invoiced), and it repairs any row created before that was maintained.
+        await RecalculateTotalHoursAsync(entity.Id, userId, ct);
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
+
+        var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
+        adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, userId);
+
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
 
@@ -746,40 +775,57 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
     }
 
     public async Task<ConsultantTimesheetDto> ApproveAsync(Guid timesheetId, string? comments, Guid userId, CancellationToken ct = default)
-    {
-        var entity = await GetOwnedTimesheetAsync(timesheetId);
-
-        if (entity.Status != TimesheetStatus.Submitted)
-            throw new InvalidOperationException("Only submitted timesheets can be approved.");
-
-        entity.Status = TimesheetStatus.Approved;
-        if (comments != null) entity.Notes = comments;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
-
-        await _repository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(ct);
-
-        _logger.LogInformation("Timesheet {Number} approved by {UserId}", entity.TimesheetNumber, userId);
-        return entity.ToDto();
-    }
+        => await ProcessDecisionAsync(timesheetId, "Approve", comments, userId, ct);
 
     public async Task<ConsultantTimesheetDto> RejectAsync(Guid timesheetId, string rejectionReason, Guid userId, CancellationToken ct = default)
+        => await ProcessDecisionAsync(timesheetId, "Reject", rejectionReason, userId, ct);
+
+    private async Task<ConsultantTimesheetDto> ProcessDecisionAsync(
+        Guid timesheetId,
+        string action,
+        string? comments,
+        Guid employeeId,
+        CancellationToken ct)
     {
         var entity = await GetOwnedTimesheetAsync(timesheetId);
 
         if (entity.Status != TimesheetStatus.Submitted)
-            throw new InvalidOperationException("Only submitted timesheets can be rejected.");
+            throw new InvalidOperationException("Only submitted timesheets can be decided.");
 
-        entity.Status = TimesheetStatus.Rejected;
-        if (rejectionReason != null) entity.Notes = rejectionReason;
+        var isReject = string.Equals(action, "Reject", StringComparison.OrdinalIgnoreCase);
+        var decisionText = isReject && string.IsNullOrWhiteSpace(comments) ? "Rejected" : comments;
+
+        // The workflow engine keys approvers off ApplicationUser.Id; the controller hands
+        // this service the caller's Employee id.
+        var currentUserId = _currentUserProvider.UserId;
+        if (currentUserId == Guid.Empty)
+            throw new UnauthorizedAccessException("User not authenticated.");
+
+        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, currentUserId);
+        if (!canApprove)
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, currentUserId, action, decisionText);
+
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the decision.");
+
+        var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
+        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, employeeId, isReject ? decisionText : null);
+
+        if (!string.IsNullOrWhiteSpace(decisionText))
+            entity.Notes = decisionText;
+
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
+        entity.UpdatedBy = employeeId.ToString();
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Timesheet {Number} rejected by {UserId}", entity.TimesheetNumber, userId);
+        _logger.LogInformation(
+            "Timesheet {Number} decision '{Action}' processed by {UserId}; outcome {Outcome}",
+            entity.TimesheetNumber, action, currentUserId, workflowResult.Outcome);
         return entity.ToDto();
     }
 
@@ -803,7 +849,40 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         var entity = dto.ToEntity(resolvedTenantId, userId);
         await _entryRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
+
+        await RecalculateTotalHoursAsync(dto.TimesheetId, userId, ct);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Re-sums the timesheet's entries into <c>ConsultantTimesheet.TotalHours</c>.
+    ///
+    /// That column is the figure the client sees on the confirmation page and the one
+    /// <c>TimesheetInvoiceService</c> bills against — but nothing recomputed it when entries
+    /// changed, so a timesheet with real entries reported 0 hours and invoices generated for
+    /// zero. Called after every entry add, edit and delete.
+    /// </summary>
+    /// <param name="userId">
+    /// The acting user, or <see cref="Guid.Empty"/> where the caller has none (the delete
+    /// endpoint takes no user). An empty value leaves <c>UpdatedBy</c> alone rather than
+    /// stamping a zero GUID over the last real editor.
+    /// </param>
+    private async Task RecalculateTotalHoursAsync(Guid timesheetId, Guid userId, CancellationToken ct)
+    {
+        var timesheet = await _repository.GetByIdAsync(timesheetId);
+        if (timesheet == null) return;
+
+        var entries = await _entryRepository.GetByTimesheetIdAsync(timesheetId);
+        timesheet.TotalHours = entries
+            .Where(e => e.TenantId == timesheet.TenantId)
+            .Sum(e => e.TotalHours);
+
+        timesheet.UpdatedAt = DateTime.UtcNow;
+        if (userId != Guid.Empty)
+            timesheet.UpdatedBy = userId.ToString();
+
+        await _repository.UpdateAsync(timesheet);
+        await _unitOfWork.SaveChangesAsync(ct);
     }
 
     public async Task<IEnumerable<ConsultantTimesheetEntryDto>> GetEntriesAsync(Guid timesheetId, CancellationToken ct = default)
@@ -821,15 +900,21 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         entity.UpdateEntity(dto, userId);
         await _entryRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
+
+        await RecalculateTotalHoursAsync(entity.TimesheetId, userId, ct);
         return entity.ToDto();
     }
 
     public async Task<bool> DeleteEntryAsync(Guid entryId, CancellationToken ct = default)
     {
         var entity = await GetOwnedEntryAsync(entryId);
+        // Captured before the delete; the entity is detached afterwards.
+        var timesheetId = entity.TimesheetId;
 
         await _entryRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
+
+        await RecalculateTotalHoursAsync(timesheetId, Guid.Empty, ct);
         return true;
     }
 
@@ -1519,7 +1604,8 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
     public async Task<PagedResult<TimesheetInvoiceSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(i => i.TenantId == tenantId);
+        // Navigation names appear on the summary DTO, so they must be loaded.
+        var query = _repository.GetQueryable().Include(i => i.Client).Include(i => i.Consultant).Where(i => i.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(i => i.IssuedDate)

@@ -694,6 +694,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffAttendancePayrollExportService, StaffAttendancePayrollExportService>();
         services.AddScoped<IStaffAttendanceAlertRuleService, StaffAttendanceAlertRuleService>();
         services.AddScoped<IStaffAttendanceAlertService, StaffAttendanceAlertService>();
+        services.AddScoped<IAttendanceDashboardService, AttendanceDashboardService>();
         services.AddScoped<IConsultantClientService, ConsultantClientService>();
         services.AddScoped<IClientEngagementService, ClientEngagementService>();
         services.AddScoped<IConsultantTimesheetService, ConsultantTimesheetService>();

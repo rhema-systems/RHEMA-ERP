@@ -12,6 +12,8 @@ import {
   Globe,
   Building,
   CreditCard,
+  Clock,
+  CalendarDays,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -95,6 +97,27 @@ export default function HrAdministrationPage() {
               description: 'Read-only lookup shared with other modules.',
               href: '/administration/hr/departments',
               icon: Building,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Time &amp; leave</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Attendance & Time',
+              description:
+                'Work schedules, shifts, holidays, pay periods, devices and alert rules.',
+              href: '/administration/hr/attendance',
+              icon: Clock,
+            },
+            {
+              title: 'Leave Types',
+              description: 'Leave types with their sub-types, allocations and accrual policies.',
+              href: '/administration/hr/leave-types',
+              icon: CalendarDays,
             },
           ]}
         />

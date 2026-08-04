@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.StaffAttendance;
@@ -86,7 +86,8 @@ public class StaffAttendanceAlertRuleService : IStaffAttendanceAlertRuleService
     public async Task<PagedResult<StaffAttendanceAlertRuleSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(r => r.TenantId == tenantId);
+        // Navigation names appear on the summary DTO, so they must be loaded.
+        var query = _repository.GetQueryable().Include(r => r.Alerts).Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderBy(r => r.RuleName)
@@ -270,7 +271,8 @@ public class StaffAttendanceAlertService : IStaffAttendanceAlertService
     public async Task<PagedResult<StaffAttendanceAlertSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var query = _repository.GetQueryable().Where(a => a.TenantId == tenantId);
+        // Navigation names appear on the summary DTO, so they must be loaded.
+        var query = _repository.GetQueryable().Include(a => a.AlertRule).Include(a => a.Employee).Where(a => a.TenantId == tenantId);
         var totalCount = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(a => a.TriggeredDate)

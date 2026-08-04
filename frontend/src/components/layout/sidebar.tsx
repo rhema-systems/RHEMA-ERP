@@ -75,6 +75,13 @@ import {
   Repeat2,
   KeyRound,
   PackageCheck,
+  CalendarCheck,
+  ScrollText,
+  Timer,
+  BellRing,
+  Upload,
+  Fingerprint,
+  Receipt,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -355,8 +362,37 @@ const navigationItems: NavItem[] = [
           { title: 'Year-End', href: '/hr/leave/year-end', icon: CalendarClock },
         ],
       },
-      // Attendance and Performance are re-added with their areas — linking to routes that
-      // do not exist yet only produces 404s.
+      {
+        title: 'Attendance & Time',
+        href: '/hr/attendance',
+        icon: Clock,
+        children: [
+          { title: 'Daily Attendance', href: '/hr/attendance/daily', icon: CalendarCheck },
+          { title: 'Attendance Records', href: '/hr/attendance/records', icon: ClipboardList },
+          { title: 'Punch Logs', href: '/hr/attendance/logs', icon: ScrollText },
+          { title: 'Regularizations', href: '/hr/attendance/regularizations', icon: FileCheck },
+          { title: 'Overtime Requests', href: '/hr/attendance/overtime', icon: Timer },
+          { title: 'Remote Work', href: '/hr/attendance/remote-work', icon: Home },
+          { title: 'Monthly Summaries', href: '/hr/attendance/summaries', icon: Database },
+          { title: 'Alerts', href: '/hr/attendance/alerts', icon: BellRing },
+          { title: 'Bulk Imports', href: '/hr/attendance/imports', icon: Upload },
+          { title: 'Payroll Exports', href: '/hr/attendance/payroll-exports', icon: DollarSign },
+          { title: 'Biometrics', href: '/hr/attendance/biometrics', icon: Fingerprint },
+        ],
+      },
+      {
+        title: 'Consulting',
+        href: '/hr/consulting',
+        icon: Briefcase,
+        children: [
+          { title: 'Clients', href: '/hr/consulting/clients', icon: Building2 },
+          { title: 'Engagements', href: '/hr/consulting/engagements', icon: FileCheck },
+          { title: 'Timesheets', href: '/hr/consulting/timesheets', icon: Clock },
+          { title: 'Invoices', href: '/hr/consulting/invoices', icon: Receipt },
+        ],
+      },
+      // Performance is re-added with its area — linking to routes that do not exist yet
+      // only produces 404s.
     ],
   },
   {
@@ -935,6 +971,21 @@ const navigationItems: NavItem[] = [
           { title: 'Countries', href: '/administration/hr/countries', icon: Globe },
           { title: 'Departments', href: '/administration/hr/departments', icon: Building },
           { title: 'Leave Types', href: '/administration/hr/leave-types', icon: CalendarDays },
+          {
+            title: 'Attendance & Time',
+            href: '/administration/hr/attendance',
+            icon: Clock,
+            children: [
+              { title: 'Work Schedules', href: '/administration/hr/attendance/work-schedules', icon: CalendarClock },
+              { title: 'Shift Rotations', href: '/administration/hr/attendance/shift-rotations', icon: Repeat2 },
+              { title: 'Holiday Calendars', href: '/administration/hr/attendance/holiday-calendars', icon: CalendarDays },
+              { title: 'Pay Periods', href: '/administration/hr/attendance/pay-periods', icon: DollarSign },
+              { title: 'Geofence Zones', href: '/administration/hr/attendance/geofence-zones', icon: MapPin },
+              { title: 'Devices', href: '/administration/hr/attendance/devices', icon: Fingerprint },
+              { title: 'Alert Rules', href: '/administration/hr/attendance/alert-rules', icon: BellRing },
+              { title: 'Overtime Policies', href: '/administration/hr/attendance/overtime-policies', icon: Timer },
+            ],
+          },
           // Employee Categories has no backing controller at all, so it stays dropped.
           {
             title: 'Payroll',
