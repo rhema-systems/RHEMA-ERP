@@ -71,6 +71,7 @@ public sealed class InventoryItemLocationAnalyticsDto
     public DateTime? LastMovementDateUtc { get; set; }
     public DateTime? LastReceiptDateUtc { get; set; }
     public DateTime? LastIssueDateUtc { get; set; }
+    public DateTime? LastCountDateUtc { get; set; }
     public int DaysSinceActivity { get; set; }
     public InventoryActivityClassification ActivityClassification { get; set; }
     public int? CurrentStockoutDays { get; set; }

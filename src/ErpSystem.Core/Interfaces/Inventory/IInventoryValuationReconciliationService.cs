@@ -22,6 +22,14 @@ public interface IInventoryValuationReconciliationService
         CancellationToken cancellationToken = default);
 }
 
+public interface IInventoryValuationReconciliationReportSource
+{
+    Task<IReadOnlyList<InventoryValuationReconciliationDto>> GetReportSourceAsync(
+        Guid? fiscalPeriodId,
+        InventoryValuationReconciliationStatus? status,
+        CancellationToken cancellationToken = default);
+}
+
 public class InventoryValuationReconciliationException : Exception
 {
     public InventoryValuationReconciliationException(string code, string message) : base(message) => Code = code;

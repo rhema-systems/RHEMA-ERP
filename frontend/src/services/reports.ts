@@ -66,6 +66,8 @@ export interface ExecuteReportDto {
   endDate?: string;
   maxRows?: number;
   includeMetadata?: boolean;
+  page?: number;
+  pageSize?: number;
 }
 
 export interface ReportResult {
@@ -78,6 +80,11 @@ export interface ReportResult {
   data: Record<string, any>[];
   metadata?: ReportMetadata;
   chartData?: ReportChartData[];
+  currentPage: number;
+  pageSize: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
 }
 
 export interface ReportMetadata {
@@ -257,6 +264,50 @@ export interface ReportAccessDto {
   accessibleRoles: string[];
 }
 
+function decodeContentDispositionValue(value: string): string {
+  const trimmed = value.trim().replace(/^['"]|['"]$/g, '');
+  try {
+    return decodeURIComponent(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+export function normalizeReportExportFileName(
+  contentDisposition: string | null,
+  format: ExportReportDto['format'],
+): string {
+  const normalizedFormat = format.toLowerCase();
+  const fallback = `report-${new Date().toISOString().split('T')[0]}.${normalizedFormat}`;
+  let candidate = '';
+
+  if (contentDisposition) {
+    const encodedMatch = contentDisposition.match(/filename\*\s*=\s*(?:UTF-8'')?([^;]+)/i);
+    const quotedMatch = contentDisposition.match(/filename\s*=\s*"([^"]+)"/i);
+    const unquotedMatch = contentDisposition.match(/filename\s*=\s*([^;]+)/i);
+    candidate = decodeContentDispositionValue(
+      encodedMatch?.[1] ?? quotedMatch?.[1] ?? unquotedMatch?.[1] ?? '',
+    );
+  }
+
+  candidate = candidate
+    .split(/[\\/]/)
+    .pop()
+    ?.replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim() ?? '';
+
+  if (!candidate) return fallback;
+
+  const extension = `.${normalizedFormat}`;
+  const extensionIndex = candidate.toLowerCase().lastIndexOf(extension);
+  if (extensionIndex >= 0) {
+    return candidate.slice(0, extensionIndex + extension.length);
+  }
+
+  const baseName = candidate.replace(/[._\s-]+$/g, '') || 'report-export';
+  return `${baseName}${extension}`;
+}
+
 class ReportsService {
 
   // Report CRUD operations
@@ -351,7 +402,9 @@ class ReportsService {
       const url = `${baseUrl}/reports/${reportId}/export`;
       
       // Get auth token for headers
-      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+      const token = typeof window !== 'undefined'
+        ? localStorage.getItem('token') || localStorage.getItem('authToken')
+        : null;
       
       const response = await fetch(url, {
         method: 'POST',
@@ -366,20 +419,8 @@ class ReportsService {
         throw new Error(`Export failed with status ${response.status}`);
       }
 
-      // Get filename from Content-Disposition header or create a default one
       const contentDisposition = response.headers.get('Content-Disposition');
-      let fileName = 'report-export';
-      
-      if (contentDisposition) {
-        const fileNameMatch = contentDisposition.match(/filename[^;=\n]*=(['"]*)([^'"\n]*(['"]*))/i);
-        if (fileNameMatch && fileNameMatch[2]) {
-          fileName = fileNameMatch[2];
-        }
-      } else {
-        // Create filename based on format
-        const timestamp = new Date().toISOString().split('T')[0];
-        fileName = `report-${timestamp}.${exportReportDto.format}`;
-      }
+      const fileName = normalizeReportExportFileName(contentDisposition, exportReportDto.format);
 
       const blob = await response.blob();
       return { fileName, blob };

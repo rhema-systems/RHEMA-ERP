@@ -5,7 +5,7 @@ namespace ErpSystem.Core.Services
     public interface IReportsService
     {
         Task<List<ReportDefinitionDto>> GetReportsAsync(Guid tenantId, Guid userId, string? type = null, string? status = null, bool? favoriteOnly = null, bool bypassRoleFiltering = false);
-        Task<ReportDefinitionDto?> GetReportAsync(Guid reportId, Guid tenantId);
+        Task<ReportDefinitionDto?> GetReportAsync(Guid reportId, Guid tenantId, Guid userId, bool isAdminUser = false);
         Task<ReportDefinitionDto> CreateReportAsync(CreateReportDto createReportDto, Guid tenantId, Guid userId);
         Task<ReportDefinitionDto?> UpdateReportAsync(Guid reportId, UpdateReportDto updateReportDto, Guid tenantId, Guid userId, bool isAdminUser = false);
         Task<bool> DeleteReportAsync(Guid reportId, Guid tenantId, Guid userId);

@@ -1,16 +1,22 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { differenceInCalendarDays, format, subMonths } from 'date-fns';
+import type { DateRange } from 'react-day-picker';
 import {
   AlertTriangle,
   ArrowRight,
   Boxes,
+  Clock3,
   FileText,
   FolderKanban,
+  Gauge,
   Loader2,
+  MapPin,
+  ShieldAlert,
   type LucideIcon,
   RefreshCw,
   ShoppingCart,
@@ -29,11 +35,14 @@ import { Alert, AlertDescription } from '../../components/ui/alert';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import { DatePickerWithRange } from '../../components/ui/date-range-picker';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { useAuth } from '../../hooks/use-auth';
 import { getExternalPortalPath, isExternalPortalUser } from '../../lib/auth-routing';
 import { cn } from '../../lib/utils';
 import { authService } from '../../services/auth';
 import { dashboardService } from '../../services/dashboard';
+import { inventoryWarehouseService } from '../../services/inventoryWarehouseService';
 
 interface SummaryCardDefinition {
   title: string;
@@ -45,13 +54,18 @@ interface SummaryCardDefinition {
   icon: LucideIcon;
 }
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
+const formatCurrency = (value: number, currency = 'USD') => {
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value);
+  } catch {
+    return `${currency} ${formatNumber(value)}`;
+  }
+};
 
 const formatNumber = (value: number) =>
   new Intl.NumberFormat('en-US', {
@@ -78,17 +92,35 @@ const formatRelativeTime = (value?: string) => {
   return date.toLocaleDateString();
 };
 
-const getDaysUntil = (value?: string) => {
+const getDaysUntil = (value?: string, referenceDate = new Date()) => {
   if (!value) return null;
 
   const target = new Date(value).getTime();
+  const reference = referenceDate.getTime();
   if (Number.isNaN(target)) return null;
 
-  return Math.ceil((target - Date.now()) / (1000 * 60 * 60 * 24));
+  return Math.ceil((target - reference) / (1000 * 60 * 60 * 24));
 };
 
 const sumBy = <T,>(items: T[], selector: (item: T) => number) =>
   items.reduce((total, item) => total + selector(item), 0);
+
+const formatMoneyPoints = (points: Array<{ amount: number; currency: string }>) =>
+  points.length === 0
+    ? 'No value'
+    : points.slice(0, 2).map((point) => formatCurrency(point.amount, point.currency)).join(' · ');
+
+const createDefaultDashboardRange = (): DateRange => {
+  const to = new Date();
+  to.setHours(0, 0, 0, 0);
+
+  return {
+    from: subMonths(to, 5),
+    to,
+  };
+};
+
+const toDashboardDate = (value: Date) => format(value, 'yyyy-MM-dd');
 
 export default function Dashboard() {
   const router = useRouter();
@@ -96,6 +128,38 @@ export default function Dashboard() {
   const storedUser = authService.getStoredUser();
   const effectiveUser = user ?? storedUser;
   const shouldRouteToExternalPortal = isExternalPortalUser(effectiveUser);
+  const [selectedRange, setSelectedRange] = useState<DateRange>(createDefaultDashboardRange);
+  const [appliedRange, setAppliedRange] = useState<DateRange>(createDefaultDashboardRange);
+  const [rangeError, setRangeError] = useState<string | null>(null);
+  const [warehouseId, setWarehouseId] = useState('all');
+  const [locationId, setLocationId] = useState('all');
+
+  const { data: warehouseOptions = [] } = useQuery({
+    queryKey: ['enterprise-dashboard', 'warehouses'],
+    queryFn: () => inventoryWarehouseService.getActiveWarehouses(),
+    enabled: !shouldRouteToExternalPortal,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
+  const { data: locationOptions = [] } = useQuery({
+    queryKey: ['enterprise-dashboard', 'locations', warehouseId],
+    queryFn: () => inventoryWarehouseService.getWarehouseLocations(warehouseId),
+    enabled: !shouldRouteToExternalPortal && warehouseId !== 'all',
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
+  const rangeQuery = useMemo(() => {
+    if (!appliedRange.from || !appliedRange.to) return null;
+
+    return {
+      startDate: toDashboardDate(appliedRange.from),
+      endDate: toDashboardDate(appliedRange.to),
+      warehouseId: warehouseId === 'all' ? undefined : warehouseId,
+      locationId: locationId === 'all' ? undefined : locationId,
+    };
+  }, [appliedRange, locationId, warehouseId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -105,14 +169,63 @@ export default function Dashboard() {
     }
   }, [router, shouldRouteToExternalPortal]);
 
-  const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['enterprise-dashboard'],
-    queryFn: () => dashboardService.getEnterpriseDashboard(),
-    enabled: !shouldRouteToExternalPortal,
+  const { data, error: dashboardError, isLoading, isFetching, refetch } = useQuery({
+    queryKey: [
+      'enterprise-dashboard',
+      rangeQuery?.startDate,
+      rangeQuery?.endDate,
+      rangeQuery?.warehouseId,
+      rangeQuery?.locationId,
+    ],
+    queryFn: () => {
+      if (!rangeQuery) {
+        throw new Error('A complete dashboard date range is required.');
+      }
+
+      return dashboardService.getEnterpriseDashboard(
+        rangeQuery.startDate,
+        rangeQuery.endDate,
+        rangeQuery.warehouseId,
+        rangeQuery.locationId,
+      );
+    },
+    enabled: !shouldRouteToExternalPortal && rangeQuery !== null,
     staleTime: 60_000,
+    placeholderData: (previousData) => previousData,
   });
 
+  const handleRangeChange = (range: DateRange | undefined) => {
+    if (!range) return;
+
+    if (range.from && range.to && differenceInCalendarDays(range.to, range.from) > 3660) {
+      setRangeError('Select a dashboard period of 10 years or less.');
+      return;
+    }
+
+    setRangeError(null);
+    setSelectedRange(range);
+    if (range.from && range.to) {
+      setAppliedRange(range);
+    }
+  };
+
   const displayName = user?.firstName || storedUser?.firstName || user?.username || storedUser?.username || 'User';
+
+  if (dashboardError && !data) {
+    return (
+      <DashboardLayout>
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>The enterprise dashboard could not be loaded. Please retry.</span>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </DashboardLayout>
+    );
+  }
 
   if (isLoading || !data) {
     return (
@@ -136,16 +249,21 @@ export default function Dashboard() {
   const pendingInventoryValue = pendingInventoryApprovalValue + pendingInventoryIssueValue;
 
   const maintenanceSummary = data.maintenanceOverview?.summary;
+  const maintenanceMetrics = data.maintenanceMetrics;
+  const maintenanceTotalWorkOrders = maintenanceMetrics?.totalWorkOrders ?? maintenanceSummary?.totalWorkOrders ?? 0;
+  const maintenanceActiveWorkOrders = maintenanceMetrics?.pendingWorkOrders ?? maintenanceSummary?.activeWorkOrders ?? 0;
+  const maintenanceOverdueWorkOrders = maintenanceMetrics?.overdueWorkOrders ?? maintenanceSummary?.overdueWorkOrders ?? 0;
+  const maintenanceCompletedWorkOrders = maintenanceMetrics?.completedWorkOrders ?? maintenanceSummary?.completedWorkOrders ?? 0;
   const maintenanceCompletionRate =
-    (maintenanceSummary?.totalWorkOrders ?? 0) > 0
-      ? ((maintenanceSummary?.completedWorkOrders ?? data.maintenanceMetrics?.completedWorkOrders ?? 0) /
-          Math.max(1, maintenanceSummary?.totalWorkOrders ?? 0)) *
-        100
-      : 0;
+    maintenanceMetrics?.completionRate
+      ?? (maintenanceTotalWorkOrders > 0
+        ? (maintenanceCompletedWorkOrders / Math.max(1, maintenanceTotalWorkOrders)) * 100
+        : 0);
 
   const openTenders = data.tenders.filter((tender) => !['closed', 'cancelled', 'awarded', 'completed'].includes(tender.status.toLowerCase()));
+  const rangeEndReference = new Date(data.rangeEndDate);
   const closingSoonTenders = openTenders.filter((tender) => {
-    const daysUntil = getDaysUntil(tender.submissionDeadline);
+    const daysUntil = getDaysUntil(tender.submissionDeadline, rangeEndReference);
     return daysUntil !== null && daysUntil >= 0 && daysUntil <= 14;
   });
   const tenderEstimatedValue = sumBy(openTenders, (tender) => tender.estimatedValue ?? 0);
@@ -193,8 +311,8 @@ export default function Dashboard() {
     },
     {
       title: 'Maintenance',
-      value: formatNumber(maintenanceSummary?.activeWorkOrders ?? data.maintenanceMetrics?.inProgressWorkOrders ?? 0),
-      meta: `${maintenanceSummary?.overdueWorkOrders ?? data.maintenanceMetrics?.overdueWorkOrders ?? 0} overdue work orders`,
+      value: formatNumber(maintenanceActiveWorkOrders),
+      meta: `${maintenanceOverdueWorkOrders} overdue work orders`,
       href: '/maintenance',
       accentClassName:
         'border-rose-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(255,241,242,0.95))] dark:border-rose-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(127,29,29,0.24))]',
@@ -268,9 +386,9 @@ export default function Dashboard() {
   }));
 
   const maintenanceStatusData = [
-    { name: 'Active', value: maintenanceSummary?.activeWorkOrders ?? data.maintenanceMetrics?.inProgressWorkOrders ?? 0 },
-    { name: 'Overdue', value: maintenanceSummary?.overdueWorkOrders ?? data.maintenanceMetrics?.overdueWorkOrders ?? 0 },
-    { name: 'Completed', value: maintenanceSummary?.completedWorkOrders ?? data.maintenanceMetrics?.completedWorkOrders ?? 0 },
+    { name: 'Active', value: maintenanceActiveWorkOrders },
+    { name: 'Overdue', value: maintenanceOverdueWorkOrders },
+    { name: 'Completed', value: maintenanceCompletedWorkOrders },
   ].filter((item) => item.value > 0);
 
   const tenderStatusData = Object.values(
@@ -290,15 +408,33 @@ export default function Dashboard() {
     },
     { module: 'Procurement', items: data.pendingPurchaseRequisitions.length + data.openPurchaseOrders.length },
     { module: 'Inventory', items: data.pendingInventoryApprovals.length + data.pendingInventoryIssues.length },
-    { module: 'Maintenance', items: (maintenanceSummary?.activeWorkOrders ?? 0) + (maintenanceSummary?.overdueWorkOrders ?? 0) },
+    { module: 'Maintenance', items: maintenanceActiveWorkOrders + maintenanceOverdueWorkOrders },
     { module: 'Tenders', items: openTenders.length + closingSoonTenders.length },
   ];
 
   const criticalAlertCount =
     (data.crmOverview?.leadsNeedingFollowUpCount ?? 0) +
     (data.projectDashboard?.overdueMilestones ?? 0) +
-    (maintenanceSummary?.overdueWorkOrders ?? 0) +
+    maintenanceOverdueWorkOrders +
     closingSoonTenders.length;
+
+  const management = data.procurementInventoryManagement;
+  const managementSpendByCategory = (management?.spendByCategory ?? []).slice(0, 10).map((item) => ({
+    label: `${item.label} · ${item.currency}`,
+    amount: item.amount,
+  }));
+  const managementSpendByDepartment = (management?.spendByDepartment ?? []).slice(0, 10).map((item) => ({
+    label: `${item.label} · ${item.currency}`,
+    amount: item.amount,
+  }));
+  const managementInventoryByCategory = (management?.inventory.valueByCategory ?? []).slice(0, 10).map((item) => ({
+    label: item.label,
+    value: item.value,
+  }));
+  const managementSupplierRisk = (management?.supplierRisk.byRiskBand ?? []).map((item) => ({
+    name: item.label,
+    value: item.count,
+  }));
 
   return (
     <DashboardLayout>
@@ -320,12 +456,51 @@ export default function Dashboard() {
               <div>
                 <h1 className="text-[1.75rem] font-bold tracking-tight text-slate-950 dark:text-slate-50">Dashboard</h1>
                 <p className="mt-1 max-w-3xl text-sm leading-5 text-slate-600 dark:text-slate-300">
-                  Welcome back, {displayName}. This view keeps the main modules raw and chart-first so you can scan business movement without drilling into tabs.
+                  Welcome back, {displayName}. Select a reporting period to refresh period-sensitive activity while retaining the current operational context.
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <DatePickerWithRange
+                value={selectedRange}
+                onChange={handleRangeChange}
+                className="w-full sm:w-[290px]"
+                placeholder="Select dashboard period"
+              />
+              <Select
+                value={warehouseId}
+                onValueChange={(value) => {
+                  setWarehouseId(value);
+                  setLocationId('all');
+                }}
+              >
+                <SelectTrigger className="w-full bg-white/80 sm:w-[210px] dark:bg-slate-950/40" aria-label="Dashboard warehouse">
+                  <MapPin className="mr-2 h-4 w-4 shrink-0 text-slate-500" />
+                  <SelectValue placeholder="All permitted warehouses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All permitted warehouses</SelectItem>
+                  {warehouseOptions.map((warehouse) => (
+                    <SelectItem key={warehouse.id} value={warehouse.id}>
+                      {warehouse.code} · {warehouse.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={locationId} onValueChange={setLocationId} disabled={warehouseId === 'all'}>
+                <SelectTrigger className="w-full bg-white/80 sm:w-[210px] dark:bg-slate-950/40" aria-label="Dashboard warehouse location">
+                  <SelectValue placeholder={warehouseId === 'all' ? 'Select warehouse first' : 'All permitted locations'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All permitted locations</SelectItem>
+                  {locationOptions.map((location) => (
+                    <SelectItem key={location.id} value={location.id}>
+                      {location.locationCode} · {location.name || location.locationCode}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Badge variant="secondary" className="rounded-full px-3 py-1">
                 Updated {formatRelativeTime(data.lastUpdated)}
               </Badge>
@@ -343,6 +518,15 @@ export default function Dashboard() {
             <AlertDescription>
               Some business modules are unavailable right now: {unavailableModules.map((module) => module.module).join(', ')}.
               The dashboard is still showing live data for the modules that responded successfully.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {(rangeError || dashboardError) && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              {rangeError || 'The selected dashboard period could not be refreshed. The previous period is still displayed.'}
             </AlertDescription>
           </Alert>
         )}
@@ -377,6 +561,187 @@ export default function Dashboard() {
             );
           })}
         </div>
+
+        {management && (
+          <section className="space-y-3" aria-labelledby="procurement-inventory-management-title">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h2 id="procurement-inventory-management-title" className="text-lg font-semibold text-slate-950 dark:text-slate-50">
+                  Procurement and inventory management
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {format(new Date(management.rangeStartDate), 'dd MMM yyyy')} – {format(new Date(management.rangeEndDate), 'dd MMM yyyy')}
+                </p>
+              </div>
+              <Badge variant="outline" className="font-normal">
+                Stock as at {formatRelativeTime(management.inventoryAsOfUtc)}
+              </Badge>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <Card className="border-amber-200/80 dark:border-amber-900/70">
+                <CardContent className="flex items-start justify-between gap-3 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Period spend</p>
+                    <p className="mt-2 text-xl font-semibold">{formatMoneyPoints(management.spendByCurrency)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{management.spendByCurrency.reduce((sum, item) => sum + item.count, 0)} purchase orders</p>
+                  </div>
+                  <ShoppingCart className="h-5 w-5 text-amber-600" />
+                </CardContent>
+              </Card>
+
+              <Card className="border-sky-200/80 dark:border-sky-900/70">
+                <CardContent className="flex items-start justify-between gap-3 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Open purchase orders</p>
+                    <p className="mt-2 text-xl font-semibold">{formatNumber(management.openPurchaseOrders.count)}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {management.openPurchaseOrders.overdueCount} overdue · {formatMoneyPoints(management.openPurchaseOrders.remainingValueByCurrency)} remaining
+                    </p>
+                  </div>
+                  <FileText className="h-5 w-5 text-sky-600" />
+                </CardContent>
+              </Card>
+
+              <Card className="border-violet-200/80 dark:border-violet-900/70">
+                <CardContent className="flex items-start justify-between gap-3 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Contracts</p>
+                    <p className="mt-2 text-xl font-semibold">{management.contracts.averageUtilizationPercent.toFixed(1)}%</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {management.contracts.activeCount} active · {management.contracts.expiringWithin90DaysCount} expiring
+                    </p>
+                  </div>
+                  <Gauge className="h-5 w-5 text-violet-600" />
+                </CardContent>
+              </Card>
+
+              <Card className="border-cyan-200/80 dark:border-cyan-900/70">
+                <CardContent className="flex items-start justify-between gap-3 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Stock value</p>
+                    <p className="mt-2 text-xl font-semibold">{formatNumber(management.inventory.stockValue)}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {management.inventory.itemLocationCount} item locations · {management.inventory.stockoutCount} stockouts
+                    </p>
+                  </div>
+                  <Boxes className="h-5 w-5 text-cyan-600" />
+                </CardContent>
+              </Card>
+
+              <Card className="border-indigo-200/80 dark:border-indigo-900/70">
+                <CardContent className="flex items-start justify-between gap-3 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Procurement cycle</p>
+                    <p className="mt-2 text-xl font-semibold">
+                      {management.cycleTime.averageRequisitionToPurchaseOrderDays?.toFixed(1) ?? '—'} days
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      PR to PO · {management.cycleTime.averagePurchaseOrderToReceiptDays?.toFixed(1) ?? '—'} days PO to receipt
+                    </p>
+                  </div>
+                  <Clock3 className="h-5 w-5 text-indigo-600" />
+                </CardContent>
+              </Card>
+
+              <Card className="border-emerald-200/80 dark:border-emerald-900/70">
+                <CardContent className="flex items-start justify-between gap-3 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Service level</p>
+                    <p className="mt-2 text-xl font-semibold">{management.serviceLevel.onTimeDeliveryPercent?.toFixed(1) ?? '—'}%</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      On-time delivery · {management.serviceLevel.acceptedFillRatePercent?.toFixed(1) ?? '—'}% accepted fill
+                    </p>
+                  </div>
+                  <TrendingUp className="h-5 w-5 text-emerald-600" />
+                </CardContent>
+              </Card>
+
+              <Card className="border-rose-200/80 dark:border-rose-900/70">
+                <CardContent className="flex items-start justify-between gap-3 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Supplier risk</p>
+                    <p className="mt-2 text-xl font-semibold">{management.supplierRisk.highOrCriticalSupplierCount}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      High/critical · {management.supplierRisk.awardBlockedSupplierCount} award blocked
+                    </p>
+                  </div>
+                  <ShieldAlert className="h-5 w-5 text-rose-600" />
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">
+              <BaseBarChart
+                data={managementSpendByCategory}
+                xAxisKey="label"
+                bars={[{ dataKey: 'amount', name: 'Spend', color: CHART_COLORS.warning[0] }]}
+                title="Spend by Category"
+                description="Purchase-order spend in the selected period."
+                height={280}
+                compact
+                formatValue={(value) => formatNumber(Number(value))}
+              />
+              <BaseBarChart
+                data={managementSpendByDepartment}
+                xAxisKey="label"
+                bars={[{ dataKey: 'amount', name: 'Spend', color: CHART_COLORS.primary[0] }]}
+                title="Spend by Department"
+                description="Source-requisition department exposure."
+                height={280}
+                compact
+                formatValue={(value) => formatNumber(Number(value))}
+              />
+              <BaseBarChart
+                data={managementInventoryByCategory}
+                xAxisKey="label"
+                bars={[{ dataKey: 'value', name: 'Stock Value', color: CHART_COLORS.info[0] }]}
+                title="Stock Value by Category"
+                description="Current authorized inventory balance."
+                height={280}
+                compact
+                formatValue={(value) => formatNumber(Number(value))}
+              />
+              <BasePieChart
+                data={managementSupplierRisk}
+                dataKey="value"
+                nameKey="name"
+                title="Supplier Risk Profile"
+                description={`${management.supplierRisk.openAlertCount} open/escalated alerts.`}
+                height={280}
+                compact
+                innerRadius={64}
+                showLabels={false}
+                colors={[CHART_COLORS.danger[0], CHART_COLORS.warning[0], CHART_COLORS.info[0], CHART_COLORS.success[0]]}
+              />
+            </div>
+
+            {management.contracts.expiringContracts.length > 0 && (
+              <Card>
+                <CardHeader className="px-4 pb-2 pt-4">
+                  <CardTitle className="text-sm">Contracts expiring within 90 days</CardTitle>
+                  <CardDescription className="text-xs">Utilization is calculated from linked purchase-order commitments through the selected period end.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-2 px-4 pb-4 md:grid-cols-2 xl:grid-cols-3">
+                  {management.contracts.expiringContracts.map((contract) => (
+                    <Link
+                      key={contract.contractId}
+                      href={`/procurement/contracts/${contract.contractId}`}
+                      className="rounded-lg border p-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-900"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="truncate text-sm font-medium">{contract.contractNumber}</span>
+                        <Badge variant="outline" className="shrink-0">{contract.daysToExpiry}d</Badge>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-slate-500">{contract.supplierName || contract.contractTitle}</p>
+                      <p className="mt-2 text-xs">{contract.utilizationPercent.toFixed(1)}% utilized</p>
+                    </Link>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+          </section>
+        )}
 
         <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           <BaseBarChart

@@ -23,6 +23,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
     private const string EventType = "ProcurementSupplierRiskControl";
     private const string ReviewPermission = "procurement.supplier.review";
     private const string ApprovePermission = "procurement.supplier.approve";
+    private const string ReportingPermission = "procurement.reports.read";
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
     private static readonly IReadOnlyList<string> DecisionKeys =
         Enumerable.Range(1, 14).Select(value => $"DEC-{value:000}").ToArray();
@@ -72,7 +73,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
     public async Task<ProcurementSupplierRiskSummaryDto> GetSummaryAsync(
         CancellationToken cancellationToken = default)
     {
-        EnsureInternalReader();
+        await EnsureInternalReaderAsync(cancellationToken);
         var now = DateTime.UtcNow;
         var policy = await TryResolvePolicyAsync(now, cancellationToken);
         var suppliers = await SupplierQuery().Select(item => item.Id).ToListAsync(cancellationToken);
@@ -113,7 +114,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
         ProcurementSupplierRiskSearchRequest request,
         CancellationToken cancellationToken = default)
     {
-        EnsureInternalReader();
+        await EnsureInternalReaderAsync(cancellationToken);
         request.Page = Math.Max(1, request.Page);
         request.PageSize = Math.Clamp(request.PageSize, 1, 100);
         var now = DateTime.UtcNow;
@@ -158,7 +159,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
         Guid id,
         CancellationToken cancellationToken = default)
     {
-        EnsureInternalReader();
+        await EnsureInternalReaderAsync(cancellationToken);
         var entity = await AssessmentQuery()
             .Include(item => item.BusinessPartner)
             .Include(item => item.Alerts)
@@ -172,7 +173,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
         Guid businessPartnerId,
         CancellationToken cancellationToken = default)
     {
-        EnsureInternalReader();
+        await EnsureInternalReaderAsync(cancellationToken);
         var partner = await SupplierQuery().AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == businessPartnerId, cancellationToken)
             ?? throw NotFound("SUPPLIER_RISK_SUPPLIER_NOT_FOUND",
@@ -206,7 +207,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
     public async Task<IReadOnlyList<ProcurementSupplierRiskSupplierOptionDto>>
         GetSupplierOptionsAsync(CancellationToken cancellationToken = default)
     {
-        EnsureInternalReader();
+        await EnsureInternalReaderAsync(cancellationToken);
         return await SupplierQuery().AsNoTracking()
             .OrderBy(item => item.PartnerName)
             .Select(item => new ProcurementSupplierRiskSupplierOptionDto
@@ -220,7 +221,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
     public async Task<IReadOnlyList<ProcurementSupplierRiskWorkflowOptionDto>>
         GetWorkflowOptionsAsync(CancellationToken cancellationToken = default)
     {
-        EnsureInternalReader();
+        await EnsureInternalReaderAsync(cancellationToken);
         return await _unitOfWork.Repository<WorkflowDefinition>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                 !item.IsDeleted && item.IsActive &&
@@ -1024,7 +1025,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
             throw new ProcurementSupplierRiskAuthorizationException(decision.Message);
     }
 
-    private void EnsureInternalReader()
+    private async Task EnsureInternalReaderAsync(CancellationToken cancellationToken)
     {
         EnsureAuthenticatedTenant();
         if (_currentUser.IsExternalUser)
@@ -1035,8 +1036,20 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
             _currentUser.Roles.Any(role =>
                 ProcurementAccessControlRegistry.FindRole(role) is not null))
             return;
+
+        var decision = await _accessControl.CheckCapabilityAsync(
+            new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = ReportingPermission,
+                SourceType = SourceType,
+                SourceReference = "supplier-risk-read"
+            }, Guid.NewGuid().ToString("N"), cancellationToken);
+        if (decision.Allowed)
+            return;
+
         throw new ProcurementSupplierRiskAuthorizationException(
-            "A supplier-review, Internal Audit, or TDC procurement role is required.");
+            decision.Message ??
+            "A supplier-review, Internal Audit, or TDC procurement responsibility assignment is required.");
     }
 
     private void EnsureAuthenticatedTenant()

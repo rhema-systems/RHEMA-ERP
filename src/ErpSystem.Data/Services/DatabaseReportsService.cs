@@ -28,6 +28,7 @@ public class DatabaseReportsService : IReportsService
     private readonly ILogger<DatabaseReportsService> _logger;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IConfiguration _configuration;
+    private readonly IReadOnlyList<ISystemReportProvider> _systemReportProviders;
 
     public DatabaseReportsService(
         IReportRepository reportRepository,
@@ -39,7 +40,8 @@ public class DatabaseReportsService : IReportsService
         IReportRoleAssignmentRepository roleAssignmentRepository,
         ILogger<DatabaseReportsService> logger,
         IUnitOfWork unitOfWork,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IEnumerable<ISystemReportProvider> systemReportProviders)
     {
         _reportRepository = reportRepository;
         _scheduleRepository = scheduleRepository;
@@ -51,6 +53,7 @@ public class DatabaseReportsService : IReportsService
         _logger = logger;
         _unitOfWork = unitOfWork;
         _configuration = configuration;
+        _systemReportProviders = systemReportProviders.ToList();
     }
 
     public async Task<List<ReportDefinitionDto>> GetReportsAsync(Guid tenantId, Guid userId, string? type = null, string? status = null, bool? favoriteOnly = null, bool bypassRoleFiltering = false)
@@ -68,16 +71,22 @@ public class DatabaseReportsService : IReportsService
                 reports = await _reportRepository.GetReportsByTenantAsync(tenantId, type, status);
             }
 
-            // Apply role-based filtering only if not bypassed
+            // System-owned reports use their module provider's responsibility/permission model.
+            // Custom reports retain the report-role assignment model.
             if (!bypassRoleFiltering)
             {
+                var reportList = reports.ToList();
+                var systemReports = reportList.Where(r => ProviderFor(r.Query) is not null).ToList();
+                // A provider-owned prefix is reserved even when the suffix is unknown.
+                // Do not let a tampered catalogue row fall back to the custom SQL path.
+                IEnumerable<Report> customReports = reportList.Where(report => !IsSystemIdentifier(report.Query));
                 // Get accessible report IDs based on user's role assignments
                 var accessibleReportIds = await _roleAssignmentRepository.GetAccessibleReportIdsForUserAsync(userId, tenantId);
 
                 // Filter reports based on role assignments (if any assignments exist)
                 if (accessibleReportIds.Any())
                 {
-                    reports = reports.Where(r => accessibleReportIds.Contains(r.Id));
+                    customReports = customReports.Where(r => accessibleReportIds.Contains(r.Id));
                 }
                 // If no role assignments exist for this tenant, show all reports (fallback behavior)
                 else
@@ -87,9 +96,17 @@ public class DatabaseReportsService : IReportsService
                     if (hasAnyRoleAssignments)
                     {
                         // If role assignments exist but user has no access, return empty list
-                        reports = new List<Report>();
+                        customReports = new List<Report>();
                     }
                 }
+
+                var authorizedSystemReports = new List<Report>();
+                foreach (var providerGroup in systemReports.GroupBy(report => ProviderFor(report.Query)!))
+                {
+                    if (await providerGroup.Key.CanReadAsync(false))
+                        authorizedSystemReports.AddRange(providerGroup);
+                }
+                reports = customReports.Concat(authorizedSystemReports);
             }
 
             var reportDtos = new List<ReportDefinitionDto>();
@@ -114,7 +131,7 @@ public class DatabaseReportsService : IReportsService
         }
     }
 
-    public async Task<ReportDefinitionDto?> GetReportAsync(Guid reportId, Guid tenantId)
+    public async Task<ReportDefinitionDto?> GetReportAsync(Guid reportId, Guid tenantId, Guid userId, bool isAdminUser = false)
     {
         try
         {
@@ -122,6 +139,21 @@ public class DatabaseReportsService : IReportsService
             if (report == null)
             {
                 return null;
+            }
+
+            var provider = ProviderFor(report.Query);
+            if (provider is not null)
+            {
+                if (!await provider.CanReadAsync(isAdminUser))
+                    throw new UnauthorizedAccessException("Access denied: system report read permission is required.");
+            }
+            else if (IsSystemIdentifier(report.Query))
+            {
+                throw new InvalidOperationException("The system report identifier is not registered by its owning provider.");
+            }
+            else if (!isAdminUser && !await ValidateReportAccessAsync(reportId, userId, tenantId, "read"))
+            {
+                throw new UnauthorizedAccessException("Access denied: you do not have permission to read this report.");
             }
 
             // Get assigned role names for this report
@@ -141,6 +173,8 @@ public class DatabaseReportsService : IReportsService
     {
         try
         {
+            if (_systemReportProviders.Any(provider => provider.OwnsIdentifier(createReportDto.Query)))
+                throw new InvalidOperationException("System report identifiers cannot be created through the custom report builder.");
             var report = new Report
             {
                 Name = createReportDto.Name,
@@ -181,6 +215,9 @@ public class DatabaseReportsService : IReportsService
             {
                 return null;
             }
+
+            if (IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("System-defined reports cannot be edited.");
 
             // Check if user has permission to edit this report (admins bypass role/module filtering)
             if (!isAdminUser)
@@ -262,6 +299,9 @@ public class DatabaseReportsService : IReportsService
                 return false;
             }
 
+            if (IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("System-defined reports cannot be deleted.");
+
             report.IsDeleted = true;
             report.DeletedAt = DateTime.UtcNow;
             report.DeletedBy = userId.ToString();
@@ -286,23 +326,19 @@ public class DatabaseReportsService : IReportsService
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new InvalidOperationException("Report not found");
 
-            // Check if user has permission to execute this report (admins bypass role/module filtering)
-            if (!isAdminUser)
+            var systemProvider = ProviderFor(report.Query);
+            if (systemProvider is null && IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("The system report identifier is not registered by its owning provider.");
+            var isSystemReport = systemProvider is not null;
+            // Custom reports retain report-role authorization. The provider enforces the
+            // tenant-scoped procurement permission for system reports.
+            if (!isAdminUser && !isSystemReport)
             {
                 var hasExecutePermission = await ValidateReportAccessAsync(reportId, userId, tenantId, "execute");
                 if (!hasExecutePermission)
                 {
                     throw new UnauthorizedAccessException("Access denied: You do not have the required role permissions to execute this report. Please contact your administrator to request access or ensure you have the appropriate role assigned.");
                 }
-            }
-
-            // Execute the query directly without complex tracking to avoid concurrency issues
-
-            // Get the connection string from configuration (user secrets)
-            var connectionString = _configuration.GetConnectionString("DefaultConnection");
-            if (string.IsNullOrEmpty(connectionString))
-            {
-                throw new InvalidOperationException("Database connection string not configured");
             }
 
             // Check if the report has a query
@@ -340,8 +376,18 @@ public class DatabaseReportsService : IReportsService
 
             _logger.LogInformation("Executing report {ReportId} with query: {Query}", reportId, report.Query);
 
-            // Execute the SQL query
-            var result = await ExecuteSqlQueryAsync(report, executeReportDto, connectionString);
+            ReportResultDto result;
+            if (systemProvider is not null)
+            {
+                result = await systemProvider.ExecuteAsync(report.Query!, executeReportDto, isAdminUser);
+            }
+            else
+            {
+                var connectionString = _configuration.GetConnectionString("DefaultConnection");
+                if (string.IsNullOrEmpty(connectionString))
+                    throw new InvalidOperationException("Database connection string not configured");
+                result = await ExecuteSqlQueryAsync(report, executeReportDto, connectionString);
+            }
             var endTime = DateTime.UtcNow;
             var executionTime = endTime - startTime;
 
@@ -362,7 +408,13 @@ public class DatabaseReportsService : IReportsService
                 TotalRows = result.TotalRows,
                 Status = "success",
                 Parameters = executeReportDto.Parameters != null ? JsonSerializer.Serialize(executeReportDto.Parameters) : null,
-                ResultMetadata = JsonSerializer.Serialize(new { ResultHash = Guid.NewGuid().ToString() }),
+                ResultMetadata = JsonSerializer.Serialize(new
+                {
+                    ResultHash = Guid.NewGuid().ToString(),
+                    SystemReportCode = systemProvider?.ResolveCode(report.Query),
+                    result.Metadata?.DataAsOf,
+                    result.Metadata?.Parameters
+                }),
                 CreatedBy = userId.ToString()
             };
 
@@ -415,8 +467,14 @@ public class DatabaseReportsService : IReportsService
                 throw new InvalidOperationException("Report not found");
             }
 
-            // Check if user has permission to export this report (admins bypass role/module filtering)
-            if (!isAdminUser)
+            var systemProvider = ProviderFor(report.Query);
+            if (systemProvider is null && IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("The system report identifier is not registered by its owning provider.");
+            if (systemProvider is not null)
+            {
+                await systemProvider.AuthorizeExportAsync(report.Query!, isAdminUser);
+            }
+            else if (!isAdminUser)
             {
                 var hasExportPermission = await ValidateReportAccessAsync(reportId, userId, tenantId, "export");
                 if (!hasExportPermission)
@@ -429,14 +487,28 @@ public class DatabaseReportsService : IReportsService
             var executeDto = new ExecuteReportDto
             {
                 Parameters = exportReportDto.Parameters,
-                IncludeMetadata = false
+                IncludeMetadata = false,
+                Page = 1,
+                PageSize = 1000,
+                MaxRows = 1000
             };
 
             var reportResult = await ExecuteReportAsync(reportId, executeDto, tenantId, userId, isAdminUser);
+            var exportRows = new List<Dictionary<string, object>>(reportResult.Data);
+            while (reportResult.HasNextPage)
+            {
+                executeDto.Page++;
+                var nextPage = await ExecuteReportAsync(reportId, executeDto, tenantId, userId, isAdminUser);
+                exportRows.AddRange(nextPage.Data);
+                reportResult.HasNextPage = nextPage.HasNextPage;
+            }
+            reportResult.Data = exportRows;
 
-            // Generate export content based on format
-            var content = GenerateExportContent(reportResult, exportReportDto.Format);
-            var fileName = $"{report.Name}_{DateTime.Now:yyyyMMdd_HHmmss}.{exportReportDto.Format.ToLower()}";
+            // Normalize the requested format once so the generated payload, audit record,
+            // content type, and download name can never disagree.
+            var normalizedFormat = exportReportDto.Format.Trim().ToLowerInvariant();
+            var content = GenerateExportContent(reportResult, normalizedFormat);
+            var fileName = $"{SanitizeExportFileName(report.Name)}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.{normalizedFormat}";
 
             // Log the export
             var export = new ReportExport
@@ -444,7 +516,7 @@ public class DatabaseReportsService : IReportsService
                 ReportId = reportId,
                 UserId = userId,
                 TenantId = tenantId,
-                Format = exportReportDto.Format,
+                Format = normalizedFormat,
                 FileName = fileName,
                 FileSize = content.Length,
                 ExportedAt = DateTime.UtcNow,
@@ -459,7 +531,7 @@ public class DatabaseReportsService : IReportsService
             return new ReportExportResultDto
             {
                 Data = content,
-                ContentType = GetContentType(exportReportDto.Format),
+                ContentType = GetContentType(normalizedFormat),
                 FileName = fileName,
                 FileSize = content.Length
             };
@@ -928,6 +1000,26 @@ public class DatabaseReportsService : IReportsService
         };
     }
 
+    private static string SanitizeExportFileName(string reportName)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars();
+        var sanitizedCharacters = reportName
+            .Trim()
+            .Select(character =>
+                char.IsControl(character) || Array.IndexOf(invalidCharacters, character) >= 0
+                    ? '_'
+                    : character)
+            .ToArray();
+        var sanitizedName = string.Join(
+            " ",
+            new string(sanitizedCharacters).Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Trim('.', ' ');
+
+        return string.IsNullOrWhiteSpace(sanitizedName) ? "Report" : sanitizedName;
+    }
+
     private static List<ReportUsageStatsDto> GenerateUsageStats(IEnumerable<ReportExecution> executions)
     {
         return executions
@@ -1218,6 +1310,8 @@ public class DatabaseReportsService : IReportsService
         try
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
+            if (IsSystemIdentifier(report.Query))
+                return report.UpdatedAt ?? report.CreatedAt;
             report.Status = "published";
             report.UpdatedAt = DateTime.UtcNow;
             report.UpdatedBy = userId.ToString();
@@ -1241,6 +1335,8 @@ public class DatabaseReportsService : IReportsService
         try
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
+            if (IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("System-defined reports cannot be unpublished.");
             report.Status = "draft";
             report.UpdatedAt = DateTime.UtcNow;
             report.UpdatedBy = userId.ToString();
@@ -1264,6 +1360,8 @@ public class DatabaseReportsService : IReportsService
         try
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
+            if (IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("System-defined report module assignments are controlled by the catalogue.");
 
             // Verify module exists and belongs to the same tenant
             // You might want to add a module repository check here
@@ -1293,6 +1391,8 @@ public class DatabaseReportsService : IReportsService
         try
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
+            if (IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("System-defined report module assignments are controlled by the catalogue.");
             report.ModuleId = null;
             report.UpdatedAt = DateTime.UtcNow;
             report.UpdatedBy = userId.ToString();
@@ -1312,4 +1412,10 @@ public class DatabaseReportsService : IReportsService
             throw;
         }
     }
+
+    private ISystemReportProvider? ProviderFor(string? reportQuery) =>
+        _systemReportProviders.FirstOrDefault(provider => provider.CanHandle(reportQuery));
+
+    private bool IsSystemIdentifier(string? reportQuery) =>
+        _systemReportProviders.Any(provider => provider.OwnsIdentifier(reportQuery));
 }

@@ -20,7 +20,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Inventory;
 
-public sealed class InventoryDisposalService : IInventoryDisposalService
+public sealed class InventoryDisposalService : IInventoryDisposalService, IInventoryDisposalReportSource
 {
     private const string EntityType = "InventoryDisposal";
     private const string CommitteeMemberRole = "TDC_DISPOSAL_COMMITTEE_MEMBER";
@@ -58,28 +58,40 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
         _controlEvents = controlEvents;
     }
 
-    public async Task<IReadOnlyList<InventoryDisposalDto>> GetAsync(
+    public Task<IReadOnlyList<InventoryDisposalDto>> GetAsync(
         InventoryDisposalStatus? status,
         Guid? warehouseId,
         int take,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        GetSourceAsync(status, warehouseId, Math.Clamp(take, 1, 500), cancellationToken);
+
+    public Task<IReadOnlyList<InventoryDisposalDto>> GetReportSourceAsync(
+        InventoryDisposalStatus? status,
+        Guid? warehouseId,
+        CancellationToken cancellationToken = default) =>
+        GetSourceAsync(status, warehouseId, null, cancellationToken);
+
+    private async Task<IReadOnlyList<InventoryDisposalDto>> GetSourceAsync(
+        InventoryDisposalStatus? status,
+        Guid? warehouseId,
+        int? take,
+        CancellationToken cancellationToken)
     {
         EnsureActor();
-        take = Math.Clamp(take, 1, 500);
         var query = FullQuery().AsNoTracking().Where(value => value.TenantId == _currentUser.TenantId && !value.IsDeleted);
         if (status.HasValue) query = query.Where(value => value.Status == status.Value);
         if (warehouseId.HasValue) query = query.Where(value => value.WarehouseId == warehouseId.Value);
-        var allowed = new List<InventoryDisposalDto>(take);
+        var allowed = new List<InventoryDisposalDto>();
         var offset = 0;
-        var pageSize = Math.Max(take, 50);
-        while (allowed.Count < take)
+        var pageSize = Math.Max(take ?? 500, 50);
+        while (!take.HasValue || allowed.Count < take.Value)
         {
             var candidates = await query.OrderByDescending(value => value.RequestedAtUtc).ThenByDescending(value => value.Id)
                 .Skip(offset).Take(pageSize).ToListAsync(cancellationToken);
             foreach (var item in candidates)
             {
                 if (await HasAccessAsync("procurement.inventory.read", item, cancellationToken)) allowed.Add(Map(item));
-                if (allowed.Count == take) break;
+                if (take.HasValue && allowed.Count == take.Value) break;
             }
             offset += candidates.Count;
             if (candidates.Count < pageSize) break;

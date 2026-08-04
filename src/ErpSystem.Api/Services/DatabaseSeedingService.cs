@@ -43,6 +43,8 @@ namespace ErpSystem.Web.Services
         private readonly IWebHostEnvironment _environment;
         private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
         private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
+        private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
+        private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
 
         private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinanceApprovalStages =
@@ -97,6 +99,8 @@ namespace ErpSystem.Web.Services
             IWebHostEnvironment environment,
             ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
             ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
+            ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
+            InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
             IConfiguration? configuration = null)
         {
             _context = context;
@@ -106,6 +110,8 @@ namespace ErpSystem.Web.Services
             _environment = environment;
             _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
             _procurementAccessControlSeeder = procurementAccessControlSeeder;
+            _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
+            _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
                 StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
                 false) ?? false;
@@ -180,6 +186,18 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring TDC access roles, permissions, committees, and Draft workflow templates are seeded...");
                     await _procurementAccessControlSeeder.SeedAsync();
+                }
+
+                if (_procurementStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC procurement statutory report catalogue is seeded...");
+                    await _procurementStatutoryReportSeeder.SeedAsync();
+                }
+
+                if (_inventoryStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC inventory statutory report catalogue is seeded...");
+                    await _inventoryStatutoryReportSeeder.SeedAsync();
                 }
 
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
