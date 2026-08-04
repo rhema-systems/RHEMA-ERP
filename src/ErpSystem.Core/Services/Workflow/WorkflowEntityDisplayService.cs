@@ -138,6 +138,50 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("LeaveRequest") || key == Normalize("LEAVE_REQUEST") || key == Normalize("Leave Request"))
+            {
+                var leaveRequest = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffLeave.LeaveRequest>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "LeaveRequest";
+                info.EntityNumber = leaveRequest?.RequestNumber;
+                info.EntityName = leaveRequest == null
+                    ? null
+                    : $"{leaveRequest.StartDate:dd MMM yyyy} - {leaveRequest.EndDate:dd MMM yyyy} ({leaveRequest.TotalDays:0.##} days)";
+                info.ActionUrl = $"/hr/leave/requests/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("LeavePlan") || key == Normalize("LEAVE_PLAN") || key == Normalize("Leave Plan"))
+            {
+                var leavePlan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffLeave.LeavePlan>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "LeavePlan";
+                info.EntityName = leavePlan == null
+                    ? null
+                    : $"{leavePlan.Year} plan ({leavePlan.StartDate:dd MMM} - {leavePlan.EndDate:dd MMM})";
+                info.ActionUrl = $"/hr/leave/plans?planId={entityId}";
+                return info;
+            }
+
+            if (key == Normalize("LeaveEncashment") || key == Normalize("LEAVE_ENCASHMENT") || key == Normalize("Leave Encashment"))
+            {
+                var encashment = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffLeave.LeaveEncashment>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "LeaveEncashment";
+                info.EntityName = encashment == null
+                    ? null
+                    : $"{encashment.DaysEncashed:0.##} days ({encashment.Year})";
+                info.ActionUrl = $"/hr/leave/encashments?encashmentId={entityId}";
+                return info;
+            }
+
+            if (key == Normalize("TrainingNomination") || key == Normalize("TRAINING_NOMINATION") || key == Normalize("Training Nomination"))
+            {
+                info.EntityType = "TrainingNomination";
+                info.ActionUrl = $"/hr/training/nominations?nominationId={entityId}";
+                return info;
+            }
+
             if (key == Normalize("FleetTrip") || key == Normalize("FLEET_TRIP") || key == Normalize("Fleet Trip"))
             {
                 var trip = await _unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.FleetTrip>()

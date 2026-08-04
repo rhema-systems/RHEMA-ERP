@@ -26,6 +26,7 @@ import {
   GraduationCap,
   IdCard,
   Tags,
+  CalendarDays,
   Globe2,
   ListTree,
   Mail,
@@ -339,8 +340,23 @@ const navigationItems: NavItem[] = [
           { title: 'Contributions', href: '/hr/payroll/contributions', icon: CreditCard },
         ],
       },
-      // Attendance, Leave Management and Performance are re-added with their areas —
-      // linking to routes that do not exist yet only produces 404s.
+      {
+        title: 'Leave Management',
+        href: '/hr/leave',
+        icon: CalendarDays,
+        children: [
+          { title: 'Requests', href: '/hr/leave/requests', icon: CalendarDays },
+          { title: 'Approvals', href: '/hr/leave/approvals', icon: CheckSquare },
+          { title: 'Plans', href: '/hr/leave/plans', icon: CalendarClock },
+          { title: 'Balances', href: '/hr/leave/balances', icon: Database },
+          { title: 'Adjustments', href: '/hr/leave/adjustments', icon: RotateCcw },
+          { title: 'Encashments', href: '/hr/leave/encashments', icon: DollarSign },
+          { title: 'Compliance', href: '/hr/leave/compliance', icon: FileCheck },
+          { title: 'Year-End', href: '/hr/leave/year-end', icon: CalendarClock },
+        ],
+      },
+      // Attendance and Performance are re-added with their areas — linking to routes that
+      // do not exist yet only produces 404s.
     ],
   },
   {
@@ -918,8 +934,8 @@ const navigationItems: NavItem[] = [
           { title: 'Reason Codes', href: '/administration/hr/reason-codes', icon: Tags },
           { title: 'Countries', href: '/administration/hr/countries', icon: Globe },
           { title: 'Departments', href: '/administration/hr/departments', icon: Building },
-          // Leave Types is re-added with the Leave area; Employee Categories has no
-          // backing controller at all, so it is dropped rather than parked.
+          { title: 'Leave Types', href: '/administration/hr/leave-types', icon: CalendarDays },
+          // Employee Categories has no backing controller at all, so it stays dropped.
           {
             title: 'Payroll',
             href: '/administration/hr/payroll',
