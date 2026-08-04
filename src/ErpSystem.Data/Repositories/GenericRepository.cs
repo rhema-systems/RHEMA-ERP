@@ -270,6 +270,13 @@ namespace ErpSystem.Data.Repositories
             return _dbSet.Where(predicate).Where(e => !e.IsDeleted);
         }
 
+        public virtual IReadOnlyCollection<T> GetAddedEntities()
+        {
+            return _dbSet.Local
+                .Where(entity => _context.Entry(entity).State == EntityState.Added)
+                .ToList();
+        }
+
         public virtual IQueryable<T> GetQueryableIncludingDeleted(Expression<Func<T, bool>> predicate)
         {
             return _dbSet.IgnoreQueryFilters().Where(predicate);

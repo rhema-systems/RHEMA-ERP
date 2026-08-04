@@ -43,7 +43,19 @@ public sealed class InventoryIssueVoucherLineConfiguration : IEntityTypeConfigur
         });
         builder.Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
         builder.Property(item => item.TotalValue).HasColumnType("decimal(18,2)");
-        builder.HasIndex(item => new { item.TenantId, item.InventoryIssueVoucherId, item.InventoryRequisitionItemId }).IsUnique();
+        builder.HasIndex(item => new
+            {
+                item.TenantId,
+                item.InventoryIssueVoucherId,
+                item.InventoryRequisitionItemId,
+                item.LocationId,
+                item.LotNumber,
+                item.BatchNumber,
+                item.SerialNumber
+            })
+            .IsUnique()
+            .HasDatabaseName("UX_InventoryIssueVoucherLines_Tracking")
+            .HasFilter(null);
         builder.HasIndex(item => new { item.TenantId, item.InventoryItemId, item.WarehouseId, item.LocationId });
         builder.HasOne(item => item.InventoryIssueVoucher).WithMany(item => item.Lines).HasForeignKey(item => item.InventoryIssueVoucherId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(item => item.InventoryRequisitionItem).WithMany().HasForeignKey(item => item.InventoryRequisitionItemId).OnDelete(DeleteBehavior.Restrict);

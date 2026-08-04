@@ -21,6 +21,7 @@ public sealed class InventoryNegativeStockOverrideConfiguration : IEntityTypeCon
         builder.Property(value => value.ReferenceNumber).HasMaxLength(100).IsRequired();
         builder.Property(value => value.Reason).HasMaxLength(2000).IsRequired();
         builder.Property(value => value.DecisionSnapshotHash).HasMaxLength(64).IsRequired();
+        builder.Property(value => value.ApprovedPayloadHash).HasMaxLength(64);
         builder.Property(value => value.EvidenceReference).HasMaxLength(500).IsRequired();
         builder.Property(value => value.IntegrityHash).HasMaxLength(64).IsRequired();
 

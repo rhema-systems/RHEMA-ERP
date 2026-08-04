@@ -127,6 +127,7 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
                     value.InventoryItemId,
                     value.LocationId,
                     LotNumber = TrackingKey(value.LotNumber),
+                    BatchNumber = TrackingKey(value.BatchNumber),
                     SerialNumber = TrackingKey(value.SerialNumber)
                 })
                 .Where(value => value.Count() > 1).ToList();
@@ -181,18 +182,20 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
                         !value.InventoryDisposalCase.IsDeleted);
                 var activeQuantity = await activeLines.SumAsync(value => (decimal?)value.Quantity, cancellationToken) ?? 0m;
                 var lotKey = TrackingKey(input.LotNumber);
+                var batchKey = TrackingKey(input.BatchNumber);
                 var serialKey = TrackingKey(input.SerialNumber);
-                var exactReservedQuantity = lotKey.Length == 0 && serialKey.Length == 0
+                var exactReservedQuantity = lotKey.Length == 0 && batchKey.Length == 0 && serialKey.Length == 0
                     ? 0m
                     : await activeLines.Where(value =>
                             (lotKey.Length == 0 || (value.LotNumber != null && value.LotNumber.Trim().ToUpper() == lotKey)) &&
+                            (batchKey.Length == 0 || (value.BatchNumber != null && value.BatchNumber.Trim().ToUpper() == batchKey)) &&
                             (serialKey.Length == 0 || (value.SerialNumber != null && value.SerialNumber.Trim().ToUpper() == serialKey)))
                         .SumAsync(value => (decimal?)value.Quantity, cancellationToken) ?? 0m;
                 if (serialKey.Length != 0 && exactReservedQuantity > 0m)
                     throw Error("INV_DISPOSAL_STOCK_RESERVED", $"Serial {serialKey} is already identified by another active disposal case.");
                 await _trackingControls.ValidateAvailabilityAsync(input.InventoryItemId, inventoryWarehouseId,
                     input.LocationId, input.Quantity + (serialKey.Length == 0 ? exactReservedQuantity : 0m),
-                    input.LotNumber, null, input.SerialNumber, cancellationToken);
+                    input.LotNumber, input.BatchNumber, input.SerialNumber, cancellationToken);
                 if (balance.QuantityAvailable - activeQuantity < input.Quantity)
                     throw Error("INV_DISPOSAL_STOCK_RESERVED", $"Stock already identified by another active disposal case leaves insufficient quantity for {inventoryItem.ItemCode}.");
                 var unitCost = balance.AverageUnitCost > 0m ? balance.AverageUnitCost :
@@ -204,11 +207,13 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
                     Id = Guid.NewGuid(), TenantId = item.TenantId, InventoryDisposalCaseId = item.Id,
                     InventoryItemId = inventoryItem.Id, LocationId = location.Id, Quantity = input.Quantity,
                     UnitCost = decimal.Round(unitCost, 4), TotalValue = decimal.Round(input.Quantity * unitCost, 2),
-                    LotNumber = Normalize(input.LotNumber, 100), SerialNumber = Normalize(input.SerialNumber, 100),
+                    LotNumber = Normalize(input.LotNumber, 100), BatchNumber = Normalize(input.BatchNumber, 100),
+                    SerialNumber = Normalize(input.SerialNumber, 100),
                     ConditionNotes = Normalize(input.ConditionNotes, 1000), CreatedAt = DateTime.UtcNow,
                     CreatedById = _currentUser.UserId
                 };
-                line.IntegrityHash = Hash(new { line.InventoryItemId, line.LocationId, line.Quantity, line.UnitCost, line.TotalValue, line.LotNumber, line.SerialNumber });
+                line.IntegrityHash = Hash(new { line.InventoryItemId, line.LocationId, line.Quantity, line.UnitCost,
+                    line.TotalValue, line.LotNumber, line.BatchNumber, line.SerialNumber });
                 item.Lines.Add(line);
             }
             item.TotalQuantity = item.Lines.Sum(value => value.Quantity);
@@ -446,6 +451,7 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
                 LocationId = value.LocationId,
                 AdjustmentQuantity = -value.Quantity,
                 LotNumber = value.LotNumber,
+                BatchNumber = value.BatchNumber,
                 SerialNumber = value.SerialNumber,
                 Reason = item.Reason,
                 Notes = $"{item.Method}: {item.ExecutionReference}"
@@ -524,11 +530,12 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
                             source.InventoryItemId == line.InventoryItemId &&
                             source.LocationId == line.LocationId &&
                             TrackingKey(source.LotNumber) == TrackingKey(line.LotNumber) &&
+                            TrackingKey(source.BatchNumber) == TrackingKey(line.BatchNumber) &&
                             TrackingKey(source.SerialNumber) == TrackingKey(line.SerialNumber))
                         .ToList();
                     if (sources.Count != 1)
                         throw Error("INV_DISPOSAL_ADJUSTMENT_LINEAGE_INVALID",
-                            "Every staged adjustment line must map to exactly one disposal item/location/lot/serial line.");
+                            "Every staged adjustment line must map to exactly one disposal item/location/lot/batch/serial line.");
                     return request.NegativeStockOverrideIds.GetValueOrDefault(sources[0].Id);
                 });
             adjustment = await _adjustments.PostAsync(adjustment.Id, _currentUser.UserId, new StockAdjustmentActionRequest
@@ -842,7 +849,7 @@ public sealed class InventoryDisposalService : IInventoryDisposalService
             ItemName = value.InventoryItem?.Name ?? string.Empty, LocationId = value.LocationId,
             LocationCode = value.Location?.LocationCode ?? string.Empty, Quantity = value.Quantity,
             UnitCost = value.UnitCost, TotalValue = value.TotalValue, LotNumber = value.LotNumber,
-            SerialNumber = value.SerialNumber, ConditionNotes = value.ConditionNotes
+            BatchNumber = value.BatchNumber, SerialNumber = value.SerialNumber, ConditionNotes = value.ConditionNotes
         }).ToList(),
         Evidence = item.Evidence.OrderBy(value => value.CreatedAt).Select(value => new InventoryDisposalEvidenceDto
         {

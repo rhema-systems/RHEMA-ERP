@@ -626,6 +626,8 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 isConsignmentWarehouse = wh?.IsConsignmentWarehouse == true;
             }
 
+            var fulfillmentOrdinal = requisitionItem.TrackingSequence + 1;
+
             await _projectReservations.FulfillForIssueAsync(new InventoryProjectReservationFulfillmentRequest
             {
                 InventoryRequisitionId = requisition.Id,
@@ -635,7 +637,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 LocationId = effectiveLocationId ?? Guid.Empty,
                 Quantity = issueItem.IssuedQuantity,
                 ActorUserId = _currentUserProvider.UserId,
-                IdempotencyKey = $"issue:{normalizedKey}:{requisitionItem.Id:N}",
+                IdempotencyKey = $"issue:{normalizedKey}:{requisitionItem.Id:N}:{fulfillmentOrdinal}",
                 CorrelationId = correlationId
             });
 

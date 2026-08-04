@@ -17,6 +17,8 @@ namespace ErpSystem.Core.Services.Inventory;
 
 public sealed class InventoryTrackingControlService : IInventoryTrackingControlService
 {
+    private const string TrackingExceptionEntityTypeCode = "INVENTORY_TRACKING_EXCEPTION";
+    private const string WorkflowPayloadHashProperty = "inventoryTrackingExceptionPayloadHash";
     private static readonly HashSet<string> ExceptionEligibleCodes = new(StringComparer.OrdinalIgnoreCase)
     {
         "INV_TRACKING_EXPIRED",
@@ -28,7 +30,6 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
     private readonly IProcurementAccessControlService _access;
-    private readonly List<InventoryTraceabilityEvent> _pendingEvents = new();
 
     public InventoryTrackingControlService(
         IUnitOfWork unitOfWork,
@@ -42,7 +43,10 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
 
     private Guid TenantId => _currentUser.TenantId;
     private Guid UserId => _currentUser.UserId;
-    private IQueryable<InventoryTraceabilityEvent> Events => _unitOfWork.Repository<InventoryTraceabilityEvent>().GetQueryable();
+    private IGenericRepository<InventoryTraceabilityEvent> EventRepository => _unitOfWork.Repository<InventoryTraceabilityEvent>();
+    private IQueryable<InventoryTraceabilityEvent> Events => EventRepository.GetQueryable();
+    private IReadOnlyCollection<InventoryTraceabilityEvent> PendingEvents =>
+        EventRepository.GetAddedEntities() ?? Array.Empty<InventoryTraceabilityEvent>();
     private IQueryable<InventoryTrackingException> Exceptions => _unitOfWork.Repository<InventoryTrackingException>().GetQueryable();
 
     public async Task<InventoryTrackingRequirementsDto> GetRequirementsAsync(
@@ -135,10 +139,15 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
                 "Tracked stock must be identified by an exact lot, batch, or serial number.");
 
         var persisted = await Events
-            .Where(value => value.TenantId == TenantId && value.InventoryItemId == inventoryItemId && !value.IsDeleted)
+            .Where(value => value.TenantId == TenantId && value.InventoryItemId == inventoryItemId && !value.IsDeleted &&
+                value.WarehouseId == warehouseId && value.LocationId == locationId &&
+                (lotNumber == null || value.LotNumber == lotNumber) &&
+                (batchNumber == null || value.BatchNumber == batchNumber) &&
+                (serialNumber == null || value.SerialNumber == serialNumber))
             .AsNoTracking()
             .ToListAsync(cancellationToken);
-        var scoped = persisted.Concat(_pendingEvents.Where(value => value.InventoryItemId == inventoryItemId))
+        var scoped = persisted.Concat(PendingEvents.Where(value => value.TenantId == TenantId &&
+                value.InventoryItemId == inventoryItemId))
             .Where(value => value.WarehouseId == warehouseId && value.LocationId == locationId &&
                 (lotNumber is null || Same(value.LotNumber, lotNumber)) &&
                 (batchNumber is null || Same(value.BatchNumber, batchNumber)) &&
@@ -214,12 +223,35 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
         if (requirements.EnforcesFifoIssue && item.ValuationMethod != ValuationMethod.FIFO)
             throw new InventoryTrackingControlException("INV_TRACKING_FIFO_CONFIGURATION_INVALID", "The category enforces FIFO issue, but the item is not configured for FIFO valuation.");
 
+        var hasTrackingIdentity = request.LotNumber is not null || request.BatchNumber is not null || request.SerialNumber is not null;
+        var hasEventKey = stage && !string.IsNullOrWhiteSpace(request.EventKey);
+        var requiresLocationHistoryWithoutIdentifier = !hasTrackingIdentity &&
+            (requirements.RequiresManufactureDate || requirements.RequiresExpiryDate || requirements.EnforcesFifoIssue ||
+             request.ManufactureDate.HasValue || request.ExpiryDate.HasValue);
         var persisted = await Events
-            .Where(value => value.TenantId == TenantId && value.InventoryItemId == request.InventoryItemId && !value.IsDeleted)
+            .Where(value => value.TenantId == TenantId && value.InventoryItemId == request.InventoryItemId && !value.IsDeleted &&
+                ((hasEventKey && value.EventKey == request.EventKey) ||
+                 (request.SerialNumber != null && value.SerialNumber == request.SerialNumber) ||
+                 (hasTrackingIdentity &&
+                  (request.LotNumber == null || value.LotNumber == request.LotNumber) &&
+                  (request.BatchNumber == null || value.BatchNumber == request.BatchNumber) &&
+                  (request.SerialNumber == null || value.SerialNumber == request.SerialNumber)) ||
+                 (requiresLocationHistoryWithoutIdentifier && value.WarehouseId == request.WarehouseId &&
+                  (!request.LocationId.HasValue || value.LocationId == request.LocationId) &&
+                  (!request.ManufactureDate.HasValue || value.ManufactureDate == request.ManufactureDate) &&
+                  (!request.ExpiryDate.HasValue || value.ExpiryDate == request.ExpiryDate))))
             .AsNoTracking()
             .OrderBy(value => value.OccurredAtUtc)
             .ToListAsync(cancellationToken);
-        var pending = _pendingEvents.Where(value => value.InventoryItemId == request.InventoryItemId).ToList();
+        var pending = PendingEvents.Where(value => value.TenantId == TenantId &&
+            value.InventoryItemId == request.InventoryItemId &&
+            ((hasEventKey && value.EventKey == request.EventKey) ||
+             (request.SerialNumber is not null && Same(value.SerialNumber, request.SerialNumber)) ||
+             (hasTrackingIdentity && TrackingKeyMatches(value, request)) ||
+             (requiresLocationHistoryWithoutIdentifier && value.WarehouseId == request.WarehouseId &&
+              (!request.LocationId.HasValue || value.LocationId == request.LocationId) &&
+              (!request.ManufactureDate.HasValue || value.ManufactureDate == request.ManufactureDate) &&
+              (!request.ExpiryDate.HasValue || value.ExpiryDate == request.ExpiryDate)))).ToList();
         var existingEvent = stage && !string.IsNullOrWhiteSpace(request.EventKey)
             ? persisted.SingleOrDefault(value => value.EventKey == request.EventKey) ??
               pending.SingleOrDefault(value => value.EventKey == request.EventKey)
@@ -298,8 +330,15 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
 
             if (requirements.EnforcesFifoIssue)
             {
-                var openGroups = allEvents
-                    .Where(value => value.WarehouseId == request.WarehouseId && (!request.LocationId.HasValue || value.LocationId == request.LocationId))
+                var fifoPersisted = await Events.Where(value => value.TenantId == TenantId &&
+                        value.InventoryItemId == request.InventoryItemId && value.WarehouseId == request.WarehouseId &&
+                        (!request.LocationId.HasValue || value.LocationId == request.LocationId) && !value.IsDeleted)
+                    .AsNoTracking().OrderBy(value => value.OccurredAtUtc).ToListAsync(cancellationToken);
+                var fifoPending = PendingEvents.Where(value => value.TenantId == TenantId &&
+                    value.InventoryItemId == request.InventoryItemId && value.WarehouseId == request.WarehouseId &&
+                    (!request.LocationId.HasValue || value.LocationId == request.LocationId));
+                var openGroups = fifoPersisted.Concat(fifoPending)
+                    .Where(value => existingEvent is null || value.Id != existingEvent.Id)
                     .GroupBy(TrackingKey)
                     .Select(group => new { Key = group.Key, Balance = Balance(group), FirstReceipt = group.Where(value => IsInbound(value.Direction)).Min(value => (DateTime?)value.OccurredAtUtc) })
                     .Where(value => value.Balance > 0 && value.FirstReceipt.HasValue)
@@ -355,8 +394,7 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
             CorrelationId = string.IsNullOrWhiteSpace(request.CorrelationId) ? request.EventKey : request.CorrelationId,
             PayloadHash = payloadHash
         };
-        await _unitOfWork.Repository<InventoryTraceabilityEvent>().AddAsync(trackingEvent);
-        _pendingEvents.Add(trackingEvent);
+        await EventRepository.AddAsync(trackingEvent);
         if (approvedException is not null)
         {
             approvedException.ConsumedAtUtc = now;
@@ -397,8 +435,12 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
             ?? throw new InventoryTrackingControlException("INV_TRACKING_EXCEPTION_WORKFLOW_NOT_FOUND", "The shared workflow instance was not found in the current tenant.");
         if (workflow.Status != WorkflowInstanceStatus.Completed || workflow.EntityId != request.ReferenceId)
             throw new InventoryTrackingControlException("INV_TRACKING_EXCEPTION_WORKFLOW_INVALID", "The shared workflow must be completed and bound to the exact transaction reference.");
-        if (!workflow.WorkflowDefinition.EntityType.Code.Contains("EXCEPTION", StringComparison.OrdinalIgnoreCase))
-            throw new InventoryTrackingControlException("INV_TRACKING_EXCEPTION_WORKFLOW_TYPE_INVALID", "The completed workflow is not an exception-approval workflow.");
+        if (!string.Equals(NormalizeCode(workflow.WorkflowDefinition.EntityType.Code), TrackingExceptionEntityTypeCode,
+                StringComparison.Ordinal))
+            throw new InventoryTrackingControlException("INV_TRACKING_EXCEPTION_WORKFLOW_TYPE_INVALID",
+                "The completed workflow is not the configured inventory-tracking-exception workflow.");
+        var approvedPayloadHash = TrackingExceptionPayloadHash(request, codes, expires);
+        RequireWorkflowPayloadHash(workflow, approvedPayloadHash);
 
         var approvals = await _unitOfWork.Repository<WorkflowApproval>().GetQueryable(value =>
                 value.TenantId == TenantId && !value.IsDeleted &&
@@ -446,6 +488,7 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
             BatchNumber = NormalizeValue(request.BatchNumber),
             SerialNumber = NormalizeValue(request.SerialNumber),
             WorkflowInstanceId = workflow.Id,
+            ApprovedPayloadHash = approvedPayloadHash,
             WorkflowEvidenceDocumentId = evidence.Id,
             RequestedById = workflow.InitiatedById,
             ApprovedById = approvedById,
@@ -458,7 +501,7 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
         {
             entity.InventoryItemId, entity.WarehouseId, entity.ReferenceId, Codes = codes,
             entity.WorkflowInstanceId, entity.WorkflowEvidenceDocumentId, entity.ApprovedById,
-            entity.ApprovedAtUtc, entity.ExpiresAtUtc, entity.IntegrityHash
+            entity.ApprovedAtUtc, entity.ExpiresAtUtc, entity.ApprovedPayloadHash, entity.IntegrityHash
         }, correlationId);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await MapExceptionAsync(entity.Id, cancellationToken);
@@ -714,9 +757,90 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
     {
         value.InventoryItemId, value.WarehouseId, value.LocationId, value.ReferenceId, value.ReferenceLineId,
         value.ReferenceType, value.ReferenceNumber, value.Reason, value.ExceptionCodesJson, value.LotNumber,
-        value.BatchNumber, value.SerialNumber, value.WorkflowInstanceId, value.WorkflowEvidenceDocumentId,
+        value.BatchNumber, value.SerialNumber, value.WorkflowInstanceId, value.ApprovedPayloadHash, value.WorkflowEvidenceDocumentId,
         value.RequestedById, value.ApprovedById, value.ApprovedAtUtc, value.ExpiresAtUtc, EvidenceSha = evidenceSha
     }));
+
+    private static string TrackingExceptionPayloadHash(
+        RegisterInventoryTrackingExceptionRequest request,
+        IReadOnlyCollection<string> codes,
+        DateTime expiresAtUtc) => Sha256(JsonSerializer.Serialize(new
+        {
+            request.InventoryItemId,
+            request.WarehouseId,
+            request.LocationId,
+            request.ReferenceId,
+            request.ReferenceLineId,
+            ReferenceType = request.ReferenceType.Trim(),
+            ReferenceNumber = request.ReferenceNumber.Trim(),
+            ExceptionCodes = codes,
+            Reason = request.Reason.Trim(),
+            LotNumber = NormalizeValue(request.LotNumber),
+            BatchNumber = NormalizeValue(request.BatchNumber),
+            SerialNumber = NormalizeValue(request.SerialNumber),
+            ExpiresAtUtc = expiresAtUtc
+        }));
+
+    private static void RequireWorkflowPayloadHash(WorkflowInstance workflow, string expectedHash)
+    {
+        var supplied = ReadJsonString(workflow.DataContext, WorkflowPayloadHashProperty) ??
+                       ReadJsonString(workflow.Data, WorkflowPayloadHashProperty);
+        if (!HashEquals(supplied, expectedHash))
+            throw new InventoryTrackingControlException("INV_TRACKING_EXCEPTION_WORKFLOW_PAYLOAD_INVALID",
+                "The completed workflow was not approved for this exact item, location, line, tracking values, exception codes, reason, and expiry snapshot.");
+    }
+
+    private static string? ReadJsonString(string? json, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return FindJsonString(document.RootElement, propertyName);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? FindJsonString(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase) &&
+                    property.Value.ValueKind == JsonValueKind.String)
+                    return property.Value.GetString();
+                var nested = FindJsonString(property.Value, propertyName);
+                if (nested is not null) return nested;
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var nested = FindJsonString(item, propertyName);
+                if (nested is not null) return nested;
+            }
+        }
+        return null;
+    }
+
+    private static bool HashEquals(string? supplied, string expected)
+    {
+        if (supplied?.Length != 64 || expected.Length != 64) return false;
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(supplied), Convert.FromHexString(expected));
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
 
     private static string Sha256(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 }

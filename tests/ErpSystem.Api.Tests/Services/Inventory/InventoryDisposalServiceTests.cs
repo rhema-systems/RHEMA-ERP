@@ -26,6 +26,9 @@ public sealed class InventoryDisposalServiceTests
     {
         await using var fixture = await Fixture.CreateAsync();
         var request = fixture.Request("identify-one");
+        request.Lines.Single().LotNumber = "LOT-01";
+        request.Lines.Single().BatchNumber = "BATCH-01";
+        request.Lines.Single().SerialNumber = "SERIAL-01";
 
         var first = await fixture.Service.CreateAsync(request);
         var replay = await fixture.Service.CreateAsync(request);
@@ -34,7 +37,13 @@ public sealed class InventoryDisposalServiceTests
         first.Status.Should().Be(InventoryDisposalStatus.Identified);
         first.TotalQuantity.Should().Be(4m);
         first.TotalValue.Should().Be(50m);
-        first.Lines.Should().ContainSingle().Which.UnitCost.Should().Be(12.5m);
+        first.Lines.Should().ContainSingle().Which.Should().BeEquivalentTo(new
+        {
+            UnitCost = 12.5m,
+            LotNumber = "LOT-01",
+            BatchNumber = "BATCH-01",
+            SerialNumber = "SERIAL-01"
+        });
         first.Evidence.Should().ContainSingle(value => value.Stage == "Identification");
         first.Actions.Should().ContainSingle(value => value.ActionType == InventoryDisposalActionType.Identified);
         (await fixture.Db.InventoryDisposalCases.CountAsync()).Should().Be(1);
@@ -44,7 +53,7 @@ public sealed class InventoryDisposalServiceTests
             It.IsAny<CancellationToken>()), Times.Once);
         fixture.TrackingControls.Verify(value => value.ValidateAvailabilityAsync(
             fixture.Item.Id, fixture.Warehouse.Id, fixture.Location.Id, 4m,
-            null, null, null, It.IsAny<CancellationToken>()), Times.Once);
+            "LOT-01", "BATCH-01", "SERIAL-01", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact, Trait("Batch", "TDC-0615")]

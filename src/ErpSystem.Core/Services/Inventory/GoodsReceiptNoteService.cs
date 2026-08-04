@@ -824,13 +824,18 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
         if (grn.Status == GRNStatus.Cancelled || grn.StockUpdated)
             throw new InvalidOperationException("Scanned receipt metadata can only be applied before inventory posting.");
 
-        foreach (var scan in lines)
+        foreach (var scanGroup in lines.GroupBy(value => value.DocumentLineId))
         {
+            var scans = scanGroup.OrderBy(value => value.SerialNumber).ToList();
+            var scan = scans[0];
             var item = grn.Items.SingleOrDefault(value => value.Id == scan.DocumentLineId && value.InventoryItemId == scan.InventoryItemId)
                 ?? throw new ArgumentException($"GRN line {scan.DocumentLineId} was not found for the scanned item.");
             var expected = item.AcceptedQuantity > 0 ? item.AcceptedQuantity : item.ReceivedQuantity;
-            if (scan.BaseQuantity != expected)
+            if (scans.Sum(value => value.BaseQuantity) != expected)
                 throw new InvalidOperationException($"The complete accepted quantity for {item.ItemCode} must be scanned before receipt posting.");
+            if (scans.Any(value => value.InventoryItemId != item.InventoryItemId) ||
+                scans.Select(value => value.LocationId).Distinct().Count() > 1)
+                throw new InvalidOperationException($"Scanned tracking lines for {item.ItemCode} must retain one item and receipt location.");
             if (scan.LocationId.HasValue)
             {
                 var location = await _unitOfWork.Repository<WarehouseLocation>().GetQueryable(value =>
@@ -844,12 +849,13 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                     throw new InvalidOperationException("The scanned receipt location does not belong to the GRN warehouse.");
             }
             item.StorageLocationId = scan.LocationId ?? item.StorageLocationId;
-            item.LotNumber = string.IsNullOrWhiteSpace(scan.LotNumber) ? item.LotNumber : scan.LotNumber.Trim();
-            item.BatchNumber = string.IsNullOrWhiteSpace(scan.BatchNumber) ? item.BatchNumber : scan.BatchNumber.Trim();
-            item.SerialNumber = string.IsNullOrWhiteSpace(scan.SerialNumber) ? item.SerialNumber : scan.SerialNumber.Trim();
-            item.ManufactureDate = scan.ManufactureDate ?? item.ManufactureDate;
-            item.ExpiryDate = scan.ExpiryDate ?? item.ExpiryDate;
-            item.InventoryTrackingExceptionId = scan.InventoryTrackingExceptionId ?? item.InventoryTrackingExceptionId;
+            item.ScanTrackingLinesJson = JsonSerializer.Serialize(scans);
+            item.LotNumber = scans.Count == 1 ? scan.LotNumber?.Trim() : null;
+            item.BatchNumber = scans.Count == 1 ? scan.BatchNumber?.Trim() : null;
+            item.SerialNumber = scans.Count == 1 ? scan.SerialNumber?.Trim() : null;
+            item.ManufactureDate = scans.Count == 1 ? scan.ManufactureDate : null;
+            item.ExpiryDate = scans.Count == 1 ? scan.ExpiryDate : null;
+            item.InventoryTrackingExceptionId = scans.Count == 1 ? scan.InventoryTrackingExceptionId : null;
             item.UpdatedAt = DateTime.UtcNow;
             item.LastModifiedById = userId;
             await _grnItemRepository.UpdateAsync(item);
@@ -932,26 +938,35 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                          value.AcceptedQuantity > 0))
             {
                 var receiptLocationId = ResolveReceiptLocation(grn, item);
-                await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+                var trackingLines = ReadScanTrackingLines(item.ScanTrackingLinesJson, item.AcceptedQuantity,
+                    item.LotNumber, item.BatchNumber, item.SerialNumber, item.ManufactureDate, item.ExpiryDate,
+                    item.InventoryTrackingExceptionId);
+                if (trackingLines.Sum(value => value.BaseQuantity) != item.AcceptedQuantity)
+                    throw new InvalidOperationException($"Scanned tracking quantities for {item.ItemCode} no longer match the accepted receipt quantity.");
+                for (var trackingIndex = 0; trackingIndex < trackingLines.Count; trackingIndex++)
                 {
-                    InventoryItemId = item.InventoryItemId,
-                    WarehouseId = grn.WarehouseId,
-                    LocationId = receiptLocationId,
-                    Direction = InventoryTrackingDirection.Receipt,
-                    Quantity = item.AcceptedQuantity,
-                    ReferenceType = "GoodsReceiptNote",
-                    ReferenceNumber = grn.GRNNumber,
-                    ReferenceId = grn.Id,
-                    ReferenceLineId = item.Id,
-                    EventKey = $"grn:{grn.Id:N}:{item.Id:N}:receipt",
-                    LotNumber = item.LotNumber,
-                    BatchNumber = item.BatchNumber,
-                    SerialNumber = item.SerialNumber,
-                    ManufactureDate = item.ManufactureDate,
-                    ExpiryDate = item.ExpiryDate,
-                    TrackingExceptionId = item.InventoryTrackingExceptionId,
-                    CorrelationId = correlationId
-                });
+                    var trackingLine = trackingLines[trackingIndex];
+                    await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+                    {
+                        InventoryItemId = item.InventoryItemId,
+                        WarehouseId = grn.WarehouseId,
+                        LocationId = receiptLocationId,
+                        Direction = InventoryTrackingDirection.Receipt,
+                        Quantity = trackingLine.BaseQuantity,
+                        ReferenceType = "GoodsReceiptNote",
+                        ReferenceNumber = grn.GRNNumber,
+                        ReferenceId = grn.Id,
+                        ReferenceLineId = item.Id,
+                        EventKey = $"grn:{grn.Id:N}:{item.Id:N}:receipt:{trackingIndex + 1}",
+                        LotNumber = trackingLine.LotNumber,
+                        BatchNumber = trackingLine.BatchNumber,
+                        SerialNumber = trackingLine.SerialNumber,
+                        ManufactureDate = trackingLine.ManufactureDate,
+                        ExpiryDate = trackingLine.ExpiryDate,
+                        TrackingExceptionId = trackingLine.InventoryTrackingExceptionId,
+                        CorrelationId = correlationId
+                    });
+                }
                 var warehouseQty = await _unitOfWork
                     .Repository<WarehouseQuantity>()
                     .GetQueryable(value =>
@@ -1396,6 +1411,43 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
             RowVersion = Convert.ToBase64String(grn.RowVersion),
             CreatedAtFormatted = grn.CreatedAt.ToString("yyyy-MM-dd HH:mm")
         };
+    }
+
+    private static List<InventoryTransactionScanLineDto> ReadScanTrackingLines(
+        string? json,
+        decimal quantity,
+        string? lotNumber,
+        string? batchNumber,
+        string? serialNumber,
+        DateTime? manufactureDate,
+        DateTime? expiryDate,
+        Guid? exceptionId)
+    {
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            try
+            {
+                var values = JsonSerializer.Deserialize<List<InventoryTransactionScanLineDto>>(json);
+                if (values is { Count: > 0 }) return values;
+            }
+            catch (JsonException)
+            {
+                throw new InvalidOperationException("The persisted GRN scan-tracking snapshot is invalid.");
+            }
+        }
+        return
+        [
+            new InventoryTransactionScanLineDto
+            {
+                BaseQuantity = quantity,
+                LotNumber = lotNumber,
+                BatchNumber = batchNumber,
+                SerialNumber = serialNumber,
+                ManufactureDate = manufactureDate,
+                ExpiryDate = expiryDate,
+                InventoryTrackingExceptionId = exceptionId
+            }
+        ];
     }
 
     private static GoodsReceiptNoteDetailDto MapToDetailDto(GoodsReceiptNote grn)

@@ -65,6 +65,49 @@ public sealed class InventoryScanningService : IInventoryScanningService
     {
         EnsureActor();
         await RequireLabelProfileMutationCapabilityAsync(correlationId, cancellationToken);
+        InventoryLabelProfileDto? result = null;
+        try
+        {
+            await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                try
+                {
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        $"inventory-label-profile-default:{TenantId:N}", cancellationToken);
+                    result = await SaveLabelProfileCoreAsync(id, request, correlationId, cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    _unitOfWork.ClearTrackedChanges();
+                    throw;
+                }
+            }, cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new InventoryScanningException("INV_LABEL_CONCURRENCY_CONFLICT",
+                "The label profile changed after it was loaded. Refresh and retry.");
+        }
+        catch (DbUpdateException exception)
+        {
+            _logger.LogWarning(exception,
+                "Concurrent label-profile replacement failed for tenant {TenantId}", TenantId);
+            throw new InventoryScanningException("INV_LABEL_DEFAULT_CONCURRENCY_CONFLICT",
+                "Another label-profile change completed concurrently. Refresh and retry.");
+        }
+        return result ?? throw new InventoryScanningException("INV_LABEL_SAVE_FAILED",
+            "The label profile could not be saved.");
+    }
+
+    private async Task<InventoryLabelProfileDto> SaveLabelProfileCoreAsync(
+        Guid? id,
+        SaveInventoryLabelProfileRequest request,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
         var name = request.Name.Trim();
         var duplicate = await Profiles.AnyAsync(item => item.TenantId == TenantId && !item.IsDeleted &&
             item.Name == name && (!id.HasValue || item.Id != id.Value), cancellationToken);
@@ -205,6 +248,10 @@ public sealed class InventoryScanningService : IInventoryScanningService
     public async Task<IReadOnlyList<InventoryLabelPrintEventDto>> GetRecentPrintsAsync(int take = 100, CancellationToken cancellationToken = default)
     {
         EnsureActor();
+        await RequireAnyLabelCapabilityAsync(
+            "InventoryLabelPrintHistory", "label-print-history", "label-print-history",
+            "Inventory-read authority or an active receive, issue, transfer, or count responsibility is required to view label print history.",
+            cancellationToken);
         take = Math.Clamp(take, 1, 250);
         return await PrintEvents.IgnoreQueryFilters()
             .Where(item => item.TenantId == TenantId && !item.IsDeleted &&
@@ -412,7 +459,19 @@ public sealed class InventoryScanningService : IInventoryScanningService
             var exceptions = group.Select(line => line.Input.InventoryTrackingExceptionId).Where(value => value.HasValue).Distinct().ToList();
             var rowVersions = group.Select(line => Clean(line.Input.DocumentLineRowVersion))
                 .Where(value => value is not null).Distinct(StringComparer.Ordinal).ToList();
-            if (locations.Count > 1 || lots.Count > 1 || batches.Count > 1 || serials.Count > 1 ||
+            if (serials.Count > 0)
+            {
+                if (group.Any(line => Clean(line.Input.SerialNumber) is null || line.BaseQuantity != 1m))
+                    throw new InventoryScanningException("INV_SCAN_SERIAL_QUANTITY_INVALID",
+                        "Every serial-tracked scan must retain its own serial number and one base unit.");
+                if (serials.Count != group.Count())
+                    throw new InventoryScanningException("INV_SCAN_SERIAL_DUPLICATE",
+                        "Each serial number may appear only once for a transaction line in a scan batch.");
+                foreach (var line in group.OrderBy(value => value.Input.ScannedAtUtc).ThenBy(value => value.Input.ClientLineId))
+                    transactionLines.Add(ToTransactionLine(line));
+                continue;
+            }
+            if (locations.Count > 1 || lots.Count > 1 || batches.Count > 1 ||
                 manufactureDates.Count > 1 || expiryDates.Count > 1 || exceptions.Count > 1 || rowVersions.Count > 1)
                 throw new InventoryScanningException("INV_SCAN_LINE_METADATA_AMBIGUOUS", "Scans for one transaction line must use one location, lot, batch, serial, date, and exception scope.");
             var first = group.First();
@@ -473,33 +532,48 @@ public sealed class InventoryScanningService : IInventoryScanningService
             case InventoryScanOperation.TransferShipment:
                 await _transfers.ApplyScanMetadataAsync(documentId, operation, transactionLines, UserId);
                 await _transfers.ShipAsync(documentId, UserId, null,
-                    transactionLines.ToDictionary(item => item.DocumentLineId, item => item.BaseQuantity));
+                    transactionLines.GroupBy(item => item.DocumentLineId)
+                        .ToDictionary(group => group.Key, group => group.Sum(item => item.BaseQuantity)));
                 break;
             case InventoryScanOperation.TransferReceipt:
                 await _transfers.ApplyScanMetadataAsync(documentId, operation, transactionLines, UserId);
-                await _transfers.ReceiveAsync(documentId, UserId, transactionLines.Select(item => new InventoryTransferItemDto
+                await _transfers.ReceiveAsync(documentId, UserId, transactionLines
+                    .GroupBy(item => new { item.DocumentLineId, item.InventoryItemId, item.LocationId })
+                    .Select(group => new InventoryTransferItemDto
                 {
-                    Id = item.DocumentLineId, InventoryItemId = item.InventoryItemId, ReceivedQuantity = item.BaseQuantity,
-                    DestinationLocationId = item.LocationId, LotNumber = item.LotNumber, BatchNumber = item.BatchNumber,
-                    SerialNumber = item.SerialNumber, ManufactureDate = item.ManufactureDate, ExpiryDate = item.ExpiryDate,
-                    InventoryTrackingExceptionId = item.InventoryTrackingExceptionId
+                    Id = group.Key.DocumentLineId, InventoryItemId = group.Key.InventoryItemId,
+                    ReceivedQuantity = group.Sum(item => item.BaseQuantity),
+                    DestinationLocationId = group.Key.LocationId
                 }).ToList());
                 break;
             case InventoryScanOperation.PhysicalCount:
-                foreach (var item in transactionLines.OrderBy(value => value.DocumentLineId))
+                foreach (var group in transactionLines.GroupBy(value => value.DocumentLineId)
+                             .OrderBy(value => value.Key))
                 {
-                    var rowVersion = Clean(item.DocumentLineRowVersion)
-                        ?? throw new InventoryScanningException("INV_SCAN_COUNT_ROW_VERSION_REQUIRED",
+                    var rowVersions = group.Select(value => Clean(value.DocumentLineRowVersion))
+                        .Where(value => value is not null).Distinct(StringComparer.Ordinal).ToList();
+                    var rowVersion = rowVersions.Count == 1 ? rowVersions[0] : null;
+                    if (rowVersions.Count > 1)
+                        throw new InventoryScanningException("INV_SCAN_COUNT_ROW_VERSION_AMBIGUOUS",
+                            "Scans for one physical-count line must retain one captured row version.");
+                    if (rowVersion is null)
+                        throw new InventoryScanningException("INV_SCAN_COUNT_ROW_VERSION_REQUIRED",
                             "Each physical-count scan must retain the count-line row version captured with its document context.");
+                    var lotNumbers = group.Select(value => Clean(value.LotNumber)).Where(value => value is not null)
+                        .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    var serialNumbers = group.Select(value => Clean(value.SerialNumber)).Where(value => value is not null)
+                        .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                     await _counts.RecordCountItemAsync(new RecordCountItemDto
                     {
-                        PhysicalCountItemId = item.DocumentLineId,
-                        CountedQuantity = item.BaseQuantity,
-                        LotNumber = item.LotNumber,
-                        SerialNumber = item.SerialNumber,
-                        Notes = "Recorded from authenticated mobile scan synchronization.",
+                        PhysicalCountItemId = group.Key,
+                        CountedQuantity = group.Sum(value => value.BaseQuantity),
+                        LotNumber = lotNumbers.Count == 1 ? lotNumbers[0] : null,
+                        SerialNumber = serialNumbers.Count == 1 ? serialNumbers[0] : null,
+                        Notes = serialNumbers.Count > 1
+                            ? $"Recorded from authenticated mobile scan synchronization ({serialNumbers.Count} individually audited serial scans)."
+                            : "Recorded from authenticated mobile scan synchronization.",
                         RowVersion = rowVersion,
-                        IdempotencyKey = $"{transactionIdempotencyKey}:{item.DocumentLineId:N}"
+                        IdempotencyKey = $"{transactionIdempotencyKey}:{group.Key:N}"
                     }, UserId);
                 }
                 break;
@@ -508,6 +582,21 @@ public sealed class InventoryScanningService : IInventoryScanningService
         }
         _ = cancellationToken;
     }
+
+    private static InventoryTransactionScanLineDto ToTransactionLine(ResolvedLine line) => new()
+    {
+        DocumentLineId = line.DocumentLine.DocumentLineId,
+        InventoryItemId = line.Match.InventoryItemId,
+        BaseQuantity = line.BaseQuantity,
+        LocationId = line.LocationId,
+        LotNumber = Clean(line.Input.LotNumber),
+        BatchNumber = Clean(line.Input.BatchNumber),
+        SerialNumber = Clean(line.Input.SerialNumber),
+        ManufactureDate = Utc(line.Input.ManufactureDate),
+        ExpiryDate = Utc(line.Input.ExpiryDate),
+        InventoryTrackingExceptionId = line.Input.InventoryTrackingExceptionId,
+        DocumentLineRowVersion = Clean(line.Input.DocumentLineRowVersion)
+    };
 
     private async Task<List<ResolvedLine>> ResolveLinesAsync(
         SynchronizeInventoryScanBatchRequest request,

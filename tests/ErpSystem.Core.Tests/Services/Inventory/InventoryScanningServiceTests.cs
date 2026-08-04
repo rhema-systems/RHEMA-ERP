@@ -210,6 +210,31 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Label_print_history_requires_inventory_read_or_an_operating_capability()
+    {
+        await _context.Set<Warehouse>().AddAsync(new Warehouse
+        {
+            TenantId = _tenantId, Code = "WH-LABEL-HISTORY-DENIED", Name = "Denied history warehouse", IsActive = true
+        });
+        await _context.SaveChangesAsync();
+        _access.Setup(item => item.CheckCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = false });
+        _access.Setup(item => item.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = false, Message = "No inventory assignment." });
+
+        var history = () => _service.GetRecentPrintsAsync();
+
+        await history.Should().ThrowAsync<InventoryScanningAuthorizationException>();
+        _access.Verify(item => item.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.inventory.read" &&
+                request.SourceType == "InventoryLabelPrintHistory"),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task External_actor_cannot_read_internal_scanning_controls()
     {
         _currentUser.SetupGet(item => item.IsExternalUser).Returns(true);
@@ -449,17 +474,124 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
             IssuedQuantity = 2m,
             LocationId = (Guid?)null,
             LotNumber = "LOT-01",
-            SerialNumber = "SERIAL-01"
+            SerialNumber = (string?)null
         });
         var countItem = (RecordCountItemDto)_counts.Invocations.Single().Arguments[0];
         countItem.Should().BeEquivalentTo(new
         {
             CountedQuantity = 2m,
             LotNumber = "LOT-01",
-            SerialNumber = "SERIAL-01",
+            SerialNumber = (string?)null,
             RowVersion = Convert.ToBase64String(new byte[] { 1, 2, 3 }),
         });
         countItem.IdempotencyKey.Should().StartWith("scan:test-batch:");
+    }
+
+    [Fact]
+    public async Task Distinct_serial_scans_are_delegated_as_distinct_one_unit_transaction_lines()
+    {
+        var documentId = Guid.NewGuid();
+        var documentLineId = Guid.NewGuid();
+        var inventoryItemId = Guid.NewGuid();
+        var resolvedLineType = typeof(InventoryScanningService)
+            .GetNestedType("ResolvedLine", BindingFlags.NonPublic)!;
+        var lines = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(resolvedLineType))!;
+        foreach (var serial in new[] { "SERIAL-001", "SERIAL-002" })
+        {
+            lines.Add(Activator.CreateInstance(
+                resolvedLineType,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new object?[]
+                {
+                    new InventoryScanInputDto
+                    {
+                        ClientLineId = Guid.NewGuid(), RawIdentifier = serial, Quantity = 1,
+                        SerialNumber = serial, ScannedAtUtc = DateTime.UtcNow
+                    },
+                    new InventoryIdentifierMatchDto
+                    {
+                        InventoryItemId = inventoryItemId, ItemCode = "SERIAL-ITEM", ItemName = "Serial item",
+                        Identifier = serial, IdentifierKind = "SerialNumber", ConversionToBase = 1
+                    },
+                    new InventoryScanDocumentLineDto
+                    {
+                        DocumentLineId = documentLineId, InventoryItemId = inventoryItemId,
+                        ItemCode = "SERIAL-ITEM", ItemName = "Serial item", ExpectedQuantity = 2
+                    },
+                    1m,
+                    null
+                },
+                null)!);
+        }
+        var apply = typeof(InventoryScanningService).GetMethod(
+            "ApplyTransactionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await (Task)apply.Invoke(_service, new object[]
+        {
+            InventoryScanOperation.RequisitionIssue, documentId, lines,
+            "scan:serial-units", "scan:serial-units", CancellationToken.None
+        })!;
+
+        var request = (IssueRequisitionDto)_requisitions.Invocations.Single().Arguments[1];
+        request.Items.Should().HaveCount(2);
+        request.Items.Should().OnlyContain(value => value.IssuedQuantity == 1m);
+        request.Items.Select(value => value.SerialNumber).Should().BeEquivalentTo("SERIAL-001", "SERIAL-002");
+    }
+
+    [Fact]
+    public async Task Distinct_serial_count_scans_are_audited_individually_but_update_the_count_line_once()
+    {
+        var documentId = Guid.NewGuid();
+        var documentLineId = Guid.NewGuid();
+        var inventoryItemId = Guid.NewGuid();
+        var rowVersion = Convert.ToBase64String(new byte[] { 4, 5, 6 });
+        var resolvedLineType = typeof(InventoryScanningService)
+            .GetNestedType("ResolvedLine", BindingFlags.NonPublic)!;
+        var lines = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(resolvedLineType))!;
+        foreach (var serial in new[] { "COUNT-SERIAL-001", "COUNT-SERIAL-002" })
+        {
+            lines.Add(Activator.CreateInstance(
+                resolvedLineType,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new object?[]
+                {
+                    new InventoryScanInputDto
+                    {
+                        ClientLineId = Guid.NewGuid(), RawIdentifier = serial, Quantity = 1,
+                        SerialNumber = serial, DocumentLineRowVersion = rowVersion, ScannedAtUtc = DateTime.UtcNow
+                    },
+                    new InventoryIdentifierMatchDto
+                    {
+                        InventoryItemId = inventoryItemId, ItemCode = "SERIAL-COUNT", ItemName = "Serial count item",
+                        Identifier = serial, IdentifierKind = "SerialNumber", ConversionToBase = 1
+                    },
+                    new InventoryScanDocumentLineDto
+                    {
+                        DocumentLineId = documentLineId, InventoryItemId = inventoryItemId,
+                        ItemCode = "SERIAL-COUNT", ItemName = "Serial count item", ExpectedQuantity = 2
+                    },
+                    1m,
+                    null
+                },
+                null)!);
+        }
+        var apply = typeof(InventoryScanningService).GetMethod(
+            "ApplyTransactionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await (Task)apply.Invoke(_service, new object[]
+        {
+            InventoryScanOperation.PhysicalCount, documentId, lines,
+            "scan:serial-count", "scan:serial-count", CancellationToken.None
+        })!;
+
+        var request = (RecordCountItemDto)_counts.Invocations.Single().Arguments[0];
+        request.PhysicalCountItemId.Should().Be(documentLineId);
+        request.CountedQuantity.Should().Be(2m);
+        request.SerialNumber.Should().BeNull();
+        request.RowVersion.Should().Be(rowVersion);
+        request.Notes.Should().Contain("2 individually audited serial scans");
     }
 
     [Fact]
@@ -792,7 +924,7 @@ public sealed class InventoryScanningServiceTests : IAsyncLifetime
                 new InventoryScanInputDto
                 {
                     ClientLineId = Guid.NewGuid(), RawIdentifier = "ITEM-01", Quantity = 2,
-                    LotNumber = "LOT-01", SerialNumber = "SERIAL-01",
+                    LotNumber = "LOT-01",
                     DocumentLineRowVersion = Convert.ToBase64String(new byte[] { 1, 2, 3 })
                 },
                 new InventoryIdentifierMatchDto

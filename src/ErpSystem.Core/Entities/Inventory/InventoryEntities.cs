@@ -389,6 +389,13 @@ public class StockAdjustmentItem : TenantEntity
     [MaxLength(100)]
     public string? LotNumber { get; set; }
 
+    [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+
+    public DateTime? ExpiryDate { get; set; }
+
     public decimal SystemQuantity { get; set; } = 0; // What the system shows
     public decimal PhysicalQuantity { get; set; } = 0; // What was actually counted
     public decimal AdjustmentQuantity { get; set; } = 0; // Difference (Physical - System)

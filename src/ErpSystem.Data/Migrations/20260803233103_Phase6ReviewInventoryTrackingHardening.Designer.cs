@@ -4,6 +4,7 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260803233103_Phase6ReviewInventoryTrackingHardening")]
+    partial class Phase6ReviewInventoryTrackingHardening
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -31536,11 +31539,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.HasIndex("TenantId", "InventoryItemId", "WarehouseId", "LocationId");
+                    b.HasIndex("TenantId", "InventoryIssueVoucherId", "InventoryRequisitionItemId")
+                        .IsUnique();
 
-                    b.HasIndex("TenantId", "InventoryIssueVoucherId", "InventoryRequisitionItemId", "LocationId", "LotNumber", "BatchNumber", "SerialNumber")
-                        .IsUnique()
-                        .HasDatabaseName("UX_InventoryIssueVoucherLines_Tracking");
+                    b.HasIndex("TenantId", "InventoryItemId", "WarehouseId", "LocationId");
 
                     b.ToTable("InventoryIssueVoucherLines", null, t =>
                         {
@@ -33772,9 +33774,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.HasIndex("InventoryReturnVoucherId", "InventoryRequisitionItemId", "LocationId", "LotNumber", "BatchNumber", "SerialNumber")
-                        .IsUnique()
-                        .HasDatabaseName("UX_InventoryReturnVoucherLines_Tracking");
+                    b.HasIndex("InventoryReturnVoucherId", "InventoryRequisitionItemId")
+                        .IsUnique();
 
                     b.ToTable("InventoryReturnVoucherLines", null, t =>
                         {

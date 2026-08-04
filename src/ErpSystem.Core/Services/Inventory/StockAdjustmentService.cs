@@ -564,6 +564,9 @@ public class StockAdjustmentService : IStockAdjustmentService
                     Notes = $"{adjustment.ReasonCode}: {item.Notes ?? adjustment.Description}",
                     SerialNumber = item.SerialNumber,
                     LotNumber = item.LotNumber,
+                    BatchNumber = item.BatchNumber,
+                    ManufactureDate = item.ManufactureDate,
+                    ExpirationDate = item.ExpiryDate,
                     RunningBalance = !isConsignmentWarehouse
                         ? (inventoryItem?.CurrentStock ?? 0)
                         : (warehouseQty?.CurrentStock ?? 0),
@@ -853,6 +856,9 @@ public class StockAdjustmentService : IStockAdjustmentService
                 WarehouseName = item.Location?.Warehouse?.Name ?? adjustment.Warehouse?.Name,
                 SerialNumber = item.SerialNumber,
                 LotNumber = item.LotNumber,
+                BatchNumber = item.BatchNumber,
+                ManufactureDate = item.ManufactureDate,
+                ExpiryDate = item.ExpiryDate,
                 SystemQuantity = item.SystemQuantity,
                 PhysicalQuantity = item.PhysicalQuantity,
                 AdjustmentQuantity = item.AdjustmentQuantity,
@@ -934,6 +940,9 @@ public class StockAdjustmentService : IStockAdjustmentService
                 LocationId = input.LocationId,
                 SerialNumber = Normalize(input.SerialNumber, 100),
                 LotNumber = Normalize(input.LotNumber, 100),
+                BatchNumber = Normalize(input.BatchNumber, 100),
+                ManufactureDate = Utc(input.ManufactureDate),
+                ExpiryDate = Utc(input.ExpiryDate),
                 SystemQuantity = systemQuantity,
                 PhysicalQuantity = systemQuantity + input.AdjustmentQuantity,
                 AdjustmentQuantity = input.AdjustmentQuantity,
@@ -1192,7 +1201,10 @@ public class StockAdjustmentService : IStockAdjustmentService
             ReferenceLineId = item.Id,
             EventKey = $"stock-adjustment:{adjustment.Id:N}:{item.Id:N}:{(reverse ? "reverse" : "post")}",
             LotNumber = item.LotNumber,
+            BatchNumber = item.BatchNumber,
             SerialNumber = item.SerialNumber,
+            ManufactureDate = item.ManufactureDate,
+            ExpiryDate = item.ExpiryDate,
             CorrelationId = adjustment.CorrelationId ?? $"stock-adjustment:{adjustment.Id:N}"
         });
         var inventoryLocationRepository = _unitOfWork.Repository<InventoryLocation>();
@@ -1280,6 +1292,9 @@ public class StockAdjustmentService : IStockAdjustmentService
             Notes = $"{adjustment.ReasonCode}: {item.Notes ?? adjustment.Description}",
             SerialNumber = item.SerialNumber,
             LotNumber = item.LotNumber,
+            BatchNumber = item.BatchNumber,
+            ManufactureDate = item.ManufactureDate,
+            ExpirationDate = item.ExpiryDate,
             RunningBalance = warehouse.IsConsignmentWarehouse ? warehouseQuantity.CurrentStock : inventoryItem.CurrentStock,
             ProcessedById = userId
         };
@@ -1377,7 +1392,8 @@ public class StockAdjustmentService : IStockAdjustmentService
     {
         item.WarehouseId, item.ReasonCode, item.Description, item.Reference, item.RelatedIssueVoucherId,
         Lines = item.Items.OrderBy(x => x.InventoryItemId).ThenBy(x => x.LocationId)
-            .Select(x => new { x.InventoryItemId, x.LocationId, x.AdjustmentQuantity, x.UnitCost, x.LotNumber, x.SerialNumber, x.Reason, x.Notes }),
+            .Select(x => new { x.InventoryItemId, x.LocationId, x.AdjustmentQuantity, x.UnitCost, x.LotNumber,
+                x.BatchNumber, x.SerialNumber, x.ManufactureDate, x.ExpiryDate, x.Reason, x.Notes }),
         Evidence = item.Evidence.OrderBy(x => x.CentralDocumentVersionId)
             .Select(x => new { x.CentralDocumentVersionId, x.EvidenceReference })
     }));
@@ -1401,12 +1417,16 @@ public class StockAdjustmentService : IStockAdjustmentService
                 x.LocationId,
                 x.AdjustmentQuantity,
                 LotNumber = Normalize(x.LotNumber, 100),
+                BatchNumber = Normalize(x.BatchNumber, 100),
                 SerialNumber = Normalize(x.SerialNumber, 100),
+                ManufactureDate = Utc(x.ManufactureDate),
+                ExpiryDate = Utc(x.ExpiryDate),
                 Reason = Normalize(x.Reason, 500),
                 Notes = Normalize(x.Notes, 1000)
             })
             .OrderBy(x => x.InventoryItemId).ThenBy(x => x.LocationId)
-            .ThenBy(x => x.AdjustmentQuantity).ThenBy(x => x.LotNumber).ThenBy(x => x.SerialNumber)
+            .ThenBy(x => x.AdjustmentQuantity).ThenBy(x => x.LotNumber).ThenBy(x => x.BatchNumber)
+            .ThenBy(x => x.SerialNumber).ThenBy(x => x.ManufactureDate).ThenBy(x => x.ExpiryDate)
             .ThenBy(x => x.Reason).ThenBy(x => x.Notes),
         Evidence = (dto.Evidence ?? new List<InventoryControlEvidenceRequest>())
             .Select(x => new
@@ -1460,6 +1480,21 @@ public class StockAdjustmentService : IStockAdjustmentService
         if (string.IsNullOrWhiteSpace(value)) return null;
         var trimmed = value.Trim();
         return trimmed.Length <= max ? trimmed : trimmed[..max];
+    }
+
+    private static DateTime? Utc(DateTime? value)
+    {
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
     }
 
     #endregion

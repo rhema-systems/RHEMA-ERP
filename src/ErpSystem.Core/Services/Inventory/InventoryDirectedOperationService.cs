@@ -28,19 +28,22 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
     private readonly IProcurementAccessControlService _access;
     private readonly IInventoryRequisitionService _requisitions;
     private readonly IInventoryTransferService _transfers;
+    private readonly IInventoryTrackingControlService _tracking;
 
     public InventoryDirectedOperationService(
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
         IProcurementAccessControlService access,
         IInventoryRequisitionService requisitions,
-        IInventoryTransferService transfers)
+        IInventoryTransferService transfers,
+        IInventoryTrackingControlService tracking)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _access = access;
         _requisitions = requisitions;
         _transfers = transfers;
+        _tracking = tracking;
     }
 
     private Guid TenantId => _currentUser.TenantId;
@@ -343,7 +346,18 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
             }
 
             var before = new { task.Status, task.LinkedInventoryTransferId };
-            if (task.TaskType == InventoryDirectedTaskType.Picking)
+            if (task.TaskType == InventoryDirectedTaskType.PutAway && task.IsQuarantine &&
+                task.SourceDocumentType == "ProcurementReceiptInspection")
+            {
+                task.Status = InventoryDirectedTaskStatus.Completed;
+                task.CompletedByUserId = UserId;
+                task.CompletedAtUtc = DateTime.UtcNow;
+                await AddActionAsync(task, InventoryDirectedTaskActionType.PlacementConfirmed, task.Status,
+                    normalizedComment,
+                    new { task.SourceDocumentId, task.SourceLineId, task.DestinationLocationId, task.Quantity },
+                    correlationId);
+            }
+            else if (task.TaskType == InventoryDirectedTaskType.Picking)
             {
                 var issued = await _requisitions.IssueAsync(task.SourceDocumentId, new IssueRequisitionDto
                 {
@@ -545,7 +559,7 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
                 line.StorageLocationId, line.StorageLocation!.LocationCode,
                 line.AcceptedQuantity, "GoodsReceiptNote", line.GoodsReceiptNoteId, line.Id,
                 line.GoodsReceiptNote.GRNNumber, false,
-                $"Move accepted receipt quantity from receiving to storage bin {line.StorageLocation.LocationCode}."))
+                $"Move accepted receipt quantity from receiving to storage bin {line.StorageLocation.LocationCode}.", null))
             .ToListAsync(cancellationToken);
         return await FinalizeSuggestionsAsync(warehouse, InventoryDirectedTaskType.PutAway, rows, cancellationToken);
     }
@@ -585,7 +599,7 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
                     value.location.Id, value.location.LocationCode,
                     value.line.RejectedQuantity, "ProcurementReceiptInspection", value.line.InspectionCaseId,
                     value.line.Id, $"INS-{value.line.InspectionCaseId.ToString().Substring(0, 8)}", true,
-                    $"Place rejected receipt quantity in quarantine bin {value.location.LocationCode}."))
+                    $"Record physical placement of rejected receipt quantity in quarantine bin {value.location.LocationCode}; this task does not post or transfer inventory stock.", null))
             .ToListAsync(cancellationToken);
         return await FinalizeSuggestionsAsync(warehouse, InventoryDirectedTaskType.PutAway, rows, cancellationToken);
     }
@@ -624,18 +638,41 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
         foreach (var line in lines)
         {
             var remaining = line.Remaining;
+            var tracking = await _tracking.GetRequirementsAsync(line.Line.InventoryItemId, cancellationToken);
+            if (tracking.RequiresSerial && decimal.Truncate(remaining) != remaining)
+                throw new InventoryDirectedOperationConflictException("INV_DIRECTED_SERIAL_QUANTITY_INVALID",
+                    $"Serial-tracked requisition line {line.RequisitionNumber} has a non-integral remaining quantity.");
+            var unitOrdinal = tracking.RequiresSerial ? decimal.ToInt32(line.Line.IssuedQuantity) : 0;
             foreach (var location in stock.Where(value => value.InventoryItemId == line.Line.InventoryItemId)
                          .OrderBy(value => value.PickSequence).ThenBy(value => value.LocationCode))
             {
                 if (remaining <= 0) break;
                 var quantity = Math.Min(remaining, location.AvailableQuantity);
                 if (quantity <= 0) continue;
-                rows.Add(new CandidateRow(line.Line.InventoryItemId, line.ItemCode, line.ItemName,
-                    location.LocationId, location.LocationCode, null, null, quantity,
-                    "InventoryRequisition", line.Line.InventoryRequisitionId, line.Line.Id,
-                    line.RequisitionNumber, false,
-                    $"Pick {quantity:0.####} from bin {location.LocationCode} for the approved requisition."));
-                remaining -= quantity;
+                if (tracking.RequiresSerial)
+                {
+                    var units = decimal.ToInt32(decimal.Truncate(quantity));
+                    for (var index = 0; index < units; index++)
+                    {
+                        unitOrdinal++;
+                        rows.Add(new CandidateRow(line.Line.InventoryItemId, line.ItemCode, line.ItemName,
+                            location.LocationId, location.LocationCode, null, null, 1m,
+                            "InventoryRequisition", line.Line.InventoryRequisitionId, line.Line.Id,
+                            line.RequisitionNumber, false,
+                            $"Pick one serial-tracked unit from bin {location.LocationCode} for the approved requisition.",
+                            $"serial-unit:{unitOrdinal}"));
+                    }
+                    remaining -= units;
+                }
+                else
+                {
+                    rows.Add(new CandidateRow(line.Line.InventoryItemId, line.ItemCode, line.ItemName,
+                        location.LocationId, location.LocationCode, null, null, quantity,
+                        "InventoryRequisition", line.Line.InventoryRequisitionId, line.Line.Id,
+                        line.RequisitionNumber, false,
+                        $"Pick {quantity:0.####} from bin {location.LocationCode} for the approved requisition."));
+                    remaining -= quantity;
+                }
             }
         }
         return await FinalizeSuggestionsAsync(warehouse, InventoryDirectedTaskType.Picking, rows, cancellationToken);
@@ -737,7 +774,8 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
                 suggestion.SourceDocumentType,
                 suggestion.SourceDocumentId,
                 suggestion.SourceLineId,
-                suggestion.IsQuarantine
+                suggestion.IsQuarantine,
+                row.Discriminator
             });
             result.Add(suggestion);
         }
@@ -855,7 +893,11 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
             if (line.ApprovedQuantity - line.IssuedQuantity < task.Quantity)
                 throw new InventoryDirectedOperationConflictException("INV_DIRECTED_SOURCE_STALE", "The remaining approved requisition quantity is below the directed pick quantity.");
         }
-        if (task.TaskType is InventoryDirectedTaskType.PutAway or InventoryDirectedTaskType.Picking or InventoryDirectedTaskType.Replenishment)
+        var isNonInventoryQuarantinePlacement = task.TaskType == InventoryDirectedTaskType.PutAway &&
+                                                task.IsQuarantine &&
+                                                task.SourceDocumentType == "ProcurementReceiptInspection";
+        if (!isNonInventoryQuarantinePlacement &&
+            task.TaskType is InventoryDirectedTaskType.PutAway or InventoryDirectedTaskType.Picking or InventoryDirectedTaskType.Replenishment)
         {
             var available = await InventoryLocations.AsNoTracking()
                 .Where(value => value.TenantId == TenantId && !value.IsDeleted &&
@@ -1265,5 +1307,6 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
         Guid SourceLineId,
         string SourceReference,
         bool IsQuarantine,
-        string Explanation);
+        string Explanation,
+        string? Discriminator = null);
 }

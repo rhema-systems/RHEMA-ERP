@@ -36,8 +36,12 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
             .SequenceEqual(new[] { "TenantId", "IdempotencyKey" }));
 
         model.FindEntityType(typeof(InventoryReturnVoucherLine))!.GetIndexes().Should().Contain(index =>
-            index.IsUnique && index.Properties.Select(property => property.Name)
-                .SequenceEqual(new[] { "InventoryReturnVoucherId", "InventoryRequisitionItemId" }));
+            index.IsUnique && index.GetFilter() == null && index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[]
+                {
+                    "InventoryReturnVoucherId", "InventoryRequisitionItemId", "LocationId",
+                    "LotNumber", "BatchNumber", "SerialNumber"
+                }));
         model.FindEntityType(typeof(InventoryReturnVoucherEvidence))!.GetIndexes().Should().Contain(index => index.IsUnique);
         model.FindEntityType(typeof(InventoryReturnVoucherAction))!.GetIndexes().Should().Contain(index => index.IsUnique);
 
@@ -271,7 +275,10 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
                     InventoryItemId = itemId,
                     LocationId = locationId,
                     AdjustmentQuantity = -2,
-                    LotNumber = " LOT-01 "
+                    LotNumber = " LOT-01 ",
+                    BatchNumber = " BATCH-01 ",
+                    ManufactureDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                    ExpiryDate = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc)
                 }
             },
             Evidence =
@@ -294,6 +301,12 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
         })!;
 
         original.Should().NotBe(changedEvidence);
+        request.Items[0].BatchNumber = "BATCH-02";
+        var changedTracking = (string)method.Invoke(null, new object[]
+        {
+            request, StockAdjustmentReasonCodes.Damage, "Damaged stock", "INSPECTION-1"
+        })!;
+        changedTracking.Should().NotBe(changedEvidence);
     }
 
     [Fact]
@@ -340,6 +353,21 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
 
         validation.Should().Contain("location.InventoryWarehouseId != warehouseId");
         validation.Should().NotContain("location.WarehouseId != warehouseId");
+    }
+
+    [Fact]
+    public void Controlled_returns_preserve_distinct_serial_lines_and_validate_their_aggregate_quantity()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
+            "InventoryReturnControlService.cs"));
+        var start = source.IndexOf("public async Task<InventoryReturnVoucherDto> RequestAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("public async Task<InventoryReturnVoucherDto> DecideAsync", start, StringComparison.Ordinal);
+        var request = source[start..end];
+
+        request.Should().Contain("INV_RETURN_DUPLICATE_TRACKING_LINE");
+        request.Should().Contain("request.Items.GroupBy(value => value.ItemId)");
+        request.Should().Contain("group.Sum(value => value.ReturnedQuantity)");
+        request.Should().NotContain("INV_RETURN_DUPLICATE_LINE");
     }
 
     private static string FindRepositoryRoot()

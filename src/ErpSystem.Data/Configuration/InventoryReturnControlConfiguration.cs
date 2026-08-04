@@ -34,7 +34,18 @@ public sealed class InventoryReturnVoucherLineConfiguration : IEntityTypeConfigu
             table.HasCheckConstraint("CK_InventoryReturnVoucherLines_Quantity", "[Quantity] > 0");
             table.HasCheckConstraint("CK_InventoryReturnVoucherLines_Value", "[UnitCost] >= 0 AND [TotalValue] >= 0");
         });
-        builder.HasIndex(x => new { x.InventoryReturnVoucherId, x.InventoryRequisitionItemId }).IsUnique();
+        builder.HasIndex(x => new
+            {
+                x.InventoryReturnVoucherId,
+                x.InventoryRequisitionItemId,
+                x.LocationId,
+                x.LotNumber,
+                x.BatchNumber,
+                x.SerialNumber
+            })
+            .IsUnique()
+            .HasDatabaseName("UX_InventoryReturnVoucherLines_Tracking")
+            .HasFilter(null);
         builder.HasOne(x => x.InventoryReturnVoucher).WithMany(x => x.Lines).HasForeignKey(x => x.InventoryReturnVoucherId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.InventoryRequisitionItem).WithMany().HasForeignKey(x => x.InventoryRequisitionItemId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.InventoryItem).WithMany().HasForeignKey(x => x.InventoryItemId).OnDelete(DeleteBehavior.Restrict);

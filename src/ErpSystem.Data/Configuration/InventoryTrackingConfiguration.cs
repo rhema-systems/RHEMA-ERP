@@ -15,6 +15,7 @@ public sealed class InventoryTrackingExceptionConfiguration : IEntityTypeConfigu
         });
         builder.Property(item => item.RowVersion).IsRowVersion();
         builder.Property(item => item.IntegrityHash).HasMaxLength(64).IsRequired();
+        builder.Property(item => item.ApprovedPayloadHash).HasMaxLength(64);
         builder.Property(item => item.ReferenceType).HasMaxLength(100).IsRequired();
         builder.Property(item => item.ReferenceNumber).HasMaxLength(100).IsRequired();
         builder.Property(item => item.Reason).HasMaxLength(2000).IsRequired();

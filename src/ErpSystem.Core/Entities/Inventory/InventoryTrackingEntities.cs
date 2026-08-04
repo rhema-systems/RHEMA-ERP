@@ -33,6 +33,7 @@ public sealed class InventoryTrackingException : TenantEntity
     [MaxLength(100)] public string? SerialNumber { get; set; }
 
     public Guid WorkflowInstanceId { get; set; }
+    [MaxLength(64)] public string? ApprovedPayloadHash { get; set; }
     public Guid WorkflowEvidenceDocumentId { get; set; }
     public Guid RequestedById { get; set; }
     public Guid ApprovedById { get; set; }

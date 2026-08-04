@@ -333,6 +333,13 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
             IdempotencyKey = "e2e-012-first-count",
             Notes = "Blind first count found a shortage."
         }, _counterId);
+        var blindDetail = await _counts.GetByIdAsync(created.Id);
+        blindDetail!.ItemsWithVariance.Should().Be(0);
+        blindDetail.TotalVarianceValue.Should().Be(0m);
+        blindDetail.SystemQuantityVisible.Should().BeFalse();
+        var blindList = (await _counts.GetAllAsync()).Single(value => value.Id == created.Id);
+        blindList.ItemsWithVariance.Should().Be(0);
+        blindList.TotalVarianceValue.Should().Be(0m);
         await _counts.CompleteCountAsync(created.Id, _counterId);
         var recountRequired = await LoadCountAsync(created.Id);
         recountRequired.Status.Should().Be("RecountRequired");
@@ -468,6 +475,13 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
             RowVersion = Convert.ToBase64String(_lineRowVersion),
             IdempotencyKey = "finance-reject-first-count"
         }, _counterId);
+        var concealedDetail = await _counts.GetByIdAsync(created.Id);
+        concealedDetail!.ItemsWithVariance.Should().Be(0);
+        concealedDetail.TotalVarianceValue.Should().Be(0m);
+        concealedDetail.SystemQuantityVisible.Should().BeFalse();
+        var concealedList = (await _counts.GetAllAsync()).Single(value => value.Id == created.Id);
+        concealedList.ItemsWithVariance.Should().Be(0);
+        concealedList.TotalVarianceValue.Should().Be(0m);
         await _counts.CompleteCountAsync(created.Id, _counterId);
 
         _currentUser.Switch(_recountUserId, "cycle.recounter");

@@ -60,6 +60,9 @@ export interface StockAdjustmentItemDto {
   warehouseName?: string;
   serialNumber?: string;
   lotNumber?: string;
+  batchNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
   systemQuantity: number;
   physicalQuantity: number;
   adjustmentQuantity: number;
@@ -83,6 +86,9 @@ export interface CreateStockAdjustmentItemDto {
   locationId?: string;
   serialNumber?: string;
   lotNumber?: string;
+  batchNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
   adjustmentQuantity: number;
   unitCost?: number;
   reason?: string;

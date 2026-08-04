@@ -31,6 +31,7 @@ public sealed class InventoryDirectedOperationServiceTests : IAsyncLifetime
     private readonly Mock<IProcurementAccessControlService> _access = new();
     private readonly Mock<IInventoryRequisitionService> _requisitions = new();
     private readonly Mock<IInventoryTransferService> _transfers = new();
+    private readonly Mock<IInventoryTrackingControlService> _tracking = new();
     private readonly InventoryDirectedOperationService _service;
 
     public InventoryDirectedOperationServiceTests()
@@ -48,8 +49,10 @@ public sealed class InventoryDirectedOperationServiceTests : IAsyncLifetime
         _access.Setup(value => value.CheckCapabilityAsync(
                 It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = true });
+        _tracking.Setup(value => value.GetRequirementsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InventoryTrackingRequirementsDto());
         _service = new InventoryDirectedOperationService(_unitOfWork, _currentUser.Object, _access.Object,
-            _requisitions.Object, _transfers.Object);
+            _requisitions.Object, _transfers.Object, _tracking.Object);
     }
 
     [Fact]
@@ -143,6 +146,76 @@ public sealed class InventoryDirectedOperationServiceTests : IAsyncLifetime
             request.TransferType == TransferType.Replenishment && request.Items.Count == 1 &&
             request.Items[0].InventoryItemId == item.Id && request.Items[0].RequestedQuantity == 6 &&
             request.Items[0].SourceLocationId == reserve.Id && request.Items[0].DestinationLocationId == pick.Id), _userId), Times.Once);
+    }
+
+    [Fact]
+    public async Task Serial_tracked_requisition_is_split_into_distinct_one_unit_suggestions()
+    {
+        var (warehouse, item, pick, _) = await SeedBinsAsync();
+        pick.IsPickingLocation = true;
+        _tracking.Setup(value => value.GetRequirementsAsync(item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InventoryTrackingRequirementsDto { InventoryItemId = item.Id, RequiresSerial = true });
+        var requisition = new InventoryRequisition
+        {
+            TenantId = _tenantId, WarehouseId = warehouse.Id, DepartmentId = Guid.NewGuid(),
+            RequisitionNumber = "REQ-SERIAL-001", Status = RequisitionStatus.Approved
+        };
+        var line = new InventoryRequisitionItem
+        {
+            TenantId = _tenantId, InventoryRequisition = requisition, InventoryRequisitionId = requisition.Id,
+            InventoryItem = item, InventoryItemId = item.Id, ApprovedQuantity = 3m, IssuedQuantity = 0m
+        };
+        await _context.AddRangeAsync(requisition, line, new InventoryLocation
+        {
+            TenantId = _tenantId, InventoryItemId = item.Id, LocationId = pick.Id,
+            Quantity = 3m, AvailableQuantity = 3m
+        });
+        await _context.SaveChangesAsync();
+
+        var suggestions = await _service.GetSuggestionsAsync(warehouse.Id, InventoryDirectedTaskType.Picking);
+
+        suggestions.Should().HaveCount(3);
+        suggestions.Should().OnlyContain(value => value.Quantity == 1m && value.SourceLineId == line.Id);
+        suggestions.Select(value => value.SuggestionKey).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task Rejected_receipt_quarantine_confirmation_records_placement_without_creating_stock_transfer()
+    {
+        var (warehouse, item, _, quarantine) = await SeedBinsAsync();
+        quarantine.IsPickingLocation = false;
+        quarantine.IsQuarantineLocation = true;
+        var inspection = new ProcurementReceiptInspectionCase
+        {
+            TenantId = _tenantId, PurchaseOrderReceiptId = Guid.NewGuid(), Sequence = 1,
+            Status = ProcurementReceiptInspectionStatus.Approved, RejectedQuantity = 2m,
+            AuthorityName = "Inspection authority", CreatedByUserId = _userId, CreatedByName = "Inspector",
+            IdempotencyKey = "inspection-quarantine", CorrelationId = "inspection-quarantine",
+            SourceSnapshotHash = new string('a', 64), IntegrityHash = new string('b', 64)
+        };
+        var inspectionLine = new ProcurementReceiptInspectionLine
+        {
+            TenantId = _tenantId, InspectionCase = inspection, InspectionCaseId = inspection.Id,
+            PurchaseOrderReceiptItemId = Guid.NewGuid(), RejectedQuantity = 2m,
+            QuarantineLocationId = quarantine.Id, IntegrityHash = new string('c', 64)
+        };
+        var task = NewDirectedTask(warehouse, item, null, quarantine.Id, InventoryDirectedTaskType.PutAway,
+            "ProcurementReceiptInspection", inspection.Id, inspectionLine.Id, 2m);
+        task.IsQuarantine = true;
+        await _context.AddRangeAsync(inspection, inspectionLine, task);
+        await _context.SaveChangesAsync();
+
+        var result = await _service.ConfirmTaskAsync(task.Id, new ConfirmInventoryDirectedTaskRequest
+        {
+            RowVersion = Convert.ToBase64String(task.RowVersion),
+            Comment = "Rejected goods are physically secured in quarantine."
+        }, "corr-quarantine-placement");
+
+        result.Status.Should().Be(InventoryDirectedTaskStatus.Completed);
+        result.LinkedInventoryTransferId.Should().BeNull();
+        _transfers.Verify(value => value.CreateAsync(It.IsAny<CreateInventoryTransferDto>(), It.IsAny<Guid>()), Times.Never);
+        (await _context.Set<InventoryDirectedTaskAction>().SingleAsync()).ActionType
+            .Should().Be(InventoryDirectedTaskActionType.PlacementConfirmed);
     }
 
     [Fact]

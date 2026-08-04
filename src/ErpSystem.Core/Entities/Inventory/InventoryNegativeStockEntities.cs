@@ -25,6 +25,7 @@ public sealed class InventoryNegativeStockOverride : TenantEntity
     [Required, MaxLength(64)] public string DecisionSnapshotHash { get; set; } = string.Empty;
 
     public Guid WorkflowInstanceId { get; set; }
+    [MaxLength(64)] public string? ApprovedPayloadHash { get; set; }
     public Guid CentralDocumentVersionId { get; set; }
     public Guid FileUploadRecordId { get; set; }
     [Required, MaxLength(500)] public string EvidenceReference { get; set; } = string.Empty;

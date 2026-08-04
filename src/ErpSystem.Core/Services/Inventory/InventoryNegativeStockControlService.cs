@@ -22,6 +22,7 @@ public sealed class InventoryNegativeStockControlService : IInventoryNegativeSto
 {
     private const string ProfileCode = "TDC-PROCUREMENT";
     private const string DecisionKey = "DEC-010";
+    private const string WorkflowPayloadHashProperty = "inventoryNegativeStockOverridePayloadHash";
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
     private readonly IUnitOfWork _unitOfWork;
@@ -154,6 +155,10 @@ public sealed class InventoryNegativeStockControlService : IInventoryNegativeSto
             workflow.Status != WorkflowInstanceStatus.Completed || workflow.EntityId != request.ReferenceId)
             throw Error("INV_NEGATIVE_OVERRIDE_WORKFLOW_INVALID",
                 "The exact DEC-010 workflow must be completed and bound to the same transaction reference.");
+        var approvedPayloadHash = NegativeOverridePayloadHash(request, expires);
+        RequireWorkflowPayloadHash(workflow, WorkflowPayloadHashProperty, approvedPayloadHash,
+            "INV_NEGATIVE_OVERRIDE_WORKFLOW_PAYLOAD_INVALID",
+            "The completed workflow was not approved for this exact item, location, line, quantity, reason, and expiry snapshot.");
 
         var approval = await _unitOfWork.Repository<WorkflowApproval>()
             .GetQueryable(value => value.TenantId == TenantId && !value.IsDeleted &&
@@ -221,6 +226,7 @@ public sealed class InventoryNegativeStockControlService : IInventoryNegativeSto
             ConfigurationProfileVersion = effective.Profile.Version,
             DecisionSnapshotHash = decisionHash,
             WorkflowInstanceId = workflow.Id,
+            ApprovedPayloadHash = approvedPayloadHash,
             CentralDocumentVersionId = evidence.Id,
             FileUploadRecordId = upload.Id,
             EvidenceReference = Required(request.EvidenceReference, 500),
@@ -237,7 +243,7 @@ public sealed class InventoryNegativeStockControlService : IInventoryNegativeSto
             entity.InventoryItemId, entity.WarehouseId, entity.LocationId, entity.ReferenceId,
             entity.ReferenceLineId, entity.AuthorizedQuantity, entity.ConfigurationProfileVersion,
             entity.WorkflowInstanceId, entity.CentralDocumentVersionId, entity.ExpiresAtUtc,
-            entity.DecisionSnapshotHash, entity.IntegrityHash
+            entity.DecisionSnapshotHash, entity.ApprovedPayloadHash, entity.IntegrityHash
         }, correlationId);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await RecordControlEventAsync(entity, "Register", ProcurementControlEventResult.Succeeded,
@@ -521,8 +527,87 @@ public sealed class InventoryNegativeStockControlService : IInventoryNegativeSto
         $"{entity.TenantId:N}|{entity.InventoryItemId:N}|{entity.WarehouseId:N}|{entity.LocationId:N}|" +
         $"{entity.ReferenceId:N}|{entity.ReferenceLineId:N}|{entity.AuthorizedQuantity}|{entity.ConfigurationProfileId:N}|" +
         $"{entity.ConfigurationDecisionId:N}|{entity.ConfigurationProfileVersion}|{entity.DecisionSnapshotHash}|" +
-        $"{entity.WorkflowInstanceId:N}|{entity.CentralDocumentVersionId:N}|{entity.FileUploadRecordId:N}|" +
+        $"{entity.WorkflowInstanceId:N}|{entity.ApprovedPayloadHash}|{entity.CentralDocumentVersionId:N}|{entity.FileUploadRecordId:N}|" +
         $"{upload.StoredFileName}|{upload.FileSize}|{entity.ApprovedById:N}|{entity.ApprovedAtUtc:O}|{entity.ExpiresAtUtc:O}");
+
+    private static string NegativeOverridePayloadHash(RegisterInventoryNegativeStockOverrideRequest request, DateTime expiresAtUtc) =>
+        Hash(JsonSerializer.Serialize(new
+        {
+            request.InventoryItemId,
+            request.WarehouseId,
+            request.LocationId,
+            request.ReferenceId,
+            request.ReferenceLineId,
+            ReferenceType = Required(request.ReferenceType, 100),
+            ReferenceNumber = Required(request.ReferenceNumber, 100),
+            request.AuthorizedQuantity,
+            Reason = Required(request.Reason, 2000),
+            ExpiresAtUtc = expiresAtUtc
+        }, JsonOptions));
+
+    private static void RequireWorkflowPayloadHash(
+        WorkflowInstance workflow,
+        string propertyName,
+        string expectedHash,
+        string errorCode,
+        string errorMessage)
+    {
+        var approvedHash = ReadJsonString(workflow.DataContext, propertyName) ??
+                           ReadJsonString(workflow.Data, propertyName);
+        if (!HashEquals(approvedHash, expectedHash)) throw Error(errorCode, errorMessage);
+    }
+
+    private static string? ReadJsonString(string? json, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return FindJsonString(document.RootElement, propertyName);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? FindJsonString(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase) &&
+                    property.Value.ValueKind == JsonValueKind.String)
+                    return property.Value.GetString();
+                var nested = FindJsonString(property.Value, propertyName);
+                if (nested is not null) return nested;
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var nested = FindJsonString(item, propertyName);
+                if (nested is not null) return nested;
+            }
+        }
+        return null;
+    }
+
+    private static bool HashEquals(string? supplied, string expected)
+    {
+        if (supplied?.Length != 64 || expected.Length != 64) return false;
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(supplied), Convert.FromHexString(expected));
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
 
     private static InventoryNegativeStockControlException Error(string code, string message) => new(code, message);
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));

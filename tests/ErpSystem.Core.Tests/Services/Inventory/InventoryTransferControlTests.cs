@@ -223,6 +223,55 @@ public sealed class InventoryTransferControlTests : IDisposable
     }
 
     [Fact]
+    public void Transfer_receipt_snapshot_accepts_only_still_unreceived_dispatch_identities()
+    {
+        var guard = typeof(ErpSystem.Core.Services.Inventory.InventoryTransferService)
+            .GetMethod("EnsureReceiptTrackingSnapshotMatchesDispatch", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var lineId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var dispatched = new List<InventoryTransactionScanLineDto>
+        {
+            new() { DocumentLineId = lineId, InventoryItemId = itemId, BaseQuantity = 1, SerialNumber = "SERIAL-01" },
+            new() { DocumentLineId = lineId, InventoryItemId = itemId, BaseQuantity = 1, SerialNumber = "SERIAL-02" }
+        };
+        var previouslyReceived = new List<InventoryTransactionScanLineDto>
+        {
+            new() { DocumentLineId = lineId, InventoryItemId = itemId, BaseQuantity = 1, SerialNumber = "serial-01" }
+        };
+        var remainingDispatchIdentity = new List<InventoryTransactionScanLineDto>
+        {
+            new() { DocumentLineId = lineId, InventoryItemId = itemId, BaseQuantity = 1, SerialNumber = " serial-02 " }
+        };
+
+        Action matchingAction = () => guard.Invoke(null, new object[] { dispatched, previouslyReceived, remainingDispatchIdentity });
+        matchingAction.Should().NotThrow();
+
+        remainingDispatchIdentity[0].SerialNumber = "SERIAL-03";
+        Action replacementAction = () => guard.Invoke(null, new object[] { dispatched, previouslyReceived, remainingDispatchIdentity });
+        replacementAction.Should().Throw<TargetInvocationException>()
+            .Which.InnerException.Should().BeOfType<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void Transfer_receipt_revalidates_the_dispatch_snapshot_before_persisting_or_staging()
+    {
+        var source = ReadTransferService();
+        var scanStart = source.IndexOf("public async Task ApplyScanMetadataAsync", StringComparison.Ordinal);
+        var scanEnd = source.IndexOf("public async Task<bool> CancelAsync", scanStart, StringComparison.Ordinal);
+        var scan = source[scanStart..scanEnd];
+        var receiveStart = source.IndexOf("private async Task<bool> ReceiveCoreAsync", StringComparison.Ordinal);
+        var receiveEnd = source.IndexOf("public async Task<bool> ResolveDiscrepanciesAsync", receiveStart, StringComparison.Ordinal);
+        var receive = source[receiveStart..receiveEnd];
+
+        scan.Should().Contain("await EnsureReceiptTrackingSnapshotAsync(transfer, item, scans);");
+        scan.IndexOf("EnsureReceiptTrackingSnapshotAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(scan.IndexOf("ReceiptScanTrackingLinesJson =", StringComparison.Ordinal));
+        receive.Should().Contain("await EnsureReceiptTrackingSnapshotAsync(transfer, item, receiptTracking);");
+        receive.IndexOf("EnsureReceiptTrackingSnapshotAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(receive.IndexOf("StageEventAsync", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Discrepancy_restoration_revalidates_capacity_and_stages_exact_tracking_before_stock()
     {
         var source = ReadTransferService();
@@ -251,10 +300,10 @@ public sealed class InventoryTransferControlTests : IDisposable
         var reversal = source[start..end];
 
         reversal.Should().Contain("Direction = InventoryTrackingDirection.TransferIn");
-        reversal.Should().Contain(":shipment-reversal\"");
-        reversal.Should().Contain("LotNumber = item.LotNumber");
-        reversal.Should().Contain("BatchNumber = item.BatchNumber");
-        reversal.Should().Contain("SerialNumber = item.SerialNumber");
+        reversal.Should().Contain(":shipment-reversal:{trackingIndex + 1}");
+        reversal.Should().Contain("LotNumber = trackingLine.LotNumber");
+        reversal.Should().Contain("BatchNumber = trackingLine.BatchNumber");
+        reversal.Should().Contain("SerialNumber = trackingLine.SerialNumber");
         reversal.IndexOf("_trackingControls.StageEventAsync", StringComparison.Ordinal)
             .Should().BeLessThan(reversal.IndexOf("sourceQty.CurrentStock += item.ShippedQuantity", StringComparison.Ordinal));
     }

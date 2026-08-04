@@ -50,6 +50,14 @@ public sealed class InventoryIssueControlTests : IDisposable
             "CK_InventoryIssueVouchers_Hashes"
         });
 
+        model.FindEntityType(typeof(InventoryIssueVoucherLine))!.GetIndexes().Should().Contain(index =>
+            index.IsUnique && index.GetFilter() == null && index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[]
+                {
+                    "TenantId", "InventoryIssueVoucherId", "InventoryRequisitionItemId", "LocationId",
+                    "LotNumber", "BatchNumber", "SerialNumber"
+                }));
+
         var action = model.FindEntityType(typeof(InventoryIssueVoucherAction))!;
         action.GetIndexes().Should().Contain(index => index.IsUnique && index.Properties.Select(property => property.Name)
             .SequenceEqual(new[] { "TenantId", "InventoryIssueVoucherId", "Sequence" }));
@@ -63,6 +71,27 @@ public sealed class InventoryIssueControlTests : IDisposable
         movement.GetForeignKeys().Should().Contain(key =>
             key.Properties.Single().Name == nameof(StockMovement.InventoryIssueVoucherId) &&
             key.PrincipalEntityType.ClrType == typeof(InventoryIssueVoucher));
+    }
+
+    [Fact]
+    public void Serial_tracking_transaction_line_migration_replaces_aggregate_line_uniqueness()
+    {
+        var migration = new SerialTrackingTransactionLines();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { builder });
+
+        builder.Operations.OfType<DropIndexOperation>().Select(value => value.Name).Should().Contain(new[]
+        {
+            "IX_InventoryIssueVoucherLines_TenantId_InventoryIssueVoucherId_InventoryRequisitionItemId",
+            "IX_InventoryReturnVoucherLines_InventoryReturnVoucherId_InventoryRequisitionItemId"
+        });
+        var indexSql = string.Join(Environment.NewLine,
+            builder.Operations.OfType<SqlOperation>().Select(value => value.Sql));
+        indexSql.Should().Contain("CREATE UNIQUE INDEX [UX_InventoryIssueVoucherLines_Tracking]");
+        indexSql.Should().Contain("CREATE UNIQUE INDEX [UX_InventoryReturnVoucherLines_Tracking]");
+        indexSql.Should().Contain("[SerialNumber]");
+        indexSql.Should().NotContain("WHERE");
     }
 
     [Fact]

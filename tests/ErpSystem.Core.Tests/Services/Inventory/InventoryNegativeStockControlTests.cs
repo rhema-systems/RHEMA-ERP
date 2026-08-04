@@ -3,6 +3,7 @@ using System.Text.Json;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -135,6 +136,43 @@ public sealed class InventoryNegativeStockControlTests : IDisposable
         guard.Should().Contain("PermissionCode = permission");
         guard.Should().Contain("\"procurement.inventory.read\", \"Inventory.EmergencyOverride\"");
         guard.Should().Contain("CheckCapabilityAsync");
+    }
+
+    [Fact]
+    public void Negative_stock_workflow_must_contain_the_exact_canonical_payload_hash()
+    {
+        var expires = new DateTime(2026, 8, 3, 18, 0, 0, DateTimeKind.Utc);
+        var request = new RegisterInventoryNegativeStockOverrideRequest
+        {
+            InventoryItemId = Guid.NewGuid(), WarehouseId = Guid.NewGuid(), LocationId = Guid.NewGuid(),
+            ReferenceId = Guid.NewGuid(), ReferenceLineId = Guid.NewGuid(), ReferenceType = "InventoryIssue",
+            ReferenceNumber = "ISS-NEG-001", AuthorizedQuantity = 2m,
+            Reason = "Emergency issue approved for exact operational need", ExpiresAtUtc = expires
+        };
+        var payloadMethod = typeof(InventoryNegativeStockControlService).GetMethod(
+            "NegativeOverridePayloadHash", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var guardMethod = typeof(InventoryNegativeStockControlService).GetMethod(
+            "RequireWorkflowPayloadHash", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var expectedHash = (string)payloadMethod.Invoke(null, new object[] { request, expires })!;
+        var workflow = new WorkflowInstance
+        {
+            Data = JsonSerializer.Serialize(new { inventoryNegativeStockOverridePayloadHash = new string('0', 64) })
+        };
+
+        var rejected = Assert.Throws<TargetInvocationException>(() => guardMethod.Invoke(null, new object[]
+        {
+            workflow, "inventoryNegativeStockOverridePayloadHash", expectedHash,
+            "INV_NEGATIVE_OVERRIDE_WORKFLOW_PAYLOAD_INVALID", "Wrong payload"
+        }));
+        rejected.InnerException.Should().BeOfType<InventoryNegativeStockControlException>()
+            .Which.Code.Should().Be("INV_NEGATIVE_OVERRIDE_WORKFLOW_PAYLOAD_INVALID");
+
+        workflow.Data = JsonSerializer.Serialize(new { inventoryNegativeStockOverridePayloadHash = expectedHash });
+        guardMethod.Invoking(method => method.Invoke(null, new object[]
+        {
+            workflow, "inventoryNegativeStockOverridePayloadHash", expectedHash,
+            "INV_NEGATIVE_OVERRIDE_WORKFLOW_PAYLOAD_INVALID", "Wrong payload"
+        })).Should().NotThrow();
     }
 
     [Fact]

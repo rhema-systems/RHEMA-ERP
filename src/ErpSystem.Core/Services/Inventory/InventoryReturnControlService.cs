@@ -95,8 +95,16 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         var reason = Required(request.Reason, "INV_RETURN_REASON_DETAIL_REQUIRED", "A return reason is required.", 1000);
         if (request.Items.Count == 0 || request.Items.Any(x => x.ReturnedQuantity <= 0))
             throw Validation("INV_RETURN_LINES_REQUIRED", "At least one positive return line is required.");
-        if (request.Items.GroupBy(x => x.ItemId).Any(x => x.Count() > 1))
-            throw Validation("INV_RETURN_DUPLICATE_LINE", "A requisition line may appear only once in a return voucher.");
+        if (request.Items.GroupBy(x => new
+            {
+                x.ItemId,
+                x.LocationId,
+                LotNumber = TrackingKey(x.LotNumber),
+                BatchNumber = TrackingKey(x.BatchNumber),
+                SerialNumber = TrackingKey(x.SerialNumber)
+            }).Any(x => x.Count() > 1))
+            throw Validation("INV_RETURN_DUPLICATE_TRACKING_LINE",
+                "The same requisition line and tracking identity may appear only once in a return voucher.");
 
         var payloadHash = Hash(JsonSerializer.Serialize(new
         {
@@ -164,13 +172,20 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                     Status = InventoryReturnVoucherStatus.PendingApproval
                 };
 
+                foreach (var group in request.Items.GroupBy(value => value.ItemId))
+                {
+                    var source = requisition.Items.FirstOrDefault(value => value.Id == group.Key)
+                        ?? throw Validation("INV_RETURN_LINE_NOT_FOUND", $"Requisition line {group.Key} was not found.");
+                    var reserved = pending.GetValueOrDefault(source.Id);
+                    if (group.Sum(value => value.ReturnedQuantity) > source.IssuedQuantity - reserved)
+                        throw Conflict("INV_RETURN_EXCEEDS_ISSUED",
+                            $"Return quantity exceeds unreserved issued quantity for {source.ItemCode}.");
+                }
+
                 foreach (var input in request.Items)
                 {
                     var source = requisition.Items.FirstOrDefault(x => x.Id == input.ItemId)
                         ?? throw Validation("INV_RETURN_LINE_NOT_FOUND", $"Requisition line {input.ItemId} was not found.");
-                    var reserved = pending.GetValueOrDefault(source.Id);
-                    if (input.ReturnedQuantity > source.IssuedQuantity - reserved)
-                        throw Conflict("INV_RETURN_EXCEEDS_ISSUED", $"Return quantity exceeds unreserved issued quantity for {source.ItemCode}.");
                     var locationId = input.LocationId ?? source.LocationId ?? requisition.LocationId;
                     await ValidateLocationAsync(requisition.WarehouseId, locationId, cancellationToken);
                     if (source.UnitCost <= 0)
@@ -756,6 +771,9 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         var trimmed = value.Trim();
         return trimmed.Length <= max ? trimmed : trimmed[..max];
     }
+
+    private static string TrackingKey(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToUpperInvariant();
 
     private static InventoryReturnControlException Validation(string code, string message) => new(code, message);
     private static InventoryReturnControlException Conflict(string code, string message) => new(code, message);

@@ -146,3 +146,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260802171742_TDC0613InventoryValuationReconciliation")] partial class TDC0613InventoryValuationReconciliation { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260802190244_TDC0615InventoryDisposalLifecycle")] partial class TDC0615InventoryDisposalLifecycle { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260802202554_TDC0616ItemMasterProfile")] partial class TDC0616ItemMasterProfile { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260803233103_Phase6ReviewInventoryTrackingHardening")] partial class Phase6ReviewInventoryTrackingHardening { }

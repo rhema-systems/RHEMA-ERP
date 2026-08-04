@@ -536,6 +536,9 @@ public class StockMovementDto
     public string? ProcessedBy { get; set; }
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
+    public string? BatchNumber { get; set; }
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
     public decimal RunningBalance { get; set; }
 }
 
@@ -1145,6 +1148,9 @@ public class StockAdjustmentItemDto
     public string? WarehouseName { get; set; }
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
+    public string? BatchNumber { get; set; }
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
     public decimal SystemQuantity { get; set; }
     public decimal PhysicalQuantity { get; set; }
     public decimal AdjustmentQuantity { get; set; }
@@ -1219,6 +1225,13 @@ public class CreateStockAdjustmentItemDto
 
     [MaxLength(100)]
     public string? LotNumber { get; set; }
+
+    [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+
+    public DateTime? ExpiryDate { get; set; }
 
     /// <summary>
     /// The adjustment quantity (positive for increase, negative for decrease)

@@ -1,6 +1,9 @@
+using System.Reflection;
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -210,6 +213,64 @@ public sealed class InventoryTrackingControlServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Date_only_tracking_reuses_exact_location_history_after_query_narrowing()
+    {
+        var category = Category("DATE-ONLY", configure: value => value.DefaultManufactureDateTracking = true);
+        var item = Item(category.Id);
+        var warehouse = Warehouse();
+        var location = new WarehouseLocation
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, WarehouseId = warehouse.Id,
+            Warehouse = warehouse, LocationCode = "DATE-BIN", Name = "Date bin", IsActive = true
+        };
+        await _context.AddRangeAsync(category, item, warehouse, location);
+        await _context.SaveChangesAsync();
+        var manufactureDate = DateTime.UtcNow.Date.AddDays(-5);
+        var receipt = Request(item.Id, warehouse.Id, InventoryTrackingDirection.Receipt, "date-only-receipt");
+        receipt.LocationId = location.Id;
+        receipt.ManufactureDate = manufactureDate;
+
+        await _service.StageEventAsync(receipt);
+        await _unitOfWork.SaveChangesAsync();
+        _service = NewService();
+        var issue = Request(item.Id, warehouse.Id, InventoryTrackingDirection.Issue, "date-only-issue");
+        issue.LocationId = location.Id;
+        issue.ManufactureDate = manufactureDate;
+
+        await _service.StageEventAsync(issue);
+
+        _context.Set<InventoryTraceabilityEvent>().Local.Should().Contain(value =>
+            value.EventKey == "date-only-issue" && value.Direction == InventoryTrackingDirection.Issue);
+    }
+
+    [Fact]
+    public async Task Date_only_tracking_reuses_pending_location_history_before_the_unit_of_work_saves()
+    {
+        var category = Category("DATE-PENDING", configure: value => value.DefaultManufactureDateTracking = true);
+        var item = Item(category.Id);
+        var warehouse = Warehouse();
+        var location = new WarehouseLocation
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, WarehouseId = warehouse.Id,
+            Warehouse = warehouse, LocationCode = "DATE-PENDING-BIN", Name = "Date pending bin", IsActive = true
+        };
+        await _context.AddRangeAsync(category, item, warehouse, location);
+        await _context.SaveChangesAsync();
+        var manufactureDate = DateTime.UtcNow.Date.AddDays(-3);
+        var receipt = Request(item.Id, warehouse.Id, InventoryTrackingDirection.Receipt, "date-pending-receipt");
+        receipt.LocationId = location.Id;
+        receipt.ManufactureDate = manufactureDate;
+        var issue = Request(item.Id, warehouse.Id, InventoryTrackingDirection.Issue, "date-pending-issue");
+        issue.LocationId = location.Id;
+        issue.ManufactureDate = manufactureDate;
+
+        await _service.StageEventAsync(receipt);
+        await _service.StageEventAsync(issue);
+
+        _context.Set<InventoryTraceabilityEvent>().Local.Should().HaveCount(2);
+    }
+
+    [Fact]
     public async Task Availability_validation_does_not_aggregate_other_lots_in_the_same_bin()
     {
         var category = Category("LOT-AVAILABILITY", configure: value => value.DefaultLotTracking = true);
@@ -317,6 +378,38 @@ public sealed class InventoryTrackingControlServiceTests : IAsyncLifetime
             .SequenceEqual(new[] { "TenantId", "EventKey" }));
         trace.FindProperty(nameof(InventoryTraceabilityEvent.Quantity))!.GetColumnType().Should().Be("decimal(18,4)");
         trace.GetCheckConstraints().Select(value => value.Name).Should().Contain("CK_InventoryTraceabilityEvents_Quantity");
+    }
+
+    [Fact]
+    public void Tracking_exception_workflow_must_contain_the_exact_canonical_payload_hash()
+    {
+        var request = new RegisterInventoryTrackingExceptionRequest
+        {
+            InventoryItemId = Guid.NewGuid(), WarehouseId = Guid.NewGuid(), LocationId = Guid.NewGuid(),
+            ReferenceId = Guid.NewGuid(), ReferenceLineId = Guid.NewGuid(), ReferenceType = "InventoryIssue",
+            ReferenceNumber = "ISS-001", Reason = "Approved expiry exception", LotNumber = " lot-01 ",
+            WorkflowInstanceId = Guid.NewGuid(), WorkflowEvidenceDocumentId = Guid.NewGuid()
+        };
+        var codes = new List<string> { "INV_TRACKING_EXPIRED" };
+        var expires = new DateTime(2026, 8, 20, 12, 0, 0, DateTimeKind.Utc);
+        var payloadHashMethod = typeof(InventoryTrackingControlService).GetMethod(
+            "TrackingExceptionPayloadHash", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var guardMethod = typeof(InventoryTrackingControlService).GetMethod(
+            "RequireWorkflowPayloadHash", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var expectedHash = (string)payloadHashMethod.Invoke(null, new object[] { request, codes, expires })!;
+        var workflow = new WorkflowInstance
+        {
+            DataContext = JsonSerializer.Serialize(new { inventoryTrackingExceptionPayloadHash = new string('0', 64) })
+        };
+
+        var rejected = Assert.Throws<TargetInvocationException>(() =>
+            guardMethod.Invoke(null, new object[] { workflow, expectedHash }));
+        rejected.InnerException.Should().BeOfType<InventoryTrackingControlException>()
+            .Which.Code.Should().Be("INV_TRACKING_EXCEPTION_WORKFLOW_PAYLOAD_INVALID");
+
+        workflow.DataContext = JsonSerializer.Serialize(new { inventoryTrackingExceptionPayloadHash = expectedHash });
+        guardMethod.Invoking(method => method.Invoke(null, new object[] { workflow, expectedHash }))
+            .Should().NotThrow();
     }
 
     private InventoryTrackingControlService NewService() => new(_unitOfWork, _currentUser.Object, _access.Object);

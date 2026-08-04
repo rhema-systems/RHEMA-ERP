@@ -23,7 +23,7 @@ export type InventoryDisposal = {
   completedAtUtc?: string; totalQuantity: number; totalValue: number; rowVersion: string;
   lines: Array<{ id: string; inventoryItemId: string; itemCode: string; itemName: string; locationId: string;
     locationCode: string; quantity: number; unitCost: number; totalValue: number; lotNumber?: string;
-    serialNumber?: string; conditionNotes?: string }>;
+    batchNumber?: string; serialNumber?: string; conditionNotes?: string }>;
   evidence: Array<{ id: string; centralDocumentVersionId: string; fileUploadRecordId: string; stage: string;
     evidenceReference: string; documentReference: string; versionNumber: string }>;
   committeeMembers: Array<{ memberUserId: string; memberName: string; recommendApproval?: boolean;
@@ -46,7 +46,7 @@ export const inventoryDisposalService = {
   },
   async create(request: { warehouseId: string; method: InventoryDisposalMethod; reason: string;
     identificationDetails: string; lines: Array<{ inventoryItemId: string; locationId: string; quantity: number;
-      lotNumber?: string; serialNumber?: string; conditionNotes?: string }>;
+      lotNumber?: string; batchNumber?: string; serialNumber?: string; conditionNotes?: string }>;
     evidence: DisposalEvidenceRequest[] }) {
     return (await axios.post<InventoryDisposal>(API_URL,
       { ...request, idempotencyKey: `identify:${crypto.randomUUID()}` }, { headers: headers() })).data;

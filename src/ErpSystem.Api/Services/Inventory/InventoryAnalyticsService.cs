@@ -112,12 +112,12 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
                 value.ExpiryDate, value.OccurredAtUtc))
             .ToListAsync(cancellationToken);
         var demandFrom = now.Date.AddDays(-DemandWindowDays);
-        var movements = await _db.InventoryMovements.AsNoTracking().Where(value =>
-                value.TenantId == _currentUser.TenantId && !value.IsDeleted && value.IsPosted &&
+        var movements = await _db.StockMovements.AsNoTracking().Where(value =>
+                value.TenantId == _currentUser.TenantId && !value.IsDeleted &&
                 value.MovementDate >= demandFrom && value.MovementDate <= now &&
                 warehouseIds.Contains(value.WarehouseId) && itemIds.Contains(value.InventoryItemId))
             .Select(value => new { value.InventoryItemId, value.WarehouseId, value.LocationId,
-                value.Direction, value.Quantity })
+                value.MovementType, value.Quantity })
             .ToListAsync(cancellationToken);
         var replenishments = await _db.InventoryReplenishmentRecommendations.AsNoTracking().Where(value =>
                 value.TenantId == _currentUser.TenantId && !value.IsDeleted &&
@@ -133,7 +133,7 @@ public sealed class InventoryAnalyticsService : IInventoryAnalyticsService
         var traceabilityByScope = traceabilityEvents.GroupBy(Key)
             .ToDictionary(group => group.Key, group => group.ToList());
         var outboundByScope = movements
-            .Where(value => value.Direction == MovementDirection.Out)
+            .Where(value => value.Quantity < 0m)
             .GroupBy(value => new ScopeItemKey(value.InventoryItemId, value.WarehouseId, value.LocationId))
             .ToDictionary(group => group.Key, group => group.Sum(value => Math.Abs(value.Quantity)));
         var replenishmentByItemWarehouse = replenishments

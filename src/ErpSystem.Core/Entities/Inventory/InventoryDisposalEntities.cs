@@ -103,6 +103,7 @@ public sealed class InventoryDisposalLine : TenantEntity
     [Column(TypeName = "decimal(18,4)")] public decimal UnitCost { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal TotalValue { get; set; }
     [MaxLength(100)] public string? LotNumber { get; set; }
+    [MaxLength(100)] public string? BatchNumber { get; set; }
     [MaxLength(100)] public string? SerialNumber { get; set; }
     [MaxLength(1000)] public string? ConditionNotes { get; set; }
     [Required, MaxLength(64)] public string IntegrityHash { get; set; } = string.Empty;

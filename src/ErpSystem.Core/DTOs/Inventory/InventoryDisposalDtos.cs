@@ -54,6 +54,7 @@ public sealed class InventoryDisposalLineDto
     public decimal UnitCost { get; set; }
     public decimal TotalValue { get; set; }
     public string? LotNumber { get; set; }
+    public string? BatchNumber { get; set; }
     public string? SerialNumber { get; set; }
     public string? ConditionNotes { get; set; }
 }
@@ -107,6 +108,7 @@ public sealed class CreateInventoryDisposalLineRequest
     public Guid LocationId { get; set; }
     [Range(typeof(decimal), "0.0001", "999999999999")] public decimal Quantity { get; set; }
     [MaxLength(100)] public string? LotNumber { get; set; }
+    [MaxLength(100)] public string? BatchNumber { get; set; }
     [MaxLength(100)] public string? SerialNumber { get; set; }
     [MaxLength(1000)] public string? ConditionNotes { get; set; }
 }

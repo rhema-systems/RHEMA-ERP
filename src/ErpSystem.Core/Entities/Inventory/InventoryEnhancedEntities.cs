@@ -332,6 +332,7 @@ public class GoodsReceiptNoteItem : TenantEntity
     public DateTime? ManufactureDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
     public Guid? InventoryTrackingExceptionId { get; set; }
+    [Column(TypeName = "nvarchar(max)")] public string? ScanTrackingLinesJson { get; set; }
 
     // Inspection
     public InspectionResult InspectionResult { get; set; } = InspectionResult.Pending;
@@ -558,6 +559,8 @@ public class InventoryTransferItem : TenantEntity
     public DateTime? ManufactureDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
     public Guid? InventoryTrackingExceptionId { get; set; }
+    [Column(TypeName = "nvarchar(max)")] public string? ShipmentScanTrackingLinesJson { get; set; }
+    [Column(TypeName = "nvarchar(max)")] public string? ReceiptScanTrackingLinesJson { get; set; }
     public int TrackingSequence { get; set; }
 
     [MaxLength(1000)]

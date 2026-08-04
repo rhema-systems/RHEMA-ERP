@@ -37,7 +37,7 @@ const errorMessage = (error: unknown, fallback: string) => {
   return value?.detail || value?.message || value?.title || (error instanceof Error ? error.message : fallback);
 };
 type DraftLine = { inventoryItemId: string; locationId: string; quantity: number; lotNumber?: string;
-  serialNumber?: string; conditionNotes?: string };
+  batchNumber?: string; serialNumber?: string; conditionNotes?: string };
 
 export default function InventoryDisposalsPage() {
   const [rows, setRows] = useState<InventoryDisposal[]>([]);
@@ -59,6 +59,9 @@ export default function InventoryDisposalsPage() {
   const [itemId, setItemId] = useState('');
   const [locationId, setLocationId] = useState('');
   const [quantity, setQuantity] = useState(1);
+  const [lotNumber, setLotNumber] = useState('');
+  const [batchNumber, setBatchNumber] = useState('');
+  const [serialNumber, setSerialNumber] = useState('');
   const [condition, setCondition] = useState('');
   const [draftLines, setDraftLines] = useState<DraftLine[]>([]);
   const [comment, setComment] = useState('');
@@ -95,6 +98,7 @@ export default function InventoryDisposalsPage() {
   const controlledEvidence = async (): Promise<DisposalEvidenceRequest[]> => {
     if (!documentId) throw new Error('Select a current published central-DMS record.');
     const detail = await documentManagementService.getRecord(documentId);
+    if (!detail) throw new Error('The selected central-DMS record could not be loaded.');
     const version = detail?.versions.find(value => value.status === 'Published' &&
       value.versionNumber === detail.record.currentVersion && !!value.fileUploadRecordId);
     if (!version) throw new Error('The selected DMS record has no current published file version.');
@@ -112,10 +116,14 @@ export default function InventoryDisposalsPage() {
   };
   const addLine = () => {
     if (!itemId || !locationId || quantity <= 0) return toast.error('Select an item, location and positive quantity.');
-    if (draftLines.some(value => value.inventoryItemId === itemId && value.locationId === locationId))
-      return toast.error('That item/location is already in the disposal case.');
-    setDraftLines(current => [...current, { inventoryItemId: itemId, locationId, quantity, conditionNotes: condition }]);
-    setItemId(''); setQuantity(1); setCondition('');
+    const tracking = { lotNumber: lotNumber.trim() || undefined, batchNumber: batchNumber.trim() || undefined,
+      serialNumber: serialNumber.trim() || undefined };
+    if (draftLines.some(value => value.inventoryItemId === itemId && value.locationId === locationId &&
+      (value.lotNumber || '') === (tracking.lotNumber || '') && (value.batchNumber || '') === (tracking.batchNumber || '') &&
+      (value.serialNumber || '') === (tracking.serialNumber || '')))
+      return toast.error('That exact item, location and tracking identity is already in the disposal case.');
+    setDraftLines(current => [...current, { inventoryItemId: itemId, locationId, quantity, ...tracking, conditionNotes: condition }]);
+    setItemId(''); setQuantity(1); setLotNumber(''); setBatchNumber(''); setSerialNumber(''); setCondition('');
   };
   const create = () => run(async () => inventoryDisposalService.create({ warehouseId, method: disposalMethod,
     reason, identificationDetails: details, lines: draftLines, evidence: await controlledEvidence() }),
@@ -153,7 +161,8 @@ export default function InventoryDisposalsPage() {
         <div className="space-y-2"><Label>Quantity</Label><Input type="number" min={0.0001} step="0.0001" value={quantity} onChange={event => setQuantity(Number(event.target.value))} /></div>
         <div className="space-y-2"><Label>Condition</Label><Input value={condition} onChange={event => setCondition(event.target.value)} /></div>
         <div className="flex items-end"><Button type="button" variant="outline" onClick={addLine}><Plus className="mr-2 h-4 w-4" />Add line</Button></div></div>
-      {draftLines.length > 0 && <div className="space-y-2">{draftLines.map((value, index) => <div key={`${value.inventoryItemId}-${value.locationId}`} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"><span>{items.find(item => item.id === value.inventoryItemId)?.itemCode} · {locations.find(location => location.id === value.locationId)?.locationCode} · {number(value.quantity)}</span><Button size="icon" variant="ghost" onClick={() => setDraftLines(lines => lines.filter((_, lineIndex) => lineIndex !== index))}><Trash2 className="h-4 w-4" /></Button></div>)}</div>}
+      <div className="grid gap-3 rounded-md border p-3 md:grid-cols-3"><div className="space-y-2"><Label>Lot number</Label><Input value={lotNumber} onChange={event => setLotNumber(event.target.value)} /></div><div className="space-y-2"><Label>Batch number</Label><Input value={batchNumber} onChange={event => setBatchNumber(event.target.value)} /></div><div className="space-y-2"><Label>Serial number</Label><Input value={serialNumber} onChange={event => setSerialNumber(event.target.value)} /></div></div>
+      {draftLines.length > 0 && <div className="space-y-2">{draftLines.map((value, index) => <div key={`${value.inventoryItemId}-${value.locationId}-${value.lotNumber || ''}-${value.batchNumber || ''}-${value.serialNumber || ''}`} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"><span>{items.find(item => item.id === value.inventoryItemId)?.itemCode} · {locations.find(location => location.id === value.locationId)?.locationCode} · {number(value.quantity)} · Lot {value.lotNumber || '—'} · Batch {value.batchNumber || '—'} · Serial {value.serialNumber || '—'}</span><Button size="icon" variant="ghost" onClick={() => setDraftLines(lines => lines.filter((_, lineIndex) => lineIndex !== index))}><Trash2 className="h-4 w-4" /></Button></div>)}</div>}
       <Button onClick={() => void create()} disabled={saving || !warehouseId || !reason.trim() || !details.trim() || !documentId || draftLines.length === 0}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Identify disposal</Button></CardContent></Card>
 
     <Card><CardHeader><CardTitle><History className="mr-2 inline h-5 w-5" />Disposal register</CardTitle><CardDescription>History-first tenant and warehouse/location authorized cases.</CardDescription></CardHeader>
@@ -162,7 +171,7 @@ export default function InventoryDisposalsPage() {
 
     {selected && <Card><CardHeader><CardTitle><Scale className="mr-2 inline h-5 w-5" />{selected.disposalNumber} · {status[selected.status]}</CardTitle><CardDescription>{selected.authorityRoute} · Stock adjustment {selected.stockAdjustmentId || 'not staged'} · {selected.evidence.length} controlled evidence link(s)</CardDescription></CardHeader>
       <CardContent className="space-y-6"><div className="grid gap-3 md:grid-cols-4"><div><Label>Warehouse</Label><p>{selected.warehouseCode} · {selected.warehouseName}</p></div><div><Label>Method</Label><p>{method[selected.method]}</p></div><div><Label>Valuation</Label><p>{money(selected.totalValue)}</p></div><div><Label>Requester</Label><p>{selected.requestedByName}</p></div></div>
-      <div className="overflow-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>Item / location</TableHead><TableHead>Quantity</TableHead><TableHead>Unit cost</TableHead><TableHead>Value</TableHead></TableRow></TableHeader><TableBody>{selected.lines.map(value => <TableRow key={value.id}><TableCell>{value.itemCode} · {value.itemName}<div className="text-xs text-muted-foreground">{value.locationCode} · {value.conditionNotes}</div></TableCell><TableCell>{number(value.quantity)}</TableCell><TableCell>{money(value.unitCost)}</TableCell><TableCell>{money(value.totalValue)}</TableCell></TableRow>)}</TableBody></Table></div>
+      <div className="overflow-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>Item / location</TableHead><TableHead>Quantity</TableHead><TableHead>Unit cost</TableHead><TableHead>Value</TableHead></TableRow></TableHeader><TableBody>{selected.lines.map(value => <TableRow key={value.id}><TableCell>{value.itemCode} · {value.itemName}<div className="text-xs text-muted-foreground">{value.locationCode} · Lot {value.lotNumber || '—'} · Batch {value.batchNumber || '—'} · Serial {value.serialNumber || '—'} · {value.conditionNotes}</div></TableCell><TableCell>{number(value.quantity)}</TableCell><TableCell>{money(value.unitCost)}</TableCell><TableCell>{money(value.totalValue)}</TableCell></TableRow>)}</TableBody></Table></div>
       <div className="space-y-2"><Label>Action comment / findings</Label><Textarea value={comment} onChange={event => setComment(event.target.value)} placeholder="Required explanation, findings or decision reason" /></div>
 
       {selected.status === 1 && <div className="flex flex-wrap gap-2"><Button onClick={() => mutate(value => inventoryDisposalService.verify(value, true, comment, []), 'Independent audit verification recorded.')} disabled={saving || !comment.trim()}><ClipboardCheck className="mr-2 h-4 w-4" />Verify</Button><Button variant="destructive" onClick={() => mutate(value => inventoryDisposalService.verify(value, false, comment, []), 'Disposal case rejected by audit verification.')} disabled={saving || !comment.trim()}>Reject finding</Button></div>}

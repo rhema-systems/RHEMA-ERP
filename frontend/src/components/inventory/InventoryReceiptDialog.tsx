@@ -47,6 +47,11 @@ interface ItemFormData {
   locationId: string;
   quantity: number;
   unitCost: number;
+  lotNumber: string;
+  batchNumber: string;
+  serialNumber: string;
+  manufactureDate: string;
+  expiryDate: string;
   reason: string;
 }
 
@@ -82,6 +87,11 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
     locationId: '',
     quantity: 1,
     unitCost: 0,
+    lotNumber: '',
+    batchNumber: '',
+    serialNumber: '',
+    manufactureDate: '',
+    expiryDate: '',
     reason: ''
   });
 
@@ -267,6 +277,11 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
             locationId: itemFormData.locationId,
             adjustmentQuantity: itemFormData.quantity,
             unitCost: itemFormData.unitCost || selectedItem.unitCost || 0,
+            lotNumber: itemFormData.lotNumber.trim() || undefined,
+            batchNumber: itemFormData.batchNumber.trim() || undefined,
+            serialNumber: itemFormData.serialNumber.trim() || undefined,
+            manufactureDate: itemFormData.manufactureDate || undefined,
+            expiryDate: itemFormData.expiryDate || undefined,
             reason: itemFormData.reason || undefined
           }]);
         }
@@ -275,7 +290,8 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
         await loadReceiptDetail();
         toast({ title: 'Info', description: 'Item management in edit mode requires saving first' });
       }
-      setItemFormData({ inventoryItemId: '', locationId: '', quantity: 1, unitCost: 0, reason: '' });
+      setItemFormData({ inventoryItemId: '', locationId: '', quantity: 1, unitCost: 0,
+        lotNumber: '', batchNumber: '', serialNumber: '', manufactureDate: '', expiryDate: '', reason: '' });
       setShowAddItem(false);
     } catch (err) {
       console.error('Error adding item:', err);
@@ -379,6 +395,11 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
       currentStock: invItem?.currentStock || 0,
       newStock: (invItem?.currentStock || 0) + quantity,
       unitOfMeasure: invItem?.unitOfMeasure || '',
+      lotNumber: item.lotNumber,
+      batchNumber: item.batchNumber,
+      serialNumber: item.serialNumber,
+      manufactureDate: item.manufactureDate,
+      expiryDate: item.expiryDate,
       reason: item.reason
     };
   }) : (receiptDetail?.items || []).filter(item => !deletedItemIds.includes(item.id)).map(item => {
@@ -394,6 +415,11 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
       currentStock: item.previousQuantity || item.systemQuantity || 0,
       newStock: item.newQuantity || ((item.previousQuantity || item.systemQuantity || 0) + quantity),
       unitOfMeasure: item.unitOfMeasure,
+      lotNumber: item.lotNumber,
+      batchNumber: item.batchNumber,
+      serialNumber: item.serialNumber,
+      manufactureDate: item.manufactureDate,
+      expiryDate: item.expiryDate,
       reason: item.reason
     };
   });
@@ -615,6 +641,13 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                         <Input value={itemFormData.reason} onChange={(e) => setItemFormData({ ...itemFormData, reason: e.target.value })} placeholder="Optional note" />
                       </div>
                     </div>
+                    <div className="grid gap-4 md:grid-cols-5">
+                      <div className="space-y-2"><Label>Lot number</Label><Input value={itemFormData.lotNumber} onChange={(e) => setItemFormData({ ...itemFormData, lotNumber: e.target.value })} /></div>
+                      <div className="space-y-2"><Label>Batch number</Label><Input value={itemFormData.batchNumber} onChange={(e) => setItemFormData({ ...itemFormData, batchNumber: e.target.value })} /></div>
+                      <div className="space-y-2"><Label>Serial number</Label><Input value={itemFormData.serialNumber} onChange={(e) => setItemFormData({ ...itemFormData, serialNumber: e.target.value })} /></div>
+                      <div className="space-y-2"><Label>Manufacture date</Label><Input type="date" value={itemFormData.manufactureDate} onChange={(e) => setItemFormData({ ...itemFormData, manufactureDate: e.target.value })} /></div>
+                      <div className="space-y-2"><Label>Expiry date</Label><Input type="date" value={itemFormData.expiryDate} onChange={(e) => setItemFormData({ ...itemFormData, expiryDate: e.target.value })} /></div>
+                    </div>
                     <Button size="sm" onClick={handleAddItem}>Add Item</Button>
                   </CardContent>
                 </Card>
@@ -642,6 +675,8 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                         <TableCell>
                           <div className="font-medium">{item.itemCode}</div>
                           <div className="text-sm text-muted-foreground">{item.itemName}</div>
+                          {(item.lotNumber || item.batchNumber || item.serialNumber || item.manufactureDate || item.expiryDate) &&
+                            <div className="text-xs text-muted-foreground">Lot {item.lotNumber || '—'} · Batch {item.batchNumber || '—'} · Serial {item.serialNumber || '—'} · Mfg {item.manufactureDate || '—'} · Exp {item.expiryDate || '—'}</div>}
                           {item.reason && <div className="text-xs text-muted-foreground italic">{item.reason}</div>}
                         </TableCell>
                         <TableCell className="text-right">{item.currentStock}</TableCell>

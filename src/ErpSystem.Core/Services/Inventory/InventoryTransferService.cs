@@ -592,26 +592,33 @@ public class InventoryTransferService : IInventoryTransferService
                 throw new InvalidOperationException($"Insufficient stock for item {item.InventoryItemId}");
 
             var trackingSequence = item.TrackingSequence + 1;
-            await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+            var shipmentTracking = ReadScanTrackingLines(item.ShipmentScanTrackingLinesJson, quantityToShip, item);
+            if (shipmentTracking.Sum(value => value.BaseQuantity) != quantityToShip)
+                throw new InvalidOperationException($"Scanned serial quantities no longer match the shipment quantity for {item.ItemCode}.");
+            for (var trackingIndex = 0; trackingIndex < shipmentTracking.Count; trackingIndex++)
             {
-                InventoryItemId = item.InventoryItemId,
-                WarehouseId = effectiveSourceWarehouseId,
-                LocationId = item.SourceLocationId,
-                Direction = InventoryTrackingDirection.TransferOut,
-                Quantity = quantityToShip,
-                ReferenceType = "InventoryTransfer",
-                ReferenceNumber = transfer.TransferNumber,
-                ReferenceId = transfer.Id,
-                ReferenceLineId = item.Id,
-                EventKey = $"transfer:{transfer.Id:N}:{item.Id:N}:{trackingSequence}:out",
-                LotNumber = item.LotNumber,
-                BatchNumber = item.BatchNumber,
-                SerialNumber = item.SerialNumber,
-                ManufactureDate = item.ManufactureDate,
-                ExpiryDate = item.ExpiryDate,
-                TrackingExceptionId = item.InventoryTrackingExceptionId,
-                CorrelationId = correlationId
-            });
+                var trackingLine = shipmentTracking[trackingIndex];
+                await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+                {
+                    InventoryItemId = item.InventoryItemId,
+                    WarehouseId = effectiveSourceWarehouseId,
+                    LocationId = item.SourceLocationId,
+                    Direction = InventoryTrackingDirection.TransferOut,
+                    Quantity = trackingLine.BaseQuantity,
+                    ReferenceType = "InventoryTransfer",
+                    ReferenceNumber = transfer.TransferNumber,
+                    ReferenceId = transfer.Id,
+                    ReferenceLineId = item.Id,
+                    EventKey = $"transfer:{transfer.Id:N}:{item.Id:N}:{trackingSequence}:out:{trackingIndex + 1}",
+                    LotNumber = trackingLine.LotNumber,
+                    BatchNumber = trackingLine.BatchNumber,
+                    SerialNumber = trackingLine.SerialNumber,
+                    ManufactureDate = trackingLine.ManufactureDate,
+                    ExpiryDate = trackingLine.ExpiryDate,
+                    TrackingExceptionId = trackingLine.InventoryTrackingExceptionId,
+                    CorrelationId = correlationId
+                });
+            }
 
             // Bin-level tracking: if a source location is specified, it must have sufficient stock.
             // This is required for inter-bin transfers and optional for inter-warehouse transfers.
@@ -1181,26 +1188,34 @@ public class InventoryTransferService : IInventoryTransferService
             var trackingSequence = item.TrackingSequence + 1;
             if (receivedQty > 0)
             {
-                await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+                var receiptTracking = ReadScanTrackingLines(item.ReceiptScanTrackingLinesJson, receivedQty, item);
+                if (receiptTracking.Sum(value => value.BaseQuantity) != receivedQty)
+                    throw new InvalidOperationException($"Scanned serial quantities no longer match the received quantity for {item.ItemCode}.");
+                await EnsureReceiptTrackingSnapshotAsync(transfer, item, receiptTracking);
+                for (var trackingIndex = 0; trackingIndex < receiptTracking.Count; trackingIndex++)
                 {
-                    InventoryItemId = item.InventoryItemId,
-                    WarehouseId = effectiveDestinationWarehouseId,
-                    LocationId = item.DestinationLocationId,
-                    Direction = InventoryTrackingDirection.TransferIn,
-                    Quantity = receivedQty,
-                    ReferenceType = "InventoryTransfer",
-                    ReferenceNumber = transfer.TransferNumber,
-                    ReferenceId = transfer.Id,
-                    ReferenceLineId = item.Id,
-                    EventKey = $"transfer:{transfer.Id:N}:{item.Id:N}:{trackingSequence}:in",
-                    LotNumber = item.LotNumber,
-                    BatchNumber = item.BatchNumber,
-                    SerialNumber = item.SerialNumber,
-                    ManufactureDate = item.ManufactureDate,
-                    ExpiryDate = item.ExpiryDate,
-                    TrackingExceptionId = item.InventoryTrackingExceptionId,
-                    CorrelationId = correlationId
-                });
+                    var trackingLine = receiptTracking[trackingIndex];
+                    await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+                    {
+                        InventoryItemId = item.InventoryItemId,
+                        WarehouseId = effectiveDestinationWarehouseId,
+                        LocationId = item.DestinationLocationId,
+                        Direction = InventoryTrackingDirection.TransferIn,
+                        Quantity = trackingLine.BaseQuantity,
+                        ReferenceType = "InventoryTransfer",
+                        ReferenceNumber = transfer.TransferNumber,
+                        ReferenceId = transfer.Id,
+                        ReferenceLineId = item.Id,
+                        EventKey = $"transfer:{transfer.Id:N}:{item.Id:N}:{trackingSequence}:in:{trackingIndex + 1}",
+                        LotNumber = trackingLine.LotNumber,
+                        BatchNumber = trackingLine.BatchNumber,
+                        SerialNumber = trackingLine.SerialNumber,
+                        ManufactureDate = trackingLine.ManufactureDate,
+                        ExpiryDate = trackingLine.ExpiryDate,
+                        TrackingExceptionId = trackingLine.InventoryTrackingExceptionId,
+                        CorrelationId = correlationId
+                    });
+                }
             }
 
             // Add to destination warehouse
@@ -1562,15 +1577,20 @@ public class InventoryTransferService : IInventoryTransferService
         if (!validStatus)
             throw new InvalidOperationException($"Transfer is not in a valid state for {operation} scanned metadata.");
 
-        foreach (var scan in lines)
+        foreach (var scanGroup in lines.GroupBy(value => value.DocumentLineId))
         {
+            var scans = scanGroup.OrderBy(value => value.SerialNumber).ToList();
+            var scan = scans[0];
             var item = transfer.Items.SingleOrDefault(value => value.Id == scan.DocumentLineId && value.InventoryItemId == scan.InventoryItemId)
                 ?? throw new ArgumentException($"Transfer line {scan.DocumentLineId} was not found for the scanned item.");
             var expectedQuantity = operation == InventoryScanOperation.TransferShipment
                 ? item.RequestedQuantity - item.ShippedQuantity
                 : item.ShippedQuantity - item.ReceivedQuantity - item.DamagedQuantity - item.ShortageQuantity;
-            if (scan.BaseQuantity != expectedQuantity)
+            if (scans.Sum(value => value.BaseQuantity) != expectedQuantity)
                 throw new InvalidOperationException($"The complete transfer quantity for {item.ItemCode} must be scanned before applying the transaction.");
+            if (scans.Any(value => value.InventoryItemId != item.InventoryItemId) ||
+                scans.Select(value => value.LocationId).Distinct().Count() > 1)
+                throw new InvalidOperationException($"Scanned tracking lines for {item.ItemCode} must retain one item and transfer location.");
             if (scan.LocationId.HasValue)
             {
                 var warehouseId = operation == InventoryScanOperation.TransferShipment ? transfer.SourceWarehouseId : transfer.DestinationWarehouseId;
@@ -1579,12 +1599,19 @@ public class InventoryTransferService : IInventoryTransferService
                 if (operation == InventoryScanOperation.TransferShipment) item.SourceLocationId = scan.LocationId;
                 else item.DestinationLocationId = scan.LocationId;
             }
-            item.LotNumber = string.IsNullOrWhiteSpace(scan.LotNumber) ? item.LotNumber : scan.LotNumber.Trim();
-            item.BatchNumber = string.IsNullOrWhiteSpace(scan.BatchNumber) ? item.BatchNumber : scan.BatchNumber.Trim();
-            item.SerialNumber = string.IsNullOrWhiteSpace(scan.SerialNumber) ? item.SerialNumber : scan.SerialNumber.Trim();
-            item.ManufactureDate = scan.ManufactureDate ?? item.ManufactureDate;
-            item.ExpiryDate = scan.ExpiryDate ?? item.ExpiryDate;
-            item.InventoryTrackingExceptionId = scan.InventoryTrackingExceptionId ?? item.InventoryTrackingExceptionId;
+            if (operation == InventoryScanOperation.TransferShipment)
+                item.ShipmentScanTrackingLinesJson = JsonSerializer.Serialize(scans);
+            else
+            {
+                await EnsureReceiptTrackingSnapshotAsync(transfer, item, scans);
+                item.ReceiptScanTrackingLinesJson = JsonSerializer.Serialize(scans);
+            }
+            item.LotNumber = scans.Count == 1 ? scan.LotNumber?.Trim() : null;
+            item.BatchNumber = scans.Count == 1 ? scan.BatchNumber?.Trim() : null;
+            item.SerialNumber = scans.Count == 1 ? scan.SerialNumber?.Trim() : null;
+            item.ManufactureDate = scans.Count == 1 ? scan.ManufactureDate : null;
+            item.ExpiryDate = scans.Count == 1 ? scan.ExpiryDate : null;
+            item.InventoryTrackingExceptionId = scans.Count == 1 ? scan.InventoryTrackingExceptionId : null;
             item.UpdatedAt = DateTime.UtcNow;
             item.LastModifiedById = userId;
             await _transferItemRepository.UpdateAsync(item);
@@ -1688,26 +1715,33 @@ public class InventoryTransferService : IInventoryTransferService
             var effectiveSourceWarehouseId = sourceLocation?.InventoryWarehouseId ?? transfer.SourceWarehouseId;
 
             var trackingSequence = item.TrackingSequence + 1;
-            await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+            var reversalTracking = ReadScanTrackingLines(item.ShipmentScanTrackingLinesJson, item.ShippedQuantity, item);
+            if (reversalTracking.Sum(value => value.BaseQuantity) != item.ShippedQuantity)
+                throw new InvalidOperationException($"Scanned serial quantities no longer match the shipment reversal quantity for {item.ItemCode}.");
+            for (var trackingIndex = 0; trackingIndex < reversalTracking.Count; trackingIndex++)
             {
-                InventoryItemId = item.InventoryItemId,
-                WarehouseId = effectiveSourceWarehouseId,
-                LocationId = item.SourceLocationId,
-                Direction = InventoryTrackingDirection.TransferIn,
-                Quantity = item.ShippedQuantity,
-                ReferenceType = "InventoryTransfer",
-                ReferenceNumber = transfer.TransferNumber,
-                ReferenceId = transfer.Id,
-                ReferenceLineId = item.Id,
-                EventKey = $"transfer:{transfer.Id:N}:{item.Id:N}:shipment-reversal",
-                LotNumber = item.LotNumber,
-                BatchNumber = item.BatchNumber,
-                SerialNumber = item.SerialNumber,
-                ManufactureDate = item.ManufactureDate,
-                ExpiryDate = item.ExpiryDate,
-                TrackingExceptionId = item.InventoryTrackingExceptionId,
-                CorrelationId = correlationId
-            });
+                var trackingLine = reversalTracking[trackingIndex];
+                await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
+                {
+                    InventoryItemId = item.InventoryItemId,
+                    WarehouseId = effectiveSourceWarehouseId,
+                    LocationId = item.SourceLocationId,
+                    Direction = InventoryTrackingDirection.TransferIn,
+                    Quantity = trackingLine.BaseQuantity,
+                    ReferenceType = "InventoryTransfer",
+                    ReferenceNumber = transfer.TransferNumber,
+                    ReferenceId = transfer.Id,
+                    ReferenceLineId = item.Id,
+                    EventKey = $"transfer:{transfer.Id:N}:{item.Id:N}:shipment-reversal:{trackingIndex + 1}",
+                    LotNumber = trackingLine.LotNumber,
+                    BatchNumber = trackingLine.BatchNumber,
+                    SerialNumber = trackingLine.SerialNumber,
+                    ManufactureDate = trackingLine.ManufactureDate,
+                    ExpiryDate = trackingLine.ExpiryDate,
+                    TrackingExceptionId = trackingLine.InventoryTrackingExceptionId,
+                    CorrelationId = correlationId
+                });
+            }
 
             var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveSourceWarehouseId, item.InventoryItemId);
             if (sourceQty != null)
@@ -2329,6 +2363,92 @@ public class InventoryTransferService : IInventoryTransferService
             throw new InvalidOperationException("Receipt tracking identity must match the lot, batch, serial and tracking metadata captured at dispatch.");
     }
 
+    private async Task EnsureReceiptTrackingSnapshotAsync(
+        InventoryTransfer transfer,
+        InventoryTransferItem item,
+        IReadOnlyList<InventoryTransactionScanLineDto> proposedReceipt)
+    {
+        var dispatched = ReadScanTrackingLines(
+            item.ShipmentScanTrackingLinesJson,
+            item.ShippedQuantity,
+            item);
+        var previouslyReceived = await _unitOfWork.Repository<InventoryTraceabilityEvent>()
+            .GetQueryable(value =>
+                value.TenantId == _currentUserProvider.TenantId &&
+                !value.IsDeleted &&
+                value.ReferenceType == "InventoryTransfer" &&
+                value.ReferenceId == transfer.Id &&
+                value.ReferenceLineId == item.Id &&
+                value.Direction == InventoryTrackingDirection.TransferIn)
+            .AsNoTracking()
+            .Select(value => new InventoryTransactionScanLineDto
+            {
+                DocumentLineId = item.Id,
+                InventoryItemId = value.InventoryItemId,
+                BaseQuantity = value.Quantity,
+                LotNumber = value.LotNumber,
+                BatchNumber = value.BatchNumber,
+                SerialNumber = value.SerialNumber,
+                ManufactureDate = value.ManufactureDate,
+                ExpiryDate = value.ExpiryDate,
+                InventoryTrackingExceptionId = value.TrackingExceptionId
+            })
+            .ToListAsync();
+
+        EnsureReceiptTrackingSnapshotMatchesDispatch(dispatched, previouslyReceived, proposedReceipt);
+    }
+
+    private static void EnsureReceiptTrackingSnapshotMatchesDispatch(
+        IReadOnlyList<InventoryTransactionScanLineDto> dispatched,
+        IReadOnlyList<InventoryTransactionScanLineDto> previouslyReceived,
+        IReadOnlyList<InventoryTransactionScanLineDto> proposedReceipt)
+    {
+        var remaining = AggregateTrackingQuantities(dispatched);
+        SubtractTrackingQuantities(remaining, previouslyReceived, "Persisted transfer-receipt history does not match the dispatch tracking snapshot.");
+        SubtractTrackingQuantities(remaining, proposedReceipt, "Receipt tracking identity must match an unreceived lot, batch, serial and tracking identity captured at dispatch.");
+    }
+
+    private static Dictionary<TransferTrackingIdentity, decimal> AggregateTrackingQuantities(
+        IEnumerable<InventoryTransactionScanLineDto> lines) =>
+        lines.GroupBy(ToTrackingIdentity)
+            .ToDictionary(group => group.Key, group => group.Sum(value => value.BaseQuantity));
+
+    private static void SubtractTrackingQuantities(
+        IDictionary<TransferTrackingIdentity, decimal> remaining,
+        IEnumerable<InventoryTransactionScanLineDto> lines,
+        string errorMessage)
+    {
+        foreach (var group in lines.GroupBy(ToTrackingIdentity))
+        {
+            var quantity = group.Sum(value => value.BaseQuantity);
+            if (quantity <= 0 || !remaining.TryGetValue(group.Key, out var available) || quantity > available)
+                throw new InvalidOperationException(errorMessage);
+            remaining[group.Key] = available - quantity;
+        }
+    }
+
+    private static TransferTrackingIdentity ToTrackingIdentity(InventoryTransactionScanLineDto line) => new(
+        NormalizeTrackingIdentityValue(line.LotNumber),
+        NormalizeTrackingIdentityValue(line.BatchNumber),
+        NormalizeTrackingIdentityValue(line.SerialNumber),
+        NormalizeTrackingIdentityDate(line.ManufactureDate),
+        NormalizeTrackingIdentityDate(line.ExpiryDate),
+        line.InventoryTrackingExceptionId);
+
+    private static string? NormalizeTrackingIdentityValue(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToUpperInvariant();
+
+    private static long? NormalizeTrackingIdentityDate(DateTime? value) =>
+        value?.ToUniversalTime().Ticks;
+
+    private readonly record struct TransferTrackingIdentity(
+        string? LotNumber,
+        string? BatchNumber,
+        string? SerialNumber,
+        long? ManufactureDateTicks,
+        long? ExpiryDateTicks,
+        Guid? TrackingExceptionId);
+
     private static bool TrackingValueChanged(string? supplied, string? dispatched) =>
         !string.IsNullOrWhiteSpace(supplied) &&
         !string.Equals(supplied.Trim(), dispatched?.Trim(), StringComparison.OrdinalIgnoreCase);
@@ -2766,6 +2886,40 @@ public class InventoryTransferService : IInventoryTransferService
 
         _logger.LogInformation("Removed item from transfer {TransferNumber}", transfer.TransferNumber);
         return true;
+    }
+
+    private static List<InventoryTransactionScanLineDto> ReadScanTrackingLines(
+        string? json,
+        decimal quantity,
+        InventoryTransferItem item)
+    {
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            try
+            {
+                var values = JsonSerializer.Deserialize<List<InventoryTransactionScanLineDto>>(json);
+                if (values is { Count: > 0 }) return values;
+            }
+            catch (JsonException)
+            {
+                throw new InvalidOperationException("The persisted transfer scan-tracking snapshot is invalid.");
+            }
+        }
+        return
+        [
+            new InventoryTransactionScanLineDto
+            {
+                DocumentLineId = item.Id,
+                InventoryItemId = item.InventoryItemId,
+                BaseQuantity = quantity,
+                LotNumber = item.LotNumber,
+                BatchNumber = item.BatchNumber,
+                SerialNumber = item.SerialNumber,
+                ManufactureDate = item.ManufactureDate,
+                ExpiryDate = item.ExpiryDate,
+                InventoryTrackingExceptionId = item.InventoryTrackingExceptionId
+            }
+        ];
     }
 
     #endregion

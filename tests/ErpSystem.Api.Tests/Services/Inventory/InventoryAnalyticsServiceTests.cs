@@ -216,12 +216,28 @@ public sealed class InventoryAnalyticsServiceTests
                 UnitCost = 10m, RemainingValue = 100m, ExpirationDate = now.AddDays(-2),
                 InventoryItem = oldItem, Warehouse = warehouse, Location = location
             });
+            db.StockMovements.Add(new StockMovement
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, InventoryItemId = fastItem.Id,
+                WarehouseId = warehouse.Id, LocationId = location.Id, MovementType = "Issue",
+                Quantity = -9m, UnitCost = 4m, TotalValue = -36m, MovementDate = now.AddDays(-5),
+                ReferenceType = ReferenceType.Requisition, ReferenceNumber = "REQ-CANONICAL",
+                InventoryItem = fastItem, Warehouse = warehouse, Location = location
+            });
+            db.StockMovements.Add(new StockMovement
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, InventoryItemId = fastItem.Id,
+                WarehouseId = warehouse.Id, LocationId = location.Id, MovementType = "IssueReversal",
+                Quantity = 90m, UnitCost = 4m, TotalValue = 360m, MovementDate = now.AddDays(-4),
+                ReferenceType = ReferenceType.Requisition, ReferenceNumber = "REQ-REVERSAL",
+                InventoryItem = fastItem, Warehouse = warehouse, Location = location
+            });
             db.InventoryMovements.Add(new InventoryMovement
             {
                 Id = Guid.NewGuid(), TenantId = tenantId, MovementNumber = "IMV-FAST",
                 InventoryItemId = fastItem.Id, WarehouseId = warehouse.Id, LocationId = location.Id,
                 MovementType = InventoryMovementType.RequisitionIssue, Direction = MovementDirection.Out,
-                Quantity = 9m, UnitCost = 4m, TotalValue = 36m, MovementDate = now.AddDays(-5),
+                Quantity = 900m, UnitCost = 4m, TotalValue = 3600m, MovementDate = now.AddDays(-5),
                 PostingDate = now.AddDays(-5), ReferenceType = ReferenceType.Requisition,
                 IsPosted = true, InventoryItem = fastItem, Warehouse = warehouse, Location = location
             });
