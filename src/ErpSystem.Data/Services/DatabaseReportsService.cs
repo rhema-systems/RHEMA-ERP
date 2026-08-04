@@ -504,9 +504,11 @@ public class DatabaseReportsService : IReportsService
             }
             reportResult.Data = exportRows;
 
-            // Generate export content based on format
-            var content = GenerateExportContent(reportResult, exportReportDto.Format);
-            var fileName = $"{report.Name}_{DateTime.Now:yyyyMMdd_HHmmss}.{exportReportDto.Format.ToLower()}";
+            // Normalize the requested format once so the generated payload, audit record,
+            // content type, and download name can never disagree.
+            var normalizedFormat = exportReportDto.Format.Trim().ToLowerInvariant();
+            var content = GenerateExportContent(reportResult, normalizedFormat);
+            var fileName = $"{SanitizeExportFileName(report.Name)}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.{normalizedFormat}";
 
             // Log the export
             var export = new ReportExport
@@ -514,7 +516,7 @@ public class DatabaseReportsService : IReportsService
                 ReportId = reportId,
                 UserId = userId,
                 TenantId = tenantId,
-                Format = exportReportDto.Format,
+                Format = normalizedFormat,
                 FileName = fileName,
                 FileSize = content.Length,
                 ExportedAt = DateTime.UtcNow,
@@ -529,7 +531,7 @@ public class DatabaseReportsService : IReportsService
             return new ReportExportResultDto
             {
                 Data = content,
-                ContentType = GetContentType(exportReportDto.Format),
+                ContentType = GetContentType(normalizedFormat),
                 FileName = fileName,
                 FileSize = content.Length
             };
@@ -996,6 +998,26 @@ public class DatabaseReportsService : IReportsService
             "pdf" => "application/pdf",
             _ => "application/octet-stream"
         };
+    }
+
+    private static string SanitizeExportFileName(string reportName)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars();
+        var sanitizedCharacters = reportName
+            .Trim()
+            .Select(character =>
+                char.IsControl(character) || Array.IndexOf(invalidCharacters, character) >= 0
+                    ? '_'
+                    : character)
+            .ToArray();
+        var sanitizedName = string.Join(
+            " ",
+            new string(sanitizedCharacters).Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Trim('.', ' ');
+
+        return string.IsNullOrWhiteSpace(sanitizedName) ? "Report" : sanitizedName;
     }
 
     private static List<ReportUsageStatsDto> GenerateUsageStats(IEnumerable<ReportExecution> executions)

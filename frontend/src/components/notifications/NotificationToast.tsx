@@ -22,7 +22,7 @@ export function NotificationToast({
   autoDismissDelay = 5000,
   position = 'top-right'
 }: NotificationToastProps) {
-  const { notifications } = useNotifications({ autoFetch: false, enableRealTime: true });
+  const { notifications = [] } = useNotifications({ autoFetch: false, enableRealTime: true });
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
   const lastNotificationIdRef = useRef<string | null>(null);
 

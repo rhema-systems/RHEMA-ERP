@@ -1024,6 +1024,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetHealthService, ErpSystem.Core.Services.Maintenance.Fleet.FleetHealthService>();
             services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IConsignmentSettlementService, ErpSystem.Core.Services.Procurement.ConsignmentSettlementService>();
+            services.AddScoped<ErpSystem.Api.Services.ProcurementInventoryManagementDashboardService>();
             services.AddScoped<ErpSystem.Api.Services.EnterpriseDashboardService>();
 
             // RFQ (Request For Quotation) - separate from Tender

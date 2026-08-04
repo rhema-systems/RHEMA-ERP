@@ -102,6 +102,7 @@
     <Compile Include="Controllers\Projects\ProjectsControllerSmokeTests.cs" />
     <Compile Include="Controllers\Projects\ProjectsControllerRouteTests.cs" />
     <Compile Include="Controllers\Projects\ProjectMobileControllerTests.cs" />
+    <Compile Include="Controllers\DashboardControllerDateRangeTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
     <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
@@ -118,6 +119,7 @@
     <Compile Include="Services\Finance\E2E012InventoryAdjustmentFinancePostingTests.cs" />
     <Compile Include="Services\Finance\InventoryValuationReconciliationServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryAnalyticsServiceTests.cs" />
+    <Compile Include="Services\ProcurementInventoryManagementDashboardServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryDisposalServiceTests.cs" />
     <Compile Include="Services\Inventory\E2E013InventoryDisposalLifecycleTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentBatchCreationTests.cs" />

@@ -11,7 +11,6 @@ public sealed record ProcurementSystemReportDefinition(
 {
     public string Query => ProcurementStatutoryReportCatalogue.QueryPrefix + Code;
 }
-
 public static class ProcurementStatutoryReportCatalogue
 {
     public const string QueryPrefix = "system://tdc/procurement/";
@@ -125,4 +124,3 @@ public static class ProcurementStatutoryReportCatalogue
         ["required"] = false
     };
 }
-
